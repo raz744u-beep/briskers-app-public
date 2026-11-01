@@ -67,8 +67,19 @@ class _TestEmployeePayrollStagingPanelState
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('TEST payroll proposals — not paid',
-                style: TextStyle(fontWeight: FontWeight.bold)),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('TEST payroll proposals — not paid',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                IconButton(
+                  tooltip: 'Refresh local TEST payroll',
+                  icon: const Icon(Icons.refresh),
+                  onPressed: () => setState(_refresh),
+                ),
+              ],
+            ),
             if (rows.isEmpty)
               const Text('No staged payroll proposals')
             else
