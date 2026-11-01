@@ -24,7 +24,7 @@ void main() {
          'record_received_payment',?,'conflict',0,123,
          'Owner recovery payment preserved; sync disabled')""",
       [jsonEncode({'invoice_id':'local-invoice','operation_id':'synthetic-op',
-                    'amount_cents':3000})]);
+                    'amount_cents':3000,'payment_date':'2026-10-19'})]);
   }
   Future<bool> check({int payment=3000,int total=12500,int count=1}) =>
     OwnerRecoveryReconciliation(database:db).verify(
@@ -32,6 +32,8 @@ void main() {
       serverInvoiceId:'server-invoice',serverJobId:'server-job',
       invoiceNumber:'8008',jobNumber:'J-8',
       totalCents:total,paymentCents:payment,
+      serverPaymentOperationId:'synthetic-op',
+      serverPaymentDate:'2026-10-19',
       serverLineCount:2,serverPaymentCount:count);
 
   test('matching identities leave quarantined outbox unchanged',() async {
@@ -48,6 +50,12 @@ void main() {
     await expectLater(check(payment:2000),throwsStateError);
     final row=await db.customSelect('SELECT state FROM sync_outbox').getSingle();
     expect(row.read<String>('state'),'conflict');
+  });
+  test('rejects missing original payment date identity',() async {
+    await seed();
+    await db.customStatement("UPDATE sync_outbox SET payload_json=?", [
+      jsonEncode({'invoice_id':'local-invoice','operation_id':'synthetic-op','amount_cents':3000,'payment_date':'2026-10-20'})]);
+    await expectLater(check(),throwsStateError);
   });
   test('rejects mismatched total and multiple server payments',() async {
     await seed();
