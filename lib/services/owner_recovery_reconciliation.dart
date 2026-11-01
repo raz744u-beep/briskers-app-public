@@ -21,11 +21,14 @@ class OwnerRecoveryReconciliation {
     required String jobNumber,
     required int totalCents,
     required int paymentCents,
+    required String serverPaymentOperationId,
+    required String serverPaymentDate,
     required int serverLineCount,
     required int serverPaymentCount,
   }) async {
     if (!isOwner) throw StateError('Owner authorization required');
-    if (serverInvoiceId.isEmpty || serverJobId.isEmpty ||
+    if (serverPaymentOperationId.isEmpty || serverPaymentDate.isEmpty ||
+        serverInvoiceId.isEmpty || serverJobId.isEmpty ||
         localInvoiceId.isEmpty || totalCents <= 0 || paymentCents <= 0 ||
         serverLineCount <= 0 || serverPaymentCount != 1) {
       throw StateError('Incomplete or ambiguous server proof');
@@ -63,7 +66,9 @@ class OwnerRecoveryReconciliation {
     if (raw is! Map ||
         raw['invoice_id'] != localInvoiceId ||
         raw['operation_id']?.toString().isNotEmpty != true ||
-        raw['amount_cents'] != paymentCents) {
+        raw['amount_cents'] != paymentCents ||
+        raw['operation_id'] != serverPaymentOperationId ||
+        raw['payment_date'] != serverPaymentDate) {
       throw StateError('Original payment identity or amount mismatch');
     }
     // Do not mark outbox rows synced or change local IDs here:
