@@ -7,6 +7,37 @@ import 'package:briskers_app/services/test_payroll_staging_repository.dart';
 import 'package:briskers_app/widgets/test_employee_payroll_staging_panel.dart';
 
 void main() {
+  testWidgets('Refresh shows newly staged local payroll without payment action', (tester) async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final repo = TestPayrollStagingRepository(database: db);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body:
+      TestEmployeePayrollStagingPanel(
+        businessId: 'test-shop', employeeId: 'mechanic', repository: repo,
+      ),
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('No staged payroll proposals'), findsOneWidget);
+    const credit = ShopPayrollAllocation(
+      id: 'fresh-credit', employeeId: 'mechanic',
+      hoursHundredths: 100, rateCentsPerHour: 4000,
+      completed: true, alreadyPaid: false,
+    );
+    await repo.stage(
+      businessId: 'test-shop', owner: true,
+      proposal: ShopPayrollPaymentProposal(
+        operationId: 'fresh-op', employeeId: 'mechanic',
+        allocationIds: ['fresh-credit'], grossCents: 4000,
+        repaymentCents: 0, method: 'Cash',
+      ),
+      credits: [credit], outstandingAdvanceCents: 0,
+    );
+    await tester.tap(find.byTooltip('Refresh local TEST payroll'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('40.00 net'), findsOneWidget);
+    expect(find.textContaining('Verify Payment'), findsNothing);
+  });
+
   testWidgets('Other employee and business see no staged payroll', (tester) async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     addTearDown(db.close);
