@@ -20,7 +20,7 @@ class TasksPayrollTestApp extends StatelessWidget {
   Widget build(BuildContext context) => const MaterialApp(
     title: 'Briskers Tasks Payroll TEST',
     debugShowCheckedModeBanner: false,
-    home: const TestPayrollHome(),
+    home: TestPayrollHome(),
   );
 }
 
