@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
 import '../../widgets/test_employee_payroll_staging_panel.dart';
-import '../../widgets/test_payroll_task_selector.dart';
+import '../../widgets/test_local_payroll_task_list.dart';
 
 class EmployeeEditScreen extends StatefulWidget {
   const EmployeeEditScreen({
@@ -720,12 +720,12 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Text(
-                                'Completed task credits are not yet connected '
-                                'to the local task database.',
+                                'Only explicit synthetic TEST work credits appear here. '
+                                'Live Job hours are not payroll credits.',
                               ),
-                              TestPayrollTaskSelector(
+                              TestLocalPayrollTaskList(
+                                businessId: widget.businessId,
                                 employeeId: widget.employeeId!,
-                                allocations: const [],
                                 isOwner: widget.isOwner,
                               ),
                               TestEmployeePayrollStagingPanel(
