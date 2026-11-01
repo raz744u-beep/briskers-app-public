@@ -1,4 +1,5 @@
 import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/core/supabase_config.dart';
 import 'package:briskers_app/services/local_job_deletion_v3.dart';
 import 'package:briskers_app/services/local_job_graph_delete.dart';
 import 'package:drift/native.dart';
@@ -99,6 +100,35 @@ void main() {
       businessId: business, jobId: job, actorId: actor), throwsStateError);
     expect(await count('local_jobs'), 2);
   });
+
+  test('TEST-only simulated payment and audit delete atomically', () async {
+    await db.customStatement(
+      "INSERT INTO sync_outbox "
+      "(business_id,entity_type,entity_id,operation,payload_json) "
+      "VALUES (?,'invoice_payment_received',?,'record_received_payment',?)",
+      [business, invoice,
+        '{"synthetic_test_only":true,"invoice_id":"$invoice",'
+        '"operation_id":"10000000-0000-4000-8000-000000000088",'
+        '"amount_cents":20000,"method_name":"TEST cash"}'],
+    );
+    await db.customStatement(
+      'INSERT INTO local_financial_cache '
+      '(business_id,cache_key,payload_json) VALUES (?,?,?)',
+      [business, 'synthetic_payment_audit:$job',
+        '{"synthetic_test_only":true,"job_id":"$job",'
+        '"invoice_id":"$invoice","action":"fake edit"}'],
+    );
+    final reviewed = await deletion.preview(
+      businessId: business, jobId: job, actorId: actor);
+    expect(reviewed.map((r) => r['kind']),
+      containsAll(['job', 'invoice', 'payment', 'payment_edit_audit']));
+    await deletion.confirm(
+      businessId: business, jobId: job, actorId: actor, reviewed: reviewed);
+    expect(await count('sync_outbox'), 0);
+    expect(await count('local_financial_cache'), 0);
+    expect(await count('local_documents'), 0);
+    expect(await count('local_jobs'), 1);
+  }, skip: !isSyntheticTestBuild);
 
   test('linked financial payment cache blocks partial deletion', () async {
     await db.customStatement(
