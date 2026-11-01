@@ -46,6 +46,39 @@ class TestPayrollCreditRepository {
     ]);
   }
 
+  /// Synthetic mechanic completion. A paid credit is immutable; completion
+  /// can never reopen or re-credit previously paid payroll hours.
+  Future<bool> markSyntheticPortionDone({
+    required String businessId,
+    required String employeeId,
+    required String allocationId,
+  }) async {
+    if (businessId.trim().isEmpty || employeeId.trim().isEmpty ||
+        allocationId.trim().isEmpty) {
+      throw ArgumentError('Missing work credit identity');
+    }
+    await prepare();
+    return _db.transaction(() async {
+      final rows = await _db.customSelect('''
+        SELECT completed, paid FROM test_payroll_credits
+        WHERE business_id = ? AND employee_id = ? AND allocation_id = ?
+      ''', variables: [
+        Variable<String>(businessId), Variable<String>(employeeId),
+        Variable<String>(allocationId),
+      ]).get();
+      if (rows.length != 1 || rows.single.read<int>('paid') != 0) {
+        return false;
+      }
+      if (rows.single.read<int>('completed') == 1) return false;
+      await _db.customStatement('''
+        UPDATE test_payroll_credits SET completed = 1
+        WHERE business_id = ? AND employee_id = ? AND allocation_id = ?
+          AND completed = 0 AND paid = 0
+      ''', [businessId, employeeId, allocationId]);
+      return true;
+    });
+  }
+
   Future<List<ShopPayrollAllocation>> completedUnpaid({
     required String businessId,
     required String employeeId,
