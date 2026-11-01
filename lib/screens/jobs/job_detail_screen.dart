@@ -3451,50 +3451,14 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         Navigator.pop(context, true);
         return;
       }
-      if (!JobSyncService.deletionFeedEnabled) {
-        if (mounted) {
-          setState(() => _error =
-            'This Job may have reached another device or the server. '
-            'Only never-uploaded Jobs can be deleted locally right now. '
-            'Nothing was deleted.');
-        }
-        return;
-      }
-      final deletion = OwnerJobDeletionServiceV3();
-      final preview = await deletion.preview(
-        widget.businessId,
-        widget.jobId,
-        actorId: actorId,
-        isOwner: _owner,
-        online: online,
-      );
-      if (!mounted) return;
-      final confirmed = await showOwnerJobDeleteV3Confirmation(
-        context, preview: preview,
-      );
-      if (!confirmed || !mounted) return;
-      // The backend checks Owner access, graph identity, posted money,
-      // and the exact linked-record confirmation again under database locks.
-      if (!_owner || supabase.auth.currentUser?.id != actorId) {
-        throw StateError('Your access changed. Reopen Delete Job to review.');
-      }
-      final outcome = await deletion.queueConfirmed(
-        preview,
-        actorId: actorId,
-        isOwner: _owner,
-        // The dialog requires a separate checkbox for financial test records.
-        // This flag is never set when preview consent was not explicitly shown.
-        noRealMoneyConfirmed: preview.snapshot['requires_synthetic_consent'] == true,
-        online: !BriskersConnectionModeController.instance.forceOffline,
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(outcome.message)),
-      );
-      if (outcome.state == 'rejected') {
-        await _load();
-      } else {
-        Navigator.pop(context, true);
+      // Local-first rollout: never route this button to server deletion.
+      // A synced or uncertain Job must wait for a separately verified
+      // device-local graph reconciler. No records were changed.
+      if (mounted) {
+        setState(() => _error =
+          'This Job has existing sync history or cannot be proven local-only. '
+          'Local deletion of this Job is not available yet. '
+          'Nothing was deleted.');
       }
     } catch (error) {
       if (mounted) {
