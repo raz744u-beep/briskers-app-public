@@ -729,7 +729,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
                                 isOwner: widget.isOwner,
                               ),
                               TestEmployeePayrollStagingPanel(
-                            businessId: widget.businessId,
+                                businessId: widget.businessId,
                                 employeeId: widget.employeeId!,
                               ),
                             ],
