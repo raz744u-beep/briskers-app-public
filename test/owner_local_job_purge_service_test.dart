@@ -39,7 +39,15 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     LocalJobDeletionV3.currentActorIdProvider = null;
     db = BriskersLocalDatabase(NativeDatabase.memory());
-    gateway = Gateway(); service = OwnerLocalJobPurgeService(database:db,gateway:gateway);
+    gateway = Gateway(); service = OwnerLocalJobPurgeService(
+      database: db,
+      gateway: gateway,
+      ownerIdentityProvider: () => {
+        'actor_id': actor,
+        'business_id': business,
+        'role_code': 'owner',
+      },
+    );
     await OfflineJobPurge.ensureSchema(db);
     await OfflineJobPurge.recordNewIntent(db,business,[job,'job-create-$job']);
     await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status,sync_state) VALUES (?,?,'full','Draft repair','open','pending')",[job,business]);
