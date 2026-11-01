@@ -7,7 +7,6 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
-import '../../core/supabase_config.dart';
 import '../../services/owner_job_deletion_v3_contract.dart';
 import '../../services/owner_local_job_purge_service.dart';
 import '../../services/local_owner_security.dart';
@@ -3406,14 +3405,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Future<void> _deleteUnusedJob() async {
     // Owner may remove a provably never-uploaded local Job without a server.
     // Synced or uncertain Jobs remain blocked until verified reconciliation.
-    if (!_owner || _busy) return;
+    if (!_owner || _busy) {
+      return;
+    }
     final actorId = LocalOwnerSecurity.instance.unlockedActorId;
     if (actorId == null) {
       if (mounted) setState(() => _error =
           'Unlock your Owner account before reviewing Job deletion.');
       return;
     }
-    final online = !BriskersConnectionModeController.instance.forceOffline;
     setState(() { _busy = true; _error = null; });
     try {
       // A never-uploaded local Job has a different, guarded cancellation path.
