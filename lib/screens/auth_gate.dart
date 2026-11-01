@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../core/supabase_config.dart';
 import 'business_gate.dart';
 import 'login_screen.dart';
+import 'local_owner_unlock_screen.dart';
+import '../services/local_owner_security.dart';
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
@@ -32,8 +34,20 @@ class _AuthGateState extends State<AuthGate> {
 
   @override
   Widget build(BuildContext context) {
-    return supabase.auth.currentSession == null
-        ? const LoginScreen()
-        : const BusinessGate();
+    return FutureBuilder<bool>(
+      future: LocalOwnerSecurity.instance.isConfigured,
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        // Local identity wins, including after the old Supabase token expires.
+        if (snapshot.data == true) return const LocalOwnerUnlockScreen();
+        // One-time migration only: existing verified accounts can enroll
+        // an Owner password using their locally saved business context.
+        return supabase.auth.currentSession == null
+            ? const LoginScreen()
+            : const BusinessGate();
+      },
+    );
   }
 }
