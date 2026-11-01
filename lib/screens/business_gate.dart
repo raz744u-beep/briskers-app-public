@@ -28,9 +28,12 @@ import '../services/local_invoice_status_styles_cache.dart';
 import '../services/offline_work_findings_service.dart';
 import 'kiosk/kiosk_checkin_screen.dart';
 import 'shell_screen.dart';
+import 'local_owner_unlock_screen.dart';
+import '../services/local_owner_security.dart';
 
 class BusinessGate extends StatefulWidget {
-  const BusinessGate({super.key});
+  const BusinessGate({super.key, this.localOwnerIdentity});
+  final Map<String, dynamic>? localOwnerIdentity;
 
   @override
   State<BusinessGate> createState() => _BusinessGateState();
@@ -74,6 +77,7 @@ class _BusinessGateState extends State<BusinessGate> {
 
   List<Map<String, dynamic>>? _businesses;
   String? _error;
+  bool _deferredLocalEnrollment = false;
 
   @override
   void initState() {
@@ -81,11 +85,24 @@ class _BusinessGateState extends State<BusinessGate> {
     BriskersConnectionModeController.instance.addListener(
       _connectionModeChanged,
     );
-    _load();
+    if (widget.localOwnerIdentity != null) {
+      final identity = widget.localOwnerIdentity!;
+      if (LocalOwnerSecurity.instance.isUnlocked &&
+          identity['role_code'] == 'owner' &&
+          identity['business_id'] is String) {
+        _businesses = [identity];
+      } else {
+        _businesses = const [];
+        _error = 'Local Owner unlock is required.';
+      }
+    } else {
+      _load();
+    }
   }
 
   void _connectionModeChanged() {
-    if (BriskersConnectionModeController.instance.forceOffline) return;
+    if (widget.localOwnerIdentity != null ||
+        BriskersConnectionModeController.instance.forceOffline) return;
     final businesses = _businesses;
     if (businesses == null || businesses.isEmpty) return;
     final business = businesses.first;
@@ -417,6 +434,9 @@ class _BusinessGateState extends State<BusinessGate> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (_businesses!.isEmpty) {
+      if (widget.localOwnerIdentity != null) {
+        return Scaffold(body: Center(child: Text(_error ?? 'Local Owner unlock required.')));
+      }
       return Scaffold(
         appBar: AppBar(title: const Text('Briskers Setup')),
         body: Padding(
@@ -462,6 +482,32 @@ class _BusinessGateState extends State<BusinessGate> {
         '${business['business_name'] ?? business['name'] ?? 'Briskers'}';
     final roleCode =
         '${business['role_code'] ?? business['role'] ?? ''}';
+
+    // One-time enrollment is offered only to a previously verified Owner.
+    // Never turn an unverified cache or fresh installation into Owner access.
+    if (roleCode == 'owner' && widget.localOwnerIdentity == null &&
+        !_deferredLocalEnrollment) {
+      return FutureBuilder<bool>(
+        future: LocalOwnerSecurity.instance.isConfigured,
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          }
+          if (snapshot.data == false) {
+            return LocalOwnerSetupScreen(
+              onCompleted: () { if (mounted) setState(() {}); },
+              onSkip: () {
+                if (mounted) setState(() => _deferredLocalEnrollment = true);
+              },
+            );
+          }
+          return ShellScreen(
+            businessId: businessId, businessName: businessName,
+            roleCode: roleCode,
+          );
+        },
+      );
+    }
 
     if (roleCode == 'kiosk') {
       return KioskCheckInScreen(
