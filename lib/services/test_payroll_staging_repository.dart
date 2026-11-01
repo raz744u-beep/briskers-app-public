@@ -67,6 +67,44 @@ class TestPayrollStagingRepository {
     }).whereType<Map<String, Object?>>().toList(growable: false);
   }
 
+  /// Validate the local staging ledger without changing payment state.
+  /// Detects missing credit reservations or orphaned reservations after
+  /// a damaged restore. This is diagnostic only, never payment approval.
+  Future<bool> stagingIntegrityOk(String businessId) async {
+    if (businessId.trim().isEmpty) throw ArgumentError('Business required');
+    await _prepare();
+    final rows = await _db.customSelect(
+      'SELECT operation_id, payload_json FROM test_payroll_staging '
+      'WHERE business_id = ?',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    final expected = <String, String>{};
+    for (final row in rows) {
+      final operationId = row.read<String>('operation_id');
+      final payload = jsonDecode(row.read<String>('payload_json'));
+      if (payload is! Map<String, dynamic> ||
+          payload['allocation_ids'] is! List) return false;
+      final ids = payload['allocation_ids'] as List;
+      if (ids.isEmpty) return false;
+      for (final value in ids) {
+        if (value is! String || value.trim().isEmpty ||
+            expected.containsKey(value)) return false;
+        expected[value] = operationId;
+      }
+    }
+    final reserved = await _db.customSelect(
+      'SELECT allocation_id, operation_id FROM test_payroll_staged_credits '
+      'WHERE business_id = ?',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    if (reserved.length != expected.length) return false;
+    for (final row in reserved) {
+      if (expected[row.read<String>('allocation_id')] !=
+          row.read<String>('operation_id')) return false;
+    }
+    return true;
+  }
+
   /// Returns false only for an exact existing replay; conflicting replays and
   /// allocations reserved by another operation fail the entire transaction.
   Future<bool> stage({
