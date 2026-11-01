@@ -131,7 +131,7 @@ class LocalJobGraphDelete {
       final current = await _inventory(businessId, jobId);
       // Only exact identities and types are authoritative for a reviewed graph.
       String fingerprint(List<Map<String, dynamic>> rows) =>
-          (rows.map((r) => '${r['kind']}:${r['id']}').toList()..sort()).join('|');
+          (rows.map((r) => jsonEncode([r['kind'], r['id'], r['label']])).toList()..sort()).join('|');
       if (fingerprint(current) != fingerprint(reviewed)) {
         throw StateError('Linked records changed. Review Delete Job again.');
       }
