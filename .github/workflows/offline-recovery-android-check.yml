@@ -29,6 +29,8 @@ jobs:
         run: |
           flutter test test/services/local_owner_invoice_numbering_test.dart
           flutter test test/services/local_numbered_document_overlay_test.dart
+      - name: Create temporary Android test project
+        run: flutter create --platforms=android --project-name briskers_app .
       - name: Compile Android debug APK
         run: flutter build apk --debug
       - name: Verify APK exists
