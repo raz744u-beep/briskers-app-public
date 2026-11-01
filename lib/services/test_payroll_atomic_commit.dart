@@ -36,8 +36,9 @@ class TestPayrollAtomicCommit {
     required String businessId,
     required String operationId,
     required bool owner,
+    required bool syntheticTestMode,
   }) async {
-    if (!owner || businessId.trim().isEmpty || operationId.trim().isEmpty) {
+    if (!syntheticTestMode || !owner || businessId.trim().isEmpty || operationId.trim().isEmpty) {
       throw StateError('Owner and operation required');
     }
     await _prepare();
