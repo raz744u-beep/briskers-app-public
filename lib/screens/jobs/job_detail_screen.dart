@@ -214,7 +214,12 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   bool get _canEditFindings =>
       _job?['_first_frame_only'] != true && _jobCapability('edit_findings');
   bool get _canEditInspection =>
-      _job?['_first_frame_only'] != true && _jobCapability('edit_inspection');
+      _job?['_first_frame_only'] != true &&
+      !_contentBlocked &&
+      (_jobCapability('edit_inspection') ||
+          // Cached offline Job details may omit server capability flags.
+          // Permit the Owner to edit the locally stored check-in odometer.
+          (!_onlineReady && _owner && _job?['_local_snapshot'] == true));
   bool get _owner => widget.roleCode == 'owner';
   String? _profitabilityError;
 
