@@ -3290,7 +3290,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-    if (!mounted || id == null) return;
+    if (!mounted) return;
     // Do not wait for a full Job refresh before showing a saved new invoice.
     await _openDocument(id, freshlyCreated: true);
   }
