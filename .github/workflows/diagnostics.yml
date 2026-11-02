@@ -6,6 +6,8 @@ on:
     paths:
       - 'lib/**'
       - 'test/**'
+      - 'pubspec.yaml'
+      - 'tools/build/**'
       - '.github/workflows/diagnostics.yml'
 
 permissions:
@@ -59,3 +61,7 @@ jobs:
       - name: Run diagnostic and regression tests
         working-directory: generated
         run: flutter test
+
+      - name: Run isolated synthetic payment deletion tests
+        working-directory: generated
+        run: flutter test --dart-define=BRISKERS_SYNTHETIC_BUILD=true test/local_job_graph_delete_test.dart
