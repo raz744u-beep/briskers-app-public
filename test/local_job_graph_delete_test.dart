@@ -73,6 +73,35 @@ void main() {
     expect(await count('local_offline_job_purge_entities'), 0);
   });
 
+  test('unrecognized linked document cannot be orphaned by deletion', () async {
+    await db.customStatement(
+      "INSERT INTO local_documents "
+      "(id,business_id,job_id,kind,document_number,sync_state) "
+      "VALUES ('test-credit',?,?,'credit_note','TEST-CREDIT','synced')",
+      [business, job],
+    );
+    await expectLater(
+      deletion.preview(businessId: business, jobId: job, actorId: actor),
+      throwsStateError,
+    );
+    expect(await count('local_documents'), 2);
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  test('converted estimate requires review before parent deletion', () async {
+    await db.customStatement(
+      "UPDATE local_documents SET kind='estimate', converted=1 "
+      "WHERE business_id=? AND id=?", [business, invoice],
+    );
+    await expectLater(
+      deletion.preview(businessId: business, jobId: job, actorId: actor),
+      throwsStateError,
+    );
+    expect(await count('local_documents'), 1);
+    expect(await count('local_jobs'), 2);
+  });
+
   test('issued invoice without cached receipts cannot be silently deleted', () async {
     await db.customStatement(
       "UPDATE local_documents SET status='issued' "
