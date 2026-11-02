@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_job_deletion_v3.dart';
 import 'package:briskers_app/services/local_job_graph_delete.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -82,6 +85,64 @@ void main() {
     expect(await LocalJobDeletionV3.blockedJobIds(db, business), contains(job));
     expect(await LocalJobDeletionV3.blockedDocumentIds(db, business), contains(invoice));
     expect(await count('sync_outbox'), 0);
+  });
+
+  test('deleted local identifiers remain fenced after app database restart', () async {
+    final directory = await Directory.systemTemp.createTemp('briskers-purge-');
+    final file = File('${directory.path}/briskers.sqlite');
+    BriskersLocalDatabase? first;
+    BriskersLocalDatabase? reopened;
+    try {
+      first = BriskersLocalDatabase(NativeDatabase(file));
+      await first.customStatement(
+        "INSERT INTO local_jobs (id,business_id,access_scope,title,status,sync_state) "
+        "VALUES (?,?,'full','Restart sample','open','synced')",
+        [job, business],
+      );
+      await first.customStatement(
+        "INSERT INTO local_documents (id,business_id,job_id,kind,document_number,sync_state) "
+        "VALUES (?,?,?,'invoice','TEST-8001','synced')",
+        [invoice, business, job],
+      );
+      final engine = LocalJobGraphDelete(first, ownerIdentityProvider: () => {
+        'actor_id': actor, 'business_id': business, 'role_code': 'owner',
+      });
+      final reviewed = await engine.preview(
+        businessId: business, jobId: job, actorId: actor,
+      );
+      await engine.confirm(
+        businessId: business, jobId: job,
+        actorId: actor, reviewed: reviewed,
+      );
+      await first.close();
+      first = null;
+
+      reopened = BriskersLocalDatabase(NativeDatabase(file));
+      expect(await LocalJobDeletionV3.blockedJobIds(reopened, business),
+          contains(job));
+      expect(await LocalJobDeletionV3.blockedDocumentIds(reopened, business),
+          contains(invoice));
+      final rows = await reopened.customSelect(
+          'SELECT COUNT(*) AS n FROM local_jobs WHERE business_id=? AND id=?',
+          variables: [Variable<String>(business), Variable<String>(job)]).getSingle();
+      expect(rows.read<int>('n'), 0);
+    } finally {
+      if (first != null) await first.close();
+      if (reopened != null) await reopened.close();
+      await directory.delete(recursive: true);
+    }
+  });
+
+  test('repeat delete cannot silently reassign a removed job identity', () async {
+    final reviewed = await deletion.preview(
+      businessId: business, jobId: job, actorId: actor);
+    await deletion.confirm(
+      businessId: business, jobId: job, actorId: actor, reviewed: reviewed);
+    await expectLater(deletion.confirm(
+      businessId: business, jobId: job, actorId: actor, reviewed: reviewed),
+      throwsStateError);
+    expect(await LocalJobDeletionV3.blockedJobIds(db, business), contains(job));
+    expect(await count('local_jobs'), 1);
   });
 
   test('reviewed inventory change rolls back without deleting anything', () async {
