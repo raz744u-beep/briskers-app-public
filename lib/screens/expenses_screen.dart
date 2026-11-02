@@ -465,9 +465,15 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         setState(() {
           // A search must not replace a newly fetched server receipt with
           // an older on-disk snapshot while background reconciliation runs.
-          _invoiceReceipts = _invoiceReceipts.isEmpty
-              ? receipts
-              : InvoicePaymentFeed.mergeReceipts(_invoiceReceipts, receipts);
+          // Force Offline: the durable local feed is authoritative.
+          // Merging prior UI rows resurrected deleted test payments until
+          // process restart after Owner Delete.
+          _invoiceReceipts =
+              BriskersConnectionModeController.instance.forceOffline
+                  ? receipts
+                  : (_invoiceReceipts.isEmpty
+                      ? receipts
+                      : InvoicePaymentFeed.mergeReceipts(_invoiceReceipts, receipts));
           if (_invoiceReceipts.isNotEmpty) _loading = false;
         });
       }
