@@ -13,7 +13,7 @@ Future<bool> showOfflineJobPurgeConfirmation(BuildContext context, {
 
   String section(Map<String, dynamic> item) {
     final kind = item['kind']?.toString() ?? '';
-    if (kind == 'job' || kind == 'local_jobs') return 'Job';
+    if (kind == 'job' || kind == 'local_jobs') { return 'Job'; }
     if (kind == 'invoice' || kind == 'estimate' ||
         kind == 'local_documents') return 'Invoices and estimates';
     if (kind == 'payment' || kind == 'transaction') return 'Payments';
