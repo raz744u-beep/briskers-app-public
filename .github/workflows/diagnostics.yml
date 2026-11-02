@@ -38,6 +38,9 @@ jobs:
           cp ../pubspec.yaml ./pubspec.yaml
           cp ../analysis_options.yaml ./analysis_options.yaml
 
+      - name: Configure Owner device authentication
+        run: python3 tools/build/configure_owner_device_auth.py generated
+
       - name: Resolve packages
         working-directory: generated
         run: flutter pub get

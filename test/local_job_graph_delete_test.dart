@@ -23,7 +23,7 @@ void main() {
 
   setUp(() async {
     db = BriskersLocalDatabase(NativeDatabase.memory());
-    deletion = LocalJobGraphDelete(db,
+    deletion = LocalJobGraphDelete.forTesting(db,
       ownerIdentityProvider: () => {
         'actor_id': actor, 'business_id': business, 'role_code': 'owner',
       });
@@ -161,7 +161,7 @@ void main() {
         "VALUES (?,?,?,'invoice','TEST-8001','synced')",
         [invoice, business, job],
       );
-      final engine = LocalJobGraphDelete(first, ownerIdentityProvider: () => {
+      final engine = LocalJobGraphDelete.forTesting(first, ownerIdentityProvider: () => {
         'actor_id': actor, 'business_id': business, 'role_code': 'owner',
       });
       final reviewed = await engine.preview(
@@ -252,7 +252,7 @@ void main() {
     final reviewed = await deletion.preview(
       businessId: business, jobId: job, actorId: actor);
     var checks = 0;
-    final switchingOwner = LocalJobGraphDelete(db, ownerIdentityProvider: () {
+    final switchingOwner = LocalJobGraphDelete.forTesting(db, ownerIdentityProvider: () {
       checks++;
       return checks < 4
           ? {'actor_id': actor, 'business_id': business, 'role_code': 'owner'}
@@ -269,7 +269,7 @@ void main() {
   });
 
   test('different business Owner cannot preview a synced job', () async {
-    final wrongOwner = LocalJobGraphDelete(db,
+    final wrongOwner = LocalJobGraphDelete.forTesting(db,
       ownerIdentityProvider: () => {
         'actor_id': actor,
         'business_id': otherJob,

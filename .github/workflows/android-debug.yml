@@ -547,6 +547,9 @@ jobs:
           p.write_text(s)
           PY
 
+      - name: Configure Owner device authentication
+        run: python3 tools/build/configure_owner_device_auth.py generated
+
       - name: Configure persistent Android signing
         working-directory: generated
         env:

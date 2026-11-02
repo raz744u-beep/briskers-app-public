@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show kReleaseMode;
 
 import '../local/briskers_local_database.dart';
 import 'local_job_deletion_v3.dart';
+import 'local_owner_authorization.dart';
 
 /// Staged implementation only. Do not wire into production Job actions.
 /// Device-authoritative deletion of a locally present Job. The sync history
@@ -18,16 +19,25 @@ const _syntheticOwnerDeleteBuild = !kReleaseMode &&
         'BRISKERS_SYNTHETIC_BUILD', defaultValue: false);
 
 class LocalJobGraphDelete {
-  LocalJobGraphDelete(this.db, {
-    Map<String, dynamic>? Function()? ownerIdentityProvider,
-  }) : _ownerIdentityProvider = ownerIdentityProvider ??
-      // Fail closed until stable Owner enrollment has been reviewed and wired.
-      (() => null);
+  LocalJobGraphDelete(this.db, {LocalOwnerGrant? ownerGrant})
+      : _ownerGrant = ownerGrant, _testOwnerIdentityProvider = null;
+
+  /// Synthetic unit-test seam. Release builds never accept a role-map provider.
+  LocalJobGraphDelete.forTesting(this.db, {
+    required Map<String, dynamic>? Function() ownerIdentityProvider,
+  }) : _ownerGrant = null, _testOwnerIdentityProvider = ownerIdentityProvider {
+    if (kReleaseMode) throw StateError('Test authorization is unavailable in release builds.');
+  }
   final BriskersLocalDatabase db;
-  final Map<String, dynamic>? Function() _ownerIdentityProvider;
+  final LocalOwnerGrant? _ownerGrant;
+  final Map<String, dynamic>? Function()? _testOwnerIdentityProvider;
 
   void _assertOwner(String business, String actorId) {
-    final owner = _ownerIdentityProvider();
+    if (_ownerGrant != null) {
+      _ownerGrant.assertValid(business, actorId);
+      return;
+    }
+    final owner = kReleaseMode ? null : _testOwnerIdentityProvider?.call();
     if (owner == null || owner['role_code'] != 'owner' ||
         owner['business_id'] != business || owner['actor_id'] != actorId) {
       throw StateError('Unlock the Owner account for this business first.');
@@ -208,7 +218,12 @@ class LocalJobGraphDelete {
   }) async {
     _assertOwner(businessId, actorId);
     await LocalJobDeletionV3.ensureSchema(db);
-    return db.transaction(() async => _inventory(businessId, jobId));
+    return db.transaction(() async {
+      _assertOwner(businessId, actorId);
+      final inventory = await _inventory(businessId, jobId);
+      _assertOwner(businessId, actorId);
+      return inventory;
+    });
   }
 
   Future<void> confirm({

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app.dart';
+import 'services/device_owner_authorization.dart';
 import 'core/briskers_i18n.dart';
 import 'core/connection_mode.dart';
 import 'core/supabase_config.dart';
@@ -17,6 +18,7 @@ Future<void> main() async {
     url: supabaseUrl,
     publishableKey: supabasePublishableKey,
   );
+  DeviceOwnerAuthorization.instance.initialize();
   await ExpenseIqBackgroundScheduler.initialize();
   runApp(const BriskersApp());
 }

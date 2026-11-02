@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/supabase_config.dart';
 import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
+import '../services/device_owner_authorization.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/customer_vehicle_sync_service.dart';
 import '../services/catalog_sync_service.dart';
@@ -187,7 +188,13 @@ class _BusinessGateState extends State<BusinessGate> {
     }
 
     try {
+      final ownerIdentity = DeviceOwnerAuthorization.instance.currentIdentity();
       final businesses = await _api.myBusinesses();
+      if (ownerIdentity != null) {
+        unawaited(DeviceOwnerAuthorization.instance
+            .observeServerMemberships(businesses, ownerIdentity)
+            .catchError((Object _) {}));
+      }
       if (businesses.isNotEmpty) {
         await _saveCachedBusiness(businesses.first);
       } else {
