@@ -78,6 +78,8 @@ class _FakeCustomerVehicleApi extends BriskersApi {
                 'license_plate': 'ABC123',
                 'license_state': 'LA',
                 'mileage': 50000,
+                'mileage_recorded_date': '2026-10-21',
+                'mileage_source_invoice_id': 'invoice-6347',
                 'color': 'Black',
                 'updated_at': '2026-09-30T20:00:00Z',
                 'row_version': 2,
@@ -130,7 +132,8 @@ void main() {
 
     final vehicle = await database.customSelect(
       '''
-      SELECT v.make, v.model, v.row_version
+      SELECT v.make, v.model, v.row_version,
+        v.mileage_recorded_date, v.mileage_source_invoice_id
       FROM local_customer_vehicles cv
       JOIN local_vehicles v
         ON v.business_id = cv.business_id
@@ -146,6 +149,8 @@ void main() {
     expect(vehicle.read<String>('make'), 'BMW');
     expect(vehicle.read<String>('model'), 'X5');
     expect(vehicle.read<int>('row_version'), 2);
+    expect(vehicle.read<String>('mileage_recorded_date'), '2026-10-21');
+    expect(vehicle.read<String>('mileage_source_invoice_id'), 'invoice-6347');
 
     final state = await database.customSelect(
       '''

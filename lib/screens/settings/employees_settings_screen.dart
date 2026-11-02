@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/employee_role_style.dart';
+import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
 import 'employee_edit_screen.dart';
 import 'employee_positions_screen.dart';
@@ -176,7 +177,9 @@ class _EmployeesSettingsScreenState
                 ),
                 ListTile(
                   leading: const CircleAvatar(
-                    child: Icon(Icons.person_add_alt_1),
+                    backgroundColor: Color(0x175E35B1),
+                    child: Icon(Icons.person_add_alt_1,
+                      color: BriskersColors.settings),
                   ),
                   title: const Text('Add employee'),
                   subtitle: const Text('Create a new employee record'),
@@ -247,6 +250,49 @@ class _EmployeesSettingsScreenState
     );
   }
 
+  Future<void> _employeeActions(Map<String, dynamic> employee) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  employee['name']?.toString() ?? 'Employee',
+                  style: const TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined,
+                color: BriskersColors.settings),
+              title: const Text('Edit employee'),
+              onTap: () => Navigator.pop(sheetContext, 'edit'),
+            ),
+            if (widget.isOwner)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: const Text('Delete employee',
+                    style: TextStyle(color: Colors.red)),
+                onTap: () => Navigator.pop(sheetContext, 'delete'),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'edit') await _open(employee);
+    if (action == 'delete') await _deleteEmployee(employee);
+  }
+
   Future<void> _showManageMenu() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -273,7 +319,9 @@ class _EmployeesSettingsScreenState
               Card(
                 child: ListTile(
                   leading: const CircleAvatar(
-                    child: Icon(Icons.groups_2_outlined),
+                    backgroundColor: Color(0x175E35B1),
+                    child: Icon(Icons.groups_2_outlined,
+                      color: BriskersColors.settings),
                   ),
                   title: const Text(
                     'Manage employees',
@@ -290,7 +338,9 @@ class _EmployeesSettingsScreenState
               Card(
                 child: ListTile(
                   leading: const CircleAvatar(
-                    child: Icon(Icons.badge_outlined),
+                    backgroundColor: Color(0x175E35B1),
+                    child: Icon(Icons.badge_outlined,
+                      color: BriskersColors.settings),
                   ),
                   title: const Text(
                     'Manage positions',
@@ -319,6 +369,8 @@ class _EmployeesSettingsScreenState
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showManageMenu,
+        backgroundColor: BriskersColors.settings,
+        foregroundColor: Colors.white,
         icon: const Icon(Icons.groups_2_outlined),
         label: const Text('Manage'),
       ),
@@ -400,8 +452,10 @@ class _EmployeesSettingsScreenState
                               ],
                             ),
                           ),
-                          trailing: const Icon(Icons.chevron_right),
+                          trailing: const Icon(Icons.chevron_right,
+                            color: BriskersColors.settings),
                           onTap: () => _open(employee),
+                          onLongPress: () => _employeeActions(employee),
                         ),
                       );
                     }),

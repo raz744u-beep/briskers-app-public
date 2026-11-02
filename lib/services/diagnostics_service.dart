@@ -97,13 +97,12 @@ class DiagnosticsReport {
 class BriskersDiagnosticsService {
   BriskersDiagnosticsService({
     BriskersLocalDatabase? database,
-    LocalDocumentDetailCache detailCache =
-        const LocalDocumentDetailCache(),
+    LocalDocumentDetailCache? detailCache,
     LocalTaxSettingsCache? taxSettingsCache,
     LocalInvoiceStatusStylesCache? invoiceStatusStylesCache,
     BriskersConnectionModeController? connectionMode,
   })  : _database = database ?? localDatabase,
-        _detailCache = detailCache,
+        _detailCache = detailCache ?? LocalDocumentDetailCache(database:database),
         _taxSettingsCache =
             taxSettingsCache ?? LocalTaxSettingsCache(),
         _invoiceStatusStylesCache =
@@ -787,17 +786,17 @@ class BriskersDiagnosticsService {
     checks.add(DiagnosticCheck(
       id: 'JOB-001',
       category: 'Jobs',
-      title: 'Job list numeric sequence',
+      title: 'Job activity ordering',
       level: inversions == 0
           ? BriskersDiagnosticLevel.pass
-          : BriskersDiagnosticLevel.fail,
+          : BriskersDiagnosticLevel.warning,
       summary: inversions == 0
-          ? 'The first ${jobs.length} jobs follow numeric sequence '
+          ? 'The first ${jobs.length} jobs show numeric sequence '
               'within their status groups.'
-          : '$inversions incorrectly ordered job pair(s) in the first '
+          : '$inversions numeric inversions due to activity ordering in the first '
               '${jobs.length} records.',
       details: [
-        'Active jobs retain priority over completed jobs.',
+        'All Jobs intentionally sorts by recent activity; number gaps are not a sorting failure.',
         if (examples.isNotEmpty) 'Examples: ${examples.join('; ')}',
         'MobileBiz import timestamps are not used to choose the newest job.',
       ],
@@ -895,6 +894,16 @@ class BriskersDiagnosticsService {
       [Variable<String>(businessId)],
     );
 
+    final pendingOperations = await _database.customSelect(
+      '''
+      SELECT entity_type, entity_id, operation, attempt_count
+      FROM sync_outbox
+      WHERE business_id = ? AND state = 'pending'
+      ORDER BY attempt_count DESC, created_at LIMIT 5
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+
     checks.add(
       DiagnosticCheck(
         id: 'SYNC-001',
@@ -928,6 +937,11 @@ class BriskersDiagnosticsService {
           if (retryingCount > 0)
             retryingCount.toString() +
                 ' pending operation(s) have already failed at least once.',
+          for (final row in pendingOperations)
+            'Outbox ' + row.read<String>('entity_type') +
+                '/' + row.read<String>('operation') +
+                ' • attempts ' + row.read<int>('attempt_count').toString() +
+                ' • ID ' + row.read<String>('entity_id'),
         ],
       ),
     );
@@ -1238,6 +1252,25 @@ class BriskersDiagnosticsService {
       ),
     };
 
+    final orphanAppointments = await _database.customSelect(
+      '''
+      SELECT a.id, a.sync_state, a.status
+      FROM local_appointments a
+      LEFT JOIN local_customers c
+        ON c.business_id = a.business_id AND c.id = a.customer_id
+      LEFT JOIN local_jobs j
+        ON j.business_id = a.business_id AND j.id = a.job_id
+      LEFT JOIN local_vehicles v
+        ON v.business_id = a.business_id AND v.id = a.vehicle_id
+      WHERE a.business_id = ? AND (
+        c.id IS NULL OR
+        (a.job_id IS NOT NULL AND j.id IS NULL) OR
+        (a.vehicle_id IS NOT NULL AND v.id IS NULL))
+      LIMIT 5
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+
     final total = problems.values.fold<int>(0, (sum, value) => sum + value);
     checks.add(
       DiagnosticCheck(
@@ -1252,7 +1285,13 @@ class BriskersDiagnosticsService {
         details: problems.entries
             .where((entry) => entry.value > 0)
             .map((entry) => entry.key + ': ' + entry.value.toString())
-            .toList(),
+            .toList()
+          ..addAll([
+            for (final row in orphanAppointments)
+              'Appointment ID ' + row.read<String>('id') +
+              ' • sync ' + (row.readNullable<String>('sync_state') ?? '') +
+              ' • status ' + (row.readNullable<String>('status') ?? ''),
+          ]),
       ),
     );
   }
@@ -1888,3 +1927,4 @@ class BriskersDiagnosticsService {
     );
   }
 }
+

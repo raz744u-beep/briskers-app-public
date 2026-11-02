@@ -1,34 +1,108 @@
 import 'package:drift/drift.dart';
 
+import '../core/document_presentation.dart';
+import 'invoice_payment_feed.dart';
+
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
-import 'local_job_deletion_v3.dart';
+import 'local_document_detail_cache.dart';
+import 'local_job_retirement.dart';
+
+/// Shared read-only predicate for the dock badge and the document list.
+bool invoiceNeedsPayment(Map<String, dynamic> document, {num receipts = 0}) {
+  if ((document['kind']?.toString() ?? 'invoice') != 'invoice') return false;
+  final row = Map<String, dynamic>.from(document);
+  if (row['_local_snapshot'] == true) {
+    row.remove('paid_amount');
+    row.remove('pending_payment');
+  }
+  final display = DocumentPresentation(row);
+  if (display.isVoid || display.isClosed || display.fullyCovered) return false;
+  final total = num.tryParse((row['total_amount'] ?? row['total'])?.toString() ?? '');
+  if (total == null || total <= 0 || !total.isFinite) return true;
+  return receipts + 0.005 < total;
+}
+
+Map<String, num> invoiceRecordedReceiptTotals(Iterable<Map<String, dynamic>> receipts) {
+  final amounts = <String, num>{};
+  for (final row in receipts) {
+    final id = row['invoice_id']?.toString() ?? '';
+    final amount = num.tryParse(row['amount']?.toString() ?? '');
+    if (id.isEmpty || amount == null || !amount.isFinite || amount <= 0) continue;
+    amounts[id] = (amounts[id] ?? 0) + amount;
+  }
+  return amounts;
+}
 
 class LocalDocumentRepository {
   LocalDocumentRepository({BriskersLocalDatabase? database})
-      : _database = database ?? localDatabase;
+    : _database = database ?? localDatabase;
 
   final BriskersLocalDatabase _database;
 
-  // Never repopulate an invoice or estimate after a local Owner purge.
-  // The parent-job fence also covers server index rows that were not yet
-  // cached when the Owner reviewed and deleted that Job.
-  Future<bool> _isPurgedServerDocument(
-    String businessId, Map<String, dynamic> document,
+  // Estimates and accounting are retained. A retired Job only hides invoices;
+  // an exact invoice tombstone also applies after a stale reassignment response.
+  static String _visibleDocumentSql(String alias) =>
+      """
+    NOT EXISTS (SELECT 1 FROM owner_recovery_aliases a
+      WHERE a.business_id = $alias.business_id
+        AND a.server_invoice_id = $alias.id
+        AND a.local_invoice_id <> $alias.id
+        AND EXISTS (SELECT 1 FROM local_documents original
+          WHERE original.business_id=a.business_id AND original.id=a.local_invoice_id))
+    AND NOT EXISTS (SELECT 1 FROM local_job_retirement_entities r
+      WHERE r.business_id = $alias.business_id
+        AND r.state IN ('pending','accepted','locally_cancelled')
+        AND ((r.entity_kind = 'invoice' AND r.entity_id = $alias.id)
+          OR ($alias.kind = 'invoice' AND r.entity_kind = 'job'
+            AND r.entity_id = $alias.job_id)))
+  """;
+
+  Future<void> _ensureRecoveryAliasTable() async {
+    await _database.customStatement(
+      """CREATE TABLE IF NOT EXISTS owner_recovery_aliases (
+        business_id TEXT NOT NULL,
+        local_invoice_id TEXT NOT NULL,
+        server_invoice_id TEXT NOT NULL,
+        server_job_id TEXT NOT NULL,
+        payment_operation_id TEXT NOT NULL,
+        invoice_number TEXT NOT NULL,
+        job_number TEXT NOT NULL,
+        total_cents INTEGER NOT NULL,
+        payment_cents INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (business_id,local_invoice_id),
+        UNIQUE (business_id,server_invoice_id),
+        UNIQUE (business_id,payment_operation_id)
+      )""",
+    );
+  }
+
+  // Capture complete deletion fences once per atomic writer transaction.
+  // Rechecking them for every document caused thousands of SQLite round trips
+  // during a full automatic document-index refresh.
+  Future<({Set<String> documents, Set<String> jobs})> _retirementFences(
+    String businessId,
   ) async {
+    await LocalJobRetirement.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
+    return (
+      documents: await LocalJobRetirement.blockedDocumentIds(
+        _database, businessId),
+      jobs: await LocalJobRetirement.blockedJobIds(_database, businessId),
+    );
+  }
+
+  static bool _serverDocumentBlocked(
+    Map<String, dynamic> document, {
+    required Set<String> blockedDocuments,
+    required Set<String> blockedJobs,
+  }) {
     final id = document['id']?.toString() ?? '';
+    if (blockedDocuments.contains(id)) return true;
     final jobId = document['job_id']?.toString() ?? '';
-    if (id.isEmpty) return false;
-    return (await _database.customSelect(
-      'SELECT 1 FROM local_job_deletion_v3_fences '
-      "WHERE business_id=? AND ((entity_kind IN ('invoice','estimate') "
-      "AND entity_id=?) OR (entity_kind='job' AND entity_id=?)) LIMIT 1",
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(id),
-        Variable<String>(jobId),
-      ],
-    ).get()).isNotEmpty;
+    return (document['kind']?.toString() ?? 'invoice') == 'invoice' &&
+        jobId.isNotEmpty && blockedJobs.contains(jobId);
   }
 
   Future<void> replaceFromServer(
@@ -36,17 +110,22 @@ class LocalDocumentRepository {
     List<Map<String, dynamic>> documents, {
     String? kind,
   }) async {
-    await LocalJobDeletionV3.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
     await _database.transaction(() async {
+      final fences = await _retirementFences(businessId);
+      // A pending request can be rejected later. Retain its exact prior row
+      // rather than letting an unrelated full refresh erase the recovery data.
+      final visible = _visibleDocumentSql('local_documents');
       await _database.customStatement(
         kind == null
-            ? "DELETE FROM local_documents WHERE business_id = ? AND sync_state = 'synced'"
-            : "DELETE FROM local_documents WHERE business_id = ? AND kind = ? AND sync_state = 'synced'",
+            ? "DELETE FROM local_documents WHERE business_id = ? AND sync_state = 'synced' AND $visible"
+            : "DELETE FROM local_documents WHERE business_id = ? AND kind = ? AND sync_state = 'synced' AND $visible",
         kind == null ? [businessId] : [businessId, kind],
       );
       for (final document in documents) {
         final id = document['id']?.toString() ?? '';
-        if (id.isEmpty || await _isPurgedServerDocument(businessId, document)) {
+        if (id.isEmpty || _serverDocumentBlocked(document,
+          blockedDocuments: fences.documents, blockedJobs: fences.jobs)) {
           continue;
         }
         await _database.customStatement(
@@ -96,15 +175,33 @@ class LocalDocumentRepository {
     });
   }
 
+  /// Record a closure already acknowledged by briskers_close_invoice.
+  /// This updates only the cached presentation index, not payments, totals,
+  /// closure timestamps or pending offline invoice edits. Never call after
+  /// Job completion alone or a failed/unconfirmed close request.
+  Future<void> recordServerConfirmedClosed(
+    String businessId,
+    String invoiceId,
+  ) async {
+    await _database.customStatement(
+      """UPDATE local_documents
+         SET status = 'closed', display_status_code = 'closed'
+         WHERE business_id = ? AND id = ? AND kind = 'invoice'
+           AND sync_state = 'synced'""",
+      [businessId, invoiceId],
+    );
+  }
+
   Future<void> upsertFromServer(
     String businessId,
     List<Map<String, dynamic>> documents,
   ) async {
-    await LocalJobDeletionV3.ensureSchema(_database);
     await _database.transaction(() async {
+      final fences = await _retirementFences(businessId);
       for (final document in documents) {
         final id = document['id']?.toString() ?? '';
-        if (id.isEmpty || await _isPurgedServerDocument(businessId, document)) {
+        if (id.isEmpty || _serverDocumentBlocked(document,
+          blockedDocuments: fences.documents, blockedJobs: fences.jobs)) {
           continue;
         }
         await _database.customStatement(
@@ -132,10 +229,13 @@ class LocalDocumentRepository {
           WHERE local_documents.sync_state = 'synced'
           ''',
           [
-            id, businessId, _text(document['job_id']),
+            id,
+            businessId,
+            _text(document['job_id']),
             _text(document['customer_id']),
             document['kind']?.toString() ?? 'invoice',
-            _text(document['document_number']), _text(document['status']),
+            _text(document['document_number']),
+            _text(document['status']),
             _text(document['display_status_code']),
             _unix(_date(document['closed_at'])),
             document['converted'] == true ? 1 : 0,
@@ -155,8 +255,11 @@ class LocalDocumentRepository {
     String businessId, {
     required String kind,
   }) async {
-    final rows = await _database.customSelect(
-      '''
+    await LocalJobRetirement.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
+    final rows = await _database
+        .customSelect(
+          '''
       SELECT d.*, j.job_number, j.title AS job_title,
              coalesce(j.customer_name,c.display_name,'Customer') AS customer_name,
              coalesce(j.vehicle_label,'') AS vehicle_label
@@ -166,34 +269,36 @@ class LocalDocumentRepository {
       LEFT JOIN local_customers c ON c.business_id=d.business_id
         AND c.id=d.customer_id
       WHERE d.business_id = ? AND d.kind = ?
+        AND ${_visibleDocumentSql('d')}
       ORDER BY d.document_date DESC NULLS LAST, d.created_at DESC, d.id
       ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(kind),
-      ],
-    ).get();
+          variables: [Variable<String>(businessId), Variable<String>(kind)],
+        )
+        .get();
 
     String displayStatus(QueryRow row) {
       if (row.read<String>('id').startsWith('local-invoice-') &&
-          row.read<String>('sync_state') == 'pending') {
+          row.read<String>('sync_state') == 'pending' &&
+          (row.readNullable<String>('document_number')?.trim().isEmpty ?? true)) {
         return 'Pending sync';
       }
-      final raw = row.readNullable<String>('display_status_code') ??
+      final raw =
+          row.readNullable<String>('display_status_code') ??
           row.readNullable<String>('status') ??
           '';
       if (raw.isEmpty) return '';
       return raw
           .split('_')
           .where((part) => part.isNotEmpty)
-          .map((part) =>
-              part.length == 1
-                  ? part.toUpperCase()
-                  : part[0].toUpperCase() + part.substring(1).toLowerCase())
+          .map(
+            (part) => part.length == 1
+                ? part.toUpperCase()
+                : part[0].toUpperCase() + part.substring(1).toLowerCase(),
+          )
           .join(' ');
     }
 
-    return rows
+    final result = rows
         .map(
           (row) => <String, dynamic>{
             'id': row.read<String>('id'),
@@ -203,9 +308,11 @@ class LocalDocumentRepository {
             'document_number': row.readNullable<String>('document_number'),
             'status': row.readNullable<String>('status'),
             'converted': row.read<int>('converted') == 1,
+            'row_version': row.readNullable<int>('row_version'),
             'display_status': displayStatus(row),
-            'display_status_code':
-                row.readNullable<String>('display_status_code'),
+            'display_status_code': row.readNullable<String>(
+              'display_status_code',
+            ),
             'total_amount': row.read<double>('total'),
             'paid_amount': 0,
             'pending_payment': 0,
@@ -221,23 +328,52 @@ class LocalDocumentRepository {
           },
         )
         .toList();
+    if (kind == 'estimate' &&
+        (await LocalJobRetirement.blockedDocumentIds(
+          _database,
+          businessId,
+        )).isNotEmpty) {
+      final cache = LocalDocumentDetailCache(database: _database);
+      for (final document in result) {
+        if (document['converted'] != true) continue;
+        final detail = await cache.load(businessId, document['id'].toString());
+        final indexVersion = num.tryParse(
+          document['row_version']?.toString() ?? '',
+        );
+        final detailVersion = num.tryParse(
+          detail?['row_version']?.toString() ?? '',
+        );
+        if (detail?['_retired_conversion'] == true &&
+            (indexVersion == null ||
+                detailVersion == null ||
+                detailVersion >= indexVersion)) {
+          document['converted'] = false;
+        }
+      }
+    }
+    return result;
   }
+
   Future<String?> createdAtForDocument(
     String businessId,
     String documentId,
   ) async {
-    final rows = await _database.customSelect(
-      '''
+    await LocalJobRetirement.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
+    final rows = await _database
+        .customSelect(
+          '''
       SELECT created_at
-      FROM local_documents
-      WHERE business_id = ? AND id = ?
+      FROM local_documents d
+      WHERE business_id = ? AND id = ? AND ${_visibleDocumentSql('d')}
       LIMIT 1
       ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(documentId),
-      ],
-    ).get();
+          variables: [
+            Variable<String>(businessId),
+            Variable<String>(documentId),
+          ],
+        )
+        .get();
     if (rows.isEmpty) return null;
     return _isoFromDb(rows.first.data['created_at']);
   }
@@ -246,36 +382,41 @@ class LocalDocumentRepository {
     String businessId,
     String jobId,
   ) async {
-    final rows = await _database.customSelect(
-      '''
+    await LocalJobRetirement.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
+    final rows = await _database
+        .customSelect(
+          '''
       SELECT d.*, j.job_number, j.customer_name, j.vehicle_label
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
       WHERE d.business_id = ? AND d.job_id = ?
+        AND ${_visibleDocumentSql('d')}
       ORDER BY d.document_date DESC NULLS LAST, d.created_at DESC, d.id
       ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(jobId),
-      ],
-    ).get();
+          variables: [Variable<String>(businessId), Variable<String>(jobId)],
+        )
+        .get();
 
     String displayStatus(QueryRow row) {
       if (row.read<String>('id').startsWith('local-invoice-') &&
           row.read<String>('sync_state') == 'pending') {
         return 'Pending sync';
       }
-      final raw = row.readNullable<String>('display_status_code') ??
+      final raw =
+          row.readNullable<String>('display_status_code') ??
           row.readNullable<String>('status') ??
           '';
       if (raw.isEmpty) return '';
       return raw
           .split('_')
           .where((part) => part.isNotEmpty)
-          .map((part) => part.length == 1
-              ? part.toUpperCase()
-              : part[0].toUpperCase() + part.substring(1).toLowerCase())
+          .map(
+            (part) => part.length == 1
+                ? part.toUpperCase()
+                : part[0].toUpperCase() + part.substring(1).toLowerCase(),
+          )
           .join(' ');
     }
 
@@ -289,8 +430,9 @@ class LocalDocumentRepository {
             'document_number': row.readNullable<String>('document_number'),
             'status': row.readNullable<String>('status'),
             'display_status': displayStatus(row),
-            'display_status_code':
-                row.readNullable<String>('display_status_code'),
+            'display_status_code': row.readNullable<String>(
+              'display_status_code',
+            ),
             'total_amount': row.read<double>('total'),
             'paid_amount': 0,
             'pending_payment': 0,
@@ -308,36 +450,26 @@ class LocalDocumentRepository {
   }
 
   Future<int> openEstimateCount(String businessId) async {
-    final row = await _database.customSelect(
-      '''
-      SELECT COUNT(*) AS count
-      FROM local_documents
-      WHERE business_id = ?
-        AND kind = 'estimate'
-        AND converted = 0
-        AND lower(COALESCE(status, '')) NOT IN ('accepted', 'declined', 'expired', 'void')
-      ''',
-      variables: [Variable<String>(businessId)],
-    ).getSingle();
-    return row.read<int>('count');
+    final estimates = await listByKind(businessId, kind: 'estimate');
+    return estimates.where((document) {
+      final status = document['status']?.toString().toLowerCase() ?? '';
+      return document['converted'] != true &&
+          !const {'accepted', 'declined', 'expired', 'void'}.contains(status);
+    }).length;
   }
 
   Stream<int> watchOpenEstimateCount(String businessId) {
+    // Conversion is a read-only projection of the retained exact detail link.
+    // A retirement notification invalidates localDocuments even though its
+    // historical converted column has deliberately not been overwritten.
     return _database
         .customSelect(
-          '''
-          SELECT COUNT(*) AS count
-          FROM local_documents
-          WHERE business_id = ?
-            AND kind = 'estimate'
-            AND converted = 0
-            AND lower(COALESCE(status, '')) NOT IN ('accepted', 'declined', 'expired', 'void')
-          ''',
+          "SELECT id FROM local_documents WHERE business_id = ? AND kind = 'estimate'",
           variables: [Variable<String>(businessId)],
           readsFrom: {_database.localDocuments},
         )
-        .watchSingle()
-        .map((row) => row.read<int>('count'));
+        .watch()
+        .asyncMap((_) => openEstimateCount(businessId));
   }
 
   /// Read-only offline Home attention from the already-synced invoice index.
@@ -346,18 +478,25 @@ class LocalDocumentRepository {
     String businessId, {
     int limit = 25,
   }) async {
-    const where = '''
+    await LocalJobRetirement.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
+    final where =
+        '''
       d.business_id = ? AND d.kind = 'invoice'
+      AND ${_visibleDocumentSql('d')}
       AND d.closed_at IS NULL
       AND lower(replace(coalesce(d.display_status_code, ''), ' ', '_'))
           IN ('pending_close', 'pendingclose')
     ''';
-    final countRow = await _database.customSelect(
-      'SELECT COUNT(*) AS count FROM local_documents d WHERE $where',
-      variables: [Variable<String>(businessId)],
-    ).getSingle();
-    final rows = await _database.customSelect(
-      '''
+    final countRow = await _database
+        .customSelect(
+          'SELECT COUNT(*) AS count FROM local_documents d WHERE $where',
+          variables: [Variable<String>(businessId)],
+        )
+        .getSingle();
+    final rows = await _database
+        .customSelect(
+          '''
       SELECT d.id, d.document_number, d.job_id, d.customer_id,
              coalesce(c.display_name,j.customer_name,'Customer') AS customer_name,
              coalesce(j.job_number,'') AS job_number,
@@ -371,8 +510,9 @@ class LocalDocumentRepository {
       ORDER BY d.document_date DESC, d.created_at DESC
       LIMIT ?
       ''',
-      variables: [Variable<String>(businessId),Variable<int>(limit)],
-    ).get();
+          variables: [Variable<String>(businessId), Variable<int>(limit)],
+        )
+        .get();
     return {
       'count': countRow.read<int>('count'),
       'items': [
@@ -389,37 +529,28 @@ class LocalDocumentRepository {
     };
   }
 
+  /// Covers local/server recorded receipts without posting or finalizing.
   Future<int> openInvoiceCount(String businessId) async {
-    final row = await _database.customSelect(
-      '''
-      SELECT COUNT(*) AS count
-      FROM local_documents
-      WHERE business_id = ?
-        AND kind = 'invoice'
-        AND closed_at IS NULL
-        AND lower(COALESCE(status, '')) <> 'void'
-      ''',
-      variables: [Variable<String>(businessId)],
-    ).getSingle();
-    return row.read<int>('count');
+    final docs = await listByKind(businessId, kind: 'invoice');
+    final receipts = await InvoicePaymentFeed(database: _database).load(businessId);
+    final paid = invoiceRecordedReceiptTotals(receipts);
+    return docs.where((d) => invoiceNeedsPayment(d,
+        receipts: paid[d['id']?.toString()] ?? 0)).length;
   }
 
-  Stream<int> watchOpenInvoiceCount(String businessId) {
-    return _database
-        .customSelect(
-          '''
-          SELECT COUNT(*) AS count
-          FROM local_documents
-          WHERE business_id = ?
-            AND kind = 'invoice'
-            AND closed_at IS NULL
-            AND lower(COALESCE(status, '')) <> 'void'
-          ''',
-          variables: [Variable<String>(businessId)],
-          readsFrom: {_database.localDocuments},
-        )
-        .watchSingle()
-        .map((row) => row.read<int>('count'));
+  Stream<int> watchOpenInvoiceCount(String businessId) async* {
+    await LocalJobRetirement.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
+    yield await openInvoiceCount(businessId);
+    yield* _database.customSelect(
+      '''SELECT (SELECT COUNT(*) FROM local_documents
+                 WHERE business_id=? AND kind='invoice') AS docs,
+                (SELECT COUNT(*) FROM sync_outbox
+                 WHERE business_id=? AND entity_type='invoice_payment_received'
+                   AND state IN ('pending','inflight')) AS receipts''',
+      variables: [Variable<String>(businessId), Variable<String>(businessId)],
+      readsFrom: {_database.localDocuments, _database.syncOutbox},
+    ).watch().asyncMap((_) => openInvoiceCount(businessId));
   }
 
   Future<List<Map<String, dynamic>>> search(
@@ -427,17 +558,21 @@ class LocalDocumentRepository {
     String query, {
     int limit = 30,
   }) async {
+    await LocalJobRetirement.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
     final value = query.trim().toLowerCase();
     if (value.isEmpty) return const [];
     final numeric = RegExp(r'^[0-9]+$').hasMatch(value);
     final like = '%$value%';
-    final rows = await _database.customSelect(
-      '''
+    final rows = await _database
+        .customSelect(
+          '''
       SELECT d.*, j.job_number, j.customer_name, j.vehicle_label
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
       WHERE d.business_id = ?
+        AND ${_visibleDocumentSql('d')}
         AND (
           (
             ? = 1 AND (
@@ -457,33 +592,38 @@ class LocalDocumentRepository {
       ORDER BY d.document_date DESC NULLS LAST, d.created_at DESC, d.id
       LIMIT ?
       ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<int>(numeric ? 1 : 0),
-        Variable<String>(value),
-        Variable<String>('I-$value'),
-        Variable<String>('MB-$value'),
-        Variable<int>(numeric ? 0 : 1),
-        Variable<String>(like),
-        Variable<String>(like),
-        Variable<String>(like),
-        Variable<int>(limit),
-      ],
-    ).get();
+          variables: [
+            Variable<String>(businessId),
+            Variable<int>(numeric ? 1 : 0),
+            Variable<String>(value),
+            Variable<String>('I-$value'),
+            Variable<String>('MB-$value'),
+            Variable<int>(numeric ? 0 : 1),
+            Variable<String>(like),
+            Variable<String>(like),
+            Variable<String>(like),
+            Variable<int>(limit),
+          ],
+        )
+        .get();
 
-    return rows.map((row) => <String, dynamic>{
-      'id': row.read<String>('id'),
-      'job_id': row.readNullable<String>('job_id'),
-      'customer_id': row.readNullable<String>('customer_id'),
-      'kind': row.read<String>('kind'),
-      'document_number': row.readNullable<String>('document_number'),
-      'status': row.readNullable<String>('status'),
-      'total': row.read<double>('total'),
-      'job_number': row.readNullable<String>('job_number'),
-      'customer_name': row.readNullable<String>('customer_name'),
-      'vehicle': row.readNullable<String>('vehicle_label'),
-      '_local_snapshot': true,
-    }).toList();
+    return rows
+        .map(
+          (row) => <String, dynamic>{
+            'id': row.read<String>('id'),
+            'job_id': row.readNullable<String>('job_id'),
+            'customer_id': row.readNullable<String>('customer_id'),
+            'kind': row.read<String>('kind'),
+            'document_number': row.readNullable<String>('document_number'),
+            'status': row.readNullable<String>('status'),
+            'total': row.read<double>('total'),
+            'job_number': row.readNullable<String>('job_number'),
+            'customer_name': row.readNullable<String>('customer_name'),
+            'vehicle': row.readNullable<String>('vehicle_label'),
+            '_local_snapshot': true,
+          },
+        )
+        .toList();
   }
 
   // Preserve YYYY-MM-DD without converting a calendar date across timezones.
@@ -507,9 +647,7 @@ class LocalDocumentRepository {
         isUtc: true,
       ).toIso8601String();
     }
-    return DateTime.tryParse(value.toString())
-        ?.toUtc()
-        .toIso8601String();
+    return DateTime.tryParse(value.toString())?.toUtc().toIso8601String();
   }
 
   String? _text(Object? value) {
@@ -520,7 +658,6 @@ class LocalDocumentRepository {
   int? _int(Object? value) => int.tryParse(value?.toString() ?? '');
   double? _double(Object? value) => double.tryParse(value?.toString() ?? '');
   DateTime? _date(Object? value) => DateTime.tryParse(value?.toString() ?? '');
-  int? _unix(DateTime? value) => value == null
-      ? null
-      : value.toUtc().millisecondsSinceEpoch ~/ 1000;
+  int? _unix(DateTime? value) =>
+      value == null ? null : value.toUtc().millisecondsSinceEpoch ~/ 1000;
 }

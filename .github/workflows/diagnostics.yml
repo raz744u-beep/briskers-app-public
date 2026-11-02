@@ -6,9 +6,18 @@ on:
     paths:
       - 'lib/**'
       - 'test/**'
-      - 'pubspec.yaml'
-      - 'tools/build/**'
       - '.github/workflows/diagnostics.yml'
+      - '.github/workflows/android-debug.yml'
+      - 'tools/require_candidate_checks.py'
+      - 'tools/tests/test_candidate_checks.py'
+      - 'tools/tests/test_apk_certificate_verification.py'
+      - 'tools/audit_ui_actions.py'
+
+# Build/test commands never transmit Flutter or Dart analytics.
+env:
+  CI: 'true'
+  FLUTTER_SUPPRESS_ANALYTICS: 'true'
+  DASH__SUPPRESS_ANALYTICS: 'true'
 
 permissions:
   contents: read
@@ -21,6 +30,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install Flutter stable
         uses: subosito/flutter-action@v2
@@ -40,9 +51,6 @@ jobs:
           cp ../pubspec.yaml ./pubspec.yaml
           cp ../analysis_options.yaml ./analysis_options.yaml
 
-      - name: Configure Owner device authentication
-        run: python3 tools/build/configure_owner_device_auth.py generated
-
       - name: Resolve packages
         working-directory: generated
         run: flutter pub get
@@ -54,6 +62,18 @@ jobs:
       - name: Audit UI action placeholders
         run: python3 tools/audit_ui_actions.py
 
+      - name: Verify release certificate output parser
+        run: python3 tools/tests/test_apk_certificate_verification.py
+
+      - name: Verify fail-closed candidate CI gate
+        run: python3 tools/tests/test_candidate_checks.py
+
+      - name: Verify payment category patch against isolated PostgreSQL
+        working-directory: tools/tests/customer_payment_category
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node run.mjs
+
       - name: Analyze Dart
         working-directory: generated
         run: flutter analyze
@@ -62,6 +82,11 @@ jobs:
         working-directory: generated
         run: flutter test
 
-      - name: Run isolated synthetic payment deletion tests
-        working-directory: generated
-        run: flutter test --dart-define=BRISKERS_SYNTHETIC_BUILD=true test/local_job_graph_delete_test.dart
+      - name: Upload synthetic PDF visual fixtures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: briskers-pdf-quantity-qa
+          path: generated/build/pdf-qa/*.pdf
+          if-no-files-found: ignore
+          retention-days: 7

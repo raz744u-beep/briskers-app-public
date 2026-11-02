@@ -51,15 +51,18 @@ class LocalOwnerAuthorization {
     required OwnerSessionIdentity? Function() currentIdentity,
     required Future<VerifiedOwnerEnrollment> Function(String business) verifyOwner,
     required Future<bool> Function() authenticateDevice,
+    Future<VerifiedOwnerEnrollment> Function(String business)? verifyLocalOwner,
     DateTime Function()? now,
   }) : _store = store, _currentIdentity = currentIdentity,
        _verifyOwner = verifyOwner, _authenticateDevice = authenticateDevice,
+       _verifyLocalOwner = verifyLocalOwner,
        _now = now ?? DateTime.now;
 
   final OwnerEnrollmentStore _store;
   final OwnerSessionIdentity? Function() _currentIdentity;
   final Future<VerifiedOwnerEnrollment> Function(String) _verifyOwner;
   final Future<bool> Function() _authenticateDevice;
+  final Future<VerifiedOwnerEnrollment> Function(String)? _verifyLocalOwner;
   final DateTime Function() _now;
   int _generation = 0;
   bool _busy = false;
@@ -90,6 +93,35 @@ class LocalOwnerAuthorization {
         !identity.matches(_currentIdentity())) {
       throw StateError('Owner account changed. Start authorization again.');
     }
+  }
+
+  /// Local app account/role boundary plus a fresh OS device challenge. This
+  /// path performs no enrollment RPC and never calls the online verifier.
+  Future<LocalOwnerGrant> authorizeLocal(String businessId) async {
+    if (_busy) throw StateError('Owner authentication is already open.');
+    final verify = _verifyLocalOwner;
+    if (verify == null) throw StateError('Local Owner authorization is not configured.');
+    _busy = true;
+    try {
+      final identity = _currentIdentity();
+      if (identity == null) throw StateError('Open the saved Owner account first.');
+      final generation = ++_generation;
+      final verified = await verify(businessId);
+      _check(identity,generation);
+      if (!verified.identity.matches(identity) || verified.businessId != businessId) {
+        throw StateError('This account is not the Owner of this business.');
+      }
+      if (!await _authenticateDevice()) throw StateError('Owner unlock cancelled.');
+      _check(identity,generation);
+      final after = await verify(businessId);
+      _check(identity,generation);
+      if (!after.identity.matches(identity) || after.businessId != businessId) {
+        throw StateError('Owner account changed during unlock.');
+      }
+      final now = _now().toUtc();
+      _lastVerifiedAt = now;
+      return LocalOwnerGrant._(this,generation,identity,businessId,now.add(unlockLifetime));
+    } finally { _busy = false; }
   }
 
   /// Requires a fresh server-authenticated Owner check and device unlock.

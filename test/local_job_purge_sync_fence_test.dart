@@ -1,3 +1,5 @@
+import 'support/empty_retirement_gateway.dart';
+import 'package:briskers_app/services/test_job_cleanup_gateway.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/job_sync_service.dart';
@@ -24,6 +26,14 @@ Map<String, dynamic> _bundle(String id) => {
   },
   'findings': <dynamic>[],
 };
+
+class _EmptyCleanupGateway extends TestJobCleanupGateway {
+  const _EmptyCleanupGateway();
+  @override
+  Future<Map<String,dynamic>> tombstones(String businessId) async => {
+    'schema_version':1,'business_id':businessId,
+    'deleted_job_ids':<String>[],'deleted_document_ids':<String>[]};
+}
 
 class _StaleServerApi extends BriskersApi {
   @override
@@ -71,7 +81,7 @@ void main() {
     try {
       await LocalJobDeletionV3.ensureSchema(db);
       await _markDeleted(db, 'job', job);
-      final sync = JobSyncService(api: _StaleServerApi(), database: db);
+      final sync = JobSyncService(api: _StaleServerApi(), database: db,retirementGateway:const EmptyRetirementGateway(),cleanupGateway:const _EmptyCleanupGateway());
       await sync.pull(business);
       var rows = await db.customSelect(
         'SELECT id FROM local_jobs WHERE business_id=? ORDER BY id',

@@ -21,20 +21,22 @@ String _normalizedInvoiceStatus(String? value) =>
 Color invoiceStatusDefaultColor(String? statusOrCode) {
   switch (_normalizedInvoiceStatus(statusOrCode)) {
     case 'paid':
-      return const Color(0xFF169B62);
+      return const Color(0xFFE58A00);
     case 'partial':
       return const Color(0xFF1976D2);
     case 'pending_close':
     case 'pending':
       return const Color(0xFFE58A00);
     case 'closed':
-      return const Color(0xFF00897B);
+      return const Color(0xFF169B62);
     case 'void':
       return const Color(0xFFC62828);
     case 'draft':
       return const Color(0xFF667085);
     case 'open':
-      return const Color(0xFF757575);
+      return const Color(0xFF1976D2);
+    case 'reopened':
+      return const Color(0xFFC62828);
     default:
       return const Color(0xFF546E7A);
   }
@@ -52,6 +54,7 @@ IconData invoiceStatusDefaultIcon(String? statusOrCode) {
     case 'closed':
       return Icons.check_circle_outline;
     case 'void':
+    case 'reopened':
       return Icons.cancel_outlined;
     case 'open':
       return Icons.receipt_long_outlined;

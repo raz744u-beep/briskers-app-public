@@ -50,9 +50,6 @@ jobs:
           p.write_text(text)
           PY
 
-      - name: Configure Owner device authentication
-        run: python3 tools/build/configure_owner_device_auth.py generated
-
       - name: Configure Briskers iOS identity
         working-directory: generated
         run: |

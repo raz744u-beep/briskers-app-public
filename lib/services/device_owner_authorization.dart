@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/widgets.dart';
@@ -34,6 +35,7 @@ class DeviceOwnerAuthorization with WidgetsBindingObserver {
     store: _DeviceEnrollmentStore(),
     currentIdentity: currentIdentity,
     verifyOwner: _verifyOwner,
+    verifyLocalOwner: _verifyLocalOwner,
     authenticateDevice: () async {
       if (!await _deviceAuth.isDeviceSupported()) {
         throw StateError('Set a screen lock or fingerprint on this Owner device first.');
@@ -58,6 +60,22 @@ class DeviceOwnerAuthorization with WidgetsBindingObserver {
       // Owner privileges. Enrollment independently verifies the token remotely.
       return OwnerSessionIdentity(session.user.id, sessionId);
     } catch (_) { return null; }
+  }
+
+  // Uses the same account-bound local business context as the regular app.
+  // The OS device challenge is mandatory; callers cannot supply a role map.
+  Future<VerifiedOwnerEnrollment> _verifyLocalOwner(String business) async {
+    final identity = currentIdentity();
+    if (identity == null) throw StateError('Open the saved Owner account first.');
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final raw = prefs.getString('briskers_business_context_${identity.actorId}');
+    final data = raw == null ? null : jsonDecode(raw);
+    if (data is! Map || data['business_id'] != business || data['role_code'] != 'owner' ||
+        !identity.matches(currentIdentity())) {
+      throw StateError('Only the saved Owner account can delete local records.');
+    }
+    return VerifiedOwnerEnrollment(identity,business);
   }
 
   Future<VerifiedOwnerEnrollment> _verifyOwner(String business) async {

@@ -1,59 +1,124 @@
-import 'package:drift/drift.dart' show Variable;
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../core/connection_mode.dart';
-import '../local/local_database_provider.dart';
+import '../services/appointment_sync_service.dart';
+import '../services/customer_vehicle_sync_service.dart';
+import '../services/document_index_sync_service.dart';
+import '../services/job_sync_service.dart';
+import '../services/local_sync_status_repository.dart';
 
 /// Compact shell-header control. Displays the selected preference separately
 /// from the most recent successful local data pull (not an invented sync state).
 class ConnectionHeaderToggle extends StatefulWidget {
-  const ConnectionHeaderToggle({super.key, required this.businessId});
+  const ConnectionHeaderToggle({
+    super.key,
+    required this.businessId,
+    this.statusRepository,
+  });
   final String businessId;
+  final LocalSyncStatusRepository? statusRepository;
 
   @override
   State<ConnectionHeaderToggle> createState() => _ConnectionHeaderToggleState();
 }
 
-class _ConnectionHeaderToggleState extends State<ConnectionHeaderToggle> {
+class _ConnectionHeaderToggleState extends State<ConnectionHeaderToggle>
+    with WidgetsBindingObserver {
   final _controller = BriskersConnectionModeController.instance;
-  DateTime? _lastPull;
+  late LocalSyncStatusRepository _repository;
+  LocalSyncStatusSnapshot? _snapshot;
+  bool _statusUnavailable = false;
+  int _refreshGeneration = 0;
+  Timer? _refreshTimer;
+  final _subscriptions = <StreamSubscription<String>>[];
 
   @override
   void initState() {
     super.initState();
+    _repository = widget.statusRepository ?? LocalSyncStatusRepository();
+    WidgetsBinding.instance.addObserver(this);
     _controller.addListener(_modeChanged);
-    _refreshTimestamp();
+    for (final events in [
+      JobSyncService.syncEvents,
+      CustomerVehicleSyncService.syncEvents,
+      AppointmentSyncService.syncEvents,
+      DocumentIndexSyncService.syncEvents,
+      LocalSyncStatusRepository.refreshEvents,
+    ]) {
+      _subscriptions.add(events.listen((businessId) {
+        if (businessId == widget.businessId) unawaited(_refreshTimestamp());
+      }));
+    }
+    _startTimer();
+  }
+
+  void _startTimer() {
+    _refreshTimer?.cancel();
+    // Also observe scopes without broadcast events and age the relative label.
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      unawaited(_refreshTimestamp());
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Subscribe to route visibility changes, including returning from Settings.
+    ModalRoute.of(context);
+    unawaited(_refreshTimestamp());
+  }
+
+  @override
+  void didUpdateWidget(covariant ConnectionHeaderToggle oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.statusRepository != widget.statusRepository) {
+      _repository = widget.statusRepository ?? LocalSyncStatusRepository();
+    }
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.statusRepository != widget.statusRepository) {
+      _snapshot = null;
+      _statusUnavailable = false;
+    }
+    // The shell keeps this State while navigating between bottom tabs.
+    unawaited(_refreshTimestamp());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _startTimer();
+      unawaited(_refreshTimestamp());
+    } else {
+      _refreshTimer?.cancel();
+    }
   }
 
   void _modeChanged() {
     if (mounted) setState(() {});
-    _refreshTimestamp();
+    unawaited(_refreshTimestamp());
   }
 
   Future<void> _refreshTimestamp() async {
+    final generation = ++_refreshGeneration;
     try {
-      final rows = await localDatabase.customSelect(
-        'SELECT MAX(last_pull_at) AS latest FROM local_sync_states '
-        'WHERE business_id = ? AND last_error IS NULL AND bootstrapped = 1',
-        variables: [Variable<String>(widget.businessId)],
-      ).get();
-      final latest = rows.isEmpty ? null : rows.first.data['latest'];
-      DateTime? parsed;
-      if (latest is DateTime) {
-        parsed = latest;
-      } else if (latest is int) {
-        parsed = DateTime.fromMillisecondsSinceEpoch(latest * 1000, isUtc: true);
-      } else if (latest != null) {
-        parsed = DateTime.tryParse(latest.toString());
-      }
-      if (mounted) setState(() => _lastPull = parsed);
+      final snapshot = await _repository.load(widget.businessId);
+      if (!mounted || generation != _refreshGeneration) return;
+      setState(() {
+        _snapshot = snapshot;
+        _statusUnavailable = false;
+      });
     } catch (_) {
-      if (mounted) setState(() => _lastPull = null);
+      if (!mounted || generation != _refreshGeneration) return;
+      setState(() => _statusUnavailable = true);
     }
   }
 
   String get _lastLabel {
-    final value = _lastPull;
+    if (_statusUnavailable) return 'Sync status unavailable';
+    if (_snapshot == null) return 'Checking sync…';
+    final value = _snapshot?.lastSuccessfulPull;
     if (value == null) return 'Not yet synced';
     final elapsed = DateTime.now().difference(value);
     if (elapsed.isNegative || elapsed.inMinutes < 1) return 'Last sync: just now';
@@ -65,6 +130,11 @@ class _ConnectionHeaderToggleState extends State<ConnectionHeaderToggle> {
   @override
   void dispose() {
     _controller.removeListener(_modeChanged);
+    WidgetsBinding.instance.removeObserver(this);
+    _refreshTimer?.cancel();
+    for (final subscription in _subscriptions) {
+      unawaited(subscription.cancel());
+    }
     super.dispose();
   }
 
@@ -85,6 +155,8 @@ class _ConnectionHeaderToggleState extends State<ConnectionHeaderToggle> {
       BriskersConnectionMode.online => 'Online',
     };
 
+    final issues = _snapshot?.issues ?? const <String>[];
+    final pending = _snapshot?.pendingUploads ?? 0;
     return SizedBox(
       width: 114,
       child: Column(
@@ -136,11 +208,34 @@ class _ConnectionHeaderToggleState extends State<ConnectionHeaderToggle> {
             ),
           ),
           const SizedBox(height: 3),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(_lastLabel,
-              maxLines: 1,
-              style: const TextStyle(fontSize: 10, color: Color(0xFF687481))),
+          Tooltip(
+            message: _statusUnavailable
+                ? 'Unable to verify sync status. Check Local database & sync.'
+                : 'Latest successful download, not a guarantee of full sync.'
+                  '${issues.isEmpty ? '' : '\n${issues.join('\n')}'}',
+            child: Column(
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(_lastLabel,
+                    maxLines: 1,
+                    style: const TextStyle(fontSize: 10, color: Color(0xFF687481))),
+                ),
+                if (!_statusUnavailable && (issues.isNotEmpty || pending > 0))
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      issues.isNotEmpty ? 'Sync needs attention' : '$pending pending upload(s)',
+                      key: const ValueKey('sync-header-attention'),
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: issues.isNotEmpty ? const Color(0xFFC62828) : const Color(0xFF687481),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ],
       ),

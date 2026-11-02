@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/connection_mode.dart';
+import '../../services/local_item_categories_cache.dart';
 import '../../services/briskers_api.dart';
 
 class ItemCategoriesSettingsScreen extends StatefulWidget {
@@ -19,6 +21,7 @@ class ItemCategoriesSettingsScreen extends StatefulWidget {
 class _ItemCategoriesSettingsScreenState
     extends State<ItemCategoriesSettingsScreen> {
   static const _api = BriskersApi();
+  final _categoriesCache = const LocalItemCategoriesCache();
 
   List<Map<String, dynamic>>? _rows;
   String? _error;
@@ -31,18 +34,26 @@ class _ItemCategoriesSettingsScreenState
   }
 
   Future<void> _load() async {
+    final forceOffline = BriskersConnectionModeController.instance.forceOffline;
     try {
-      final rows = await _api.itemCategories(
-        widget.businessId,
-        includeInactive: true,
-      );
+      final rows = forceOffline
+          ? await _categoriesCache.load(widget.businessId)
+          : await _api.itemCategories(widget.businessId, includeInactive: true);
+      if (!forceOffline) {
+        await _categoriesCache.save(widget.businessId, rows);
+      }
       if (!mounted) return;
       setState(() {
         _rows = rows;
         _error = null;
       });
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      final cached = await _categoriesCache.load(widget.businessId);
+      if (!mounted) return;
+      setState(() {
+        _rows = cached;
+        _error = cached.isEmpty ? error.toString() : null;
+      });
     }
   }
 

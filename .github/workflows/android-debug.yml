@@ -3,23 +3,67 @@ name: Build Android debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [integration/local-owner-delete-stable-20261101, main, feat/combined-118-20261014, fix/oct15-independent-ui-20261015, recovery/latest-feature-startup-20261017, feature/invoice-payments-expenses-feed-20261017, fix/expenses-offline-targeted-reporting-20261017, feature/oct17-stability-navigation-tax-20261017, release/payment-v2-apk-20261018, release/navigation-sort-verified-20261018, release/offline-tax-save-20261018, release/payment-actions-invoice-dock-20261018, recovery/oct19-modern-ui-b2322-candidate, fix/oct19-b2322-stability-consolidated, fix/b2326-cache-navigation-performance-20261020, fix/b2327-payment-feed-first-paint-invoice-expense-amounts, release/bugs13-b2328-consolidated-20261020, fix/b2350-expenses-cloud-retain-20261020, fix/b2353-customer-banner-owner-total-speed-20261020, fix/b2354-doc-add-customer-fast-expense-proof-20261020, fix/b2356-orphan-appointment-owner-delete-20261021, fix/b2360-orphan-absent-reconciliation-20261021, fix/b2361-new-payment-date-20261021, feature/mileage-and-closed-20261021, fix/customers-unread-badge-tab-opens-review-20261021, release/bugs14-15-all-fixes-20261021, release/offline-first-stability-post-b2373-20261021, fix/post-b2382-ux-polish-20261021, fix/expenses-verified-totals-hydration-311, fix/b2423-first-open-local-cache-313, fix/b2425-detail-firstpaint-regression-20261024, fix/b2426-auto-stability-batch-20261025, fix/b2428-findings-warranty-ui-20261025, fix/b2436-jobs-redundant-offline-banner-20261026, fix/b2443-job-detail-financial-status-stable-20261026, fix/b2448-job-first-frame-compact-financial-20261026, fix/b2448-jobs-list-first-paint-sql-priority-20261026, fix/b2448-invoice-mileage-warranty-checkbox-20261026, fix/b2448-job-detail-intake-departure-mileage-20261026, fix/b2456-job-status-offline-first-frame-20261026, fix/b2456-invoice-closed-list-immediate-20261026, fix/b2464-local-financial-running-totals-20261026, fix/b2467-invoices-local-first-cold-open-20261026, fix/b2468-rolling-daily-local-totals-20261027, fix/b2470-invoice-first-frame-refresh-race-20261027, fix/b2471-new-invoice-customer-search-warranty-details-20261027, fix/b2473-expense-editor-vehicle-required-fast-lines-20261027, fix/b2476-job-mechanic-time-instant-local-20261027, fix/b2478-crossmodule-local-first-regression-audit-20261027, fix/b2480-paid-invoice-leaves-open-immediately-20261027, fix/b2481-first-frame-loading-regression-20261027, fix/b2487-dock-scroll-stability-20261028, release/b2489-all-oct28-stable-fixes-20261028, fix/b2489-appointment-date-selection-20261029, release/bugs23-consolidated-20261029, release/b2497-repair-history-searchbar-20261029, release/gloria-sync-recovery-20261029, release/focused-gloria-recovery-20261030, release/oct30-vin-checksum-local-first-candidate, fix/gloria-rounding-preflight-20261030, fix/offline-recovery-proof-generic-20261031]
     paths-ignore:
       - '.github/workflows/**'
+
+# Build/test commands never transmit Flutter or Dart analytics.
+env:
+  CI: 'true'
+  FLUTTER_SUPPRESS_ANALYTICS: 'true'
+  DASH__SUPPRESS_ANALYTICS: 'true'
 
 permissions:
   contents: read
 
 jobs:
+  candidate-prerequisites:
+    if: (github.ref == 'refs/heads/release/offline-first-stability-post-b2373-20261021' || github.ref == 'refs/heads/fix/post-b2382-ux-polish-20261021' || github.ref == 'refs/heads/fix/b2423-first-open-local-cache-313' || github.ref == 'refs/heads/fix/b2425-detail-firstpaint-regression-20261024' || github.ref == 'refs/heads/fix/b2426-auto-stability-batch-20261025' || github.ref == 'refs/heads/fix/b2428-findings-warranty-ui-20261025' || github.ref == 'refs/heads/fix/b2436-jobs-redundant-offline-banner-20261026' || github.ref == 'refs/heads/fix/b2443-job-detail-financial-status-stable-20261026' || github.ref == 'refs/heads/fix/b2448-job-first-frame-compact-financial-20261026' || github.ref == 'refs/heads/fix/b2448-jobs-list-first-paint-sql-priority-20261026' || github.ref == 'refs/heads/fix/b2448-invoice-mileage-warranty-checkbox-20261026' || github.ref == 'refs/heads/fix/b2448-job-detail-intake-departure-mileage-20261026' || github.ref == 'refs/heads/fix/b2456-job-status-offline-first-frame-20261026' || github.ref == 'refs/heads/fix/b2456-invoice-closed-list-immediate-20261026' || github.ref == 'refs/heads/fix/b2464-local-financial-running-totals-20261026' || github.ref == 'refs/heads/fix/b2467-invoices-local-first-cold-open-20261026' || github.ref == 'refs/heads/fix/b2468-rolling-daily-local-totals-20261027' || github.ref == 'refs/heads/fix/b2470-invoice-first-frame-refresh-race-20261027' || github.ref == 'refs/heads/fix/b2471-new-invoice-customer-search-warranty-details-20261027' || github.ref == 'refs/heads/fix/b2473-expense-editor-vehicle-required-fast-lines-20261027' || github.ref == 'refs/heads/fix/b2476-job-mechanic-time-instant-local-20261027' || github.ref == 'refs/heads/fix/b2478-crossmodule-local-first-regression-audit-20261027' || github.ref == 'refs/heads/fix/b2480-paid-invoice-leaves-open-immediately-20261027' || github.ref == 'refs/heads/fix/b2481-first-frame-loading-regression-20261027' || github.ref == 'refs/heads/fix/b2487-dock-scroll-stability-20261028' || github.ref == 'refs/heads/release/b2489-all-oct28-stable-fixes-20261028' || github.ref == 'refs/heads/fix/b2489-appointment-date-selection-20261029' || github.ref == 'refs/heads/release/bugs23-consolidated-20261029' || github.ref == 'refs/heads/release/b2497-repair-history-searchbar-20261029' || github.ref == 'refs/heads/release/gloria-sync-recovery-20261029' || github.ref == 'refs/heads/release/focused-gloria-recovery-20261030' || github.ref == 'refs/heads/release/oct30-vin-checksum-local-first-candidate' || github.ref == 'refs/heads/fix/gloria-rounding-preflight-20261030' || github.ref == 'refs/heads/fix/offline-recovery-proof-generic-20261031')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out exact candidate source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Test fail-closed candidate gate
+        run: python3 tools/tests/test_candidate_checks.py
+
+      - name: Require exact-head Diagnostics and iOS success
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/require_candidate_checks.py --timeout-seconds 2400
+
   build:
+    needs: candidate-prerequisites
+    # A skipped candidate-only gate preserves every existing branch's behavior.
+    # Cancellation/failure can never enable the isolated candidate build.
+    if: >-
+      ${{ !cancelled() &&
+          ((github.ref != 'refs/heads/release/offline-first-stability-post-b2373-20261021' && github.ref != 'refs/heads/fix/post-b2382-ux-polish-20261021' && github.ref != 'refs/heads/fix/b2423-first-open-local-cache-313' && github.ref != 'refs/heads/fix/b2425-detail-firstpaint-regression-20261024' && github.ref != 'refs/heads/fix/b2426-auto-stability-batch-20261025' && github.ref != 'refs/heads/fix/b2428-findings-warranty-ui-20261025' && github.ref != 'refs/heads/fix/b2436-jobs-redundant-offline-banner-20261026' && github.ref != 'refs/heads/fix/b2443-job-detail-financial-status-stable-20261026' && github.ref != 'refs/heads/fix/b2448-job-first-frame-compact-financial-20261026' && github.ref != 'refs/heads/fix/b2448-jobs-list-first-paint-sql-priority-20261026' && github.ref != 'refs/heads/fix/b2448-invoice-mileage-warranty-checkbox-20261026' && github.ref != 'refs/heads/fix/b2448-job-detail-intake-departure-mileage-20261026' && github.ref != 'refs/heads/fix/b2456-job-status-offline-first-frame-20261026' && github.ref != 'refs/heads/fix/b2456-invoice-closed-list-immediate-20261026' && github.ref != 'refs/heads/fix/b2464-local-financial-running-totals-20261026' && github.ref != 'refs/heads/fix/b2467-invoices-local-first-cold-open-20261026' && github.ref != 'refs/heads/fix/b2468-rolling-daily-local-totals-20261027' && github.ref != 'refs/heads/fix/b2470-invoice-first-frame-refresh-race-20261027' && github.ref != 'refs/heads/fix/b2471-new-invoice-customer-search-warranty-details-20261027' && github.ref != 'refs/heads/fix/b2473-expense-editor-vehicle-required-fast-lines-20261027' && github.ref != 'refs/heads/fix/b2476-job-mechanic-time-instant-local-20261027' && github.ref != 'refs/heads/fix/b2478-crossmodule-local-first-regression-audit-20261027' && github.ref != 'refs/heads/fix/b2480-paid-invoice-leaves-open-immediately-20261027' && github.ref != 'refs/heads/fix/b2481-first-frame-loading-regression-20261027' && github.ref != 'refs/heads/fix/b2487-dock-scroll-stability-20261028' && github.ref != 'refs/heads/release/b2489-all-oct28-stable-fixes-20261028' && github.ref != 'refs/heads/fix/b2489-appointment-date-selection-20261029' && github.ref != 'refs/heads/release/bugs23-consolidated-20261029' && github.ref != 'refs/heads/release/b2497-repair-history-searchbar-20261029' && github.ref != 'refs/heads/release/gloria-sync-recovery-20261029' && github.ref != 'refs/heads/release/focused-gloria-recovery-20261030' && github.ref != 'refs/heads/release/oct30-vin-checksum-local-first-candidate' && github.ref != 'refs/heads/fix/gloria-rounding-preflight-20261030' && github.ref != 'refs/heads/fix/offline-recovery-proof-generic-20261031') ||
+           needs.candidate-prerequisites.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
     env:
       ANDROID_USER_HOME: ${{ github.workspace }}/.android
 
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
+      - name: Revalidate exact-head checks before Android work
+        if: (github.ref == 'refs/heads/release/offline-first-stability-post-b2373-20261021' || github.ref == 'refs/heads/fix/post-b2382-ux-polish-20261021' || github.ref == 'refs/heads/fix/b2423-first-open-local-cache-313' || github.ref == 'refs/heads/fix/b2425-detail-firstpaint-regression-20261024' || github.ref == 'refs/heads/fix/b2426-auto-stability-batch-20261025' || github.ref == 'refs/heads/fix/b2428-findings-warranty-ui-20261025' || github.ref == 'refs/heads/fix/b2436-jobs-redundant-offline-banner-20261026' || github.ref == 'refs/heads/fix/b2443-job-detail-financial-status-stable-20261026' || github.ref == 'refs/heads/fix/b2448-job-first-frame-compact-financial-20261026' || github.ref == 'refs/heads/fix/b2448-jobs-list-first-paint-sql-priority-20261026' || github.ref == 'refs/heads/fix/b2448-invoice-mileage-warranty-checkbox-20261026' || github.ref == 'refs/heads/fix/b2448-job-detail-intake-departure-mileage-20261026' || github.ref == 'refs/heads/fix/b2456-job-status-offline-first-frame-20261026' || github.ref == 'refs/heads/fix/b2456-invoice-closed-list-immediate-20261026' || github.ref == 'refs/heads/fix/b2464-local-financial-running-totals-20261026' || github.ref == 'refs/heads/fix/b2467-invoices-local-first-cold-open-20261026' || github.ref == 'refs/heads/fix/b2468-rolling-daily-local-totals-20261027' || github.ref == 'refs/heads/fix/b2470-invoice-first-frame-refresh-race-20261027' || github.ref == 'refs/heads/fix/b2471-new-invoice-customer-search-warranty-details-20261027' || github.ref == 'refs/heads/fix/b2473-expense-editor-vehicle-required-fast-lines-20261027' || github.ref == 'refs/heads/fix/b2476-job-mechanic-time-instant-local-20261027' || github.ref == 'refs/heads/fix/b2478-crossmodule-local-first-regression-audit-20261027' || github.ref == 'refs/heads/fix/b2480-paid-invoice-leaves-open-immediately-20261027' || github.ref == 'refs/heads/fix/b2481-first-frame-loading-regression-20261027' || github.ref == 'refs/heads/fix/b2487-dock-scroll-stability-20261028' || github.ref == 'refs/heads/release/b2489-all-oct28-stable-fixes-20261028' || github.ref == 'refs/heads/fix/b2489-appointment-date-selection-20261029' || github.ref == 'refs/heads/release/bugs23-consolidated-20261029' || github.ref == 'refs/heads/release/b2497-repair-history-searchbar-20261029' || github.ref == 'refs/heads/release/gloria-sync-recovery-20261029' || github.ref == 'refs/heads/release/focused-gloria-recovery-20261030' || github.ref == 'refs/heads/release/oct30-vin-checksum-local-first-candidate' || github.ref == 'refs/heads/fix/gloria-rounding-preflight-20261030' || github.ref == 'refs/heads/fix/offline-recovery-proof-generic-20261031')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/require_candidate_checks.py --timeout-seconds 30
 
       - name: Install Flutter stable
         uses: subosito/flutter-action@v2
@@ -37,6 +81,7 @@ jobs:
           cp -R ../test ./test
           if [ -d ../assets ]; then cp -R ../assets ./assets; fi
           cp ../pubspec.yaml ./pubspec.yaml
+          cp ../pubspec.lock ./pubspec.lock
           cp ../analysis_options.yaml ./analysis_options.yaml
 
           cat > android/app/src/main/kotlin/com/briskers/briskers_app/MainActivity.kt <<'KOTLIN'
@@ -198,15 +243,9 @@ jobs:
                           addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                       }
 
-                      if (intent.resolveActivity(packageManager) == null) {
-                          result.error(
-                              "gmail_unavailable",
-                              "Gmail is not installed on this device.",
-                              null
-                          )
-                          return
-                      }
-
+                      // On Android 11+, resolveActivity can return null
+                      // when Gmail is installed but package visibility was not
+                      // declared. Launch directly and catch the real error.
                       startActivity(intent)
                       result.success(true)
                   } catch (error: Exception) {
@@ -547,9 +586,6 @@ jobs:
           p.write_text(s)
           PY
 
-      - name: Configure Owner device authentication
-        run: python3 tools/build/configure_owner_device_auth.py generated
-
       - name: Configure persistent Android signing
         working-directory: generated
         env:
@@ -601,6 +637,34 @@ jobs:
           p.write_text(s)
           PY
 
+      - name: Configure optional-language ML Kit release shrinker rules
+        working-directory: generated
+        run: |
+          # The app exclusively uses Latin OCR. ML Kit's Flutter plugin references
+          # other optional recognizers from unreachable selection branches.
+          # Do not silence missing Latin recognizer or unrelated classes.
+          cat > android/app/proguard-rules.pro <<'PROGUARD'
+          -dontwarn com.google.mlkit.vision.text.chinese.**
+          -dontwarn com.google.mlkit.vision.text.devanagari.**
+          -dontwarn com.google.mlkit.vision.text.japanese.**
+          -dontwarn com.google.mlkit.vision.text.korean.**
+          PROGUARD
+          python3 - <<'PY'
+          from pathlib import Path
+          gradle = Path('android/app/build.gradle.kts')
+          code = gradle.read_text()
+          release_signing = '            signingConfig = signingConfigs.getByName("briskersRelease")'
+          if code.count(release_signing) != 1:
+              raise SystemExit("Expected exactly one permanent release signing config")
+          code = code.replace(
+              release_signing,
+              release_signing + '\n'
+              '            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")',
+              1,
+          )
+          gradle.write_text(code)
+          PY
+
       - name: Validate permanent signing keystore
         working-directory: generated
         env:
@@ -613,6 +677,11 @@ jobs:
             -alias "$BRISKERS_KEY_ALIAS" \
             | grep -E "Alias name:|Owner:|SHA256:"
           echo "Permanent Briskers keystore validated."
+
+      - name: Configure offline Owner device unlock
+        run: |
+          python3 -m unittest tools.tests.test_owner_device_auth_config
+          python3 tools/build/configure_owner_device_auth.py generated
 
       - name: Resolve packages
         working-directory: generated
@@ -638,6 +707,7 @@ jobs:
         run: |
           VERSION="$(awk '/^version:/ {print $2}' pubspec.yaml | cut -d+ -f1)"
           BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
+          test "$BUILD_NUMBER" -gt 2545
 
           # Native-asset downloads (notably sqlite3) occasionally arrive
           # corrupted from the upstream CDN. Clean only generated/native
@@ -649,7 +719,7 @@ jobs:
             rm -rf build/native_assets
             rm -rf build/.dart_tool
 
-            if flutter build apk --release               --build-name "$VERSION"               --build-number "$BUILD_NUMBER"; then
+            if flutter build apk --release               --build-name "$VERSION"               --build-number "$BUILD_NUMBER"               --dart-define="BRISKERS_BUILD_NUMBER=$BUILD_NUMBER"               --dart-define="BRISKERS_SOURCE=${GITHUB_SHA:0:12}"; then
               exit 0
             fi
 
@@ -671,6 +741,9 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           CERTS="$("$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk)"
           printf '%s\n' "$CERTS"
+          EXPECTED_CERT="82075a34ef748541a270af4172dd3ddc37f3e464d9ac9f20eeef7f40a029ff08"
+          python3 ../tools/tests/test_apk_certificate_verification.py
+          printf '%s\n' "$CERTS" | python3 ../tools/verify_apk_certificate.py --expected "$EXPECTED_CERT"
           if printf '%s\n' "$CERTS" | grep -q "CN=Android Debug"; then
             echo "ERROR: APK was signed with a temporary Android Debug certificate."
             exit 1
@@ -681,12 +754,31 @@ jobs:
         run: |
           VERSION="$(awk '/^version:/ {print $2}' pubspec.yaml | cut -d+ -f1)"
           BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
-          cp build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/Briskers-v${VERSION}-b${BUILD_NUMBER}.apk"
+          test "$BUILD_NUMBER" -gt 2545
+          APK="build/app/outputs/flutter-apk/Briskers-v${VERSION}-b${BUILD_NUMBER}.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "$APK"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          printf '%s\n' "$BADGING" | head -1
+          printf '%s\n' "$BADGING" | grep -q "package: name='com.briskers.briskers_app' versionCode='$BUILD_NUMBER' versionName='$VERSION'" || { echo "Unexpected APK identity"; exit 1; }
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          {
+            echo "source_commit=$GITHUB_SHA"
+            echo "run_url=https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "filename=$(basename "$APK")"
+            echo "bytes=$(stat -c%s "$APK")"
+            sha256sum "$APK"
+            "$APKSIGNER" verify --verbose --print-certs "$APK"
+            printf '%s\n' "$BADGING" | head -1
+          } > "${APK%.apk}.verification.txt"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: briskers-android-debug
-          path: generated/build/app/outputs/flutter-apk/Briskers-v*.apk
+          path: |
+            generated/build/app/outputs/flutter-apk/Briskers-v*.apk
+            generated/build/app/outputs/flutter-apk/Briskers-v*.verification.txt
           if-no-files-found: error
           retention-days: 30
+

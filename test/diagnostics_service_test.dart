@@ -52,7 +52,7 @@ void main() {
       )
       ''',
     );
-    await const LocalDocumentDetailCache().save('shop-2', 'closed-2', {
+    await LocalDocumentDetailCache(database: db).save('shop-2', 'closed-2', {
       'id': 'closed-2',
       'kind': 'invoice',
       'lines': <Map<String, dynamic>>[],
@@ -174,7 +174,7 @@ void main() {
       [businessId],
     );
 
-    const detailCache = LocalDocumentDetailCache();
+    final detailCache = LocalDocumentDetailCache(database: database);
     await detailCache.save(businessId, 'estimate-1', {
       'id': 'estimate-1',
       'kind': 'estimate',
@@ -292,3 +292,4 @@ void main() {
     await database.close();
   });
 }
+
