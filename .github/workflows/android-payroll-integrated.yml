@@ -69,10 +69,13 @@ jobs:
       - name: Verify sources and tests
         working-directory: generated
         run: |
+          set -euo pipefail
+          mkdir -p verification
+          dart format lib/services/integrated_test_payroll.dart lib/tasks_payroll_integrated_main.dart test/integrated*test.dart integration_test/payroll_device_test.dart
           dart fix --apply --code=curly_braces_in_flow_control_structures --code=use_null_aware_elements
           dart format lib/services/integrated_test_payroll.dart lib/tasks_payroll_integrated_main.dart test/integrated*test.dart
-          flutter analyze
-          flutter test test/integrated*test.dart test/test_payroll_*_test.dart test/test_employee_payroll_staging_panel_test.dart test/shop_workflow_status_policy_test.dart
+          flutter analyze 2>&1 | tee verification/analysis.txt
+          flutter test test/integrated*test.dart test/test_payroll_*_test.dart test/test_employee_payroll_staging_panel_test.dart test/shop_workflow_status_policy_test.dart --reporter expanded 2>&1 | tee verification/host-tests.txt
       - name: Build distinct debug APK
         working-directory: generated
         run: |

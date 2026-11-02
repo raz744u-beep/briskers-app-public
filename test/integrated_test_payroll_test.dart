@@ -71,4 +71,20 @@ void main() {
       await disk.customStatement("UPDATE it_sync_outbox SET attempts=attempts+1,state='failed'");expect(await commit(),false);expect((await repo.history('chris')).length,1);
     } finally {await disk.close();await dir.delete(recursive:true);}
   });
+
+  test('outside-week work requires audited override; invalid deductions and amount fail',()async{
+    await done();final work=await r.work(employee:'chris');
+    Future<bool> outside(String reason)=>r.verify(operation:'outside',employee:'chris',week:'2026-10-26',date:'2026-11-02',method:'Cash',selected:work,base:0,hourlyAdjustment:0,adjustmentReason:reason,repayment:0,confirmedNet:10000);
+    await expectLater(outside(''),throwsStateError);
+    await expectLater(pay(repayment:1,net:9999),throwsStateError);
+    await expectLater(pay(net:9999),throwsStateError);
+    await outside('Owner includes late completed work');expect((await r.history('chris')).single['gross'],10000);
+    await expectLater(db.customStatement('UPDATE test_payroll_credits SET hours_hundredths=0 WHERE paid=1'),throwsA(isA<Exception>()));
+  });
+  test('base payment also rolls back and non Owner cannot verify',()async{
+    await expectLater(pay(employee:'base',base:10000,selected:[],net:10000,fault:()async{throw StateError('Abort');}),throwsStateError);
+    expect(await count('it_paid_base'),0);expect(await count('it_payments'),0);
+    final denied=IntegratedTestPayroll(db,owner:false);
+    await expectLater(denied.verify(operation:'forbidden',employee:'base',week:'2026-11-02',date:'2026-11-02',method:'Cash',selected:[],base:10000,hourlyAdjustment:0,adjustmentReason:'',repayment:0,confirmedNet:10000),throwsStateError);
+  });
 }
