@@ -55,10 +55,39 @@ class LocalJobGraphDelete {
     final found = <Map<String, dynamic>>[];
     final root = await _rows('local_jobs', business, 'id', job);
     if (root.length != 1) throw StateError('Job is not present locally.');
+    // A local summary is not a complete financial ledger. In particular, a
+    // paid/partially-paid server Job may have NO locally cached receipt rows.
+    // Never infer safe hard deletion from missing payment cache entries.
+    final paymentState =
+        root.single['payment_state']?.toString().trim().toLowerCase() ?? '';
+    if (paymentState.isNotEmpty &&
+        !const {'unpaid', 'none', 'no_payment'}.contains(paymentState)) {
+      throw StateError(
+          'Job payment status requires authoritative reconciliation before deletion.');
+    }
     for (final entry in _owned.entries) {
       final (table, key, field) = entry.value;
       for (final row in await _rows(table, business, field, job)) {
         if (table == 'local_documents' && row['kind'] != entry.key) continue;
+        if (table == 'local_documents') {
+          // Issued, paid or closed documents may have external payment/audit
+          // references absent from this device. This partial implementation
+          // must not treat their locally empty payment cache as proof.
+          final status = row['status']?.toString().trim().toLowerCase() ?? '';
+          final displayStatus =
+              row['display_status_code']?.toString().trim().toLowerCase() ?? '';
+          const protected = {
+            'issued', 'sent', 'paid', 'partially_paid',
+            'partial', 'closed', 'complete', 'completed',
+            'finalized', 'pending_close',
+          };
+          if (row['closed_at'] != null ||
+              protected.contains(status) ||
+              protected.contains(displayStatus)) {
+            throw StateError(
+                'Issued or settled documents require financial reconciliation.');
+          }
+        }
         found.add({'kind': entry.key, 'table': table,
           'id': row[key], 'label': row['document_number'] ??
             row['job_number'] ?? row['title'] ?? row[key]});
