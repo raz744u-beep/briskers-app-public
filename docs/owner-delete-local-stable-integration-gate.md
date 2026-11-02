@@ -5,6 +5,15 @@ Source prototype: PR #367, branch `feat/oct28-owner-delete-v3-current-main`.
 This is an integration branch based on current `main`. It is **not** approved
 for production installation or deletion of actual shop records yet.
 
+## Integration implementation status (November 1)
+- Current stable main is the base; its navigation and shell files have not been replaced.
+- Payment confirmation UI and five formatting regression tests are staged.
+- `LocalJobDeletionV3` tombstone/cleanup engine and `LocalJobGraphDelete` local graph implementation are staged as **unwired source**.
+- The staged graph service denies Owner access by default: no secure enrollment/provider is wired on stable, and live Job actions never call it. Production financial/outbox references fail closed instead of being erased.
+- Unit tests cover local atomic removal/markers, scope and role rejection, revision/preview race rollback, unrelated record preservation, pending payment protection and queued edit refusal.
+- Synthetic-only payment and audit erasure remains isolated by the `BRISKERS_SYNTHETIC_BUILD` build flag and is **not enabled in the regular app**.
+- No changes to production data, production network deletion, app signing identity, package ID or Android navigation.
+
 ## Confirmed Android TEST behavior
 - A locally stored synchronized sample Job TEST-7001 and its sample Invoice
   TEST-8001 were removed immediately in the isolated TEST application.
