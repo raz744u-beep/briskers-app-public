@@ -50,7 +50,7 @@ void main() {
       service.reconcileFromTrustedServer(
         isOwner:true,businessId:'test',localInvoiceId:'local-invoice',
         invoiceNumber:'8008',jobNumber:'J-8',
-        fetchCandidates:(_,__) async => rows);
+        fetchCandidates:(_,invoiceNumber) async => rows);
     await expectLater(run([]),throwsStateError);
     await expectLater(run([proof,proof]),throwsStateError);
     await expectLater(run([{...proof,'business_id':'other'}]),throwsStateError);
