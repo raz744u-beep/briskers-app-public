@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
+import 'local_job_deletion_v3.dart';
 
 class LocalDocumentRepository {
   LocalDocumentRepository({BriskersLocalDatabase? database})
@@ -9,11 +10,33 @@ class LocalDocumentRepository {
 
   final BriskersLocalDatabase _database;
 
+  // Never repopulate an invoice or estimate after a local Owner purge.
+  // The parent-job fence also covers server index rows that were not yet
+  // cached when the Owner reviewed and deleted that Job.
+  Future<bool> _isPurgedServerDocument(
+    String businessId, Map<String, dynamic> document,
+  ) async {
+    final id = document['id']?.toString() ?? '';
+    final jobId = document['job_id']?.toString() ?? '';
+    if (id.isEmpty) return false;
+    return (await _database.customSelect(
+      'SELECT 1 FROM local_job_deletion_v3_fences '
+      "WHERE business_id=? AND ((entity_kind IN ('invoice','estimate') "
+      "AND entity_id=?) OR (entity_kind='job' AND entity_id=?)) LIMIT 1",
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(id),
+        Variable<String>(jobId),
+      ],
+    ).get()).isNotEmpty;
+  }
+
   Future<void> replaceFromServer(
     String businessId,
     List<Map<String, dynamic>> documents, {
     String? kind,
   }) async {
+    await LocalJobDeletionV3.ensureSchema(_database);
     await _database.transaction(() async {
       await _database.customStatement(
         kind == null
@@ -23,7 +46,9 @@ class LocalDocumentRepository {
       );
       for (final document in documents) {
         final id = document['id']?.toString() ?? '';
-        if (id.isEmpty) continue;
+        if (id.isEmpty || await _isPurgedServerDocument(businessId, document)) {
+          continue;
+        }
         await _database.customStatement(
           '''
           INSERT INTO local_documents (
@@ -75,10 +100,13 @@ class LocalDocumentRepository {
     String businessId,
     List<Map<String, dynamic>> documents,
   ) async {
+    await LocalJobDeletionV3.ensureSchema(_database);
     await _database.transaction(() async {
       for (final document in documents) {
         final id = document['id']?.toString() ?? '';
-        if (id.isEmpty) continue;
+        if (id.isEmpty || await _isPurgedServerDocument(businessId, document)) {
+          continue;
+        }
         await _database.customStatement(
           '''
           INSERT INTO local_documents (
