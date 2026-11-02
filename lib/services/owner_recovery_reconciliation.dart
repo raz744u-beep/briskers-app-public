@@ -76,6 +76,55 @@ class OwnerRecoveryReconciliation {
     return true;
   }
 
+  /// Uses a trusted read-only server lookup rather than accepting an
+  /// unverified manually entered server identity as evidence.
+  /// An ambiguous or missing server response fails closed.
+  Future<void> reconcileFromTrustedServer({
+    required bool isOwner,
+    required String businessId,
+    required String localInvoiceId,
+    required String invoiceNumber,
+    required String jobNumber,
+    required Future<List<Map<String, dynamic>>> Function(
+      String businessId, String invoiceNumber,
+    ) fetchCandidates,
+  }) async {
+    if (!isOwner) throw StateError('Owner authorization required');
+    final candidates = await fetchCandidates(businessId, invoiceNumber);
+    if (candidates.length != 1) {
+      throw StateError('Server invoice must match exactly one record');
+    }
+    final row = candidates.single;
+    int? integer(Object? value) => value is int
+        ? value : int.tryParse(value?.toString() ?? '');
+    final invoiceId = row['invoice_id']?.toString() ?? '';
+    final jobId = row['job_id']?.toString() ?? '';
+    final operationId = row['payment_operation_id']?.toString() ?? '';
+    final paymentDate = row['payment_date']?.toString() ?? '';
+    if (row['business_id']?.toString() != businessId ||
+        row['invoice_number']?.toString() != invoiceNumber ||
+        row['job_number']?.toString() != jobNumber ||
+        invoiceId.isEmpty || jobId.isEmpty || operationId.isEmpty ||
+        paymentDate.isEmpty) {
+      throw StateError('Server identity or business mismatch');
+    }
+    final total = integer(row['total_cents']);
+    final payment = integer(row['payment_cents']);
+    final lines = integer(row['line_count']);
+    final count = integer(row['payment_count']);
+    if (total == null || payment == null || lines == null || count == null) {
+      throw StateError('Incomplete server financial proof');
+    }
+    await recordVerifiedAlias(
+      isOwner:isOwner,businessId:businessId,localInvoiceId:localInvoiceId,
+      serverInvoiceId:invoiceId,serverJobId:jobId,
+      invoiceNumber:invoiceNumber,jobNumber:jobNumber,
+      totalCents:total,paymentCents:payment,
+      serverPaymentOperationId:operationId,serverPaymentDate:paymentDate,
+      serverLineCount:lines,serverPaymentCount:count,
+    );
+  }
+
   /// Stores an Owner-approved identity match. This has no network effects,
   /// makes no payment, and deliberately does not unblock ordinary sync.
   Future<void> recordVerifiedAlias({
