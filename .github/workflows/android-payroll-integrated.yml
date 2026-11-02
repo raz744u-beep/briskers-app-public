@@ -107,6 +107,8 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           android = 'http://schemas.android.com/apk/res/android'
+          ET.register_namespace('android', android)
+          ET.register_namespace('tools', 'http://schemas.android.com/tools')
           for variant in ('main', 'debug', 'profile'):
               path = Path(f'generated/android/app/src/{variant}/AndroidManifest.xml')
               tree = ET.parse(path)
