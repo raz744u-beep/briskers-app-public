@@ -14,7 +14,7 @@ import 'local_job_deletion_v3.dart';
 /// than silently orphaned. No network calls are made.
 // Even a misconfigured signed release cannot enable synthetic financial erasure.
 const _syntheticOwnerDeleteBuild = !kReleaseMode &&
-    const bool.fromEnvironment(
+    bool.fromEnvironment(
         'BRISKERS_SYNTHETIC_BUILD', defaultValue: false);
 
 class LocalJobGraphDelete {
