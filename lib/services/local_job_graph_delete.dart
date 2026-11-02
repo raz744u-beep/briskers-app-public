@@ -44,6 +44,14 @@ class LocalJobGraphDelete {
     'appointment': ('local_appointments', 'id', 'job_id'),
   };
 
+  // Capture every stored column, including amounts, ownership and revisions.
+  // A display label is not a concurrency token. Keep a detached string so the
+  // reviewed snapshot cannot change when the database row changes.
+  static String _snapshot(Map<String, dynamic> row) {
+    final columns = row.keys.toList()..sort();
+    return jsonEncode({for (final column in columns) column: row[column]});
+  }
+
   Future<List<Map<String, dynamic>>> _rows(
       String table, String business, String field, String value) async {
     // All SQL identifiers are compiled-in constants, never user input.
@@ -104,7 +112,7 @@ class LocalJobGraphDelete {
           }
         }
         found.add({'kind': entry.key, 'table': table,
-          'id': row[key], 'label': row['document_number'] ??
+          'id': row[key], 'snapshot': _snapshot(row), 'label': row['document_number'] ??
             row['job_number'] ?? row['title'] ?? row[key]});
       }
     }
@@ -113,7 +121,7 @@ class LocalJobGraphDelete {
       for (final row in await _rows('local_pre_inspection_photos',
           business, 'inspection_id', inspection['id'].toString())) {
         found.add({'kind': 'pre_inspection_photo', 'table': 'local_pre_inspection_photos',
-          'id': row['id'], 'label': row['filename'] ?? row['id']});
+          'id': row['id'], 'snapshot': _snapshot(row), 'label': row['filename'] ?? row['id']});
       }
     }
     final findings = await db.customSelect(
@@ -130,11 +138,11 @@ class LocalJobGraphDelete {
         throw StateError('A finding is shared with another Job. Review it before deleting.');
       }
       found.add({'kind': 'finding', 'table': 'local_findings',
-        'id': row['id'], 'label': row['body']});
+        'id': row['id'], 'snapshot': _snapshot(row), 'label': row['body']});
       for (final photo in await _rows('local_finding_photos',
           business, 'finding_id', row['id'].toString())) {
         found.add({'kind': 'finding_photo', 'table': 'local_finding_photos',
-          'id': photo['id'], 'label': photo['filename'] ?? photo['id']});
+          'id': photo['id'], 'snapshot': _snapshot(photo), 'label': photo['filename'] ?? photo['id']});
       }
     }
     // Financial projections and queued work can contain nested allocations.
@@ -162,7 +170,7 @@ class LocalJobGraphDelete {
             payload['operation_id'] is String) {
           found.add({'kind': 'payment', 'table': 'sync_outbox',
             'id': payload['operation_id'],
-            'outbox_id': data['id'],
+            'outbox_id': data['id'], 'snapshot': _snapshot(data),
             'label': 'FAKE payment • ${((payload['amount_cents'] as num) / 100).toStringAsFixed(2)} • ${payload['method_name']}'});
           continue;
         }
@@ -185,7 +193,7 @@ class LocalJobGraphDelete {
             payload['job_id'] == job &&
             data['cache_key'] == 'synthetic_payment_audit:$job') {
           found.add({'kind': 'payment_edit_audit', 'table': 'local_financial_cache',
-            'id': data['cache_key'], 'label': 'FAKE payment edit audit'});
+            'id': data['cache_key'], 'snapshot': _snapshot(data), 'label': 'FAKE payment edit audit'});
           continue;
         }
         throw StateError('Linked financial records need review before deletion.');
@@ -218,9 +226,10 @@ class LocalJobGraphDelete {
     await db.transaction(() async {
       _assertOwner(businessId, actorId);
       final current = await _inventory(businessId, jobId);
-      // Only exact identities and types are authoritative for a reviewed graph.
+      // Any stored-column change invalidates the reviewed graph, even when
+      // identities and display labels are unchanged.
       String fingerprint(List<Map<String, dynamic>> rows) =>
-          (rows.map((r) => jsonEncode([r['kind'], r['id'], r['label']])).toList()..sort()).join('|');
+          (rows.map((r) => jsonEncode([r['kind'], r['id'], r['label'], r['snapshot']])).toList()..sort()).join('|');
       if (fingerprint(current) != fingerprint(reviewed)) {
         throw StateError('Linked records changed. Review Delete Job again.');
       }

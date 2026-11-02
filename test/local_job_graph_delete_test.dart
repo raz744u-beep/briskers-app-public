@@ -216,6 +216,38 @@ void main() {
     expect(await count('local_offline_job_purge_entities'), 0);
   });
 
+  for (final change in <String, String>{
+    'invoice amount': 'UPDATE local_documents SET total=125 WHERE id=?',
+    'invoice revision': 'UPDATE local_documents SET row_version=2 WHERE id=?',
+    'invoice customer': "UPDATE local_documents SET customer_id='another-customer' WHERE id=?",
+  }.entries) {
+    test('${change.key} change invalidates confirmation without removing data', () async {
+      final reviewed = await deletion.preview(
+        businessId: business, jobId: job, actorId: actor);
+      await db.customStatement(change.value, [invoice]);
+      await expectLater(deletion.confirm(
+        businessId: business, jobId: job, actorId: actor, reviewed: reviewed),
+        throwsStateError);
+      expect(await count('local_jobs'), 2);
+      expect(await count('local_documents'), 1);
+      expect(await count('local_offline_job_purge_entities'), 0);
+    });
+  }
+
+  test('confirmation without a row snapshot fails closed', () async {
+    final reviewed = await deletion.preview(
+      businessId: business, jobId: job, actorId: actor);
+    for (final row in reviewed) {
+      row.remove('snapshot');
+    }
+    await expectLater(deletion.confirm(
+      businessId: business, jobId: job, actorId: actor, reviewed: reviewed),
+      throwsStateError);
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
   test('Owner identity change before commit rolls back rows and markers', () async {
     final reviewed = await deletion.preview(
       businessId: business, jobId: job, actorId: actor);
