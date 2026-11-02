@@ -129,8 +129,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     super.initState();
     _scrollController.addListener(_handleScroll);
     WidgetsBinding.instance.addObserver(this);
-    _load();
-    _refreshPhotoCounts();
+    // Allow the first Expenses frame to paint before starting database work.
+    // Running multiple startup queries during initState can make navigation
+    // appear unresponsive, particularly after returning from another module.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_load());
+      unawaited(_refreshPhotoCounts());
+    });
     if (_owner && Platform.isAndroid) {
       // Photo totals are informational; avoid rebuilding the entire list
       // every four seconds while the owner is reading transactions.
