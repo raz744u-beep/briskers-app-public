@@ -93,4 +93,9 @@ void main() {
     expect(work['actual_minutes'],1);expect(work['gross_cents'],67);
     await pay(net:67);expect((await r.history('chris')).single['gross'],67);
   });
+  test('authoritative unfinished repository credit cannot be paid through stale task state',()async{
+    await done();
+    await db.customStatement('UPDATE local_mechanic_work_credits_v1 SET completed=0,revision=revision+1 WHERE employee_id=?',['chris']);
+    await expectLater(pay(),throwsStateError);expect(await count('it_payments'),0);
+  });
 }

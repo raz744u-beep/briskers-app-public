@@ -229,7 +229,7 @@ class IntegratedTestPayroll {
     _authorize();
     await prepare();
     return _read(
-      '''SELECT p.business_id,p.id,p.task_id,p.employee_id,p.state,p.completed_date,c.revision AS version,t.description,t.job_id,c.actual_minutes,(c.actual_minutes*100+30)/60 AS hours_hundredths,c.rate_cents,(c.actual_minutes*c.rate_cents+30)/60 AS gross_cents,CASE WHEN c.paid_operation_id IS NULL THEN 0 ELSE 1 END AS paid FROM it_portions p JOIN it_tasks t ON t.business_id=p.business_id AND t.id=p.task_id JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id WHERE p.business_id=? ${employee == null ? '' : 'AND p.employee_id=?'} ORDER BY p.id''',
+      '''SELECT p.business_id,p.id,p.task_id,p.employee_id,p.state,p.completed_date,c.revision AS version,t.description,t.job_id,c.completed AS credit_completed,c.actual_minutes,(c.actual_minutes*100+30)/60 AS hours_hundredths,c.rate_cents,(c.actual_minutes*c.rate_cents+30)/60 AS gross_cents,CASE WHEN c.paid_operation_id IS NULL THEN 0 ELSE 1 END AS paid FROM it_portions p JOIN it_tasks t ON t.business_id=p.business_id AND t.id=p.task_id JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id WHERE p.business_id=? ${employee == null ? '' : 'AND p.employee_id=?'} ORDER BY p.id''',
       [business, ?employee],
     );
   }
@@ -365,6 +365,7 @@ class IntegratedTestPayroll {
         if (match.length != 1) { throw StateError('Missing work'); }
         final w = match.single;
         if (w['state'] != 'Done' ||
+            w['credit_completed'] != 1 ||
             w['paid'] != 0 ||
             w['version'] != p['version'] ||
             w['hours_hundredths'] != p['hours'] ||
