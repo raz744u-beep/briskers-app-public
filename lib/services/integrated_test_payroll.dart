@@ -32,6 +32,8 @@ class IntegratedTestPayroll {
       '''CREATE TABLE IF NOT EXISTS it_paid_base (business_id TEXT NOT NULL, employee_id TEXT NOT NULL, week TEXT NOT NULL, operation_id TEXT NOT NULL, amount INTEGER NOT NULL, PRIMARY KEY(business_id,employee_id,week))''',
       '''CREATE TABLE IF NOT EXISTS it_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, business_id TEXT NOT NULL, operation_id TEXT NOT NULL, event TEXT NOT NULL, payload TEXT NOT NULL)''',
       '''CREATE TABLE IF NOT EXISTS it_sync_outbox (business_id TEXT NOT NULL, operation_id TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'blocked_test', attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(business_id,operation_id))''',
+      '''CREATE TRIGGER IF NOT EXISTS it_credit_frozen_update BEFORE UPDATE ON test_payroll_credits WHEN OLD.paid=1 AND EXISTS(SELECT 1 FROM it_paid_work WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id) BEGIN SELECT RAISE(ABORT,'Paid credit is immutable'); END''',
+      '''CREATE TRIGGER IF NOT EXISTS it_credit_frozen_delete BEFORE DELETE ON test_payroll_credits WHEN EXISTS(SELECT 1 FROM it_paid_work WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id) BEGIN SELECT RAISE(ABORT,'Paid credit is immutable'); END''',
       '''CREATE TRIGGER IF NOT EXISTS it_paid_work_frozen_update BEFORE UPDATE ON it_paid_work BEGIN SELECT RAISE(ABORT,'Paid work is immutable'); END''',
       '''CREATE TRIGGER IF NOT EXISTS it_paid_work_frozen_delete BEFORE DELETE ON it_paid_work BEGIN SELECT RAISE(ABORT,'Paid work is immutable'); END''',
       '''CREATE TRIGGER IF NOT EXISTS it_payments_frozen_update BEFORE UPDATE ON it_payments BEGIN SELECT RAISE(ABORT,'Payment is immutable'); END''',
@@ -135,6 +137,9 @@ class IntegratedTestPayroll {
         if(match.length!=1) throw StateError('Missing work');
         final w=match.single;
         if(w['state']!='Done' || w['paid']!=0 || w['version']!=p['version'] || w['hours_hundredths']!=p['hours'] || w['rate_cents']!=p['rate']) throw StateError('Work changed or already paid');
+        final completed=DateTime.parse(w['completed_date'] as String);
+        final start=DateTime.parse(week);
+        if((completed.isBefore(start) || !completed.isBefore(start.add(const Duration(days:7)))) && adjustmentReason.trim().isEmpty) throw StateError('Outside-week work requires an Owner override reason');
         gross+=((p['hours'] as int)*(p['rate'] as int)+50)~/100;
         snapshots.add(jsonEncode(w));
       }

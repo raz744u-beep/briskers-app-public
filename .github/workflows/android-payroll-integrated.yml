@@ -7,6 +7,7 @@ on:
     paths:
       - lib/**
       - test/**
+      - integration_test/**
       - pubspec.yaml
       - .github/workflows/android-payroll-integrated.yml
   workflow_dispatch:
@@ -34,6 +35,7 @@ jobs:
           rm -rf generated/lib generated/test
           cp -R lib generated/lib
           cp -R test generated/test
+          cp -R integration_test generated/integration_test
           if [ -d assets ]; then cp -R assets generated/assets; fi
           cp pubspec.yaml generated/pubspec.yaml
           cp analysis_options.yaml generated/analysis_options.yaml
@@ -91,9 +93,27 @@ jobs:
           fi
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee verification/signature.txt
           unzip -t "$APK" > verification/zip-integrity.txt
-          sha256sum "$APK" | tee verification/SHA256SUMS
+          cp "$APK" verification/Briskers-Integrated-Payroll-TEST.apk
+          sha256sum verification/Briskers-Integrated-Payroll-TEST.apk | tee verification/SHA256SUMS
           git -C .. rev-parse HEAD | tee verification/COMMIT_SHA
           flutter --version > verification/flutter-version.txt
+      - name: Enable VM service only for temporary emulator test build
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          android = 'http://schemas.android.com/apk/res/android'
+          for variant in ('main', 'debug', 'profile'):
+              path = Path(f'generated/android/app/src/{variant}/AndroidManifest.xml')
+              tree = ET.parse(path)
+              root = tree.getroot()
+              for node in list(root.findall('uses-permission')):
+                  if node.get(f'{{{android}}}name') == 'android.permission.INTERNET':
+                      root.remove(node)
+              if variant == 'main':
+                  ET.SubElement(root, 'uses-permission', {f'{{{android}}}name': 'android.permission.INTERNET'})
+              tree.write(path, encoding='unicode')
+          PYCODE
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -107,23 +127,36 @@ jobs:
           target: default
           disable-animations: true
           script: |
-            adb install generated/build/app/outputs/flutter-apk/app-debug.apk
+            adb install generated/verification/Briskers-Integrated-Payroll-TEST.apk
             adb logcat -c
             adb shell am start -W -n com.briskers.test.tasks_payroll_integrated_test/.MainActivity
             sleep 10
             adb shell pidof com.briskers.test.tasks_payroll_integrated_test
             adb logcat -d > generated/verification/android-launch-log.txt
             if grep -E 'FATAL EXCEPTION|Unhandled Exception|Error while initializing' generated/verification/android-launch-log.txt; then exit 1; fi
+            cd generated
+            flutter test integration_test/payroll_device_test.dart -d emulator-5554 --reporter expanded > verification/device-first-run.txt 2>&1 || { cat verification/device-first-run.txt; exit 1; }
             adb shell am force-stop com.briskers.test.tasks_payroll_integrated_test
+            adb reboot
+            adb wait-for-device
+            timeout 120 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 2; done'
+            flutter test integration_test/payroll_device_test.dart -d emulator-5554 --dart-define=PAYROLL_REOPEN=true --reporter expanded > verification/device-after-reboot.txt 2>&1 || { cat verification/device-after-reboot.txt; exit 1; }
+            adb install -r verification/Briskers-Integrated-Payroll-TEST.apk
             adb shell am start -W -n com.briskers.test.tasks_payroll_integrated_test/.MainActivity
             sleep 5
             adb shell pidof com.briskers.test.tasks_payroll_integrated_test
+      - name: Upload validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integrated-payroll-validation-logs
+          path: generated/verification/*.txt
+          if-no-files-found: ignore
       - name: Upload installable TEST APK
         uses: actions/upload-artifact@v4
         with:
           name: briskers-integrated-payroll-test-apk
           if-no-files-found: error
           path: |
-            generated/build/app/outputs/flutter-apk/app-debug.apk
             generated/verification/*
           retention-days: 14

@@ -57,7 +57,8 @@ class _IntegratedPayrollHomeState extends State<IntegratedPayrollHome> {
     final cs=initial.map((v)=>TextEditingController(text:v)).toList();
     final result=await showDialog<List<String>>(context:context,builder:(context)=>AlertDialog(title:Text(title),content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[for(var i=0;i<labels.length;i++)TextField(controller:cs[i],decoration:InputDecoration(labelText:labels[i]))])),actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Cancel')),FilledButton(onPressed:()=>Navigator.pop(context,cs.map((c)=>c.text.trim()).toList()),child:const Text('Save locally'))]));
     // Dialog fields may remain mounted during their exit animation.
-    WidgetsBinding.instance.addPostFrameCallback((_){for(final c in cs){c.dispose();}});
+    await Future<void>.delayed(const Duration(milliseconds:350));
+    for(final c in cs){c.dispose();}
     return result;
   }
   Future<void> _newJob() async {
