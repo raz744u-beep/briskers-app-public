@@ -5428,16 +5428,20 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     // Never overwrite it with a potentially lagging local index when the
     // documents tile is reopened. Local recovery is for offline display only.
     if (key == 'documents' && _canSeeFinancial && !_onlineReady) {
-      try {
-        final localDocuments = await _localDocumentsForJob(
-          recoverLegacy: true,
-        );
-        if (mounted) {
+      // Never block opening the sheet on legacy local-document recovery.
+      // The existing snapshot renders immediately; new results refresh in place.
+      unawaited(() async {
+        try {
+          final localDocuments = await _localDocumentsForJob(
+            recoverLegacy: true,
+          );
+          if (!mounted) return;
           setState(() => _documents = localDocuments);
+          _modalRefresh?.call();
+        } catch (_) {
+          // Keep the previous local snapshot if recovery fails.
         }
-      } catch (_) {
-        // Keep the last visible document list if local recovery fails.
-      }
+      }());
     }
 
     if (key == 'profit' && _owner) {
