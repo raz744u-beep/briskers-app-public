@@ -1347,7 +1347,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                         ),
                       ),
                       icon: const Icon(Icons.fact_check_outlined),
-                      label: const Text('Review pending records (local only)'),
+                      label: const Text('Review and reconcile recovered records'),
                     ),
                     const SizedBox(height: 12),
                     OutlinedButton.icon(

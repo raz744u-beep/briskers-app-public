@@ -2,11 +2,12 @@ import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/material.dart';
 
 import '../../core/connection_mode.dart';
+import '../../services/owner_recovery_finalizer.dart';
 
 import '../../local/local_database_provider.dart';
 
-/// Read-only Owner diagnostic. No remote calls and no outbox mutations.
-/// A subsequent recovery action requires independent verified server proof.
+/// Owner recovery review with an explicit authenticated read-only lookup.
+/// Finalization is local, atomic, and never sends a business-data upload.
 class LocalRecoveryReviewScreen extends StatefulWidget {
   const LocalRecoveryReviewScreen({
     super.key, required this.businessId, required this.isOwner,
@@ -23,6 +24,25 @@ class _LocalRecoveryReviewScreenState extends State<LocalRecoveryReviewScreen> {
   bool _checking = false;
   String? _error;
   Map<String, int>? _counts;
+  String? _result;
+
+  Future<void> _reconcile() async {
+    if (!widget.isOwner || _checking) return;
+    setState(() { _checking=true; _error=null; _result=null; _counts=null; });
+    try {
+      final rows=await localDatabase.customSelect(
+        "SELECT entity_id FROM sync_outbox WHERE business_id=? AND entity_type='document_draft_create' AND state IN ('conflict','reconciled') AND last_error='Owner assigned authoritative local number; sync disabled'",
+        variables:[Variable<String>(widget.businessId)]).get();
+      if (rows.length!=1) throw StateError('Exactly one held recovery invoice is required.');
+      await OwnerRecoveryFinalizer().reconcile(isOwner:widget.isOwner,
+        businessId:widget.businessId,localInvoiceId:rows.single.read<String>('entity_id'));
+      if (mounted) setState(()=>_result='Recovery reconciled and saved on this device. Original operations remain preserved and cannot upload again. Force Offline is still enabled. Return to the invoice list to check the invoice, then select Auto to resume normal sync.');
+    } catch (e) {
+      if (mounted) setState(()=>_error='Recovery was not completed. Keep Force Offline enabled. $e');
+    } finally {
+      if (mounted) setState(()=>_checking=false);
+    }
+  }
 
   Future<void> _check() async {
     if (!widget.isOwner || _checking) return;
@@ -90,15 +110,17 @@ class _LocalRecoveryReviewScreenState extends State<LocalRecoveryReviewScreen> {
           animation: BriskersConnectionModeController.instance,
           builder: (context, _) => Text(
             BriskersConnectionModeController.instance.forceOffline
-                ? 'Force Offline is enabled. No server verification or payment acknowledgment will run.'
+                ? 'Force Offline is enabled. Only the explicit read-only recovery lookup can connect.'
                 : 'Auto mode is active. This review remains read-only and does not trigger synchronization.',
             style: const TextStyle(fontWeight: FontWeight.w600),
           ),
         ),
         const SizedBox(height: 12),
-        const Text('Recovery acknowledgment remains disabled until '
-          'authoritative invoice and payment identities can be verified, '
-          'and the full local transaction is tested.'),
+        const Text('Verify and reconcile reads the existing server identities using your Owner session, preserves the original records, and commits the local match. It never uploads an invoice or payment.'),
+        FilledButton.icon(onPressed:_checking ? null : _reconcile,
+          icon:const Icon(Icons.verified_user_outlined),
+          label:const Text('Verify and reconcile existing records')),
+        if (_result!=null) Text(_result!),
       ]),
     );
   }

@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:drift/drift.dart' show Variable;
+import 'recovery_commit_store.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -114,6 +116,13 @@ class LocalDocumentDetailCache {
     return _database.transaction(
       () => _serialized(key, () async {
         if (await _blocked(businessId, documentId, detail)) return;
+        if (await RecoveryCommitStore.isOriginal(_database,businessId,documentId)) return;
+        if (await RecoveryCommitStore.snapshot(_database,businessId,documentId) != null) {
+          await _database.customStatement(
+            'UPDATE recovery_document_cache SET payload_json=? WHERE business_id=? AND document_id=?',
+            [encoded,businessId,documentId]);
+          return;
+        }
         final prefs = await SharedPreferences.getInstance();
         // A late response may omit a provisional alias's canonical identity.
         // The existing association remains authoritative while it is blocked.
@@ -134,8 +143,11 @@ class LocalDocumentDetailCache {
     return _database.transaction(
       () => _serialized(key, () async {
         if (await _blocked(businessId, documentId)) return null;
+        if (await RecoveryCommitStore.isOriginal(_database,businessId,documentId)) return null;
+        final durable=await RecoveryCommitStore.snapshot(_database,businessId,documentId);
         final prefs = await SharedPreferences.getInstance();
-        final detail = _decode(prefs.getString(key));
+        final detail = durable == null ? _decode(prefs.getString(key))
+            : _decode(durable.readNullable<String>('payload_json'));
         if (detail == null) return null;
         if (await _blocked(businessId, documentId, detail)) return null;
         return _projectRetiredConversion(businessId, detail);
@@ -150,10 +162,15 @@ class LocalDocumentDetailCache {
       final prefs = await SharedPreferences.getInstance();
       final prefix = 'briskers_document_detail_${businessId}_';
       final result = <Map<String, dynamic>>[];
-      for (final key in prefs.getKeys().where(
-        (key) => key.startsWith(prefix),
-      )) {
-        final snapshot = await load(businessId, key.substring(prefix.length));
+      await RecoveryCommitStore.ensure(_database);
+      final durable=await _database.customSelect(
+        'SELECT document_id FROM recovery_document_cache WHERE business_id=?',
+        variables:[Variable<String>(businessId)]).get();
+      final ids={...prefs.getKeys().where((key)=>key.startsWith(prefix))
+          .map((key)=>key.substring(prefix.length)),
+          ...durable.map((r)=>r.read<String>('document_id'))};
+      for (final id in ids) {
+        final snapshot = await load(businessId, id);
         if (snapshot != null) result.add(snapshot);
       }
       return result;
@@ -173,13 +190,20 @@ class LocalDocumentDetailCache {
         if (await _blocked(businessId, documentId, expected)) return false;
         final prefs = await SharedPreferences.getInstance();
         await prefs.reload();
-        final raw = prefs.getString(key);
+        final durable=await RecoveryCommitStore.snapshot(_database,businessId,documentId);
+        final raw = durable == null ? prefs.getString(key) : durable.readNullable<String>('payload_json');
         if (raw == null) return true;
         if (await _blocked(businessId, documentId, _decode(raw))) return false;
         if (expected == null ||
             raw != jsonEncode(expected) ||
             TestJobCleanupPolicy.hasPendingSnapshot(expected)) {
           return false;
+        }
+        if (durable != null) {
+          await _database.customStatement(
+            'UPDATE recovery_document_cache SET payload_json=NULL WHERE business_id=? AND document_id=?',
+            [businessId,documentId]);
+          return true;
         }
         return prefs.remove(key);
       }),
@@ -198,6 +222,11 @@ class LocalDocumentDetailCache {
           _decode(prefs.getString(key)),
         )) {
           return;
+        }
+        if (await RecoveryCommitStore.snapshot(_database,businessId,documentId) != null) {
+          await _database.customStatement(
+            'UPDATE recovery_document_cache SET payload_json=NULL WHERE business_id=? AND document_id=?',
+            [businessId,documentId]);
         }
         await prefs.remove(key);
       }),

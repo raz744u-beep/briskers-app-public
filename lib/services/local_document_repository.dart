@@ -47,7 +47,9 @@ class LocalDocumentRepository {
     NOT EXISTS (SELECT 1 FROM owner_recovery_aliases a
       WHERE a.business_id = $alias.business_id
         AND a.server_invoice_id = $alias.id
-        AND a.local_invoice_id <> $alias.id)
+        AND a.local_invoice_id <> $alias.id
+        AND EXISTS (SELECT 1 FROM local_documents original
+          WHERE original.business_id=a.business_id AND original.id=a.local_invoice_id))
     AND NOT EXISTS (SELECT 1 FROM local_job_retirement_entities r
       WHERE r.business_id = $alias.business_id
         AND r.state IN ('pending','accepted','locally_cancelled')
