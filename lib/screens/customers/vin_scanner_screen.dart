@@ -244,7 +244,9 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
   );
 
   Widget _chooseView() => ListView(
-    padding: const EdgeInsets.all(16),
+    padding: EdgeInsets.fromLTRB(
+      16, 16, 16, 16 + MediaQuery.paddingOf(context).bottom,
+    ),
     children: [
       const Text(
         'Capture a VIN',
@@ -329,7 +331,7 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
         ),
       ),
       Positioned(
-        bottom: 12,
+        bottom: 12 + MediaQuery.paddingOf(context).bottom,
         left: 12,
         right: 12,
         child: Card(
@@ -375,7 +377,9 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
   );
 
   Widget _reviewView() => ListView(
-    padding: const EdgeInsets.all(16),
+    padding: EdgeInsets.fromLTRB(
+      16, 16, 16, 16 + MediaQuery.paddingOf(context).bottom,
+    ),
     children: [
       const Text('Confirm VIN',
           style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
