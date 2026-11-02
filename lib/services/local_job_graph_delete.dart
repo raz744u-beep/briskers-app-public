@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart' show kReleaseMode;
 
 import '../local/briskers_local_database.dart';
 import 'local_job_deletion_v3.dart';
@@ -11,8 +12,10 @@ import 'local_job_deletion_v3.dart';
 /// is not an eligibility requirement. This first adapter supports the local
 /// relational graph; ambiguous financial/outbox references are rejected rather
 /// than silently orphaned. No network calls are made.
-const _syntheticOwnerDeleteBuild = bool.fromEnvironment(
-    'BRISKERS_SYNTHETIC_BUILD', defaultValue: false);
+// Even a misconfigured signed release cannot enable synthetic financial erasure.
+const _syntheticOwnerDeleteBuild = !kReleaseMode &&
+    const bool.fromEnvironment(
+        'BRISKERS_SYNTHETIC_BUILD', defaultValue: false);
 
 class LocalJobGraphDelete {
   LocalJobGraphDelete(this.db, {
