@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:briskers_app/payroll_native_acceptance_main.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
@@ -97,5 +98,9 @@ void main() {
     await done();
     await db.customStatement('UPDATE local_mechanic_work_credits_v1 SET completed=0,revision=revision+1 WHERE employee_id=?',['chris']);
     await expectLater(pay(),throwsStateError);expect(await count('it_payments'),0);
+  });
+  test('native acceptance entry point detects first and persisted launches',()async{
+    expect(await verifyNativePayrollPersistence(db),'created');
+    expect(await verifyNativePayrollPersistence(db),'reopened');
   });
 }

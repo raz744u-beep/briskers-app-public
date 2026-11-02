@@ -20,7 +20,9 @@ This is a functional **isolated local workflow milestone**, not a production int
 - Invoice document/customer creation, customer payment/final closure prompts, production tax/1099 export and editing employee details are not implemented here. The Taxes tab shows recorded gross only.
 - The existing durable work-credit repository is reused; its `recordWork` method adds revision-checked time edits. No second synthetic credit ledger is used by this entry point.
 - Sync delivery and financial posting remain disabled. Blocked TEST outbox rows exercise transaction persistence but do not claim verified server synchronization/idempotency.
-- No physical Note 9 validation of this new APK has been claimed. CI validates API 29 emulator installation, launch, native SQLite persistence and reboot, provided all workflow steps pass.
+- No physical Note 9 validation of this new APK has been claimed. CI validates API 29 emulator installation, launch, native SQLite persistence and reboot through an internal bounded on-device probe (no VM service required), provided all workflow steps pass.
+
+The internal native acceptance entry point is `lib/payroll_native_acceptance_main.dart`. It is not the delivered APK. It creates a payment on first launch, validates immutable history and duplicate prevention, and requires the same records on the post-reboot launch. Host tests exercise both probe phases too.
 
 ## Manual Note 9 acceptance
 

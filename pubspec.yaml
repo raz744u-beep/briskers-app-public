@@ -33,8 +33,6 @@ dependencies:
   saf: ^2.1.2
 
 dev_dependencies:
-  integration_test:
-    sdk: flutter
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0

@@ -7,7 +7,6 @@ on:
     paths:
       - lib/**
       - test/**
-      - integration_test/**
       - pubspec.yaml
       - .github/workflows/android-payroll-integrated.yml
   workflow_dispatch:
@@ -35,7 +34,6 @@ jobs:
           rm -rf generated/lib generated/test
           cp -R lib generated/lib
           cp -R test generated/test
-          cp -R integration_test generated/integration_test
           if [ -d assets ]; then cp -R assets generated/assets; fi
           cp pubspec.yaml generated/pubspec.yaml
           cp analysis_options.yaml generated/analysis_options.yaml
@@ -71,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p verification
-          dart format lib/services/integrated_test_payroll.dart lib/services/local_mechanic_work_credit_repository.dart lib/tasks_payroll_integrated_main.dart test/integrated*test.dart integration_test/payroll_device_test.dart
+          dart format lib/services/integrated_test_payroll.dart lib/services/local_mechanic_work_credit_repository.dart lib/tasks_payroll_integrated_main.dart test/integrated*test.dart lib/payroll_native_acceptance_main.dart
           dart fix --apply --code=curly_braces_in_flow_control_structures --code=use_null_aware_elements
           dart format lib/services/integrated_test_payroll.dart lib/services/local_mechanic_work_credit_repository.dart lib/tasks_payroll_integrated_main.dart test/integrated*test.dart
           flutter analyze 2>&1 | tee verification/analysis.txt
@@ -101,25 +99,11 @@ jobs:
           sha256sum verification/Briskers-Integrated-Payroll-TEST.apk | tee verification/SHA256SUMS
           git -C .. rev-parse HEAD | tee verification/COMMIT_SHA
           flutter --version > verification/flutter-version.txt
-      - name: Enable VM service only for temporary emulator test build
+      - name: Build bounded native persistence probe
+        working-directory: generated
         run: |
-          python3 - <<'PYCODE'
-          from pathlib import Path
-          import xml.etree.ElementTree as ET
-          android = 'http://schemas.android.com/apk/res/android'
-          ET.register_namespace('android', android)
-          ET.register_namespace('tools', 'http://schemas.android.com/tools')
-          for variant in ('main', 'debug', 'profile'):
-              path = Path(f'generated/android/app/src/{variant}/AndroidManifest.xml')
-              tree = ET.parse(path)
-              root = tree.getroot()
-              for node in list(root.findall('uses-permission')):
-                  if node.get(f'{{{android}}}name') == 'android.permission.INTERNET':
-                      root.remove(node)
-              if variant == 'main':
-                  ET.SubElement(root, 'uses-permission', {f'{{{android}}}name': 'android.permission.INTERNET'})
-              tree.write(path, encoding='unicode')
-          PYCODE
+          flutter build apk --debug -t lib/payroll_native_acceptance_main.dart
+          cp build/app/outputs/flutter-apk/app-debug.apk verification/native-persistence-probe.apk
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -141,12 +125,21 @@ jobs:
             adb shell pidof com.briskers.test.tasks_payroll_integrated_test
             adb logcat -d > verification/android-launch-log.txt
             if grep -E 'FATAL EXCEPTION|Unhandled Exception|Error while initializing' verification/android-launch-log.txt; then exit 1; fi
-            flutter test integration_test/payroll_device_test.dart -d emulator-5554 --reporter expanded > verification/device-first-run.txt 2>&1 || { cat verification/device-first-run.txt; exit 1; }
+            adb install -r verification/native-persistence-probe.apk
+            adb logcat -c
+            adb shell am force-stop com.briskers.test.tasks_payroll_integrated_test
+            adb shell am start -W -n com.briskers.test.tasks_payroll_integrated_test/.MainActivity
+            timeout 120 bash -c 'until adb logcat -d | grep -q "PAYROLL_NATIVE_ACCEPTANCE_PASS phase=created"; do if adb logcat -d | grep -q PAYROLL_NATIVE_ACCEPTANCE_FAIL; then adb logcat -d; exit 1; fi; sleep 2; done'
+            adb logcat -d > verification/device-first-run.txt
             adb shell am force-stop com.briskers.test.tasks_payroll_integrated_test
             adb reboot
             adb wait-for-device
             timeout 120 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 2; done'
-            flutter test integration_test/payroll_device_test.dart -d emulator-5554 --dart-define=PAYROLL_REOPEN=true --reporter expanded > verification/device-after-reboot.txt 2>&1 || { cat verification/device-after-reboot.txt; exit 1; }
+            adb shell input keyevent 82
+            adb logcat -c
+            adb shell am start -W -n com.briskers.test.tasks_payroll_integrated_test/.MainActivity
+            timeout 120 bash -c 'until adb logcat -d | grep -q "PAYROLL_NATIVE_ACCEPTANCE_PASS phase=reopened"; do if adb logcat -d | grep -q PAYROLL_NATIVE_ACCEPTANCE_FAIL; then adb logcat -d; exit 1; fi; sleep 2; done'
+            adb logcat -d > verification/device-after-reboot.txt
             adb install -r verification/Briskers-Integrated-Payroll-TEST.apk
             adb shell am start -W -n com.briskers.test.tasks_payroll_integrated_test/.MainActivity
             sleep 5
@@ -161,7 +154,7 @@ jobs:
             generated/lib/services/local_mechanic_work_credit_repository.dart
             generated/lib/tasks_payroll_integrated_main.dart
             generated/test/integrated*test.dart
-            generated/integration_test/payroll_device_test.dart
+            generated/lib/payroll_native_acceptance_main.dart
       - name: Upload validation diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -176,4 +169,5 @@ jobs:
           if-no-files-found: error
           path: |
             generated/verification/*
+            !generated/verification/native-persistence-probe.apk
           retention-days: 14
