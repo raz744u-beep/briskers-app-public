@@ -1031,7 +1031,9 @@ class OfflineInvoicePaymentLedger {
       SELECT payload_json FROM sync_outbox
       WHERE business_id = ? AND entity_id = ?
         AND entity_type = 'invoice_payment_received'
-        AND state IN ('pending', 'inflight')
+        AND (state IN ('pending', 'inflight')
+          OR (state = 'conflict' AND
+              last_error = 'Owner recovery payment preserved; sync disabled'))
       ORDER BY id
       ''',
       variables: [
