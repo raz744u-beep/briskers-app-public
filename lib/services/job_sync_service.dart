@@ -7,6 +7,7 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_job_deletion_v3.dart';
 
 class JobSyncService {
   JobSyncService({
@@ -99,6 +100,8 @@ class JobSyncService {
   }
 
   Future<void> pull(String businessId) async {
+    // Install durable local deletion fences before processing any server pull.
+    await LocalJobDeletionV3.ensureSchema(_database);
     int? cursor;
     var bootstrapped = false;
 
@@ -353,6 +356,16 @@ class JobSyncService {
     final job = Map<String, dynamic>.from(rawJob);
     final jobId = job['id']?.toString() ?? '';
     if (jobId.isEmpty) return;
+
+    // Server snapshots can legitimately lag behind a confirmed local purge.
+    // Ignore the entire bundle BEFORE deleting or refreshing child tables.
+    // This also covers initial bootstrap, not only incremental changes.
+    final deletedLocally = await _database.customSelect(
+      'SELECT 1 FROM local_job_deletion_v3_fences '
+      "WHERE business_id=? AND entity_kind='job' AND entity_id=? LIMIT 1",
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).get();
+    if (deletedLocally.isNotEmpty) return;
 
     final vehicleId = _text(job['vehicle_id']);
 
