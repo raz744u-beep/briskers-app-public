@@ -108,6 +108,7 @@ class LocalDocumentRepository {
     List<Map<String, dynamic>> documents, {
     String? kind,
   }) async {
+    await _ensureRecoveryAliasTable();
     await _database.transaction(() async {
       final fences = await _retirementFences(businessId);
       // A pending request can be rejected later. Retain its exact prior row
