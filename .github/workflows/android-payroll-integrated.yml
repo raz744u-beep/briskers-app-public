@@ -1,0 +1,129 @@
+name: Integrated Tasks Payroll durable Android TEST
+
+on:
+  push:
+    branches:
+      - integration/tasks-payroll-local-persistence-20261102
+    paths:
+      - lib/**
+      - test/**
+      - pubspec.yaml
+      - .github/workflows/android-payroll-integrated.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CI: 'true'
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+      DART_SUPPRESS_ANALYTICS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.9'
+      - name: Create isolated Android TEST project
+        run: |
+          flutter create --platforms=android --org com.briskers.test --project-name tasks_payroll_integrated_test generated
+          rm -rf generated/lib generated/test
+          cp -R lib generated/lib
+          cp -R test generated/test
+          if [ -d assets ]; then cp -R assets generated/assets; fi
+          cp pubspec.yaml generated/pubspec.yaml
+          cp analysis_options.yaml generated/analysis_options.yaml
+          # Remove development network permission; synthetic tests need no network.
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          android = 'http://schemas.android.com/apk/res/android'
+          tools = 'http://schemas.android.com/tools'
+          ET.register_namespace('android', android)
+          ET.register_namespace('tools', tools)
+          for variant in ('main', 'debug', 'profile'):
+              path = Path(f'generated/android/app/src/{variant}/AndroidManifest.xml')
+              tree = ET.parse(path)
+              root = tree.getroot()
+              for node in list(root.findall('uses-permission')):
+                  if node.get(f'{{{android}}}name') == 'android.permission.INTERNET':
+                      root.remove(node)
+              ET.SubElement(root, 'uses-permission', {
+                  f'{{{android}}}name': 'android.permission.INTERNET',
+                  f'{{{tools}}}node': 'remove',
+              })
+              tree.write(path, encoding='unicode')
+          PY
+          sed -i 's/android:label="tasks_payroll_integrated_test"/android:label="Briskers Integrated TEST"/' generated/android/app/src/main/AndroidManifest.xml
+      - name: Resolve and generate database sources
+        working-directory: generated
+        run: |
+          flutter pub get
+          dart run build_runner build --delete-conflicting-outputs
+      - name: Verify sources and tests
+        working-directory: generated
+        run: |
+          dart format lib/services/integrated_test_payroll.dart lib/tasks_payroll_integrated_main.dart test/integrated*test.dart
+          flutter analyze
+          flutter test test/integrated*test.dart test/test_payroll_*_test.dart test/test_employee_payroll_staging_panel_test.dart test/shop_workflow_status_policy_test.dart
+      - name: Build distinct debug APK
+        working-directory: generated
+        run: |
+          flutter build apk --debug -t lib/tasks_payroll_integrated_main.dart
+          test -s build/app/outputs/flutter-apk/app-debug.apk
+      - name: Verify APK identity signature and integrity
+        working-directory: generated
+        run: |
+          set -euo pipefail
+          mkdir -p verification
+          APK=build/app/outputs/flutter-apk/app-debug.apk
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$BUILD_TOOLS/aapt" dump badging "$APK" | tee verification/apk-badging.txt
+          grep -q "package: name='com.briskers.test.tasks_payroll_integrated_test'" verification/apk-badging.txt
+          "$BUILD_TOOLS/aapt" dump permissions "$APK" | tee verification/permissions.txt
+          if grep -q android.permission.INTERNET verification/permissions.txt; then
+            echo "Unexpected network permission in synthetic APK"
+            exit 1
+          fi
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee verification/signature.txt
+          unzip -t "$APK" > verification/zip-integrity.txt
+          sha256sum "$APK" | tee verification/SHA256SUMS
+          git -C .. rev-parse HEAD | tee verification/COMMIT_SHA
+          flutter --version > verification/flutter-version.txt
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install and launch on Android 10
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          target: default
+          disable-animations: true
+          script: |
+            adb install generated/build/app/outputs/flutter-apk/app-debug.apk
+            adb logcat -c
+            adb shell am start -W -n com.briskers.test.tasks_payroll_integrated_test/.MainActivity
+            sleep 10
+            adb shell pidof com.briskers.test.tasks_payroll_integrated_test
+            adb logcat -d > generated/verification/android-launch-log.txt
+            if grep -E 'FATAL EXCEPTION|Unhandled Exception|Error while initializing' generated/verification/android-launch-log.txt; then exit 1; fi
+            adb shell am force-stop com.briskers.test.tasks_payroll_integrated_test
+            adb shell am start -W -n com.briskers.test.tasks_payroll_integrated_test/.MainActivity
+            sleep 5
+            adb shell pidof com.briskers.test.tasks_payroll_integrated_test
+      - name: Upload installable TEST APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: briskers-integrated-payroll-test-apk
+          if-no-files-found: error
+          path: |
+            generated/build/app/outputs/flutter-apk/app-debug.apk
+            generated/verification/*
+          retention-days: 14
