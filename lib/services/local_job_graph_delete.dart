@@ -65,6 +65,16 @@ class LocalJobGraphDelete {
       throw StateError(
           'Job payment status requires authoritative reconciliation before deletion.');
     }
+    // Only recognized invoice/estimate kinds can be included in this graph.
+    // Any other linked document must fail the entire preview, rather than
+    // leave an orphan behind after removing its parent Job.
+    for (final document in await _rows(
+        'local_documents', business, 'job_id', job)) {
+      if (!const {'invoice', 'estimate'}.contains(document['kind'])) {
+        throw StateError(
+            'An unrecognized linked document requires reconciliation.');
+      }
+    }
     for (final entry in _owned.entries) {
       final (table, key, field) = entry.value;
       for (final row in await _rows(table, business, field, job)) {
@@ -82,6 +92,8 @@ class LocalJobGraphDelete {
             'finalized', 'pending_close',
           };
           if (row['closed_at'] != null ||
+              row['converted'] == 1 ||
+              row['converted'] == true ||
               protected.contains(status) ||
               protected.contains(displayStatus)) {
             throw StateError(
