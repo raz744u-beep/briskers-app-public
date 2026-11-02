@@ -71,7 +71,61 @@ void main() {
     expect(await count('local_documents'), 1);
   });
 
-  test('production constructor accepts a freshly authenticated Owner grant', () async {
+  test('Owner grant cannot authorize deletion of a synchronized unpaid Job', () async {
+    const identity = OwnerSessionIdentity(actor, 'verified-session');
+    final authorization = LocalOwnerAuthorization(
+      store: _OwnerStore(), currentIdentity: () => identity,
+      verifyOwner: (business) async => VerifiedOwnerEnrollment(identity, business),
+      authenticateDevice: () async => true,
+    );
+    await authorization.enroll(business);
+    final engine = LocalJobGraphDelete(db,
+      ownerGrant: await authorization.unlock(business));
+    await expectLater(engine.preview(
+      businessId: business, jobId: job, actorId: actor), throwsStateError);
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  for (final scenario in ['synced document', 'server timestamp', 'unknown state']) {
+    test('production protects $scenario despite pending Job and Owner unlock', () async {
+      await db.customStatement(
+        "UPDATE local_jobs SET sync_state='pending' WHERE id=?", [job]);
+      if (scenario != 'synced document') {
+        await db.customStatement(
+          "UPDATE local_documents SET sync_state='pending' WHERE id=?", [invoice]);
+      }
+      if (scenario == 'server timestamp') {
+        await db.customStatement(
+          'UPDATE local_documents SET server_updated_at=123 WHERE id=?', [invoice]);
+      }
+      if (scenario == 'unknown state') {
+        await db.customStatement(
+          "UPDATE local_jobs SET sync_state='unknown' WHERE id=?", [job]);
+      }
+      const identity = OwnerSessionIdentity(actor, 'verified-session');
+      final authorization = LocalOwnerAuthorization(
+        store: _OwnerStore(), currentIdentity: () => identity,
+        verifyOwner: (business) async => VerifiedOwnerEnrollment(identity, business),
+        authenticateDevice: () async => true,
+      );
+      await authorization.enroll(business);
+      final engine = LocalJobGraphDelete(db,
+        ownerGrant: await authorization.unlock(business));
+      await expectLater(engine.preview(
+        businessId: business, jobId: job, actorId: actor), throwsStateError);
+      expect(await count('local_jobs'), 2);
+      expect(await count('local_documents'), 1);
+      expect(await count('local_offline_job_purge_entities'), 0);
+    });
+  }
+
+  test('publication after preview blocks commit without deleting records', () async {
+    await db.customStatement(
+      "UPDATE local_jobs SET sync_state='pending' WHERE id=?", [job]);
+    await db.customStatement(
+      "UPDATE local_documents SET sync_state='pending' WHERE id=?", [invoice]);
     const identity = OwnerSessionIdentity(actor, 'verified-session');
     final authorization = LocalOwnerAuthorization(
       store: _OwnerStore(), currentIdentity: () => identity,
@@ -83,13 +137,21 @@ void main() {
       ownerGrant: await authorization.unlock(business));
     final reviewed = await engine.preview(
       businessId: business, jobId: job, actorId: actor);
-    await engine.confirm(businessId: business, jobId: job,
-      actorId: actor, reviewed: reviewed);
-    expect(await count('local_jobs'), 1);
-    expect(await count('local_documents'), 0);
+    await db.customStatement(
+      "UPDATE local_documents SET sync_state='synced' WHERE id=?", [invoice]);
+    await expectLater(engine.confirm(businessId: business, jobId: job,
+      actorId: actor, reviewed: reviewed), throwsStateError);
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+    expect(await count('local_owner_delete_journal'), 0);
   });
 
   test('revoked protected grant rolls back data and markers during deletion', () async {
+    await db.customStatement(
+      "UPDATE local_jobs SET sync_state='pending' WHERE id=?", [job]);
+    await db.customStatement(
+      "UPDATE local_documents SET sync_state='pending' WHERE id=?", [invoice]);
     const identity = OwnerSessionIdentity(actor, 'verified-session');
     var insideConfirmation = false;
     var checks = 0;

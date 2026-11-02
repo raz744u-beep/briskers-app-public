@@ -9,8 +9,9 @@ import 'local_job_deletion_v3.dart';
 import 'local_owner_authorization.dart';
 
 /// Staged implementation only. Do not wire into production Job actions.
-/// Device-authoritative deletion of a locally present Job. The sync history
-/// is not an eligibility requirement. This first adapter supports the local
+/// Device-authoritative deletion of a locally present Job. Production rejects
+/// synchronized or uncertain rows even when no payments are cached locally.
+/// This first adapter supports the local
 /// relational graph; ambiguous financial/outbox references are rejected rather
 /// than silently orphaned. No network calls are made.
 // Even a misconfigured signed release cannot enable synthetic financial erasure.
@@ -76,6 +77,7 @@ class LocalJobGraphDelete {
     final found = <Map<String, dynamic>>[];
     final root = await _rows('local_jobs', business, 'id', job);
     if (root.length != 1) throw StateError('Job is not present locally.');
+    _rejectPublishedProductionRow(root.single);
     // A local summary is not a complete financial ledger. In particular, a
     // paid/partially-paid server Job may have NO locally cached receipt rows.
     // Never infer safe hard deletion from missing payment cache entries.
@@ -100,6 +102,7 @@ class LocalJobGraphDelete {
       final (table, key, field) = entry.value;
       for (final row in await _rows(table, business, field, job)) {
         if (table == 'local_documents' && row['kind'] != entry.key) continue;
+        _rejectPublishedProductionRow(row);
         if (table == 'local_documents') {
           // Issued, paid or closed documents may have external payment/audit
           // references absent from this device. This partial implementation
@@ -130,6 +133,7 @@ class LocalJobGraphDelete {
     for (final inspection in inspections) {
       for (final row in await _rows('local_pre_inspection_photos',
           business, 'inspection_id', inspection['id'].toString())) {
+        _rejectPublishedProductionRow(row);
         found.add({'kind': 'pre_inspection_photo', 'table': 'local_pre_inspection_photos',
           'id': row['id'], 'snapshot': _snapshot(row), 'label': row['filename'] ?? row['id']});
       }
@@ -141,6 +145,7 @@ class LocalJobGraphDelete {
         Variable<String>(job)]).get();
     for (final item in findings) {
       final row = item.data;
+      _rejectPublishedProductionRow(row);
       if ((row['found_job_id'] != null && row['found_job_id'] != '' &&
            row['found_job_id'] != job) ||
           (row['repair_job_id'] != null && row['repair_job_id'] != '' &&
@@ -151,6 +156,7 @@ class LocalJobGraphDelete {
         'id': row['id'], 'snapshot': _snapshot(row), 'label': row['body']});
       for (final photo in await _rows('local_finding_photos',
           business, 'finding_id', row['id'].toString())) {
+        _rejectPublishedProductionRow(photo);
         found.add({'kind': 'finding_photo', 'table': 'local_finding_photos',
           'id': photo['id'], 'snapshot': _snapshot(photo), 'label': photo['filename'] ?? photo['id']});
       }
@@ -210,6 +216,19 @@ class LocalJobGraphDelete {
       }
     }
     return found;
+  }
+
+  /// A missing local receipt is never evidence that a server row is disposable.
+  /// Keep the historical synthetic adapter available only through forTesting;
+  /// a real Owner grant cannot override this production financial boundary.
+  /// Pending rows still undergo all graph/outbox protections above. This check
+  /// alone is NOT proof of unpublished test provenance or permission to wire UI.
+  void _rejectPublishedProductionRow(Map<String, dynamic> row) {
+    if (_testOwnerIdentityProvider != null && !kReleaseMode) return;
+    if (row['sync_state'] != 'pending' || row['server_updated_at'] != null) {
+      throw StateError(
+          'Previously synchronized or uncertain records cannot be deleted offline.');
+    }
   }
 
   Future<void> _ensureJournal() async {

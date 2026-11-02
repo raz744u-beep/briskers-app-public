@@ -1,5 +1,47 @@
 # Owner Delete Job — stable integration gate (2026-11-01)
 
+## Current offline-only scope (supersedes broader release gates below)
+
+The current request is limited to provably unpublished synthetic transactions in
+the regular application. Previously synchronized or uncertain financial records
+must be refused. No server migration, reconciliation consumer, backend deletion,
+or production-data change is authorized or needed to deliver that narrower scope.
+The older synchronized-record roadmap below is historical, not a prerequisite
+for the offline-only feature.
+
+This continuation adds a production-only guard rejecting synchronized, unknown,
+or server-timestamped graph rows even with a valid Owner grant. The historical
+synthetic adapter remains available through `forTesting` only. Checks run again
+at commit, so publication after preview refuses deletion without journal entries
+or tombstones. A `pending` label alone is still not unpublished-test proof.
+
+Local validation: clean Flutter analysis; full regression suite passed 258 tests
+with one opposite-mode synthetic test skipped (including 55 focused tests);
+native authentication configuration test passed;
+UI placeholder audit passed. These checks do not establish APK readiness.
+
+Concrete local work still required before enabling the regular Job action:
+
+1. Protected Owner enrollment UI. Existing enrollment requires fresh online
+   membership verification; subsequent device unlock is offline. First-time
+   offline enrollment cannot trust an editable cached role.
+2. Explicit test provenance created before any synthetic transaction or payment,
+   with durable exclusion from upload and rejection of attempted publication.
+   The current release-mode synthetic payment prohibition remains intact.
+3. Full atomic record handling. `LocalDocumentDetailCache` stores invoice lines
+   and details in SharedPreferences, outside the SQLite deletion transaction.
+   Graph removal cannot currently promise atomic deletion of that content.
+4. Offline number ownership and reuse. `createQuickInvoice` currently stores
+   null invoice/Job numbers and relies on server allocation after reconnecting.
+   `queueJobCreate` stores `Pending sync`. There is no local reusable-number
+   allocator in this branch to connect to the delete transaction.
+5. End-to-end regular-screen creation/payment/deletion, restart, list refresh,
+   collision and rollback verification, followed by permanent signing,
+   certificate/package/version checks and upgrade-data verification.
+
+No APK is produced by this continuation. Do not enable the UI on the strength of
+the new rejection tests: they are financial protection, not complete eligibility.
+
 Source prototype: PR #367, branch `feat/oct28-owner-delete-v3-current-main`.
 
 This is an integration branch based on current `main`. It is **not** approved
