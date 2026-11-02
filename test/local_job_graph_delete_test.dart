@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_job_deletion_v3.dart';
@@ -209,6 +210,38 @@ void main() {
     expect(await count('sync_outbox'), 0);
   });
 
+  test('deletion records one identity-only reconciliation operation atomically', () async {
+    final review = await deletion.preview(businessId: business, jobId: job, actorId: actor);
+    await deletion.confirm(businessId: business, jobId: job, actorId: actor, reviewed: review);
+    final journal = (await db.customSelect('SELECT * FROM local_owner_delete_journal').getSingle()).data;
+    expect(journal['actor_id'], actor);
+    expect(journal['business_id'], business);
+    expect(journal['job_id'], job);
+    expect(journal['state'], 'awaiting_backend');
+    final identities = jsonDecode(journal['entities_json'] as String) as List;
+    expect(identities, hasLength(2));
+    expect(identities.every((row) => (row as Map).keys.toSet().difference(
+      {'entity_kind', 'entity_id'}).isEmpty), isTrue);
+    final markerOperations = await db.customSelect(
+      'SELECT DISTINCT operation_id FROM local_offline_job_purge_entities').get();
+    expect(markerOperations.single.read<String>('operation_id'), journal['operation_id']);
+    await expectLater(deletion.confirm(businessId: business, jobId: job,
+      actorId: actor, reviewed: review), throwsStateError);
+    expect(await count('local_owner_delete_journal'), 1);
+  });
+
+  test('failure after journal insert rolls back journal, markers, and records', () async {
+    final review = await deletion.preview(businessId: business, jobId: job, actorId: actor);
+    await db.customStatement("CREATE TRIGGER injected_delete_failure BEFORE DELETE ON local_documents "
+      "BEGIN SELECT RAISE(ABORT, 'synthetic rollback test'); END");
+    await expectLater(deletion.confirm(businessId: business, jobId: job,
+      actorId: actor, reviewed: review), throwsA(anything));
+    expect(await count('local_owner_delete_journal'), 0);
+    expect(await count('local_offline_job_purge_entities'), 0);
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+  });
+
   test('deleted local identifiers remain fenced after app database restart', () async {
     final directory = await Directory.systemTemp.createTemp('briskers-purge-');
     final file = File('${directory.path}/briskers.sqlite');
@@ -240,6 +273,10 @@ void main() {
       first = null;
 
       reopened = BriskersLocalDatabase(NativeDatabase(file));
+      final persistedJournal = await reopened.customSelect(
+          'SELECT actor_id,state FROM local_owner_delete_journal').getSingle();
+      expect(persistedJournal.read<String>('actor_id'), actor);
+      expect(persistedJournal.read<String>('state'), 'awaiting_backend');
       expect(await LocalJobDeletionV3.blockedJobIds(reopened, business),
           contains(job));
       expect(await LocalJobDeletionV3.blockedDocumentIds(reopened, business),

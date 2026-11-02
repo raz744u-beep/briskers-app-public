@@ -212,6 +212,15 @@ class LocalJobGraphDelete {
     return found;
   }
 
+  Future<void> _ensureJournal() async {
+    await db.customStatement('''CREATE TABLE IF NOT EXISTS local_owner_delete_journal (
+      business_id TEXT NOT NULL, job_id TEXT NOT NULL, operation_id TEXT NOT NULL,
+      actor_id TEXT NOT NULL, entities_json TEXT NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('awaiting_backend','acknowledged','needs_review')),
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY(business_id, operation_id), UNIQUE(business_id, job_id))''');
+  }
+
   Future<List<Map<String, dynamic>>> preview({
     required String businessId, required String jobId,
     required String actorId,
@@ -233,6 +242,7 @@ class LocalJobGraphDelete {
   }) async {
     _assertOwner(businessId, actorId);
     await LocalJobDeletionV3.ensureSchema(db);
+    await _ensureJournal();
     final bytes = List<int>.generate(16, (_) => Random.secure().nextInt(256));
     bytes[6] = (bytes[6] & 15) | 64;
     bytes[8] = (bytes[8] & 63) | 128;
@@ -249,6 +259,18 @@ class LocalJobGraphDelete {
         throw StateError('Linked records changed. Review Delete Job again.');
       }
       _assertOwner(businessId, actorId);
+      // Preserve the original author and operation across restart. This is
+      // identity-only sync metadata, not a recovery copy of deleted records.
+      // No server path is activated until its reconciliation contract is verified.
+      final identities = current.map((row) => {
+        'entity_kind': row['kind'], 'entity_id': row['id'],
+      }).toList()..sort((a, b) => jsonEncode(a).compareTo(jsonEncode(b)));
+      await db.customStatement(
+        'INSERT INTO local_owner_delete_journal '
+        '(business_id,job_id,operation_id,actor_id,entities_json,state,created_at) '
+        'VALUES (?,?,?,?,?,?,?)',
+        [businessId, jobId, operation, actorId, jsonEncode(identities),
+          'awaiting_backend', DateTime.now().toUtc().millisecondsSinceEpoch]);
       // Permanent local tombstones are committed in the SAME transaction as
       // deletion. Sync can propagate them later, without server approval.
       for (final entry in current) {

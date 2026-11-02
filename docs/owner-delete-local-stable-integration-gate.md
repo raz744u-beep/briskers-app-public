@@ -55,3 +55,28 @@ for production installation or deletion of actual shop records yet.
 
 The target design is Owner-controlled, local-first, network-independent
 deletion. Prior synchronization must not by itself disqualify deletion.
+
+## Owner Delete 3 continuation
+
+- Added platform-protected Owner enrollment: fresh authenticated user and business
+  membership verification, device fingerprint/passcode challenge, account/session
+  binding, seven-day offline enrollment, two-minute action grants, and synchronous
+  grant invalidation on sign-out or account switch. Backgrounding locks idle grants.
+- Role-map injection is now a unit-test-only constructor that refuses release mode.
+  The production graph constructor accepts an unforgeable in-process Owner grant;
+  it checks that grant before and after preview and throughout confirmation.
+- Added native Android FragmentActivity/biometric configuration and iOS Face ID
+  description without changing app identifiers, signing, navigation or database name.
+  Secure enrollment is excluded from Android backup; other backup settings remain.
+- Added an identity-only deletion journal in the same local transaction as record
+  deletion and tombstones. It retains the author and original operation ID across
+  restart, with state `awaiting_backend`. It does not claim successful remote sync.
+- The regular Delete Job button is still **not wired to the new engine**. Enrollment
+  UI, complete production graph coverage and verified reconciliation remain gates.
+- Read-only inspection confirmed the production project has none of the four v3
+  preview/execute/status/feed endpoints. The sandbox local-registration endpoint
+  explicitly supports only `unpublished-local-job` and rejects remote identities.
+  It must not be reused as synchronization for previously synchronized jobs.
+- No backend changes or real shop-data tests were performed. The earlier corrected
+  installer preflight is conditional, sandbox-scoped, and does not establish safe
+  production deployment or full two-device acceptance.

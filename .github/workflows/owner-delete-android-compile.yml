@@ -39,4 +39,4 @@ jobs:
           dart run build_runner build --delete-conflicting-outputs
       - name: Compile native Android integration without packaging an APK
         working-directory: generated/android
-        run: ./gradlew :app:compileDebugKotlin
+        run: ./gradlew :app:compileReleaseKotlin
