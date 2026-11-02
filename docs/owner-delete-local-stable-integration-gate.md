@@ -17,7 +17,11 @@ for production installation or deletion of actual shop records yet.
 - The existing Jobs list is subscribed to local-purge events to remove matching Job rows and search hits immediately, followed by a local-first refresh. Navigation and unrelated screens are unchanged.
 - A paid-status Job, issued/closed invoice, converted estimate or unknown linked document kind blocks the incomplete local graph deletion rather than relying on an empty local payment cache.
 - Synthetic payment erasure is forcibly disabled in release mode, even if someone supplies a synthetic build flag.
-- Integration diagnostics at `6eeee8ce` passed 226 tests, 1 skipped; latest head with UI/release safeguards requires its own CI verification.
+- Verified application code at `a7a5aa4c46d78b2c14bcd9c5e9b46f3786f91cf8`:
+  diagnostics passed 254 tests, 1 skipped; the separate synthetic payment run
+  passed 24 tests, 1 skipped. These suites overlap and must not be summed.
+  The opposite-mode safety test is intentionally skipped in each configuration.
+  Flutter analysis, Android release Kotlin compilation, and iOS compilation passed.
 
 ## Confirmed Android TEST behavior
 - A locally stored synchronized sample Job TEST-7001 and its sample Invoice
@@ -80,3 +84,46 @@ deletion. Prior synchronization must not by itself disqualify deletion.
 - No backend changes or real shop-data tests were performed. The earlier corrected
   installer preflight is conditional, sandbox-scoped, and does not establish safe
   production deployment or full two-device acceptance.
+
+## Reproducible evidence and remaining implementation
+
+Application-code checks for `a7a5aa4c46d78b2c14bcd9c5e9b46f3786f91cf8`:
+
+- [Diagnostics and synthetic-payment tests](https://github.com/raz744u-beep/briskers-app-public/actions/runs/41377441655).
+- [Android release Kotlin compilation](https://github.com/raz744u-beep/briskers-app-public/actions/runs/41377441614).
+- [iOS compilation](https://github.com/raz744u-beep/briskers-app-public/actions/runs/41377441573).
+
+The recovered private corrected installer matches SHA-256
+`5550d232dbce31a611dd170403a2e5b3680b7bcc375eda1cd7351a210350e509`.
+`tools/owner_delete/verify_private_backend.mjs` provides a repeatable local
+emulator check without publishing the private source. Its five synthetic suites
+cover execution/rollback/retry/number fences, graph inventory, unpublished local
+cancellation, storage state transitions, and scoped tombstone feeds. Auth and
+Storage are emulated; this is not hosted or two-device acceptance.
+
+Read-only function comparison found a newer private-bucket witness check in the
+sandbox's storage inspection function. Preserve it. The archived installer is
+bound to an empty sandbox, refuses an existing v3 installation, and is not a
+production upgrade script.
+
+Release remains blocked by unfinished engineering, not by a request for the
+owner to repeat permission or supply the old source again:
+
+1. The protected Owner enrollment service still needs its regular-app user flow.
+2. The graph adapter still refuses financial/outbox relationships it cannot
+   safely reconcile. A protected-record correction/archive route is not complete.
+3. The journal is durable but has no active server consumer. The existing server
+   cancellation protocol covers unpublished jobs only. Server-issued v3 consent
+   expires after 24 hours; it cannot be silently renewed for an offline deletion
+   of a changed synchronized graph. This requires explicit reconciliation and
+   conflict handling before the regular Delete Job action is connected.
+4. A current-schema production migration, real-provider storage checks, and
+   multi-device resurrection tests remain unverified. Production has no v3
+   preview/execute/status/feed endpoints.
+5. No APK has been packaged or published for this continuation. Signing-certificate
+   comparison, version/package verification, upgrade-with-data retention, and
+   Samsung acceptance therefore remain outstanding.
+
+Do not describe the compile workflow as an APK build, or this branch as a
+completed feature/release candidate. Keep the production feature disabled and
+the PR in draft until these gaps are resolved.
