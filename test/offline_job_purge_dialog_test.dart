@@ -19,6 +19,26 @@ void main() {
     }), 'Queued payment · USD 200.00 · Cash');
   });
 
+  test('already formatted payment amount and method are never duplicated', () {
+    expect(offlinePurgeItemLabel({
+      'kind': 'payment',
+      'label': 'FAKE payment • 200.00 • TEST cash',
+      'amount_cents': 20000,
+      'method_name': 'TEST cash',
+      'currency': 'USD',
+    }), 'FAKE payment • 200.00 • TEST cash');
+  });
+
+  test('partially formatted labels receive only the missing detail', () {
+    expect(offlinePurgeItemLabel({
+      'kind': 'transaction',
+      'label': 'Payment via Cash',
+      'amount_cents': 12345,
+      'method_name': 'Cash',
+      'currency': 'USD',
+    }), 'Payment via Cash · USD 123.45');
+  });
+
   test('payment edit audit labels are unchanged', () {
     expect(offlinePurgeItemLabel({
       'kind': 'payment_edit_audit',
