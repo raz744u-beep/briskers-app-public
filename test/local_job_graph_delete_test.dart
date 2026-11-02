@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_job_deletion_v3.dart';
 import 'package:briskers_app/services/local_job_graph_delete.dart';
+import 'package:briskers_app/services/local_owner_authorization.dart';
 import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -15,6 +16,16 @@ const job = '10000000-0000-4000-8000-000000000002';
 const invoice = '10000000-0000-4000-8000-000000000003';
 const otherJob = '10000000-0000-4000-8000-000000000004';
 const actor = '10000000-0000-4000-8000-000000000005';
+
+class _OwnerStore implements OwnerEnrollmentStore {
+  String? record;
+  @override
+  Future<String?> read() async => record;
+  @override
+  Future<void> write(String value) async { record = value; }
+  @override
+  Future<void> clear() async { record = null; }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -57,6 +68,60 @@ void main() {
     );
     expect(await count('local_jobs'), 2);
     expect(await count('local_documents'), 1);
+  });
+
+  test('production constructor accepts a freshly authenticated Owner grant', () async {
+    const identity = OwnerSessionIdentity(actor, 'verified-session');
+    final authorization = LocalOwnerAuthorization(
+      store: _OwnerStore(), currentIdentity: () => identity,
+      verifyOwner: (business) async => VerifiedOwnerEnrollment(identity, business),
+      authenticateDevice: () async => true,
+    );
+    await authorization.enroll(business);
+    final engine = LocalJobGraphDelete(db,
+      ownerGrant: await authorization.unlock(business));
+    final reviewed = await engine.preview(
+      businessId: business, jobId: job, actorId: actor);
+    await engine.confirm(businessId: business, jobId: job,
+      actorId: actor, reviewed: reviewed);
+    expect(await count('local_jobs'), 1);
+    expect(await count('local_documents'), 0);
+  });
+
+  test('revoked protected grant rolls back data and markers during deletion', () async {
+    const identity = OwnerSessionIdentity(actor, 'verified-session');
+    var insideConfirmation = false;
+    var checks = 0;
+    final authorization = LocalOwnerAuthorization(
+      store: _OwnerStore(), currentIdentity: () {
+        if (insideConfirmation && ++checks >= 4) return null;
+        return identity;
+      },
+      verifyOwner: (business) async => VerifiedOwnerEnrollment(identity, business),
+      authenticateDevice: () async => true,
+    );
+    await authorization.enroll(business);
+    final engine = LocalJobGraphDelete(db,
+      ownerGrant: await authorization.unlock(business));
+    final reviewed = await engine.preview(
+      businessId: business, jobId: job, actorId: actor);
+    insideConfirmation = true;
+    await expectLater(engine.confirm(businessId: business, jobId: job,
+      actorId: actor, reviewed: reviewed), throwsStateError);
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  test('Owner account change during preview does not disclose its inventory', () async {
+    var checks = 0;
+    final engine = LocalJobGraphDelete.forTesting(db,
+      ownerIdentityProvider: () => ++checks < 3
+        ? {'actor_id': actor, 'business_id': business, 'role_code': 'owner'}
+        : null);
+    await expectLater(engine.preview(
+      businessId: business, jobId: job, actorId: actor), throwsStateError);
+    expect(await count('local_jobs'), 2);
   });
 
   test('paid synced Job without cached receipts is protected', () async {
