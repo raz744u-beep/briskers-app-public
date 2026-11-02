@@ -36,6 +36,31 @@ void main() {
       serverPaymentDate:'2026-10-19',
       serverLineCount:2,serverPaymentCount:count);
 
+  test('trusted server reconciliation refuses ambiguous identity', () async {
+    await seed();
+    final service=OwnerRecoveryReconciliation(database:db);
+    final proof=<String,dynamic>{
+      'business_id':'test','invoice_id':'server-invoice',
+      'job_id':'server-job','invoice_number':'8008','job_number':'J-8',
+      'total_cents':12500,'payment_cents':3000,
+      'payment_operation_id':'synthetic-op','payment_date':'2026-10-19',
+      'line_count':2,'payment_count':1,
+    };
+    Future<void> run(List<Map<String,dynamic>> rows) =>
+      service.reconcileFromTrustedServer(
+        isOwner:true,businessId:'test',localInvoiceId:'local-invoice',
+        invoiceNumber:'8008',jobNumber:'J-8',
+        fetchCandidates:(_,__) async => rows);
+    await expectLater(run([]),throwsStateError);
+    await expectLater(run([proof,proof]),throwsStateError);
+    await expectLater(run([{...proof,'business_id':'other'}]),throwsStateError);
+    expect((await db.customSelect(
+      "SELECT name FROM sqlite_master WHERE name='owner_recovery_aliases'").get()),
+      isEmpty);
+    await run([proof]);
+    expect((await db.customSelect(
+      'SELECT * FROM owner_recovery_aliases').get()).length,1);
+  });
   test('verified aliases are idempotent and keep payment held',() async {
     await seed();
     final service=OwnerRecoveryReconciliation(database:db);
