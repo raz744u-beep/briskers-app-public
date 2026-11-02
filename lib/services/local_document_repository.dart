@@ -44,13 +44,37 @@ class LocalDocumentRepository {
   // an exact invoice tombstone also applies after a stale reassignment response.
   static String _visibleDocumentSql(String alias) =>
       """
-    NOT EXISTS (SELECT 1 FROM local_job_retirement_entities r
+    NOT EXISTS (SELECT 1 FROM owner_recovery_aliases a
+      WHERE a.business_id = $alias.business_id
+        AND a.server_invoice_id = $alias.id
+        AND a.local_invoice_id <> $alias.id)
+    AND NOT EXISTS (SELECT 1 FROM local_job_retirement_entities r
       WHERE r.business_id = $alias.business_id
         AND r.state IN ('pending','accepted','locally_cancelled')
         AND ((r.entity_kind = 'invoice' AND r.entity_id = $alias.id)
           OR ($alias.kind = 'invoice' AND r.entity_kind = 'job'
             AND r.entity_id = $alias.job_id)))
   """;
+
+  Future<void> _ensureRecoveryAliasTable() async {
+    await _database.customStatement(
+      """CREATE TABLE IF NOT EXISTS owner_recovery_aliases (
+        business_id TEXT NOT NULL,
+        local_invoice_id TEXT NOT NULL,
+        server_invoice_id TEXT NOT NULL,
+        server_job_id TEXT NOT NULL,
+        payment_operation_id TEXT NOT NULL,
+        invoice_number TEXT NOT NULL,
+        job_number TEXT NOT NULL,
+        total_cents INTEGER NOT NULL,
+        payment_cents INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (business_id,local_invoice_id),
+        UNIQUE (business_id,server_invoice_id),
+        UNIQUE (business_id,payment_operation_id)
+      )""",
+    );
+  }
 
   // Capture complete deletion fences once per atomic writer transaction.
   // Rechecking them for every document caused thousands of SQLite round trips
@@ -59,6 +83,7 @@ class LocalDocumentRepository {
     String businessId,
   ) async {
     await LocalJobRetirement.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
     return (
       documents: await LocalJobRetirement.blockedDocumentIds(
         _database, businessId),
@@ -228,6 +253,7 @@ class LocalDocumentRepository {
     required String kind,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
     final rows = await _database
         .customSelect(
           '''
@@ -330,6 +356,7 @@ class LocalDocumentRepository {
     String documentId,
   ) async {
     await LocalJobRetirement.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
     final rows = await _database
         .customSelect(
           '''
@@ -353,6 +380,7 @@ class LocalDocumentRepository {
     String jobId,
   ) async {
     await LocalJobRetirement.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
     final rows = await _database
         .customSelect(
           '''
@@ -448,6 +476,7 @@ class LocalDocumentRepository {
     int limit = 25,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
     final where =
         '''
       d.business_id = ? AND d.kind = 'invoice'
@@ -508,6 +537,7 @@ class LocalDocumentRepository {
 
   Stream<int> watchOpenInvoiceCount(String businessId) async* {
     await LocalJobRetirement.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
     yield await openInvoiceCount(businessId);
     yield* _database.customSelect(
       '''SELECT (SELECT COUNT(*) FROM local_documents
@@ -526,6 +556,7 @@ class LocalDocumentRepository {
     int limit = 30,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    await _ensureRecoveryAliasTable();
     final value = query.trim().toLowerCase();
     if (value.isEmpty) return const [];
     final numeric = RegExp(r'^[0-9]+$').hasMatch(value);
