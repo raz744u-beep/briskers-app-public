@@ -44,11 +44,15 @@ String offlinePurgeItemLabel(Map<String, dynamic> item) {
       return label;
     }
     final currency = item['currency']?.toString().trim();
+    final alreadyShowsAmount = amount != null && label.contains(amount);
+    final alreadyShowsMethod = method != null &&
+        method.isNotEmpty &&
+        label.toLowerCase().contains(method.toLowerCase());
     final pieces = <String>[
       label,
-      if (amount != null)
+      if (amount != null && !alreadyShowsAmount)
         '${currency == null || currency.isEmpty ? '' : '$currency '}$amount',
-      if (method != null && method.isNotEmpty) method,
+      if (method != null && method.isNotEmpty && !alreadyShowsMethod) method,
     ];
     return pieces.join(' · ');
   }
