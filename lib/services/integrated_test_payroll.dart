@@ -1,8 +1,7 @@
 import 'dart:convert';
 import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
-import '../core/shop_payroll_preview.dart';
-import 'test_payroll_credit_repository.dart';
+import 'local_mechanic_work_credit_repository.dart';
 
 /// Local integration harness. Requires an explicitly supplied isolated database.
 /// No production database defaults, server client, or financial posting path.
@@ -41,7 +40,7 @@ class IntegratedTestPayroll {
           .toList();
   Future<void> prepare() => _prepared ??= _prepare();
   Future<void> _prepare() async {
-    await TestPayrollCreditRepository(database: db).prepare();
+    await LocalMechanicWorkCreditRepository(database: db).prepare();
     for (final sql in [
       '''CREATE TABLE IF NOT EXISTS it_jobs (business_id TEXT NOT NULL, id TEXT NOT NULL, label TEXT NOT NULL, PRIMARY KEY(business_id,id))''',
       '''CREATE TABLE IF NOT EXISTS it_tasks (business_id TEXT NOT NULL, id TEXT NOT NULL, job_id TEXT NOT NULL, labor_id TEXT NOT NULL, description TEXT NOT NULL, planned INTEGER NOT NULL CHECK(planned>=0), PRIMARY KEY(business_id,id), UNIQUE(business_id,job_id,labor_id))''',
@@ -53,8 +52,8 @@ class IntegratedTestPayroll {
       '''CREATE TABLE IF NOT EXISTS it_paid_base (business_id TEXT NOT NULL, employee_id TEXT NOT NULL, week TEXT NOT NULL, operation_id TEXT NOT NULL, amount INTEGER NOT NULL, PRIMARY KEY(business_id,employee_id,week))''',
       '''CREATE TABLE IF NOT EXISTS it_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, business_id TEXT NOT NULL, operation_id TEXT NOT NULL, event TEXT NOT NULL, payload TEXT NOT NULL)''',
       '''CREATE TABLE IF NOT EXISTS it_sync_outbox (business_id TEXT NOT NULL, operation_id TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'blocked_test', attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(business_id,operation_id))''',
-      '''CREATE TRIGGER IF NOT EXISTS it_credit_frozen_update BEFORE UPDATE ON test_payroll_credits WHEN OLD.paid=1 AND EXISTS(SELECT 1 FROM it_paid_work WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id) BEGIN SELECT RAISE(ABORT,'Paid credit is immutable'); END''',
-      '''CREATE TRIGGER IF NOT EXISTS it_credit_frozen_delete BEFORE DELETE ON test_payroll_credits WHEN EXISTS(SELECT 1 FROM it_paid_work WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id) BEGIN SELECT RAISE(ABORT,'Paid credit is immutable'); END''',
+      '''CREATE TRIGGER IF NOT EXISTS it_credit_frozen_update BEFORE UPDATE ON local_mechanic_work_credits_v1 WHEN OLD.paid_operation_id IS NOT NULL AND EXISTS(SELECT 1 FROM it_paid_work WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id) BEGIN SELECT RAISE(ABORT,'Paid credit is immutable'); END''',
+      '''CREATE TRIGGER IF NOT EXISTS it_credit_frozen_delete BEFORE DELETE ON local_mechanic_work_credits_v1 WHEN EXISTS(SELECT 1 FROM it_paid_work WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id) BEGIN SELECT RAISE(ABORT,'Paid credit is immutable'); END''',
       '''CREATE TRIGGER IF NOT EXISTS it_paid_work_frozen_update BEFORE UPDATE ON it_paid_work BEGIN SELECT RAISE(ABORT,'Paid work is immutable'); END''',
       '''CREATE TRIGGER IF NOT EXISTS it_paid_work_frozen_delete BEFORE DELETE ON it_paid_work BEGIN SELECT RAISE(ABORT,'Paid work is immutable'); END''',
       '''CREATE TRIGGER IF NOT EXISTS it_payments_frozen_update BEFORE UPDATE ON it_payments BEGIN SELECT RAISE(ABORT,'Payment is immutable'); END''',
@@ -164,16 +163,11 @@ class IntegratedTestPayroll {
         "INSERT INTO it_portions(business_id,id,task_id,employee_id,state) VALUES(?,?,?,?,'Open')",
         [business, id, task, employee],
       );
-      await TestPayrollCreditRepository(database: db).seedSyntheticCredit(
-        businessId: business,
-        credit: ShopPayrollAllocation(
-          id: id,
-          employeeId: employee,
-          hoursHundredths: tasks.single['planned'] as int,
-          rateCentsPerHour: staff.single['rate'] as int,
-          completed: false,
-          alreadyPaid: false,
-        ),
+      await LocalMechanicWorkCreditRepository(database: db).createAssignment(
+        businessId: business, allocationId: id, jobId: tasks.single['job_id'] as String,
+        laborLineId: tasks.single['labor_id'] as String, taskId: task, employeeId: employee,
+        actualMinutes: ((tasks.single['planned'] as int) * 60 + 50) ~/ 100,
+        rateCents: staff.single['rate'] as int,
       );
     });
   }
@@ -193,16 +187,17 @@ class IntegratedTestPayroll {
       { throw ArgumentError('Invalid work'); }
     await db.transaction(() async {
       final rows = await _read(
-        'SELECT c.*,p.state FROM test_payroll_credits c JOIN it_portions p ON p.business_id=c.business_id AND p.id=c.allocation_id WHERE c.business_id=? AND c.allocation_id=?',
+        'SELECT c.*,p.state FROM local_mechanic_work_credits_v1 c JOIN it_portions p ON p.business_id=c.business_id AND p.id=c.allocation_id WHERE c.business_id=? AND c.allocation_id=?',
         [business, id],
       );
-      if (rows.length != 1 || rows.single['paid'] != 0)
+      if (rows.length != 1 || rows.single['paid_operation_id'] != null)
         { throw StateError('Missing or paid work; add a recheck'); }
       if (state == 'Done' && rows.single['state'] == 'Open')
         { throw StateError('Start work before completion'); }
-      await db.customStatement(
-        'UPDATE test_payroll_credits SET hours_hundredths=?, completed=? WHERE business_id=? AND allocation_id=?',
-        [hours, state == 'Done' ? 1 : 0, business, id],
+      await LocalMechanicWorkCreditRepository(database: db).recordWork(
+        businessId: business, allocationId: id, employeeId: rows.single['employee_id'] as String,
+        expectedRevision: rows.single['revision'] as int,
+        actualMinutes: (hours * 60 + 50) ~/ 100, completed: state == 'Done',
       );
       await db.customStatement(
         'UPDATE it_portions SET state=?,version=version+1,completed_date=? WHERE business_id=? AND id=?',
@@ -234,7 +229,7 @@ class IntegratedTestPayroll {
     _authorize();
     await prepare();
     return _read(
-      '''SELECT p.*,t.description,t.job_id,c.hours_hundredths,c.rate_cents,c.paid FROM it_portions p JOIN it_tasks t ON t.business_id=p.business_id AND t.id=p.task_id JOIN test_payroll_credits c ON c.business_id=p.business_id AND c.allocation_id=p.id WHERE p.business_id=? ${employee == null ? '' : 'AND p.employee_id=?'} ORDER BY p.id''',
+      '''SELECT p.business_id,p.id,p.task_id,p.employee_id,p.state,p.completed_date,c.revision AS version,t.description,t.job_id,c.actual_minutes,(c.actual_minutes*100+30)/60 AS hours_hundredths,c.rate_cents,(c.actual_minutes*c.rate_cents+30)/60 AS gross_cents,CASE WHEN c.paid_operation_id IS NULL THEN 0 ELSE 1 END AS paid FROM it_portions p JOIN it_tasks t ON t.business_id=p.business_id AND t.id=p.task_id JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id WHERE p.business_id=? ${employee == null ? '' : 'AND p.employee_id=?'} ORDER BY p.id''',
       [business, ?employee],
     );
   }
@@ -326,6 +321,7 @@ class IntegratedTestPayroll {
                 'id': w['id'],
                 'version': w['version'],
                 'hours': w['hours_hundredths'],
+                'minutes': w['actual_minutes'],
                 'rate': w['rate_cents'],
               },
             )
@@ -372,6 +368,7 @@ class IntegratedTestPayroll {
             w['paid'] != 0 ||
             w['version'] != p['version'] ||
             w['hours_hundredths'] != p['hours'] ||
+            w['actual_minutes'] != p['minutes'] ||
             w['rate_cents'] != p['rate'])
           { throw StateError('Work changed or already paid'); }
         final completed = DateTime.parse(w['completed_date'] as String);
@@ -382,7 +379,7 @@ class IntegratedTestPayroll {
           { throw StateError(
             'Outside-week work requires an Owner override reason',
           ); }
-        gross += ((p['hours'] as int) * (p['rate'] as int) + 50) ~/ 100;
+        gross += ((p['minutes'] as int) * (p['rate'] as int) + 30) ~/ 60;
         snapshots.add(jsonEncode(w));
       }
       if (gross < 0 ||
@@ -421,8 +418,8 @@ class IntegratedTestPayroll {
           snapshots[i],
         ]);
         await db.customStatement(
-          'UPDATE test_payroll_credits SET paid=1 WHERE business_id=? AND allocation_id=?',
-          [business, picked[i]['id']],
+          'UPDATE local_mechanic_work_credits_v1 SET paid_operation_id=? WHERE business_id=? AND allocation_id=?',
+          [operation, business, picked[i]['id']],
         );
       }
       await db.customStatement(

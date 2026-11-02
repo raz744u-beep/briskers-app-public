@@ -110,6 +110,36 @@ class LocalMechanicWorkCreditRepository {
     });
   }
 
+  /// Version-checked local editing for the isolated integration workflow.
+  /// A paid portion is frozen. Completion of one employee never completes
+  /// another employee's portion on a shared task.
+  Future<void> recordWork({
+    required String businessId,
+    required String allocationId,
+    required String employeeId,
+    required int expectedRevision,
+    required int actualMinutes,
+    required bool completed,
+  }) async {
+    if ([businessId, allocationId, employeeId].any((id) => id.trim().isEmpty) || actualMinutes < 0) {
+      throw ArgumentError('Invalid work identity or minutes');
+    }
+    await prepare();
+    await _db.transaction(() async {
+      final rows = await _db.customSelect(
+        'SELECT revision, paid_operation_id FROM local_mechanic_work_credits_v1 WHERE business_id=? AND allocation_id=? AND employee_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(allocationId), Variable<String>(employeeId)],
+      ).get();
+      if (rows.length != 1 || rows.single.read<int>('revision') != expectedRevision || rows.single.read<String?>('paid_operation_id') != null) {
+        throw StateError('Work changed or is already paid');
+      }
+      await _db.customStatement(
+        'UPDATE local_mechanic_work_credits_v1 SET actual_minutes=?, completed=?, revision=revision+1 WHERE business_id=? AND allocation_id=? AND employee_id=?',
+        [actualMinutes, completed ? 1 : 0, businessId, allocationId, employeeId],
+      );
+    });
+  }
+
   Future<List<Map<String, Object?>>> completedUnpaid({
     required String businessId,
     required String employeeId,

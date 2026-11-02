@@ -79,12 +79,18 @@ void main() {
     await expectLater(pay(repayment:1,net:9999),throwsStateError);
     await expectLater(pay(net:9999),throwsStateError);
     await outside('Owner includes late completed work');expect((await r.history('chris')).single['gross'],10000);
-    await expectLater(db.customStatement('UPDATE test_payroll_credits SET hours_hundredths=0 WHERE paid=1'),throwsA(isA<Exception>()));
+    await expectLater(db.customStatement('UPDATE local_mechanic_work_credits_v1 SET actual_minutes=0 WHERE paid_operation_id IS NOT NULL'),throwsA(isA<Exception>()));
   });
   test('base payment also rolls back and non Owner cannot verify',()async{
     await expectLater(pay(employee:'base',base:10000,selected:[],net:10000,fault:()async{throw StateError('Abort');}),throwsStateError);
     expect(await count('it_paid_base'),0);expect(await count('it_payments'),0);
     final denied=IntegratedTestPayroll(db,owner:false);
     await expectLater(denied.verify(operation:'forbidden',employee:'base',week:'2026-11-02',date:'2026-11-02',method:'Cash',selected:[],base:10000,hourlyAdjustment:0,adjustmentReason:'',repayment:0,confirmedNet:10000),throwsStateError);
+  });
+  test('minute work credit is authoritative for cents rounding',()async{
+    await done('chris',1);
+    final work=(await r.work(employee:'chris')).single;
+    expect(work['actual_minutes'],1);expect(work['gross_cents'],67);
+    await pay(net:67);expect((await r.history('chris')).single['gross'],67);
   });
 }

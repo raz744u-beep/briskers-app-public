@@ -210,7 +210,7 @@ class _IntegratedPayrollHomeState extends State<IntegratedPayrollHome> {
   Future<void> _edit(Map<String, dynamic> w, String state) async {
     final v = await _form(
       state == 'Done' ? 'Complete own work' : 'Edit / start own work',
-      ['Actual hours'],
+      ['Actual hours (rounded to nearest minute)'],
       [((w['hours_hundredths'] as int) / 100).toStringAsFixed(2)],
     );
     if (v != null)
@@ -224,16 +224,7 @@ class _IntegratedPayrollHomeState extends State<IntegratedPayrollHome> {
         (w) => _selected.contains(w['id']) && w['employee_id'] == _employee,
       )
       .toList();
-  int _gross() =>
-      _picked.fold<int>(
-        0,
-        (sum, w) =>
-            sum +
-            ((w['hours_hundredths'] as int) * (w['rate_cents'] as int) + 50) ~/
-                100,
-      ) +
-      decimal(_base.text) +
-      decimal(_adjust.text);
+  int _gross() => _picked.fold<int>(0, (sum,w) => sum + (w['gross_cents'] as int)) + decimal(_base.text) + decimal(_adjust.text);
   Future<void> _verify() async {
     try {
       final picked = _picked,
@@ -424,7 +415,7 @@ class _IntegratedPayrollHomeState extends State<IntegratedPayrollHome> {
             '${w['description']} • ${(w['hours_hundredths'] as int) / 100} hrs',
           ),
           subtitle: Text(
-            'Completed ${w['completed_date']} • ${money(((w['hours_hundredths'] as int) * (w['rate_cents'] as int) + 50) ~/ 100)}',
+            'Completed ${w['completed_date']} • ${money(w['gross_cents'] as int)}',
           ),
           value: _selected.contains(w['id']),
           onChanged: _busy

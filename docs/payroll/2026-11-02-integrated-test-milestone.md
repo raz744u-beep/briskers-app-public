@@ -7,7 +7,7 @@ This is a functional **isolated local workflow milestone**, not a production int
 - Create local TEST jobs; add one or more invoice-style labor lines, each producing a service task; assign multiple TEST mechanics.
 - Each mechanic starts work, edits actual hours, completes independently. One completed mechanic portion can be paid while another remains open. Job task counts/status derive from local state.
 - Employee profile: Details, Tasks, Payroll, Reports, Taxes & 1099. Payroll selects completed unpaid portions for a Monday-based payroll week. Outside-week selections require an Owner reason.
-- Integer-cents earnings at snapshotted assignment rates; independent weekly base for the base-enabled TEST employee; signed hourly earnings adjustment requiring an Owner reason.
+- Integer-cents earnings from the existing durable `LocalMechanicWorkCreditRepository`, at snapshotted assignment rates (actual time rounds to the nearest minute; pay is computed from minutes); independent weekly base for the base-enabled TEST employee; signed hourly earnings adjustment requiring an Owner reason.
 - Review and Verify Payment: method, date, gross, explicit advance repayment and net. Partial-job pay does not close work, jobs or invoices.
 - One SQLite transaction validates selected work versions, writes immutable payment/work snapshots, marks credits paid, records a weekly base once, deducts repayment, writes audit, and enqueues a unique blocked TEST sync operation. Exact retries return the existing operation; conflicting or overlapping requests fail.
 - Paid portions cannot reopen or change. Add a new labor/recheck line to represent additional work. Unpaid work can reopen, invalidating stale selections.
@@ -18,6 +18,7 @@ This is a functional **isolated local workflow milestone**, not a production int
 - The existing regular invoice editor, existing Job screens and existing employee records are **not wired into this milestone**. Local TEST jobs/labor/employees are created through the integration harness. This is beyond the old calculation demo but is not full regular-app integration.
 - Local TEST Owner role is fixed; real device/PIN identity and mechanic session permissions are not integrated. Repository non-Owner guards are regression-tested, not proof of production authentication.
 - Invoice document/customer creation, customer payment/final closure prompts, production tax/1099 export and editing employee details are not implemented here. The Taxes tab shows recorded gross only.
+- The existing durable work-credit repository is reused; its `recordWork` method adds revision-checked time edits. No second synthetic credit ledger is used by this entry point.
 - Sync delivery and financial posting remain disabled. Blocked TEST outbox rows exercise transaction persistence but do not claim verified server synchronization/idempotency.
 - No physical Note 9 validation of this new APK has been claimed. CI validates API 29 emulator installation, launch, native SQLite persistence and reboot, provided all workflow steps pass.
 
