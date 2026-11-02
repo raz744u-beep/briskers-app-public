@@ -59,6 +59,34 @@ void main() {
     expect(await count('local_documents'), 1);
   });
 
+  test('paid synced Job without cached receipts is protected', () async {
+    await db.customStatement(
+      "UPDATE local_jobs SET payment_state='paid' "
+      "WHERE business_id=? AND id=?", [business, job],
+    );
+    await expectLater(
+      deletion.preview(businessId: business, jobId: job, actorId: actor),
+      throwsStateError,
+    );
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  test('issued invoice without cached receipts cannot be silently deleted', () async {
+    await db.customStatement(
+      "UPDATE local_documents SET status='issued' "
+      "WHERE business_id=? AND id=?", [business, invoice],
+    );
+    await expectLater(
+      deletion.preview(businessId: business, jobId: job, actorId: actor),
+      throwsStateError,
+    );
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
   test('genuine queued payment cannot be silently discarded', () async {
     await db.customStatement(
       "INSERT INTO sync_outbox "
