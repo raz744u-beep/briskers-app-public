@@ -152,7 +152,7 @@ void main() {
           contains(invoice));
       final rows = await reopened.customSelect(
           'SELECT COUNT(*) AS n FROM local_jobs WHERE business_id=? AND id=?',
-          variables: [Variable<String>(business), Variable<String>(job)]).getSingle();
+          variables: [const Variable<String>(business), const Variable<String>(job)]).getSingle();
       expect(rows.read<int>('n'), 0);
     } finally {
       if (first != null) await first.close();
