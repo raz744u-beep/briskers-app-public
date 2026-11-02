@@ -43,7 +43,7 @@ void main() {
     expect(home, contains('documentId: invoiceId,'));
     expect(home, contains('freshlyCreated: true,'));
     expect(list, contains('freshlyCreated: true,'));
-    expect(job, contains('await _openDocument(id!, freshlyCreated: true);'));
+    expect(job, contains('await _openDocument(id, freshlyCreated: true);'));
     expect(job, contains('freshlyCreated: freshlyCreated,'));
   });
 
