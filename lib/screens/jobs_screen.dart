@@ -8,6 +8,7 @@ import '../core/connection_mode.dart';
 import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
+import '../services/local_job_deletion_v3.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/local_document_repository.dart';
 import '../services/local_job_repository.dart';
@@ -52,6 +53,7 @@ class _JobsScreenState extends State<JobsScreen> {
   String? _selectedStatus;
   final TextEditingController _search = TextEditingController();
   Timer? _searchDebounce;
+  StreamSubscription<({String businessId, Set<String> jobIds})>? _purgeSubscription;
   int _loadGeneration = 0;
   int _totalCount = 0;
   Map<String, int> _statusCounts = const {};
@@ -69,11 +71,28 @@ class _JobsScreenState extends State<JobsScreen> {
   @override
   void initState() {
     super.initState();
+    // A successful local purge should disappear from the visible list on the
+    // same frame, without waiting for a network refresh.
+    _purgeSubscription = LocalJobDeletionV3.events.listen((event) {
+      if (!mounted || event.businessId != widget.businessId) return;
+      setState(() {
+        _rows = _rows
+            ?.where((row) => !event.jobIds.contains(row['id']?.toString()))
+            .toList();
+        _documentMatches = _documentMatches
+            .where((row) =>
+                !event.jobIds.contains(row['job_id']?.toString()))
+            .toList();
+      });
+      widget.onJobsChanged?.call();
+      unawaited(_load());
+    });
     _load();
   }
 
   @override
   void dispose() {
+    _purgeSubscription?.cancel();
     _searchDebounce?.cancel();
     _search.dispose();
     super.dispose();
