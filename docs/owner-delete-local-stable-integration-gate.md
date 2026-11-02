@@ -13,6 +13,11 @@ for production installation or deletion of actual shop records yet.
 - Unit tests cover local atomic removal/markers, scope and role rejection, revision/preview race rollback, unrelated record preservation, pending payment protection and queued edit refusal.
 - Synthetic-only payment and audit erasure remains isolated by the `BRISKERS_SYNTHETIC_BUILD` build flag and is **not enabled in the regular app**.
 - No changes to production data, production network deletion, app signing identity, package ID or Android navigation.
+- Job bootstrap and incremental server bundles now skip local purge tombstones **before modifying children**. Document index replace/upsert also skips deleted document IDs and documents whose Job is tombstoned. Synthetic tests cover both paths and unrelated business isolation.
+- The existing Jobs list is subscribed to local-purge events to remove matching Job rows and search hits immediately, followed by a local-first refresh. Navigation and unrelated screens are unchanged.
+- A paid-status Job, issued/closed invoice, converted estimate or unknown linked document kind blocks the incomplete local graph deletion rather than relying on an empty local payment cache.
+- Synthetic payment erasure is forcibly disabled in release mode, even if someone supplies a synthetic build flag.
+- Integration diagnostics at `6eeee8ce` passed 226 tests, 1 skipped; latest head with UI/release safeguards requires its own CI verification.
 
 ## Confirmed Android TEST behavior
 - A locally stored synchronized sample Job TEST-7001 and its sample Invoice
