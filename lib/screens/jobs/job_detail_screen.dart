@@ -3269,9 +3269,13 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   }
 
   Future<void> _createInvoice() async {
-    if (!_canSeeFinancial) return;
+    if (!_canSeeFinancial || _busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
     String? id;
-    await _run(() async {
+    try {
       id = BriskersConnectionModeController.instance.forceOffline
           ? await _offlineDocumentDraft.createQuickInvoice(widget.businessId,
               existingJobId:widget.jobId,
@@ -3280,9 +3284,15 @@ class _JobDetailScreenState extends State<JobDetailScreen>
               vehicleId:_job?['vehicle_id']?.toString(),
               vehicleLabel:(_job?['vehicle_label'] ?? _job?['vehicle'])?.toString())
           : await _api.createInvoice(widget.businessId, widget.jobId);
-    });
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
     if (!mounted || id == null) return;
-    await _openDocument(id!, freshlyCreated: true);
+    // Do not wait for a full Job refresh before showing a saved new invoice.
+    await _openDocument(id, freshlyCreated: true);
   }
 
   Future<void> _addPayment() async {
