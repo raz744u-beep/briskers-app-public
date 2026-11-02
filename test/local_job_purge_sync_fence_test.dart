@@ -28,7 +28,7 @@ Map<String, dynamic> _bundle(String id) => {
 class _StaleServerApi extends BriskersApi {
   @override
   Future<Map<String, dynamic>> syncPullJobsBootstrap(
-    String businessId, {String? afterJobId, int limit = 25},
+    String businessId, {String? afterJobId, int limit = 25}
   ) async => {
     'mode': 'bootstrap',
     'bootstrap_cursor': 20,
@@ -39,7 +39,7 @@ class _StaleServerApi extends BriskersApi {
 
   @override
   Future<Map<String, dynamic>> syncPullJobs(
-    String businessId, {int? afterCursor, int limit = 250},
+    String businessId, {int? afterCursor, int limit = 250}
   ) async {
     expect(afterCursor, 20);
     return {
