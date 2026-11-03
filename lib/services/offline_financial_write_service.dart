@@ -32,6 +32,73 @@ class OfflineFinancialWriteService {
   final FinancialMediaDirectoryProvider _mediaDirectoryProvider;
   final Random _random = Random.secure();
 
+  /// Local JSON projection of the existing receipt-details and receipt-items
+  /// records. Stored in the same SQLite transaction as the expense and queue.
+  Map<String, dynamic> _receiptProjection(
+    String transactionId,
+    Map<String, dynamic> extraction,
+  ) {
+    final parts = <Map<String, dynamic>>[];
+    final raw = extraction['items'];
+    if (raw is List) {
+      for (final row in raw) {
+        if (row is! Map) continue;
+        parts.add(<String, dynamic>{
+          'transaction_id': transactionId,
+          'position': parts.length + 1,
+          'description': row['description'],
+          'sku': row['sku'],
+          'quantity': row['quantity'],
+          'unit_price': row['unit_price'],
+          'total_amount': row['total_amount'],
+        });
+      }
+    }
+    return <String, dynamic>{
+      'receipt_extraction': extraction,
+      'receipt_details': <String, dynamic>{
+        'transaction_id': transactionId,
+        'vendor_invoice_number': extraction['vendor_invoice_number'],
+        'receipt_date': extraction['receipt_date'],
+        'receipt_total': extraction['receipt_total'],
+        'item_summary': parts
+            .map((row) => row['description']?.toString() ?? '')
+            .where((text) => text.trim().isNotEmpty)
+            .take(10).join(', '),
+        'extraction_source': extraction['extraction_source'] ?? 'on_device_ocr',
+        'raw_data': extraction['raw_data'] ?? <String, dynamic>{},
+      },
+      'receipt_items': parts,
+    };
+  }
+
+  Future<void> _enqueueReceiptExtraction(
+    String businessId,
+    String transactionId,
+    Map<String, dynamic> extraction,
+  ) async {
+    if (extraction['review_confirmed'] != true) return;
+    // Collapse queued review revisions: one authoritative set per expense.
+    await _database.customStatement(
+      "DELETE FROM sync_outbox WHERE business_id = ? "
+      "AND entity_type = 'financial_receipt_extraction' "
+      "AND entity_id = ? AND state = 'pending'",
+      [businessId, transactionId],
+    );
+    await _enqueue(
+      businessId,
+      'financial_receipt_extraction',
+      transactionId,
+      'apply',
+      <String, dynamic>{
+        'transaction_id': transactionId,
+        'extraction': extraction,
+      },
+    );
+  }
+
+
+
   String _operationId(String prefix) {
     final now = DateTime.now().toUtc().microsecondsSinceEpoch;
     final salt = _random.nextInt(1 << 32).toRadixString(16);
@@ -181,6 +248,7 @@ class OfflineFinancialWriteService {
     String? remarks,
     String? contextLabel,
     required List<Map<String, dynamic>> receipts,
+    Map<String, dynamic>? receiptExtraction,
   }) async {
     final operationId = _operationId('financial-create');
     final localId = 'local-transaction-$operationId';
@@ -211,6 +279,9 @@ class OfflineFinancialWriteService {
       attachments.addAll(
         await _queueReceipts(businessId, localId, receipts),
       );
+      if (receiptExtraction != null) {
+        await _enqueueReceiptExtraction(businessId, localId, receiptExtraction);
+      }
 
     final cleanCounterparty =
         (counterpartyName ?? '').trim().isEmpty
@@ -261,6 +332,8 @@ class OfflineFinancialWriteService {
       'editable': true,
       'deletable': false,
       'attachments': attachments,
+      if (receiptExtraction != null)
+        ..._receiptProjection(localId, receiptExtraction),
     };
     await _cache.saveTransactionDetail(
       businessId,
@@ -288,6 +361,7 @@ class OfflineFinancialWriteService {
     String? remarks,
     String? contextLabel,
     List<Map<String, dynamic>> receipts = const [],
+    Map<String, dynamic>? receiptExtraction,
   }) async {
     // Keep the edit, all prior attachments, and new upload operations atomic.
     // A retry after a failed local write cannot append a second copy.
@@ -363,6 +437,9 @@ class OfflineFinancialWriteService {
       attachments.addAll(
         await _queueReceipts(businessId, transactionId, receipts),
       );
+      if (receiptExtraction != null) {
+        await _enqueueReceiptExtraction(businessId, transactionId, receiptExtraction);
+      }
 
       final summary = <String, dynamic>{
         'id': transactionId,
@@ -404,6 +481,8 @@ class OfflineFinancialWriteService {
         'editable': true,
         'deletable': false,
         'attachments': attachments,
+        if (receiptExtraction != null)
+          ..._receiptProjection(transactionId, receiptExtraction),
       };
       await _cache.saveTransactionDetail(
         businessId,
@@ -425,7 +504,8 @@ class OfflineFinancialWriteService {
         AND entity_type IN (
           'financial_create',
           'financial_update',
-          'financial_photo'
+          'financial_photo',
+          'financial_receipt_extraction'
         )
       ORDER BY id
       ''',
@@ -462,6 +542,8 @@ class OfflineFinancialWriteService {
           await _flushUpdate(businessId, outboxId, payload);
         } else if (type == 'financial_photo') {
           await _flushPhoto(businessId, outboxId, payload);
+        } else if (type == 'financial_receipt_extraction') {
+          await _flushReceiptExtraction(businessId, outboxId, payload);
         }
       } catch (error) {
         await _database.customStatement(
@@ -542,6 +624,9 @@ class OfflineFinancialWriteService {
             ...detail,
             'id': serverId,
             'sync_state': 'pending',
+            if (detail['receipt_extraction'] is Map)
+              ..._receiptProjection(serverId,
+                Map<String, dynamic>.from(detail['receipt_extraction'] as Map)),
           },
         );
       }
@@ -551,7 +636,7 @@ class OfflineFinancialWriteService {
         SELECT id, payload_json
         FROM sync_outbox
         WHERE business_id = ?
-          AND entity_type = 'financial_photo'
+          AND entity_type IN ('financial_photo', 'financial_receipt_extraction')
           AND state = 'pending'
         ''',
         variables: [Variable<String>(businessId)],
@@ -610,6 +695,36 @@ class OfflineFinancialWriteService {
       await _database.customStatement(
         'DELETE FROM sync_outbox WHERE id = ?',
         [outboxId],
+      );
+    });
+  }
+
+  /// Supabase only receives confirmed receipt structure during background
+  /// synchronization. Recognition and local saving do not use Supabase.
+  Future<void> _flushReceiptExtraction(
+    String businessId,
+    int outboxId,
+    Map<String, dynamic> payload,
+  ) async {
+    final transactionId = payload['transaction_id']?.toString() ?? '';
+    if (transactionId.startsWith('local-transaction-')) return;
+    final extraction = payload['extraction'];
+    if (extraction is! Map || extraction['review_confirmed'] != true) {
+      throw StateError('Unconfirmed receipt cannot be synchronized.');
+    }
+    await LocalJobQuarantine.guardReplay(
+      _database, businessId,
+      () => _api.applyExpenseReceiptExtraction(
+        businessId, transactionId, Map<String, dynamic>.from(extraction),
+      ),
+      outboxId: outboxId,
+    );
+    await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database, businessId, outboxId: outboxId,
+      );
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE id = ?', [outboxId],
       );
     });
   }

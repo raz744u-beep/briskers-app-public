@@ -44,4 +44,27 @@ void main() {
     expect(dateTile, contains('subtitle: Text('));
     expect(source, contains('backgroundColor: BriskersColors.expenses'));
   });
+
+  test('TEST scanner identifies the installed build and acknowledges every tap', () {
+    final harness = File('lib/screens/expenses/receipt_scan_test_harness.dart')
+        .readAsStringSync();
+    expect(harness, contains("'BRISKERS_SOURCE'"));
+    expect(harness, contains('Installed TEST build:'));
+    expect(harness, contains('onPressed: _openingScanner ? null : _showScanChoices'));
+    expect(harness, contains('_scanTapCount++'));
+    expect(harness, contains('Scanner status:'));
+    expect(harness, contains("Text('Take receipt photo')"));
+    expect(harness, contains("Text('Choose from gallery')"));
+    expect(harness, contains('initialReceiptSource: source'));
+    expect(harness, contains('Could not open receipt editor'));
+  });
+
+  test('receipt picker errors are visible and can be retried', () {
+    final editor = File('lib/screens/expenses/expense_entry_screen.dart')
+        .readAsStringSync();
+    expect(editor, contains('source: widget.initialReceiptSource'));
+    expect(editor, contains('final file = await _picker.pickImage(source: source)'));
+    expect(editor, contains('Receipt photo picker error:'));
+    expect(editor, contains('ScaffoldMessenger.of(context).showSnackBar('));
+  });
 }

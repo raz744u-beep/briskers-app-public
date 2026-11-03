@@ -14,18 +14,22 @@ class BriskersConnectionModeController extends ChangeNotifier {
       BriskersConnectionModeController._();
 
   static const _preferenceKey = 'briskers_connection_mode';
+  // Isolated APK only; a normal release does not define this flag.
+  static const bool receiptTestBuild = bool.fromEnvironment('BRISKERS_RECEIPT_TEST');
 
   BriskersConnectionMode _mode = BriskersConnectionMode.auto;
 
   int _revision = 0;
   int get revision => _revision;
 
-  BriskersConnectionMode get mode => _mode;
+  BriskersConnectionMode get mode => receiptTestBuild
+      ? BriskersConnectionMode.offline : _mode;
 
-  bool get forceOffline => _mode == BriskersConnectionMode.offline;
-  bool get forceOnline => _mode == BriskersConnectionMode.online;
+  bool get forceOffline => receiptTestBuild || _mode == BriskersConnectionMode.offline;
+  bool get forceOnline => !receiptTestBuild && _mode == BriskersConnectionMode.online;
 
   String get label {
+    if (receiptTestBuild) return 'Receipt TEST • Offline';
     switch (_mode) {
       case BriskersConnectionMode.auto:
         return 'Auto';
@@ -54,7 +58,7 @@ class BriskersConnectionModeController extends ChangeNotifier {
   }
 
   Future<void> setMode(BriskersConnectionMode value) async {
-    if (_mode == value) return;
+    if (receiptTestBuild || _mode == value) return;
     _revision++;
     _mode = value;
     notifyListeners();
