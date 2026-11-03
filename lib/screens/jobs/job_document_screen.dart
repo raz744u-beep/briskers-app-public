@@ -14,6 +14,7 @@ import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
 import '../../core/module_modal_theme.dart';
 import '../../widgets/estimate_merge_confirmation_dialog.dart';
 import '../../widgets/document_identity_app_bar.dart';
+import '../../widgets/financial_summary_row.dart';
 import '../../widgets/stale_keyboard_inset_guard.dart';
 import '../../services/vehicle_finding_actions_service.dart';
 import '../../services/offline_work_findings_service.dart';
@@ -6117,8 +6118,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
             child: Column(
               children: [
-                _AmountRow(
+                FinancialSummaryRow(
                   label: 'Subtotal',
+                  tone: FinancialSummaryTone.subtotal,
                   value: _money(
                     lines
                         .where((line) => line['line_kind'] != 'discount')
@@ -6160,10 +6162,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                       : null,
                 ),
                 const Divider(height: 18),
-                _AmountRow(
-                  label: 'TOTAL',
+                FinancialSummaryRow(
+                  label: 'Total',
                   value: _money(_detail!['total_amount']),
-                  bold: true,
+                  tone: FinancialSummaryTone.total,
                 ),
                 if (_detail?['_local_tax_sync_state'] != null)
                   Padding(
@@ -6191,10 +6193,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                         ? const Color(0xFF0C9A43)
                         : null,
                   ),
-                  _AmountRow(
+                  FinancialSummaryRow(
                     label: 'Balance Due',
                     value: _money(balance < 0 ? 0 : balance),
-                    bold: balance > 0,
+                    tone: FinancialSummaryTone.balanceDue,
                   ),
                 ],
               ],
