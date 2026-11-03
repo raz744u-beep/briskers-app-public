@@ -306,8 +306,7 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            EmployeeNicknameStore.displayName(employee) +
-                                ' — ' + position,
+                            '${EmployeeNicknameStore.displayName(employee)} — $position',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
