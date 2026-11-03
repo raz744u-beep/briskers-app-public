@@ -128,7 +128,10 @@ void main() {
       expect(action, contains('backgroundColor: Colors.teal.shade700'));
       expect(action, contains('Icon(Icons.photo_library_outlined, color: Colors.teal)'));
       expect(action, contains('Icon(Icons.photo_camera_outlined, color: Colors.teal)'));
-      expect(action, contains('if (controller.text.trim().isEmpty) return;'));
+      expect(action, contains('if (controller.text.trim().isEmpty) {'));
+      expect(action, contains('errorText: findingInputError'));
+      expect(action, contains('setSheetState(() => findingInputError ='));
+      expect(action, contains('return;'));
       final cancel = action.indexOf('if (save != true || body.isEmpty) return;');
       expect(cancel, greaterThan(0));
       expect(action.indexOf(entry.mutation), greaterThan(cancel));
