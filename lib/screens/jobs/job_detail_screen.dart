@@ -26,6 +26,7 @@ import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/local_customer_repository.dart';
 import '../../core/job_mileage_summary.dart';
+import '../../core/job_findings_edit_policy.dart';
 import '../../services/offline_invoice_mileage_service.dart';
 import '../../widgets/job_mileage_row.dart';
 import '../../widgets/local_first_attachment_image.dart';
@@ -213,8 +214,14 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       _jobCapability('request_job');
   bool get _canEditWork =>
       _job?['_first_frame_only'] != true && _jobCapability('edit_work');
-  bool get _canEditFindings =>
-      _job?['_first_frame_only'] != true && _jobCapability('edit_findings');
+  bool get _canEditFindings => canEditJobFindings(
+    firstFrameOnly: _job?['_first_frame_only'] == true,
+    contentBlocked: _contentBlocked,
+    serverAllows: _jobCapability('edit_findings'),
+    onlineReady: _onlineReady,
+    isOwner: _owner,
+    verifiedLocal: _job?['_local_snapshot'] == true,
+  );
   bool get _canEditInspection =>
       _job?['_first_frame_only'] != true &&
       !_contentBlocked &&
