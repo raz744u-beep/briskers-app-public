@@ -2,6 +2,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../services/local_financial_cache.dart';
 import 'expense_entry_screen.dart';
@@ -20,6 +21,7 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
   final _cache = LocalFinancialCache();
   List<Map<String, dynamic>> _rows = const [];
   String? _error;
+  bool _openingScanner = false;
 
   @override
   void initState() {
@@ -40,16 +42,57 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
   }
 
   Future<void> _scan() async {
-    await Navigator.push<bool>(
-      context,
-      MaterialPageRoute<bool>(
-        builder: (_) => const ExpenseEntryScreen(
-          businessId: business,
-          autoScanReceipt: true,
+    if (_openingScanner) return;
+
+    // A visible choice confirms the button was pressed and provides a gallery
+    // fallback on devices where Android blocks the external camera intent.
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(title: Text('Scan receipt offline'),
+              subtitle: Text('Choose a camera photo or one on this phone.')),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Take receipt photo'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+            ),
+          ],
         ),
       ),
     );
-    await _reload();
+    if (!mounted || source == null) return;
+
+    setState(() {
+      _openingScanner = true;
+      _error = null;
+    });
+    try {
+      await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) => ExpenseEntryScreen(
+            businessId: business,
+            autoScanReceipt: true,
+            initialReceiptSource: source,
+          ),
+        ),
+      );
+      if (mounted) await _reload();
+    } catch (error, stack) {
+      debugPrint('Receipt test navigation failed: $error\\n$stack');
+      if (mounted) setState(() =>
+        _error = 'Could not open the receipt editor: $error');
+    } finally {
+      if (mounted) setState(() => _openingScanner = false);
+    }
   }
 
   Future<void> _open(Map<String, dynamic> row) async {
@@ -132,9 +175,15 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
               ),
               const SizedBox(height: 18),
               FilledButton.icon(
-                onPressed: _scan,
-                icon: const Icon(Icons.document_scanner_outlined),
-                label: const Text('AI Scan Receipt'),
+                onPressed: _openingScanner ? null : _scan,
+                icon: _openingScanner
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.document_scanner_outlined),
+                label: Text(_openingScanner
+                    ? 'Opening receipt editor…' : 'AI Scan Receipt'),
               ),
               const SizedBox(height: 18),
               Text('Saved local expenses: ' + _rows.length.toString(),
