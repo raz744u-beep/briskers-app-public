@@ -177,7 +177,7 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
               ),
               const SizedBox(height: 12),
               const Text('Installed TEST build: $buildCommit',
-                style: const TextStyle(fontWeight: FontWeight.bold)),
+                style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed: _openingScanner ? null : _showScanChoices,
