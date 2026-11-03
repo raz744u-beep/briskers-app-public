@@ -176,7 +176,7 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
                 'Your installed shop app and its invoices are untouched.',
               ),
               const SizedBox(height: 12),
-              Text('Installed TEST build: $buildCommit',
+              const Text('Installed TEST build: $buildCommit',
                 style: const TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               FilledButton.icon(
