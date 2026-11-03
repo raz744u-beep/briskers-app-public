@@ -1,4 +1,4 @@
-name: Briskers LAN two-Android AUTO TEST APK
+name: Briskers LAN AUTO TEST 17 APK
 
 on:
   workflow_dispatch:
@@ -29,7 +29,7 @@ jobs:
           mkdir generated
           cd generated
           # Different applicationId from the installed Briskers business app.
-          flutter create --platforms=android --org com.briskers.lanauto16 --project-name briskers_app .
+          flutter create --platforms=android --org com.briskers.lanauto17 --project-name briskers_app .
           rm -rf lib test
           cp -R ../lib ./lib
           cp -R ../test ./test
@@ -44,7 +44,7 @@ jobs:
               '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
               '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
               '    <uses-permission android:name="android.permission.INTERNET" />')
-          content = content.replace('android:label="briskers_app"', 'android:label="Briskers LAN AUTO TEST 16" android:usesCleartextTraffic="true"')
+          content = content.replace('android:label="briskers_app"', 'android:label="Briskers LAN AUTO TEST 17" android:usesCleartextTraffic="true"')
           p.write_text(content)
           gradle = Path('android/app/build.gradle.kts')
           code = gradle.read_text()
@@ -52,7 +52,7 @@ jobs:
           code = code.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 36')
           gradle.write_text(code)
           assert 'android.permission.INTERNET' in p.read_text()
-          assert 'com.briskers.lanauto16' in Path('android/app/build.gradle.kts').read_text()
+          assert 'com.briskers.lanauto17' in Path('android/app/build.gradle.kts').read_text()
           assert 'targetSdk = 36' in gradle.read_text()
           PY
       - name: Resolve Flutter packages
@@ -73,7 +73,7 @@ jobs:
       - name: Upload synthetic-only APK
         uses: actions/upload-artifact@v4
         with:
-          name: briskers-lan-auto-test16-${{ github.run_number }}
+          name: briskers-lan-auto-test17-${{ github.run_number }}
           path: generated/build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
           retention-days: 14
