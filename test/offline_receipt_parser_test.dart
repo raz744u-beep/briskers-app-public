@@ -10,7 +10,7 @@ Date 10/27/2026
 34 11 6 886 478 Brake Disc 2 56.70 113.40
 34 11 6 852 253 Brake Pad Set 1 62.25 62.25
 34 35 6 792 567 Brake Pad Sensor 1 15.70 15.70
-TOTAL $191.35
+TOTAL \$191.35
 ''');
     expect(extracted['vendor_name'], 'Worldpac');
     expect(extracted['vendor_invoice_number'], '74966713');
@@ -23,7 +23,7 @@ TOTAL $191.35
     expect(items[0]['quantity'], 2);
     expect(items[0]['unit_price'], 56.7);
     expect(LocalReceiptParser.formatDescription(extracted),
-        'Brake Disc, Brake Pad Set, Brake Pad Sensor — Inv. 74966713 — 10/27/26 — $191.35');
+        'Brake Disc, Brake Pad Set, Brake Pad Sensor — Inv. 74966713 — 10/27/26 — \$191.35');
   });
 
   test('AutoZone leading-zero invoice and trailing SKU', () {
@@ -33,7 +33,7 @@ Invoice # 04290190370
 Date: 10/24/26
 NGK Laser Iridium NGK Spark Plug 96008 6 18.00 108.00
 Engine Air Filter STP Air Filter SA6900 2 11.65 23.30
-Grand Total $131.30
+Grand Total \$131.30
 ''');
     expect(extracted['vendor_name'], 'AutoZone');
     expect(extracted['vendor_invoice_number'], '04290190370');
@@ -42,7 +42,7 @@ Grand Total $131.30
     expect((items[0] as Map)['sku'], '96008');
     expect((items[1] as Map)['sku'], 'SA6900');
     expect(LocalReceiptParser.formatDescription(extracted),
-      'NGK Laser Iridium NGK Spark Plug, Engine Air Filter STP Air Filter — Inv. 04290190370 — 10/24/26 — $131.30');
+      'NGK Laser Iridium NGK Spark Plug, Engine Air Filter STP Air Filter — Inv. 04290190370 — 10/24/26 — \$131.30');
   });
 
   test('Peake BMW hyphenated part numbers', () {
@@ -59,7 +59,7 @@ TOTAL 26.12
     expect(((extracted['items'] as List).first as Map)['sku'],
       '21-52-6-864-478');
     expect(LocalReceiptParser.formatDescription(extracted),
-      'Connecting link, Grommet — Inv. 603162 — 10/23/26 — $26.12');
+      'Connecting link, Grommet — Inv. 603162 — 10/23/26 — \$26.12');
   });
 
   test('missing or weak OCR never fabricates invoice number or total', () {
@@ -75,7 +75,7 @@ TOTAL 26.12
 WORLDPAC
 DATE 02/31/2026
 Item ZZ123 2 18.00 100.00
-TOTAL $100.00
+TOTAL \$100.00
 ''');
     expect(extracted.containsKey('receipt_date'), isFalse);
     expect(extracted['items'], isEmpty);
@@ -90,7 +90,7 @@ TOTAL $100.00
       'receipt_total': 100,
       'items': [
         for (var i = 1; i <= 12; i++)
-          {'description': 'Part $i', 'sku': 'SKU$i'},
+          {'description': 'Part \$i', 'sku': 'SKU\$i'},
         {'description': 'Part 1', 'sku': 'OTHER'},
       ],
     };
@@ -98,13 +98,13 @@ TOTAL $100.00
     expect(description, contains('Part 10'));
     expect(description, isNot(contains('Part 11')));
     expect(description, isNot(contains('SKU')));
-    expect(description, endsWith('Inv. 0001234 — 10/27/26 — $100.00'));
+    expect(description, endsWith('Inv. 0001234 — 10/27/26 — \$100.00'));
   });
 
   test('formatter falls back to separate vendor label only without items', () {
     final summary = LocalReceiptParser.formatDescription({
       'vendor_name': 'Worldpac', 'items': [], 'receipt_total': 26.12,
     });
-    expect(summary, 'Worldpac — $26.12');
+    expect(summary, 'Worldpac — \$26.12');
   });
 }
