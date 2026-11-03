@@ -27,7 +27,7 @@ Date 10/27/2026
 34 11 6 886 478 Brake Disc 2 56.70 113.40
 34 11 6 852 253 Brake Pad Set 1 62.25 62.25
 34 35 6 792 567 Brake Pad Sensor 1 15.70 15.70
-TOTAL $191.35
+TOTAL \$191.35
 ''')..['review_confirmed'] = true;
 
     var db = BriskersLocalDatabase(NativeDatabase(dbFile));
@@ -59,7 +59,7 @@ TOTAL $191.35
       expect(detail['receipt_details']['vendor_invoice_number'], '74966713');
       expect(detail['receipt_items'], hasLength(3));
       expect(detail['remarks'],
-        'Brake Disc, Brake Pad Set, Brake Pad Sensor — Inv. 74966713 — 10/27/26 — $191.35');
+        'Brake Disc, Brake Pad Set, Brake Pad Sensor — Inv. 74966713 — 10/27/26 — \$191.35');
       final photoPath = (detail['attachments'] as List).first['local_file_path'] as String;
       expect(await File(photoPath).readAsBytes(), original);
 
