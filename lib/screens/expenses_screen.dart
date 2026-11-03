@@ -519,6 +519,17 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         // verification is asynchronous and scoped to this navigation epoch.
         localRows = localRows.take(_pageSize).map(
           WarrantyReceiptReporting.unverified).toList();
+        // Paint locally committed transactions before loading account/category
+        // dropdown options. An options query failure must not blank Expenses.
+        if (_isCurrentLoad(epoch, businessId) && localRows.isNotEmpty) {
+          setState(() {
+            _transactions = localRows;
+            _hasMore = hasMoreLocal;
+            _loading = false;
+            _showingLocal = true;
+            _error = null;
+          });
+        }
         final localOptions = await _localFinancial.loadOptions(
           widget.businessId,
         );

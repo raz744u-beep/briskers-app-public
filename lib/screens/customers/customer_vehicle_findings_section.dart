@@ -487,7 +487,7 @@ class _CustomerVehicleFindingsSectionState
                   const SizedBox(height: 10),
                   TextField(
                     controller: controller,
-                    autofocus: true,
+                    autofocus: false,
                     minLines: 3,
                     maxLines: 7,
                     decoration: const InputDecoration(
