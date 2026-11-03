@@ -36,6 +36,7 @@ class _LanLabScreenState extends State<LanLabScreen> with WidgetsBindingObserver
   LanLabTransport? _transport;
   LanLabAutoSyncController? _auto;
   bool _autoSyncing = false;
+  DateTime? _lastAutoSuccess;
   String _autoStatus = 'Automatic sync initializing...';
   List<LanLabNote> _notes = const [];
   LanLabPairing? _peer;
@@ -142,6 +143,7 @@ class _LanLabScreenState extends State<LanLabScreen> with WidgetsBindingObserver
           setState(() {
             _autoStatus = state.message;
             _autoSyncing = state.isSyncing;
+            _lastAutoSuccess = state.lastSuccessAt;
           });
         },
         onSuccess: _refresh,
@@ -255,6 +257,9 @@ class _LanLabScreenState extends State<LanLabScreen> with WidgetsBindingObserver
           Text(_status),
           const SizedBox(height: 6),
           Text(_autoStatus, style: const TextStyle(fontWeight: FontWeight.w600)),
+          if (_lastAutoSuccess != null)
+            Text('Last successful LAN sync: '
+                '${_lastAutoSuccess!.toLocal().toString().split('.').first}'),
           const SizedBox(height: 8),
           Text('Local device: ' + (_deviceId.isEmpty
               ? 'Not ready' : _deviceId.substring(0, 8))),
