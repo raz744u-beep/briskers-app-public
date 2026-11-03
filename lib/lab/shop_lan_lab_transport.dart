@@ -65,7 +65,8 @@ class LanLabPairing {
 bool isLanLabPrivateIpv4(InternetAddress address) {
   if (address.type != InternetAddressType.IPv4) return false;
   final x = address.rawAddress;
-  return x[0] == 10 ||
+  return x[0] == 127 || // isolated loopback integration tests only
+      x[0] == 10 ||
       (x[0] == 172 && x[1] >= 16 && x[1] <= 31) ||
       (x[0] == 192 && x[1] == 168) ||
       (x[0] == 169 && x[1] == 254);
