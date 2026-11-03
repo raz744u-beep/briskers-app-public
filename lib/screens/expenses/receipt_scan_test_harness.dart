@@ -18,10 +18,19 @@ class ReceiptScanTestHarness extends StatefulWidget {
 
 class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
   static const business = 'briskers-isolated-receipt-test-20261102';
+  // Injected by the isolated Actions workflow. Must be visible to distinguish
+  // an installed old TEST build from a newer, differently signed APK.
+  static const buildCommit = String.fromEnvironment(
+    'BRISKERS_SOURCE', defaultValue: 'unidentified');
+
   final _cache = LocalFinancialCache();
   List<Map<String, dynamic>> _rows = const [];
   String? _error;
   bool _openingScanner = false;
+  bool _scanChoicesVisible = false;
+  int _scanTapCount = 0;
+  String _scanStage = 'Ready';
+
 
   @override
   void initState() {
@@ -41,38 +50,25 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
     }
   }
 
-  Future<void> _scan() async {
+  void _showScanChoices() {
     if (_openingScanner) return;
+    // This must update the screen synchronously, before any platform plugin
+    // or Navigator call. It is a visible proof that the button received a tap.
+    setState(() {
+      _scanTapCount++;
+      _scanChoicesVisible = true;
+      _scanStage = 'Button tap #$_scanTapCount received — select a photo source';
+      _error = null;
+    });
+  }
 
-    // A visible choice confirms the button was pressed and provides a gallery
-    // fallback on devices where Android blocks the external camera intent.
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(title: Text('Scan receipt offline'),
-              subtitle: Text('Choose a camera photo or one on this phone.')),
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined),
-              title: const Text('Take receipt photo'),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (!mounted || source == null) return;
-
+  Future<void> _scan(ImageSource source) async {
+    if (_openingScanner) return;
     setState(() {
       _openingScanner = true;
+      _scanStage = source == ImageSource.camera
+          ? 'Opening the receipt camera…'
+          : 'Opening the receipt gallery…';
       _error = null;
     });
     try {
@@ -85,11 +81,17 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
           ),
         ),
       );
-      if (mounted) await _reload();
+      if (!mounted) return;
+      setState(() => _scanStage = 'Returned from receipt editor');
+      await _reload();
     } catch (error, stack) {
-      debugPrint('Receipt test navigation failed: $error\\n$stack');
-      if (mounted) setState(() =>
-        _error = 'Could not open the receipt editor: $error');
+      debugPrint('Receipt test navigation failed: $error\n$stack');
+      if (mounted) {
+        setState(() {
+          _scanStage = 'Could not open receipt editor';
+          _error = 'Receipt navigation: $error';
+        });
+      }
     } finally {
       if (mounted) setState(() => _openingScanner = false);
     }
@@ -173,9 +175,12 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
                 'is disabled for this APK even when Wi-Fi is on. '
                 'Your installed shop app and its invoices are untouched.',
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 12),
+              Text('Installed TEST build: $buildCommit',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
               FilledButton.icon(
-                onPressed: _openingScanner ? null : _scan,
+                onPressed: _openingScanner ? null : _showScanChoices,
                 icon: _openingScanner
                     ? const SizedBox.square(
                         dimension: 18,
@@ -185,6 +190,36 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
                 label: Text(_openingScanner
                     ? 'Opening receipt editor…' : 'AI Scan Receipt'),
               ),
+              const SizedBox(height: 8),
+              Text('Scanner status: $_scanStage'),
+              if (_scanChoicesVisible) ...[
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('Scan receipt offline',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: _openingScanner
+                              ? null : () => _scan(ImageSource.camera),
+                          icon: const Icon(Icons.camera_alt_outlined),
+                          label: const Text('Take receipt photo'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _openingScanner
+                              ? null : () => _scan(ImageSource.gallery),
+                          icon: const Icon(Icons.photo_library_outlined),
+                          label: const Text('Choose from gallery'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 18),
               Text('Saved local expenses: ' + _rows.length.toString(),
                 style: const TextStyle(fontWeight: FontWeight.w800)),
