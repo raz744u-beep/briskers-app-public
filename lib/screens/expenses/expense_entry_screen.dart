@@ -676,9 +676,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
           (x) => x['id']?.toString() == vendor,
         );
         if (_receiptBaseAmount != null) {
-          _receiptSurchargePercent = _numValue(
-            selected['default_surcharge_percent'],
-          );
+          final printedTotal = _receiptExtraction == null ? 0 :
+            _numValue(_receiptExtraction!['receipt_total']);
+          _receiptSurchargePercent = printedTotal > 0 ? 0 :
+            _numValue(selected['default_surcharge_percent']);
           _applyReceiptSurcharge = _receiptSurchargePercent > 0;
           _setAmountFromReceipt();
         }
@@ -717,7 +718,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       }
 
       if (_receiptBaseAmount != null) {
-        _receiptSurchargePercent = _numValue(item['default_surcharge_percent']);
+        final printedTotal = _receiptExtraction == null ? 0 :
+            _numValue(_receiptExtraction!['receipt_total']);
+        _receiptSurchargePercent = printedTotal > 0 ? 0 :
+            _numValue(item['default_surcharge_percent']);
         _applyReceiptSurcharge = _receiptSurchargePercent > 0;
         _setAmountFromReceipt();
         if (_receiptExtraction != null) {
