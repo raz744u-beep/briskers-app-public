@@ -21,7 +21,10 @@ class OfflineJobAdminService {
 
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
-  final _nicknames = EmployeeNicknameStore();
+  // Share this service's injected database. Never initialize an extra
+  // device database from a synthetic test or an offline assignment action.
+  late final EmployeeNicknameStore _nicknames =
+      EmployeeNicknameStore(database: _database);
 
   String _employeesKey(String businessId) =>
       'briskers_job_employees_$businessId';
