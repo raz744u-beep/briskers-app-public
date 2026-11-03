@@ -78,6 +78,40 @@ void main() {
     expect((await LanLabStore(Directory(root.path + '/secretary')).all()).length, 2);
   });
 
+  test('another app occupying preferred port does not prevent LAN startup',
+      () async {
+    // Simulates the old TEST #15/#16 app still listening on this same phone.
+    final blocker = await HttpServer.bind(InternetAddress.anyIPv4, 0);
+    addTearDown(() => blocker.close(force: true));
+
+    final key = newLanLabPairingKey();
+    final receiverStore = LanLabStore(Directory(root.path + '/receiver'));
+    final senderStore = LanLabStore(Directory(root.path + '/sender'));
+    await senderStore.save(
+      await LanLabNote.create(secondaryId, 'port fallback survives'),
+    );
+    final receiver = LanLabTransport(
+      store: receiverStore,
+      pairingKey: key,
+      deviceId: ownerId,
+      preferredPort: blocker.port,
+    );
+    await receiver.start();
+    addTearDown(receiver.close);
+
+    expect(receiver.port, isNotNull);
+    expect(receiver.port, isNot(blocker.port));
+    final sender = LanLabTransport(
+      store: senderStore, pairingKey: key, deviceId: secondaryId,
+    );
+    final pairing = LanLabPairing(
+      host: '127.0.0.1', port: receiver.port!, key: key,
+    );
+    expect((await sender.syncWith(pairing)).totalLocal, 1);
+    expect((await receiverStore.all()).single.text, 'port fallback survives');
+    expect((await sender.syncWith(pairing)).imported, 0);
+  });
+
   test('wrong shared key is rejected without sending any readable notes', () async {
     final good = newLanLabPairingKey();
     final bad = newLanLabPairingKey();
