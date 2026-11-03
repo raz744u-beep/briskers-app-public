@@ -126,15 +126,23 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
     } else if (_customerId != null) {
       unawaited(_loadVehiclesForCustomer(_customerId!));
     }
-    if (!BriskersConnectionModeController.instance.forceOffline) {
-      unawaited(_loadEmployeesInBackground());
-    }
+    // The loader reads the saved mechanic list first in every mode.
+    unawaited(_loadEmployeesInBackground());
   }
 
   Future<void> _loadEmployeesInBackground() async {
     try {
       var rows = await _offlineEmployees.cachedEmployees(widget.businessId);
-      if (mounted && rows.isNotEmpty) setState(() => _employees = rows);
+      if (rows.isNotEmpty && mounted) {
+        final selected = _employeeId;
+        if (selected != null &&
+            !rows.any((row) => row['id']?.toString() == selected)) {
+          rows = [...rows, ..._employees.where(
+            (row) => row['id']?.toString() == selected,
+          )];
+        }
+        setState(() => _employees = rows);
+      }
       if (BriskersConnectionModeController.instance.forceOffline) return;
       rows = await _offlineEmployees.refreshEmployees(widget.businessId)
           .timeout(const Duration(seconds: 8));
