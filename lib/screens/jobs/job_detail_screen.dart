@@ -46,6 +46,7 @@ import '../../services/local_financial_cache.dart';
 import '../../services/offline_preinspection_service.dart';
 import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_job_admin_service.dart';
+import '../../services/employee_nickname_store.dart';
 import '../../services/offline_work_findings_service.dart';
 import '../../services/work_finding_merge.dart';
 import '../../services/vehicle_finding_actions_service.dart';
@@ -99,6 +100,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   final LocalDocumentDetailCache _documentDetailCache =
       const LocalDocumentDetailCache();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
+  final _nicknameStore = EmployeeNicknameStore();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
   final OfflineInvoiceMileageService _invoiceMileage =
@@ -478,6 +480,38 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     }
   }
 
+  Future<void> _hydrateAssignedEmployeeNickname(int epoch) async {
+    final snapshot = _job;
+    if (snapshot == null) return;
+    final assignments = List<dynamic>.from(
+      snapshot['assignments'] ?? const [],
+    );
+    final first = assignments.isNotEmpty && assignments.first is Map
+        ? Map<String, dynamic>.from(assignments.first as Map)
+        : const <String, dynamic>{};
+    final employeeId = (snapshot['assigned_employee_id'] ??
+            first['employee_id'])?.toString() ?? '';
+    if (employeeId.isEmpty) return;
+    final nickname = await _nicknameStore.get(widget.businessId, employeeId);
+    if (nickname == null || !_currentLoad(epoch)) return;
+    final current = _job;
+    if (current == null) return;
+    final currentAssignments = List<dynamic>.from(
+      current['assignments'] ?? const [],
+    );
+    final currentFirst = currentAssignments.isNotEmpty &&
+            currentAssignments.first is Map
+        ? Map<String, dynamic>.from(currentAssignments.first as Map)
+        : const <String, dynamic>{};
+    final currentId = (current['assigned_employee_id'] ??
+        currentFirst['employee_id'])?.toString() ?? '';
+    if (employeeId != currentId) return;
+    setState(() => _job = {
+      ...current,
+      'assigned_employee_nickname': nickname,
+    });
+  }
+
   Future<void> _hydrateLocalLinkedExpenses() async {
     final epoch = _loadEpoch;
     try {
@@ -604,6 +638,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           _showingLocal = true;
           _error = null;
         });
+        unawaited(_hydrateAssignedEmployeeNickname(epoch));
         _modalRefresh?.call();
         // Linked documents and expenses hydrate independently of first paint.
         // Each is fenced by the load epoch so back/forward navigation cannot
@@ -906,6 +941,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         _showingLocal = false;
         _error = null;
       });
+      unawaited(_hydrateAssignedEmployeeNickname(epoch));
       // Fill a missing/stale local payment summary from an actual successful
       // authorized server document response. No payment/ledger mutation.
       // Do not persist a fabricated Paid state from a zero-amount invoice or
@@ -1854,6 +1890,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
     }
 
+    employees = await _nicknameStore.decorate(widget.businessId, employees);
     if (!mounted) return;
     if (employees.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1911,8 +1948,12 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                           roleStyle.color.withValues(alpha: 0.14),
                       child: Icon(roleStyle.icon, color: roleStyle.color),
                     ),
-                    title: Text(employee['name']?.toString() ?? ''),
-                    subtitle: Text(position),
+                    title: Text(EmployeeNicknameStore.displayName(employee)),
+                    subtitle: Text(
+                      employee['nickname']?.toString().isNotEmpty == true
+                          ? (employee['name']?.toString() ?? '') + ' • ' + position
+                          : position,
+                    ),
                     trailing: id == currentId
                         ? const Icon(Icons.check, color: BriskersColors.jobs)
                         : null,
@@ -1960,6 +2001,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           ..._job!,
           'assigned_employee_id': assigned ? selected : null,
           'assigned_employee_name': employee?['name'],
+          'assigned_employee_nickname': employee?['nickname'],
           'assigned_position': employee?['position_name'],
           'is_unassigned': !assigned,
           'assignments': assigned
@@ -3510,9 +3552,13 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     required String jobTitle,
     required Map<String, dynamic>? assignment,
   }) {
-    final employeeName = assignment == null
-        ? 'Unassigned'
-        : assignment['employee_name']?.toString() ?? 'Assigned';
+    final preferredNickname =
+        _job?['assigned_employee_nickname']?.toString().trim() ?? '';
+    final employeeName = preferredNickname.isNotEmpty
+        ? preferredNickname
+        : (assignment == null
+            ? 'Unassigned'
+            : assignment['employee_name']?.toString() ?? 'Assigned');
     final employeePosition =
         assignment?['position']?.toString() ?? 'Mechanic';
     final roleStyle = employeeRoleStyle(employeePosition);
