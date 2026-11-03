@@ -1,4 +1,19 @@
 // ignore_for_file: prefer_interpolation_to_compose_strings, use_null_aware_elements, curly_braces_in_flow_control_structures
+/// OCR line geometry; pure Dart so invoice parsing can be tested offline.
+class ReceiptOcrFragment {
+  const ReceiptOcrFragment({
+    required this.text,
+    required this.left,
+    required this.top,
+    required this.height,
+  });
+
+  final String text;
+  final double left;
+  final double top;
+  final double height;
+}
+
 /// Conservative receipt parser. Never requires internet or database access.
 /// All recognized values remain suggestions until user confirmation.
 class LocalReceiptParser {
@@ -28,6 +43,41 @@ class LocalReceiptParser {
     caseSensitive: false,
   );
   static const _knownNames = ['Worldpac', 'AutoZone', 'Peake BMW'];
+
+  /// ML Kit sometimes returns one text block per invoice column. Grouping
+  /// fragments by row center restores SKU / description / quantity / prices.
+  static List<String> _layoutRows(List<ReceiptOcrFragment> fragments) {
+    final measured = fragments.where(
+      (line) => line.height > 0 && line.text.trim().isNotEmpty,
+    ).toList()
+      ..sort((a, b) => (a.top + a.height / 2)
+        .compareTo(b.top + b.height / 2));
+    final groups = <List<ReceiptOcrFragment>>[];
+    for (final fragment in measured) {
+      if (groups.isEmpty) {
+        groups.add([fragment]);
+        continue;
+      }
+      final row = groups.last;
+      final center = fragment.top + fragment.height / 2;
+      final first = row.first;
+      final rowCenter = first.top + first.height / 2;
+      if ((center - rowCenter).abs() <=
+          (fragment.height + first.height) * 0.31) {
+        row.add(fragment);
+      } else {
+        groups.add([fragment]);
+      }
+    }
+    return groups.map((row) {
+      row.sort((a, b) => a.left.compareTo(b.left));
+      return row.map((entry) => entry.text.trim()).join(' ');
+    }).toList();
+  }
+
+  static bool _isOnlyAmount(String line) =>
+      RegExp(r'^(?:USD\s*)?\$?\s*[0-9][0-9,]*\.[0-9]{2}\s*$',
+        caseSensitive: false).hasMatch(line.trim());
 
   static String _norm(String text) =>
       text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
@@ -74,10 +124,17 @@ class LocalReceiptParser {
   static Map<String, dynamic> parse(
     String ocrText, {
     List<Map<String, dynamic>> vendors = const [],
+    List<ReceiptOcrFragment> positionedLines = const [],
   }) {
-    final lines = ocrText.split(RegExp(r'[\r\n]+'))
+    final originalLines = ocrText.split(RegExp(r'[\r\n]+'))
         .map((line) => line.trim().replaceAll(RegExp(r'\s{2,}'), ' '))
         .where((line) => line.isNotEmpty).toList();
+    final rowLines = _layoutRows(positionedLines);
+    final lines = <String>[
+      ...rowLines,
+      for (final original in originalLines)
+        if (!rowLines.contains(original)) original,
+    ];
     String? vendor;
     String? receiptDate;
     String? invoiceNumber;
@@ -157,6 +214,12 @@ class LocalReceiptParser {
       if (description.isEmpty || RegExp(r'^\d+$').hasMatch(description)) {
         continue;
       }
+      // A geometrically reconstructed row can also occur as raw OCR text.
+      if (items.any((item) =>
+          item['description'] == description && item['sku'] == sku &&
+          item['quantity'] == qty && item['total_amount'] == lineTotal)) {
+        continue;
+      }
       items.add(<String, dynamic>{
         'position': items.length + 1,
         'description': description,
@@ -165,6 +228,40 @@ class LocalReceiptParser {
         'unit_price': unit,
         'total_amount': lineTotal,
       });
+    }
+
+    // Second pass for column-oriented invoices with label and value on
+    // different OCR lines. Never fall back to today's date or summed totals.
+    for (var i = 0; i < lines.length; i++) {
+      final label = lines[i].trim();
+      final next = i + 1 < lines.length ? lines[i + 1].trim() : '';
+      if (invoiceNumber == null &&
+          RegExp(r'^(?:invoice|inv\.?|invoice no\.?|invoice number|inv\.? #|invoice #|receipt #)\s*[:#-]?\s*$',
+            caseSensitive: false).hasMatch(label) &&
+          RegExp(r'^[A-Z0-9-]{4,25}$', caseSensitive: false).hasMatch(next) &&
+          RegExp(r'\d').hasMatch(next) &&
+          !RegExp(r'^20\d{2}-\d{1,2}-\d{1,2}$').hasMatch(next)) {
+        invoiceNumber = next;
+      }
+      if (receiptDate == null &&
+          RegExp(r'^(?:date|invoice date|receipt date|sale date|sold on)\s*[:#-]?\s*$',
+            caseSensitive: false).hasMatch(label)) {
+        receiptDate = _date(next);
+      }
+      if (total == null && _isTotal(label) && _isOnlyAmount(next)) {
+        total = _lastMoney(next);
+      }
+    }
+
+    if (receiptDate == null) {
+      // Accept a date without a label only if it is the ONE distinct date
+      // in the recognized document. Multiple plausible dates need review.
+      final candidates = <String>{};
+      for (final line in originalLines) {
+        final found = _date(line);
+        if (found != null) candidates.add(found);
+      }
+      if (candidates.length == 1) receiptDate = candidates.single;
     }
 
     if (receiptDate == null) flags.add('Date needs review');
@@ -180,8 +277,12 @@ class LocalReceiptParser {
       'items': items,
       'review_flags': flags,
       'extraction_source': 'on_device_ocr',
-      'raw_data': <String, dynamic>{'ocr_text': ocrText.length > 25000
-          ? ocrText.substring(0, 25000) : ocrText},
+      'raw_data': <String, dynamic>{
+        'ocr_text': ocrText.length > 25000
+            ? ocrText.substring(0, 25000) : ocrText,
+        'ocr_line_count': positionedLines.length,
+        'reconstructed_rows': rowLines.take(120).toList(),
+      },
     };
   }
 
