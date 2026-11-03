@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/formatters.dart';
+import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/employee_nickname_store.dart';
 
@@ -116,6 +117,17 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
         _nickname.text = await _nicknameStore.get(
               widget.businessId, widget.employeeId!,
             ) ?? '';
+      }
+      if (BriskersConnectionModeController.instance.forceOffline) {
+        if (!mounted) return;
+        setState(() {
+          _loading = false;
+          _error = _editing
+              ? 'Other employee profile fields require a connection. '
+                  'You can save the nickname on this device.'
+              : 'Creating employee records is not available in Force Offline.';
+        });
+        return;
       }
       final positions = await _api.employeePositions(widget.businessId);
       Map<String, dynamic>? employee;
@@ -766,7 +778,10 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
                   ],
                   const SizedBox(height: 16),
                   FilledButton.icon(
-                    onPressed: _saving ? null : _save,
+                    onPressed: _saving ||
+                            BriskersConnectionModeController.instance.forceOffline
+                        ? null
+                        : _save,
                     icon: _saving
                         ? const SizedBox(
                             width: 18,
