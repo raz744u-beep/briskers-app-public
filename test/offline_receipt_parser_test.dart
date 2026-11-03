@@ -90,7 +90,7 @@ TOTAL \$100.00
       'receipt_total': 100,
       'items': [
         for (var i = 1; i <= 12; i++)
-          {'description': 'Part \$i', 'sku': 'SKU\$i'},
+          {'description': 'Part $i', 'sku': 'SKU$i'},
         {'description': 'Part 1', 'sku': 'OTHER'},
       ],
     };
