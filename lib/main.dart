@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app.dart';
+import 'screens/expenses/receipt_scan_test_harness.dart';
 import 'services/local_document_detail_cache.dart';
 import 'services/device_owner_authorization.dart';
 import 'core/briskers_i18n.dart';
@@ -119,7 +120,10 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
 
   @override
   Widget build(BuildContext context) {
-    if (_ready) return const BriskersApp();
+    if (_ready) {
+      return BriskersConnectionModeController.receiptTestBuild
+          ? const ReceiptScanTestHarness() : const BriskersApp();
+    }
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       home: Scaffold(
