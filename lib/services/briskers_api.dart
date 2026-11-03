@@ -2160,7 +2160,12 @@ class BriskersApi {
     String? vendorId,
   }) async {
     try {
-      final result = await networkSupabase.functions.invoke(
+      // Receipt recognition is the ONE permitted online function while
+      // financial synchronization remains Force Offline. This existing
+      // AI-only Edge Function must never initiate queue replay or DB writes.
+      // The normal networkSupabase getter continues to guard every other
+      // financial RPC and sync operation in Force Offline.
+      final result = await supabase.functions.invoke(
         'receipt-parse',
         body: {
           'business_id': businessId,
