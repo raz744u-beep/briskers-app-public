@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -66,6 +68,32 @@ void main() {
           throwsArgumentError);
     } finally {
       await db.close();
+    }
+  });
+
+  test('nickname survives closing and reopening its backing SQLite file', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'briskers-nickname-reopen-',
+    );
+    final file = File('${directory.path}/shop.sqlite');
+    try {
+      final first = BriskersLocalDatabase(NativeDatabase(file));
+      await EmployeeNicknameStore(database: first)
+          .save('shop-a', 'employee-one', 'Kam');
+      await first.close();
+
+      final reopened = BriskersLocalDatabase(NativeDatabase(file));
+      try {
+        expect(
+          await EmployeeNicknameStore(database: reopened)
+              .get('shop-a', 'employee-one'),
+          'Kam',
+        );
+      } finally {
+        await reopened.close();
+      }
+    } finally {
+      await directory.delete(recursive: true);
     }
   });
 
