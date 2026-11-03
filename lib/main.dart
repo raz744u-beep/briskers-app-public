@@ -86,13 +86,15 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
               'forcing offline until user selects a connection mode: $error');
         }
       });
-      await _runStep('Initializing secure session', () => Supabase.initialize(
-        url: supabaseUrl,
-        publishableKey: supabasePublishableKey,
-      ));
-      DeviceOwnerAuthorization.instance.initialize();
-      await _runStep('Starting photo background service',
-          ExpenseIqBackgroundScheduler.initialize);
+      if (!BriskersConnectionModeController.receiptTestBuild) {
+        await _runStep('Initializing secure session', () => Supabase.initialize(
+          url: supabaseUrl,
+          publishableKey: supabasePublishableKey,
+        ));
+        DeviceOwnerAuthorization.instance.initialize();
+        await _runStep('Starting photo background service',
+            ExpenseIqBackgroundScheduler.initialize);
+      }
       if (mounted) setState(() => _ready = true);
     } catch (error, stack) {
       debugPrint('Briskers startup failed at $_step: $error\n$stack');
