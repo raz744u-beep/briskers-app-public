@@ -1,32 +1,57 @@
-import 'dart:convert';
+import 'package:drift/drift.dart' show Variable;
 
-import 'package:shared_preferences/shared_preferences.dart';
+import '../local/briskers_local_database.dart';
+import '../local/local_database_provider.dart';
 
-/// Device-local employee display alias, separate from the legal payroll name.
+/// A durable business- and employee-ID-scoped local display alias.
 ///
-/// No remote nickname sync is claimed by this service. Multi-device sync
-/// requires a separate vetted storage/replay contract before release.
+/// Nicknames live in the same SQLite database as Briskers shop records, so
+/// normal app-database backups contain them. Full legal employee names are
+/// never modified. Remote nickname synchronization remains a separate gate.
 class EmployeeNicknameStore {
-  static const _keyPrefix = 'briskers_employee_nicknames_v1:';
-  String _key(String businessId) => '$_keyPrefix$businessId';
+  EmployeeNicknameStore({BriskersLocalDatabase? database})
+      : _database = database ?? localDatabase;
+
+  final BriskersLocalDatabase _database;
+  static final _schemaReady = Expando<Future<void>>();
+
+  Future<void> _ensureSchema() {
+    final existing = _schemaReady[_database];
+    if (existing != null) return existing;
+    Future<void> install() async {
+      try {
+        await _database.customStatement(
+          '''CREATE TABLE IF NOT EXISTS local_employee_nicknames(
+            business_id TEXT NOT NULL,
+            employee_id TEXT NOT NULL,
+            nickname TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (business_id, employee_id)
+          )''',
+        );
+      } catch (_) {
+        _schemaReady[_database] = null;
+        rethrow;
+      }
+    }
+    final created = install();
+    _schemaReady[_database] = created;
+    return created;
+  }
 
   Future<Map<String, String>> all(String businessId) async {
     if (businessId.trim().isEmpty) return {};
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_key(businessId));
-    if (raw == null || raw.isEmpty) return {};
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map) return {};
-      return {
-        for (final entry in decoded.entries)
-          if (entry.key is String && entry.value is String &&
-              (entry.value as String).trim().isNotEmpty)
-            entry.key as String: (entry.value as String).trim(),
-      };
-    } catch (_) {
-      return {};
-    }
+    await _ensureSchema();
+    final rows = await _database.customSelect(
+      'SELECT employee_id,nickname FROM local_employee_nicknames '
+      'WHERE business_id=?',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return {
+      for (final row in rows)
+        if (row.read<String>('nickname').trim().isNotEmpty)
+          row.read<String>('employee_id'): row.read<String>('nickname').trim(),
+    };
   }
 
   Future<String?> get(String businessId, String employeeId) async {
@@ -46,29 +71,43 @@ class EmployeeNicknameStore {
     if (value.length > 32 || value.contains(RegExp(r'[\r\n]'))) {
       throw ArgumentError('Nickname must be at most 32 characters on one line.');
     }
-    final saved = await all(businessId);
-    if (value.isEmpty) {
-      saved.remove(employeeId);
-    } else {
-      saved[employeeId] = value;
-    }
-    final prefs = await SharedPreferences.getInstance();
-    if (!await prefs.setString(_key(businessId), jsonEncode(saved))) {
-      throw StateError('Nickname could not be saved on this device.');
-    }
+    await _ensureSchema();
+    await _database.transaction(() async {
+      if (value.isEmpty) {
+        await _database.customStatement(
+          'DELETE FROM local_employee_nicknames '
+          'WHERE business_id=? AND employee_id=?',
+          [businessId, employeeId],
+        );
+      } else {
+        await _database.customStatement(
+          '''INSERT INTO local_employee_nicknames(
+            business_id,employee_id,nickname,updated_at
+          ) VALUES (?,?,?,?)
+          ON CONFLICT(business_id,employee_id) DO UPDATE SET
+            nickname=excluded.nickname,updated_at=excluded.updated_at''',
+          [
+            businessId,
+            employeeId,
+            value,
+            DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+          ],
+        );
+      }
+    });
   }
 
   Future<List<Map<String, dynamic>>> decorate(
     String businessId,
     List<Map<String, dynamic>> employees,
   ) async {
-    final values = await all(businessId);
+    final names = await all(businessId);
     return [
       for (final employee in employees)
         {
           ...employee,
-          if (values[employee['id']?.toString()] != null)
-            'nickname': values[employee['id']?.toString()],
+          if (names[employee['id']?.toString()] != null)
+            'nickname': names[employee['id']?.toString()],
         },
     ];
   }
