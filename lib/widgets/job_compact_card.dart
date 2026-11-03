@@ -66,13 +66,10 @@ class JobCompactCard extends StatelessWidget {
         int.tryParse(job['pending_requests']?.toString() ?? '') ?? 0;
     // Three operational states must remain distinguishable even when the
     // offline snapshot has no server-provided status_color.
-    final status = job['status']?.toString().trim().toLowerCase() ?? '';
-    final statusColor = switch (status) {
-      'open' => const Color(0xFF2864A5),
-      'in_progress' || 'in progress' => const Color(0xFFB66D13),
-      'complete' || 'completed' => const Color(0xFF26844D),
-      _ => colorFromHex(job['status_color']?.toString()),
-    };
+    final statusColor = operationalJobStatusColor(
+      job['status']?.toString(),
+      job['status_color']?.toString(),
+    );
     final paymentState = job['status']?.toString() == 'completed'
         ? job['payment_state']?.toString()
         : null;

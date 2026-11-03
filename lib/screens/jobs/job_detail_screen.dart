@@ -3425,7 +3425,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   List<Map<String, dynamic>> _availableStatuses() => _statuses;
 
   Widget _statusControl() {
-    final color = colorFromHex(_job?['status_color']?.toString());
+    final color = operationalJobStatusColor(
+      _job?['status']?.toString(),
+      _job?['status_color']?.toString(),
+    );
     final icon = jobStatusIcon(_job?['status_icon']?.toString());
     final name = jobStatusLabel(
       _job?['status']?.toString(),
@@ -3562,7 +3565,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     final employeePosition =
         assignment?['position']?.toString() ?? 'Mechanic';
     final roleStyle = employeeRoleStyle(employeePosition);
-    final statusColor = colorFromHex(_job?['status_color']?.toString());
+    final statusColor = operationalJobStatusColor(
+      _job?['status']?.toString(),
+      _job?['status_color']?.toString(),
+    );
     final cardTint = Color.alphaBlend(
       statusColor.withValues(alpha: 0.12),
       const Color(0xFFFCFCFB),
@@ -5818,7 +5824,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     final complaint = _job!['requested_work']?.toString().trim() ?? '';
     final workSummary = currentVisit?['work_summary']?.toString().trim() ?? '';
     final unassigned = _job!['is_unassigned'] == true;
-    final statusColor = colorFromHex(_job!['status_color']?.toString());
+    final statusColor = operationalJobStatusColor(
+      _job!['status']?.toString(),
+      _job!['status_color']?.toString(),
+    );
     final activeFindings = _findings.where((finding) {
       final status = finding['status']?.toString() ?? 'open';
       if (status == 'resolved') return false;

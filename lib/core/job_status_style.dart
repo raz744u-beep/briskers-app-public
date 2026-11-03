@@ -8,6 +8,21 @@ Color colorFromHex(String? value, {Color fallback = const Color(0xFF546E7A)}) {
   return Color(0xFF000000 | parsed);
 }
 
+/// Stable operational Job colors shared by the list and Job Detail.
+///
+/// These three automatic states must remain distinguishable even when a
+/// locally saved Job has no server-provided status_color. Other legacy
+/// states continue to respect their configured colors.
+Color operationalJobStatusColor(String? status, String? configuredHex) {
+  final code = (status ?? '').trim().toLowerCase();
+  return switch (code) {
+    'open' => const Color(0xFF2864A5),
+    'in_progress' || 'in progress' => const Color(0xFFB66D13),
+    'complete' || 'completed' => const Color(0xFF26844D),
+    _ => colorFromHex(configuredHex),
+  };
+}
+
 IconData jobStatusIcon(String? key) {
   switch ((key ?? '').trim()) {
     case 'work_outline':
