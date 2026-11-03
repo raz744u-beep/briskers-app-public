@@ -52,7 +52,7 @@ jobs:
           # v3 uses a new package because earlier TEST APKs were signed with
           # ephemeral debug certificates, so Android rejects in-place upgrades.
           # Keep the original TEST and production installs untouched.
-          text = text.replace(before, 'applicationId = "com.briskers.receipt_ocr_test3"')
+          text = text.replace(before, 'applicationId = "com.briskers.receipt_ocr_test4"')
           gradle.write_text(text)
           manifest = Path('android/app/src/main/AndroidManifest.xml')
           xml = manifest.read_text()
@@ -62,15 +62,15 @@ jobs:
                             'android:name="com.briskers.briskers_app.MainActivity"')
           manifest.write_text(xml.replace(
               'android:label="briskers_app"',
-              'android:label="Briskers Receipt TEST 3"'))
+              'android:label="Briskers Receipt TEST 4"'))
           PY
       - name: Build separate debug-signed APK with network sync disabled
         run: |
           # A new versionCode for each CI run avoids the original 1018 clash.
-          BUILD_NUMBER=$((300000 + GITHUB_RUN_NUMBER))
+          BUILD_NUMBER=$((400000 + GITHUB_RUN_NUMBER))
           echo "RECEIPT_TEST_BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
           flutter build apk --debug \
-            --build-name=0.10.9.3 \
+            --build-name=0.10.9.4 \
             --build-number="$BUILD_NUMBER" \
             --dart-define=BRISKERS_RECEIPT_TEST=true \
             --dart-define=BRISKERS_BUILD_NUMBER="RECEIPT-TEST-$BUILD_NUMBER" \
@@ -83,10 +83,10 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           "$AAPT" dump badging "$APK" | tee /tmp/receipt-badging.txt
-          grep -q "package: name='com.briskers.receipt_ocr_test3' versionCode='$RECEIPT_TEST_BUILD_NUMBER'" /tmp/receipt-badging.txt
+          grep -q "package: name='com.briskers.receipt_ocr_test4' versionCode='$RECEIPT_TEST_BUILD_NUMBER'" /tmp/receipt-badging.txt
           "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/receipt-certs.txt
           mkdir -p receipt-apk
-          cp "$APK" "receipt-apk/Briskers-Receipt-OCR-TEST3-b$RECEIPT_TEST_BUILD_NUMBER-$(echo "$GITHUB_SHA" | cut -c1-12).apk"
+          cp "$APK" "receipt-apk/Briskers-Receipt-OCR-TEST4-b$RECEIPT_TEST_BUILD_NUMBER-$(echo "$GITHUB_SHA" | cut -c1-12).apk"
           cp /tmp/receipt-badging.txt receipt-apk/
           cp /tmp/receipt-certs.txt receipt-apk/
           (cd receipt-apk && sha256sum *.apk > SHA256SUMS)
