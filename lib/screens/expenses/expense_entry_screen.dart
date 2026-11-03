@@ -313,6 +313,15 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     }
 
     if (forceOffline) {
+      // AI Scan Receipt must open the camera from the existing expenses
+      // shortcut even when all app synchronization remains Force Offline.
+      if (widget.autoScanReceipt &&
+          !_autoScanLaunched && !_editing && !_copying) {
+        _autoScanLaunched = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _takeReceiptPhoto(scanWithAi: true);
+        });
+      }
       if (!localShown && mounted) {
         setState(() {
           _loading = false;
@@ -449,18 +458,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
 
   Future<void> _readReceipt(XFile file) async {
     if (_readingReceipt) return;
-    if (BriskersConnectionModeController.instance.forceOffline) {
-      if (mounted) {
-        setState(() {
-          _receiptReadMessage = 'Receipt saved locally. Automatic reading will be available when online.';
-          _error = null;
-        });
-      }
-      return;
-    }
+    // User explicitly chose Scan with AI. This is permitted even when
+    // Briskers Force Offline blocks all synchronization. No financial data
+    // is sent by the receipt-parse call; final expense/photo save is local.
     setState(() {
       _readingReceipt = true;
-      _receiptReadMessage = 'Reading receipt...';
+      _receiptReadMessage = 'Reading receipt using internet AI • Sync remains offline';
       _error = null;
     });
 
@@ -1023,7 +1026,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       // Recurring rules and AI extraction currently need additional online
       // operations; preserve those workflows until their queue is supported.
       final localFirst = BriskersConnectionModeController.instance.forceOffline ||
-          (!_repeat && _recurringRuleId == null && _receiptExtraction == null);
+          (!_repeat && _recurringRuleId == null);
       if (localFirst) {
         if (_repeat) {
           setState(() {
@@ -1064,6 +1067,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                 : _remarksController.text.trim(),
             contextLabel: _contextLabel,
             receipts: stagedReceipts,
+            receiptExtraction: _receiptExtraction,
           );
         } else {
           await _offlineFinancial.createLocalTransaction(
@@ -1086,6 +1090,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                 : _remarksController.text.trim(),
             contextLabel: _contextLabel,
             receipts: stagedReceipts,
+            receiptExtraction: _receiptExtraction,
           );
         }
 
