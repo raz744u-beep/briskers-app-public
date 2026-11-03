@@ -1,10 +1,11 @@
+// ignore_for_file: prefer_interpolation_to_compose_strings, curly_braces_in_flow_control_structures
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -70,15 +71,9 @@ class _LanLabScreenState extends State<LanLabScreen> {
 
   Future<void> _initialize() async {
     try {
-      // On Android 17 / target SDK 37+, local sockets need permission.
-      // The isolated test APK declares ACCESS_LOCAL_NETWORK in its manifest.
-      if (Platform.isAndroid) {
-        final access = await Permission.accessLocalNetwork.request();
-        if (!access.isGranted) {
-          throw StateError('Local Network permission denied. Enable it in '
-              'Android app settings and reopen this test.');
-        }
-      }
+      // This isolated TEST targets SDK 36. Android 17 still permits LAN
+      // sockets with INTERNET permission for apps targeting <= 36. Before
+      // raising target SDK to 37, add ACCESS_LOCAL_NETWORK runtime consent.
       final prefs = await SharedPreferences.getInstance();
       var id = prefs.getString('briskers_lan_lab_device_id') ?? '';
       if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(id)) {
