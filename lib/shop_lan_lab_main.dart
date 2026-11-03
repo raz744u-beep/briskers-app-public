@@ -93,6 +93,7 @@ class _LanLabScreenState extends State<LanLabScreen> {
       final store = await LanLabStore.open();
       final transport = LanLabTransport(
         store: store, pairingKey: key, deviceId: id,
+        onRemoteChanged: _refresh,
       );
       await transport.start();
       final ip = await _findLocalIp();
