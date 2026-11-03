@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
+import '../../services/employee_nickname_store.dart';
 
 class EmployeeEditScreen extends StatefulWidget {
   const EmployeeEditScreen({
@@ -22,9 +23,11 @@ class EmployeeEditScreen extends StatefulWidget {
 
 class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   static const _api = BriskersApi();
+  final _nicknameStore = EmployeeNicknameStore();
 
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
+  final _nickname = TextEditingController();
   final _phone = TextEditingController();
   final _email = TextEditingController();
   final _address = TextEditingController();
@@ -43,6 +46,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   bool _appLoginBusy = false;
   bool _loading = true;
   bool _saving = false;
+  bool _savingNickname = false;
   String? _error;
 
   bool get _editing => widget.employeeId != null;
@@ -97,6 +101,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   @override
   void dispose() {
     _name.dispose();
+    _nickname.dispose();
     _phone.dispose();
     _email.dispose();
     _address.dispose();
@@ -107,6 +112,11 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
 
   Future<void> _load() async {
     try {
+      if (_editing) {
+        _nickname.text = await _nicknameStore.get(
+              widget.businessId, widget.employeeId!,
+            ) ?? '';
+      }
       final positions = await _api.employeePositions(widget.businessId);
       Map<String, dynamic>? employee;
       if (_editing) {
@@ -152,6 +162,24 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
         _loading = false;
         _error = error.toString();
       });
+    }
+  }
+
+  Future<void> _saveNicknameLocally() async {
+    if (!widget.isOwner || !_editing || _savingNickname) return;
+    setState(() {
+      _savingNickname = true;
+      _error = null;
+    });
+    try {
+      await _nicknameStore.save(
+        widget.businessId, widget.employeeId!, _nickname.text,
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _savingNickname = false);
     }
   }
 
@@ -201,6 +229,11 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
         active: _active,
         ssn: _ssn.text.trim().isEmpty ? null : _ssn.text.trim(),
       );
+      if (_editing && widget.isOwner) {
+        await _nicknameStore.save(
+          widget.businessId, widget.employeeId!, _nickname.text,
+        );
+      }
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -430,6 +463,25 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
                       labelText: 'Full name',
                     ),
                   ),
+                  if (_editing && widget.isOwner) ...[
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _nickname,
+                      maxLength: 32,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(
+                        labelText: 'Nickname (optional)',
+                        helperText: 'Display alias only; full name stays unchanged.',
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _savingNickname ? null : _saveNicknameLocally,
+                      icon: const Icon(Icons.save_outlined),
+                      label: Text(_savingNickname
+                          ? 'Saving nickname…'
+                          : 'Save nickname on this device'),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _phone,

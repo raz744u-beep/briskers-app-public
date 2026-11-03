@@ -4,6 +4,9 @@ import 'package:intl/intl.dart';
 import '../../core/employee_role_style.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
+import '../../services/employee_nickname_store.dart';
+import '../../services/offline_job_admin_service.dart';
+import '../../core/connection_mode.dart';
 import 'employee_edit_screen.dart';
 import 'employee_positions_screen.dart';
 
@@ -25,9 +28,12 @@ class EmployeesSettingsScreen extends StatefulWidget {
 class _EmployeesSettingsScreenState
     extends State<EmployeesSettingsScreen> {
   static const _api = BriskersApi();
+  final _nicknameStore = EmployeeNicknameStore();
+  final _offlineEmployees = OfflineJobAdminService();
 
   List<Map<String, dynamic>>? _employees;
   String? _error;
+  bool _cachedEmployeesOnly = false;
 
   @override
   void initState() {
@@ -37,22 +43,33 @@ class _EmployeesSettingsScreenState
 
   Future<void> _load() async {
     try {
+      if (BriskersConnectionModeController.instance.forceOffline) {
+        throw StateError('Force Offline is enabled.');
+      }
       final rows = await _api.employeesSettings(widget.businessId);
+      final annotated = await _nicknameStore.decorate(widget.businessId, rows);
       if (!mounted) return;
       setState(() {
-        _employees = rows;
+        _employees = annotated;
+        _cachedEmployeesOnly = false;
         _error = null;
       });
     } catch (error) {
+      // Keep known employees visible offline without fabricating pay details.
+      final cached = await _offlineEmployees.cachedEmployees(widget.businessId);
       if (!mounted) return;
       setState(() {
-        _employees = const [];
-        _error = error.toString();
+        _employees = cached;
+        _cachedEmployeesOnly = true;
+        _error = cached.isEmpty ? error.toString()
+            : 'Showing locally saved employee names and roles. '
+              'Pay details require an authenticated refresh.';
       });
     }
   }
 
   String _pay(Map<String, dynamic> employee) {
+    if (_cachedEmployeesOnly) return 'Pay unavailable offline';
     if (employee['compensation_enabled'] == false) {
       return 'Pay not tracked';
     }
@@ -196,9 +213,9 @@ class _EmployeesSettingsScreenState
                     children: _employees!.map((employee) {
                       final active = employee['active'] != false;
                       final position =
-                          employee['position']?.toString() ?? 'No position';
+                          (employee['position'] ?? employee['position_name'])?.toString() ?? 'No position';
                       final roleStyle = employeeRoleStyle(position);
-                      final name = employee['name']?.toString() ?? '';
+                      final name = EmployeeNicknameStore.displayName(employee);
 
                       return ListTile(
                         leading: CircleAvatar(
@@ -213,7 +230,11 @@ class _EmployeesSettingsScreenState
                           ),
                         ),
                         title: Text(name),
-                        subtitle: Text(position),
+                        subtitle: Text(
+                          employee['nickname']?.toString().isNotEmpty == true
+                              ? (employee['name']?.toString() ?? '') + ' • ' + position
+                              : position,
+                        ),
                         trailing: Wrap(
                           spacing: 0,
                           children: [
@@ -404,7 +425,7 @@ class _EmployeesSettingsScreenState
                     ..._employees!.map((employee) {
                       final active = employee['active'] != false;
                       final position =
-                          employee['position']?.toString() ?? 'No position';
+                          (employee['position'] ?? employee['position_name'])?.toString() ?? 'No position';
                       final ssnLast4 = employee['ssn_last4']?.toString();
                       final roleStyle = employeeRoleStyle(position);
 
@@ -422,7 +443,7 @@ class _EmployeesSettingsScreenState
                             ),
                           ),
                           title: Text(
-                            employee['name']?.toString() ?? '',
+                            EmployeeNicknameStore.displayName(employee),
                             style: TextStyle(
                               fontWeight: FontWeight.w600,
                               color: active ? null : Colors.grey,
@@ -431,6 +452,8 @@ class _EmployeesSettingsScreenState
                           subtitle: Text.rich(
                             TextSpan(
                               children: [
+                                if (employee['nickname']?.toString().isNotEmpty == true)
+                                  TextSpan(text: (employee['name']?.toString() ?? '') + ' • '),
                                 TextSpan(
                                   text: position,
                                   style: TextStyle(
