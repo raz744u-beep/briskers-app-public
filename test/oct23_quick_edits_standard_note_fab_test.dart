@@ -37,21 +37,29 @@ void main() {
     expect(source, contains('bool _quickEditSyncRequested = false'));
   });
 
-  test('Primary creation actions use rounded rectangle FABs above dock', () {
-    const paths = <String>[
+  test('Primary New actions stay in approved positions with rounded styling', () {
+    for (final path in const [
       'lib/screens/jobs_screen.dart',
       'lib/screens/customers/customers_screen.dart',
       'lib/screens/appointments_screen.dart',
-      'lib/screens/documents_screen.dart',
-      'lib/screens/expenses_screen.dart',
-    ];
-    for (final path in paths) {
+    ]) {
       final source = File(path).readAsStringSync();
       expect(source, contains('FloatingActionButton.extended('), reason: path);
       expect(source, contains('shape: RoundedRectangleBorder('), reason: path);
       expect(source, contains("label: const Text('New'"), reason: path);
       expect(source, contains('MediaQuery.viewInsetsOf(context).bottom == 0'),
           reason: path);
+    }
+    for (final item in const [
+      ('lib/screens/documents_screen.dart', 'documents-inline-new'),
+      ('lib/screens/expenses_screen.dart', 'expenses-inline-new'),
+    ]) {
+      final source = File(item.$1).readAsStringSync();
+      expect(source, contains("ValueKey('${item.$2}')"), reason: item.$1);
+      expect(source, contains('shape: RoundedRectangleBorder('), reason: item.$1);
+      expect(source, contains("label: const Text('New'"), reason: item.$1);
+      expect(source, isNot(contains('FloatingActionButton.extended(')),
+          reason: item.$1);
     }
   });
   test('Auto Jobs keeps initial list render separate from network refresh', () {

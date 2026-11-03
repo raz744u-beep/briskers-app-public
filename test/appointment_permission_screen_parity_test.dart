@@ -47,18 +47,18 @@ void main() {
     expect(diagnostics, contains("a.sync_state <> 'pending_delete'"));
   });
 
-  test('main list pages keep permission-safe bottom New actions and invoice close', () async {
+  test('main list pages keep permission-safe New actions and invoice close', () async {
     final jobs = await File('lib/screens/jobs_screen.dart').readAsString();
     final documents = await File('lib/screens/documents_screen.dart').readAsString();
     final expenses = await File('lib/screens/expenses_screen.dart').readAsString();
     expect(jobs, contains("tooltip: 'New Job'"));
     expect(jobs, contains('onPressed: _createNewJob'));
-    expect(documents, contains("tooltip: _estimate ? 'New Estimate' : 'New Invoice'"));
+    expect(documents, contains("ValueKey('documents-inline-new')"));
     expect(documents, contains('onPressed: _showCloseInvoices'));
-    expect(expenses, contains("tooltip: 'Add transaction'"));
+    expect(expenses, contains("ValueKey('expenses-inline-new')"));
     expect(expenses, contains('onPressed: _importing ? null : _showAddMenu'));
     expect(expenses, isNot(contains('onPressed: _importing || _loading ? null : _showAddMenu')));
-    expect(expenses, contains('FloatingActionButton.extended('));
+    expect(expenses, isNot(contains('FloatingActionButton.extended(')));
     expect(jobs, contains('shape: RoundedRectangleBorder('));
     expect(documents, contains('shape: RoundedRectangleBorder('));
     expect(expenses, isNot(contains('_importing || _showingLocal ? null : _showAddMenu')));
@@ -86,7 +86,7 @@ void main() {
     expect(expenses, contains('child: SearchBar('));
     expect(expenses, contains('WidgetStatePropertyAll<double>(3)'));
     expect(expenses, contains('WidgetStatePropertyAll<Color>('));
-    expect(expenses, contains("tooltip: 'Add transaction'"));
+    expect(expenses, contains("ValueKey('expenses-inline-new')"));
   });
 
   test('offline New Job routes to durable create queue', () async {

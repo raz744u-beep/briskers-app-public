@@ -53,36 +53,27 @@ void main() {
         isNot(contains('onPressed: _canManageCustomers ? _add : null')));
   });
 
-  test('Appointments, Documents and Expenses retain the approved New action', () {
-    const paths = <String>[
-      'lib/screens/appointments_screen.dart',
-      'lib/screens/documents_screen.dart',
-      'lib/screens/expenses_screen.dart',
-    ];
-    for (final path in paths) {
-      final source = File(path).readAsStringSync();
-      expect(source, contains('FloatingActionButton.extended('), reason: path);
-      expect(source, contains('shape: RoundedRectangleBorder('), reason: path);
-      expect(source, contains('borderRadius: BorderRadius.circular(14)'),
-          reason: path);
-      expect(source, contains('MediaQuery.viewInsetsOf(context).bottom == 0'),
-          reason: path);
-      expect(source, contains("label: const Text('New'"), reason: path);
-    }
+  test('Appointments, Documents and Expenses retain approved New actions', () {
     final appointments =
         File('lib/screens/appointments_screen.dart').readAsStringSync();
+    expect(appointments, contains('FloatingActionButton.extended('));
     expect(appointments, contains('backgroundColor: BriskersColors.appointments'));
-    expect(appointments, isNot(contains("tooltip: 'Add appointment',\\n                      style: IconButton.styleFrom(")));
 
     final documents =
         File('lib/screens/documents_screen.dart').readAsStringSync();
+    expect(documents, contains("ValueKey('documents-inline-new')"));
     expect(documents, contains('backgroundColor: accent'));
-    expect(documents, isNot(contains('IconButton.filled(\\n                    tooltip: _estimate')));
+    expect(documents, contains('shape: RoundedRectangleBorder('));
+    expect(documents, contains('borderRadius: BorderRadius.circular(14)'));
+    expect(documents, isNot(contains('FloatingActionButton.extended(')));
 
     final expenses =
         File('lib/screens/expenses_screen.dart').readAsStringSync();
+    expect(expenses, contains("ValueKey('expenses-inline-new')"));
     expect(expenses, contains('backgroundColor: BriskersColors.expenses'));
-    expect(expenses, isNot(contains("tooltip: 'Add transaction',\\n                        style: IconButton.styleFrom(")));
+    expect(expenses, contains('shape: RoundedRectangleBorder('));
+    expect(expenses, contains('borderRadius: BorderRadius.circular(14)'));
+    expect(expenses, isNot(contains('FloatingActionButton.extended(')));
   });
 
   test('Finding Resolve explicitly selects the actual Job, including history', () {
