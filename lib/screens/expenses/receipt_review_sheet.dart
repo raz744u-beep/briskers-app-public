@@ -1,5 +1,6 @@
 // ignore_for_file: prefer_interpolation_to_compose_strings, use_null_aware_elements, curly_braces_in_flow_control_structures
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// Explicit operator confirmation before receipt fields alter expense entry.
 /// Keeps the existing expense editor; it does not create any transaction.
@@ -147,6 +148,11 @@ class _ReceiptReviewSheetState extends State<ReceiptReviewSheet> {
     final flags = (widget.extraction['review_flags'] is List)
         ? (widget.extraction['review_flags'] as List).map((item) => item.toString()).toList()
         : <String>[];
+    final metadata = widget.extraction['raw_data'];
+    final rawText = metadata is Map
+        ? metadata['ocr_text']?.toString() ?? ''
+        : '';
+    final rowCount = metadata is Map ? metadata['ocr_line_count'] : null;
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
@@ -179,6 +185,48 @@ class _ReceiptReviewSheetState extends State<ReceiptReviewSheet> {
                       const SizedBox(height: 8),
                       Text('Needs review: ' + flags.join('; '),
                         style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    ],
+                    if (rawText.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      ExpansionTile(
+                        key: const ValueKey('local-receipt-ocr-details'),
+                        tilePadding: EdgeInsets.zero,
+                        title: const Text('View text recognized on phone'),
+                        subtitle: Text(rowCount == null
+                            ? 'Local OCR text — never uploaded automatically'
+                            : 'Local OCR text ($rowCount recognized lines)'),
+                        children: [
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                              key: const ValueKey('copy-local-receipt-ocr'),
+                              icon: const Icon(Icons.copy_outlined),
+                              onPressed: () => Clipboard.setData(
+                                ClipboardData(text: rawText),
+                              ),
+                              label: const Text('Copy recognized text'),
+                            ),
+                          ),
+                          Container(
+                            alignment: Alignment.topLeft,
+                            width: double.infinity,
+                            constraints: const BoxConstraints(maxHeight: 220),
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: Theme.of(context).colorScheme.outlineVariant,
+                              ),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: SingleChildScrollView(
+                              child: SelectableText(
+                                rawText,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                     const SizedBox(height: 16),
                     _field(_vendor, 'Vendor'),
