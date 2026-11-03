@@ -685,7 +685,12 @@ class _CustomerVehicleFindingsSectionState
 
       if (!BriskersConnectionModeController.instance.forceOffline) {
         unawaited(
-          _offlineWrites.flush(widget.businessId).then((_) => _refresh()),
+          _offlineWrites.flush(widget.businessId)
+              .then((_) => _refresh())
+              .catchError((Object _) {
+                // Local finding and retry queue remain durable if the
+                // network returns an error after the on-device save.
+              }),
         );
       }
     } catch (error) {
@@ -971,7 +976,11 @@ class _CustomerVehicleFindingsSectionState
       );
 
       if (!BriskersConnectionModeController.instance.forceOffline) {
-        unawaited(_offlineWrites.flush(widget.businessId));
+        unawaited(_offlineWrites.flush(widget.businessId).catchError(
+          (Object _) {
+            // Keep the committed local edit for the next safe sync retry.
+          },
+        ));
       }
       return updated;
     } finally {
@@ -1067,14 +1076,22 @@ class _CustomerVehicleFindingsSectionState
                   await _workFindings.updateLocalFinding(widget.businessId,
                     foundJobId, findingId, body: updatedBody);
                   if (!BriskersConnectionModeController.instance.forceOffline) {
-                    unawaited(_workFindings.flush(widget.businessId));
+                    unawaited(_workFindings.flush(widget.businessId).catchError(
+                      (Object _) {
+                        // Never undo an already committed offline finding.
+                      },
+                    ));
                   }
                 } else {
                   await _offlineWrites.updateFinding(
                     widget.businessId, widget.customerId, findingId,
                     body: updatedBody);
                   if (!BriskersConnectionModeController.instance.forceOffline) {
-                    unawaited(_offlineWrites.flush(widget.businessId));
+                    unawaited(_offlineWrites.flush(widget.businessId).catchError(
+          (Object _) {
+            // Keep the committed local edit for the next safe sync retry.
+          },
+        ));
                   }
                 }
                 changed = true;
@@ -1149,7 +1166,11 @@ class _CustomerVehicleFindingsSectionState
                   customerId: widget.customerId,
                 );
                 if (!BriskersConnectionModeController.instance.forceOffline) {
-                  unawaited(_offlineWrites.flush(widget.businessId));
+                  unawaited(_offlineWrites.flush(widget.businessId).catchError(
+          (Object _) {
+            // Keep the committed local edit for the next safe sync retry.
+          },
+        ));
                 }
                 changed = true;
                 setSheetState(() => includeOnInvoice = value);
