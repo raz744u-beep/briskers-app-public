@@ -67,7 +67,7 @@ class LanLabAutoSyncController {
     _peer = peer;
     _active = true;
     _schedule(Duration.zero);
-    if (peer == null) _emit('waiting', 'Automatic sync waiting for QR pairing');
+    if (peer == null) _emit('waiting', 'Listening for incoming notes; scan QR to enable outgoing auto-sync');
   }
 
   void setPeer(LanLabPairing? peer) {
@@ -78,7 +78,7 @@ class LanLabAutoSyncController {
       _schedule(Duration.zero);
     } else {
       _timer?.cancel();
-      _emit('waiting', 'Automatic sync waiting for QR pairing');
+      _emit('waiting', 'Listening for incoming notes; scan QR to enable outgoing auto-sync');
     }
   }
 
@@ -110,7 +110,7 @@ class LanLabAutoSyncController {
     if (_disposed || !_active) return;
     _timer?.cancel();
     if (_peer == null) {
-      _emit('waiting', 'Automatic sync waiting for QR pairing');
+      _emit('waiting', 'Listening for incoming notes; scan QR to enable outgoing auto-sync');
       return;
     }
     if (_syncing) {
