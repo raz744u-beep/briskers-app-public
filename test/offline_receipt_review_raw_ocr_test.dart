@@ -27,7 +27,12 @@ void main() {
       const ValueKey('local-receipt-ocr-details')));
     await tester.tap(find.byKey(const ValueKey('local-receipt-ocr-details')));
     await tester.pumpAndSettle();
-    expect(find.text(raw), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is SelectableText && widget.data == raw,
+      ),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('copy-local-receipt-ocr')),
         findsOneWidget);
   });
