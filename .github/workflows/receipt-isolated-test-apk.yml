@@ -7,6 +7,7 @@ on:
     paths:
       - 'lib/**'
       - 'test/offline_receipt_*'
+      - 'test/expense_receipt_entry_contract_test.dart'
       - '.github/workflows/receipt-isolated-test-apk.yml'
   workflow_dispatch:
 
