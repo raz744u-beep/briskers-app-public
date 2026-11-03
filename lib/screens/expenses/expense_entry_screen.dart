@@ -296,6 +296,15 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     });
   }
 
+  void _launchAutoReceiptScan() {
+    if (widget.autoScanReceipt && !_autoScanLaunched && !_editing && !_copying) {
+      _autoScanLaunched = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _takeReceiptPhoto(scanWithAi: true);
+      });
+    }
+  }
+
   Future<void> _load() async {
     var localShown = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
@@ -350,13 +359,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       localShown = true;
     }
 
+    // Cached options are sufficient to start the camera before any network
+    // lookup. Auto mode with no internet must still open the scanner.
+    if (localShown) _launchAutoReceiptScan();
+
     if (forceOffline) {
-      if (widget.autoScanReceipt && !_autoScanLaunched && !_editing && !_copying) {
-        _autoScanLaunched = true;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _takeReceiptPhoto(scanWithAi: true);
-        });
-      }
+      _launchAutoReceiptScan();
       if (!localShown && mounted) {
         setState(() {
           _loading = false;
@@ -383,17 +391,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       if (!mounted) return;
       _applyLoadedOptions(data, detail);
 
-      if (widget.autoScanReceipt &&
-          !_autoScanLaunched &&
-          !_editing &&
-          !_copying) {
-        _autoScanLaunched = true;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _takeReceiptPhoto(scanWithAi: true);
-        });
-      }
+      _launchAutoReceiptScan();
     } catch (error) {
       if (!mounted) return;
+      _launchAutoReceiptScan();
       if (!localShown) {
         setState(() {
           _loading = false;
