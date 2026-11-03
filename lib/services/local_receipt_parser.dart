@@ -114,9 +114,9 @@ class LocalReceiptParser {
       }
       if (invoiceNumber == null) {
         final candidate = _invoicePattern.firstMatch(line)?.group(1);
-        if (candidate != null && RegExp(r'\\d').hasMatch(candidate) &&
+        if (candidate != null && RegExp(r'\d').hasMatch(candidate) &&
             !candidate.contains('/') && !candidate.contains('.') &&
-            !RegExp(r'^20\\d{2}-\\d{1,2}-\\d{1,2}\
+            !RegExp(r'^20\d{2}-\d{1,2}-\d{1,2}').hasMatch(candidate)) {
           invoiceNumber = candidate; // Preserve leading zeros.
         }
       }
