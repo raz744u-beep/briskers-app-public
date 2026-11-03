@@ -43,22 +43,18 @@ jobs:
           content = content.replace(
               '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
               '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
-              '    <uses-permission android:name="android.permission.INTERNET" />\n'
-              '    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />')
+              '    <uses-permission android:name="android.permission.INTERNET" />')
           content = content.replace('android:label="briskers_app"', 'android:label="Briskers LAN TEST"')
           p.write_text(content)
           gradle = Path('android/app/build.gradle.kts')
           code = gradle.read_text()
-          code = code.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 37')
-          code = code.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 37')
+          code = code.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36')
+          code = code.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 36')
           gradle.write_text(code)
-          assert 'ACCESS_LOCAL_NETWORK' in p.read_text()
+          assert 'android.permission.INTERNET' in p.read_text()
           assert 'com.briskers.lanlab' in Path('android/app/build.gradle.kts').read_text()
-          assert 'targetSdk = 37' in gradle.read_text()
+          assert 'targetSdk = 36' in gradle.read_text()
           PY
-      - name: Install Android 17 SDK for local-network permission
-        run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" >/dev/null
       - name: Resolve Flutter packages
         working-directory: generated
         run: flutter pub get
