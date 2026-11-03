@@ -1,3 +1,4 @@
+// ignore_for_file: prefer_interpolation_to_compose_strings, use_null_aware_elements, curly_braces_in_flow_control_structures
 /// Conservative receipt parser. Never requires internet or database access.
 /// All recognized values remain suggestions until user confirmation.
 class LocalReceiptParser {
