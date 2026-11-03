@@ -320,6 +320,35 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       }
     }
 
+    if (BriskersConnectionModeController.receiptTestBuild && !localShown) {
+      // Isolated test install has no production cache, login or accounting
+      // records. Keep synthetic IDs permanently offline.
+      _applyLoadedOptions(<String, dynamic>{
+        'accounts': [
+          {'id': 'receipt-test-cash', 'name': 'TEST Account',
+           'is_default_expense': true},
+        ],
+        'categories': [
+          {'id': 'receipt-test-parts', 'name': 'Customer Parts',
+           'normal_direction': 'expense'},
+          {'id': 'receipt-test-supplies', 'name': 'Shop Supplies',
+           'normal_direction': 'expense'},
+        ],
+        'counterparties': [
+          {'id': 'receipt-test-worldpac', 'name': 'Worldpac',
+           'default_category_id': 'receipt-test-parts',
+           'default_surcharge_percent': 0},
+          {'id': 'receipt-test-autozone', 'name': 'AutoZone',
+           'default_category_id': 'receipt-test-parts',
+           'default_surcharge_percent': 0},
+          {'id': 'receipt-test-peake', 'name': 'Peake BMW',
+           'default_category_id': 'receipt-test-parts',
+           'default_surcharge_percent': 0},
+        ],
+      }, null);
+      localShown = true;
+    }
+
     if (forceOffline) {
       if (widget.autoScanReceipt && !_autoScanLaunched && !_editing && !_copying) {
         _autoScanLaunched = true;
