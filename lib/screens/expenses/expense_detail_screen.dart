@@ -1436,6 +1436,13 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     final attachments = List<dynamic>.from(
       detail['attachments'] ?? const [],
     ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+    // The Invoice/Expense list may know that a receipt exists even when the
+    // exact image metadata has not been cached. This is a visibility warning,
+    // never an instruction to add or recreate a missing financial receipt.
+    final receiptReferenceCount = int.tryParse(
+      (detail['receipt_count'] ??
+          widget.cachedDetail?['receipt_count'])?.toString() ?? '',
+    ) ?? 0;
     final counterparty =
         detail['counterparty']?.toString() ?? (income ? 'Income' : 'Expense');
     final category = detail['category']?.toString() ?? '';
@@ -1644,10 +1651,17 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                   _localExpenseIqPhoto!['state'] != 'uploaded'))
             _localExpenseIqReceiptCard(),
           if (attachments.isEmpty && _localExpenseIqPhoto == null)
-            const Card(
+            Card(
               child: Padding(
-                padding: EdgeInsets.all(18),
-                child: Text('No receipt photos attached.'),
+                padding: const EdgeInsets.all(18),
+                child: receiptReferenceCount > 0
+                    ? Text(
+                        '$receiptReferenceCount receipt photo reference(s) '
+                        'exist, but the images are not available in this '
+                        'device’s saved expense detail. This does not prove '
+                        'the original pictures were deleted.',
+                      )
+                    : const Text('No receipt photos attached.'),
               ),
             )
           else
