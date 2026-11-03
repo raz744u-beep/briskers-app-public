@@ -73,6 +73,74 @@ Invoice total 191.35
     expect(extracted['receipt_total'], 191.35);
   });
 
+  test('Worldpac column layout restores separated SKU, description and price', () {
+    final parsed = LocalReceiptParser.parse('''
+WORLDPAC
+Invoice
+74966713
+Date
+10/27/2026
+34 11 6 886 478
+Brake Disc
+2
+56.70
+113.40
+Total
+191.35
+''', positionedLines: const [
+      ReceiptOcrFragment(text: 'WORLDPAC', left: 20, top: 5, height: 12),
+      ReceiptOcrFragment(text: 'Invoice', left: 20, top: 25, height: 12),
+      ReceiptOcrFragment(text: '74966713', left: 20, top: 45, height: 12),
+      ReceiptOcrFragment(text: 'Date', left: 20, top: 65, height: 12),
+      ReceiptOcrFragment(text: '10/27/2026', left: 20, top: 85, height: 12),
+      ReceiptOcrFragment(text: '34 11 6 886 478', left: 20, top: 115, height: 12),
+      ReceiptOcrFragment(text: 'Brake Disc', left: 180, top: 114, height: 12),
+      ReceiptOcrFragment(text: '2', left: 395, top: 115, height: 12),
+      ReceiptOcrFragment(text: '56.70', left: 445, top: 115, height: 12),
+      ReceiptOcrFragment(text: '113.40', left: 525, top: 115, height: 12),
+      ReceiptOcrFragment(text: 'TOTAL', left: 20, top: 145, height: 12),
+      ReceiptOcrFragment(text: '191.35', left: 525, top: 146, height: 12),
+    ]);
+    expect(parsed['vendor_name'], 'Worldpac');
+    expect(parsed['vendor_invoice_number'], '74966713');
+    expect(parsed['receipt_date'], '2026-10-27');
+    expect(parsed['receipt_total'], 191.35);
+    final items = parsed['items'] as List;
+    expect(items, hasLength(1));
+    expect((items.first as Map)['description'], 'Brake Disc');
+    expect((items.first as Map)['sku'], '34 11 6 886 478');
+    expect((items.first as Map)['quantity'], 2);
+    expect((parsed['raw_data'] as Map)['ocr_line_count'], 12);
+  });
+
+  test('standalone invoice fields work without location coordinates', () {
+    final parsed = LocalReceiptParser.parse('''
+Worldpac
+Invoice
+74966713
+Date
+10/27/2026
+Total
+191.35
+''');
+    expect(parsed['vendor_invoice_number'], '74966713');
+    expect(parsed['receipt_date'], '2026-10-27');
+    expect(parsed['receipt_total'], 191.35);
+  });
+
+  test('do not mistake subtotal or line total for missing printed total', () {
+    final parsed = LocalReceiptParser.parse('''
+Worldpac
+Invoice 74966713
+Brake Disc 2 56.70 113.40
+Subtotal 113.40
+Tax 7.92
+''');
+    expect(parsed.containsKey('receipt_total'), isFalse);
+    expect(parsed['subtotal'], 113.40);
+    expect(parsed['items'], hasLength(1));
+  });
+
   test('missing or weak OCR never fabricates invoice number or total', () {
     final extracted = LocalReceiptParser.parse('Brake repair\nSomething unreadable');
     expect(extracted.containsKey('vendor_invoice_number'), isFalse);
