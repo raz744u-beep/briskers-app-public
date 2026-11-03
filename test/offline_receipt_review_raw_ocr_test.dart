@@ -9,7 +9,7 @@ void main() {
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(
         body: ReceiptReviewSheet(
-          extraction: const <String, dynamic>{
+          extraction: <String, dynamic>{
             'vendor_name': 'Worldpac',
             'review_flags': <String>['Part lines need review'],
             'items': <Map<String, dynamic>>[],
