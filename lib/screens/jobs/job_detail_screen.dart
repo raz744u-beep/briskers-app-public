@@ -118,6 +118,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   List<Map<String, dynamic>> _jobExpenses = const [];
   num? _mileageOut;
   String? _mileageOutVehicleId;
+  String? _mileageOutInvoiceId;
   bool _linkedExpensesCached = false;
   final ImagePicker _picker = ImagePicker();
 
@@ -154,6 +155,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       _jobExpenses = const [];
       _mileageOut = null;
       _mileageOutVehicleId = null;
+      _mileageOutInvoiceId = null;
       _linkedExpensesCached = false;
       _loading = false;
       _busy = false;
@@ -214,7 +216,12 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   bool get _canEditFindings =>
       _job?['_first_frame_only'] != true && _jobCapability('edit_findings');
   bool get _canEditInspection =>
-      _job?['_first_frame_only'] != true && _jobCapability('edit_inspection');
+      _job?['_first_frame_only'] != true &&
+      !_contentBlocked &&
+      (_jobCapability('edit_inspection') ||
+          // Cached offline Job details may omit server capability flags.
+          // Permit the Owner to edit the locally stored check-in odometer.
+          (!_onlineReady && _owner && _job?['_local_snapshot'] == true));
   bool get _owner => widget.roleCode == 'owner';
   String? _profitabilityError;
 
@@ -355,6 +362,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     final vehicleId = _job?['vehicle_id']?.toString() ?? '';
     if (vehicleId.isEmpty) return;
     num? departure;
+    String? departureInvoiceId;
     try {
       for (final invoice in documents) {
         if (invoice['kind']?.toString() != 'invoice') continue;
@@ -372,7 +380,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         departure = JobMileageSummary.mileageOutFromInvoice(
           projected, jobId: jobId, vehicleId: vehicleId,
         );
-        if (departure != null) break;
+        if (departure != null) {
+          departureInvoiceId = invoiceId;
+          break;
+        }
       }
     } catch (_) {
       // A missing cache or pending-outbox read must not fabricate a reading.
@@ -385,6 +396,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     setState(() {
       _mileageOut = departure;
       _mileageOutVehicleId = vehicleId;
+      _mileageOutInvoiceId = departureInvoiceId;
     });
   }
 
@@ -397,7 +409,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       await _openSectionModal('documents');
       return;
     }
-    final id = invoices.first['id']?.toString() ?? '';
+    // Open the invoice that supplied the displayed departure reading.
+    // A Job may have multiple invoices; the first is not always the source.
+    final id = _mileageOutInvoiceId ??
+        (invoices.first['id']?.toString() ?? '');
     if (id.isNotEmpty) await _openDocument(id);
   }
 
@@ -1462,6 +1477,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           };
           _mileageOut = null;
           _mileageOutVehicleId = null;
+          _mileageOutInvoiceId = null;
           _busy = false;
         });
         if (!BriskersConnectionModeController.instance.forceOffline) {

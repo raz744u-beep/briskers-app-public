@@ -129,8 +129,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     super.initState();
     _scrollController.addListener(_handleScroll);
     WidgetsBinding.instance.addObserver(this);
-    _load();
-    _refreshPhotoCounts();
+    // Allow the first Expenses frame to paint before starting database work.
+    // Running multiple startup queries during initState can make navigation
+    // appear unresponsive, particularly after returning from another module.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_load());
+      unawaited(_refreshPhotoCounts());
+    });
     if (_owner && Platform.isAndroid) {
       // Photo totals are informational; avoid rebuilding the entire list
       // every four seconds while the owner is reading transactions.
@@ -513,6 +519,17 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         // verification is asynchronous and scoped to this navigation epoch.
         localRows = localRows.take(_pageSize).map(
           WarrantyReceiptReporting.unverified).toList();
+        // Paint locally committed transactions before loading account/category
+        // dropdown options. An options query failure must not blank Expenses.
+        if (_isCurrentLoad(epoch, businessId) && localRows.isNotEmpty) {
+          setState(() {
+            _transactions = localRows;
+            _hasMore = hasMoreLocal;
+            _loading = false;
+            _showingLocal = true;
+            _error = null;
+          });
+        }
         final localOptions = await _localFinancial.loadOptions(
           widget.businessId,
         );

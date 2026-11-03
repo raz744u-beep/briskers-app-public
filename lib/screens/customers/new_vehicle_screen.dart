@@ -176,7 +176,9 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
         title: Text(widget.isEditing ? 'Edit vehicle' : 'Add vehicle'),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(
+          16, 16, 16, 16 + MediaQuery.paddingOf(context).bottom,
+        ),
         children: [
           Row(
             children: [
