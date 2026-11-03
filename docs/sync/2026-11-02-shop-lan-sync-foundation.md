@@ -55,3 +55,16 @@ Related: #389 (offline master/slave, LAN and kiosk) and #388/#396 (Gloria/cloud 
 ## Implementation boundary
 
 Do not interpret a successful read-only probe as secure pairing or working record sync. An Android signed APK and on-device test with two physical devices are still required to validate LAN networking and Android background behavior.
+
+
+## Cross-platform addition — iOS and Android peers (Nov 2, 2026)
+
+The Briskers shop LAN sync protocol **must be cross-platform**: iPhone/iPad peers exchange the same versioned, encrypted, business-scoped change operations and durable ACKs as Android phones and the Android kiosk, using local Wi-Fi with no internet or Supabase dependency. A paired iPhone may be an Owner/Secretary/authorized staff peer; the Owner's Samsung remains number-authority until a separately authorized Master transfer occurs.
+
+- Prefer interoperable IP transport (authenticated TLS over TCP/HTTPS/WebSocket) and cross-platform mDNS/DNS-SD/Bonjour discovery with manually entered IP/QR fallback. Do **not** base the canonical protocol on Android-only Nearby Connections, Wi-Fi Direct, or Apple-only Multipeer Connectivity. Platform-specific nearby connection methods are optional additional transports only.
+- On iOS declare `NSLocalNetworkUsageDescription` and registered `NSBonjourServices` in Info.plist; request Local Network permission appropriately and explain when it is denied. Use Apple's Network framework/Bonjour APIs for discovery where necessary. Android needs equivalent multicast/NSD permissions and device checks.
+- Local SQLite schema, immutable UUIDs, signed/encrypted operation envelope, role capabilities, server-independent peer receipts, invoice lease protocol, and conflict rules **must be platform-neutral**, so a change made on iPhone is indistinguishable in meaning from the same change made on Android.
+- **Background limits:** iOS suspends ordinary background apps; Android can similarly suspend receivers. Never promise uninterrupted peer-to-peer delivery to a sleeping phone. Keep local changes pending and retry on foreground/reconnect. To support reliable kiosk-to-staff fan-out, consider the powered Android kiosk as an explicitly enrolled queue relay (restricted records only), or a dedicated shop hub. The kiosk still must never be granted payroll or unrestricted financial access.
+- Test Android-to-iPhone, iPhone-to-Android, and mixed three-peer fan-out with the ISP disconnected; cover iOS permission denied, app suspended/terminated, lock screen, restart, re-pairing, duplicate operation, offline operation recovery, and Master-only number allocation.
+- An iPhone away from shop Wi-Fi requires separately authorized remote/cloud sync over internet; direct shop-LAN sync cannot reach it remotely.
+- Status: **cross-platform requirement**, not yet implemented; first draft PR only contains read-only Dart probe and pure batch planner, with no iOS device acceptance.
