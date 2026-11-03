@@ -189,8 +189,13 @@ class LanLabTransport {
     try {
       _server = await HttpServer.bind(InternetAddress.anyIPv4, preferredPort);
     } on SocketException catch (error) {
-      // EADDRINUSE (errno 98): an older test/other app owns this port.
-      if (error.osError?.errorCode != 98) rethrow;
+      // Android/Linux reports EADDRINUSE (98) for another app. In the
+      // same-process test the Dart socket runtime may instead report the
+      // shared-bind requirement. Both mean the preferred port is occupied.
+      final occupied = error.osError?.errorCode == 98 ||
+          error.message.contains('shared flag to bind') ||
+          error.message.contains('Address already in use');
+      if (!occupied) rethrow;
       _server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
     }
     _server!.listen((request) { unawaited(_accept(request)); });
