@@ -1067,7 +1067,13 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                 : _remarksController.text.trim(),
             contextLabel: _contextLabel,
             receipts: stagedReceipts,
-            receiptExtraction: _receiptExtraction,
+            // Save Transaction is the owner's explicit confirmation of the
+            // scanned suggestion; never upload or persist an unconfirmed scan.
+            receiptExtraction: _receiptExtraction == null ? null : {
+              ..._receiptExtraction!,
+              'review_confirmed': true,
+              'extraction_source': 'existing_online_receipt_ai',
+            },
           );
         } else {
           await _offlineFinancial.createLocalTransaction(
@@ -1090,7 +1096,13 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                 : _remarksController.text.trim(),
             contextLabel: _contextLabel,
             receipts: stagedReceipts,
-            receiptExtraction: _receiptExtraction,
+            // Save Transaction is the owner's explicit confirmation of the
+            // scanned suggestion; never upload or persist an unconfirmed scan.
+            receiptExtraction: _receiptExtraction == null ? null : {
+              ..._receiptExtraction!,
+              'review_confirmed': true,
+              'extraction_source': 'existing_online_receipt_ai',
+            },
           );
         }
 
