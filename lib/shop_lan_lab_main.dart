@@ -134,7 +134,11 @@ class _LanLabScreenState extends State<LanLabScreen> with WidgetsBindingObserver
         _address = ip;
         _status = ip == null
             ? 'No private Wi-Fi IP found. Connect both phones to shop Wi-Fi.'
-            : 'Listening on ' + ip + ':' + transport.port.toString();
+            : transport.port != transport.preferredPort
+                ? 'LAN port occupied: switched to available port '
+                    '${transport.port}. If the other phone cannot connect, '
+                    'scan this device QR again.'
+                : 'Listening on $ip:${transport.port} (LAN TEST #17).';
       });
       final auto = LanLabAutoSyncController(
         transfer: transport.syncWith,
