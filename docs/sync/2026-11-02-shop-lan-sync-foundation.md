@@ -68,3 +68,38 @@ The Briskers shop LAN sync protocol **must be cross-platform**: iPhone/iPad peer
 - Test Android-to-iPhone, iPhone-to-Android, and mixed three-peer fan-out with the ISP disconnected; cover iOS permission denied, app suspended/terminated, lock screen, restart, re-pairing, duplicate operation, offline operation recovery, and Master-only number allocation.
 - An iPhone away from shop Wi-Fi requires separately authorized remote/cloud sync over internet; direct shop-LAN sync cannot reach it remotely.
 - Status: **cross-platform requirement**, not yet implemented; first draft PR only contains read-only Dart probe and pure batch planner, with no iOS device acceptance.
+
+
+## Complete device matrix — shop and commercial edition (Nov 2, 2026)
+
+Owner-confirmed target mix: Android phones, iPhones, iPads, Android tablet kiosk, optional Windows desktop/laptop in a **browser**, and optional Mac/MacBook in a **browser**. Android tablets outside kiosk mode also supported. This is an architecture target, not a claim that these clients already synchronize.
+
+| Device | Preferred client | Storage and offline behavior |
+| --- | --- | --- |
+| Android phone/tablet | Native Flutter app | Durable local SQLite, same shop LAN peer protocol |
+| iPhone/iPad | Native Flutter app | Durable local SQLite, same shop LAN peer protocol; handle iOS local network privacy and app suspension |
+| Android check-in kiosk | Restricted, always-on native app | Local check-in queue; narrowly authorized relay capability, *never* unrestricted payroll/accounting data |
+| Windows desktop/laptop | HTTPS web app in browser | Browser local database/cache where appropriate; connect through shop LAN gateway; offline local editing only after explicit PWA/database durability tests |
+| Mac/MacBook | Same HTTPS web app in Safari/Chrome/Edge | Same browser-capability and persistence tests as Windows |
+
+### Browser-specific interoperability
+
+- **Do not** assume a webpage can run Android/iOS native peer discovery, open incoming listening sockets, or act as an always-available LAN peer. Have browser clients connect **outbound** over authenticated HTTPS/WSS to a shop gateway/hub that speaks the **same versioned change protocol** as the native apps.
+- Shop gateway/hub is a logical capability, not a mandatory new physical purchase at this stage. Investigate hosting it in a reliable always-powered shop device; the Android kiosk is a *candidate*, contingent on Android service lifecycle, power/battery health, local HTTPS certificates and strict role/tenant isolation. A dedicated low-power LAN hub may later be justified for reliable browser availability and fanout.
+- For browsers to load Briskers when ISP is down: either serve a signed/secure web app over the LAN from an always-on host, or use a properly installed/cache-primed PWA with tested service worker and local data storage. A never-before-loaded public website cannot be guaranteed to open offline. Browser background sync is not universally supported, so never promise delivery when the tab is closed.
+- Browser secure-context rules, CORS, network permissions, TLS certificates and origin limitations must be tested in Windows Chrome/Edge and macOS Safari/Chrome. Chrome Local Network Access may prompt on public-to-LAN access; avoid relying on browser-specific APIs. See https://developer.chrome.com/docs/modern-web-guidance/guides/security/local-network-access and https://developer.mozilla.org/en-US/docs/Web/API/Background_Synchronization_API.
+- Do not silently equate a browser cache with native device SQLite; implement an explicit storage/replay layer, encryption/permission model, crash safety, and offline acceptance per supported browser. Storage eviction, private browsing, multiple tabs, and logout need explicit handling.
+- All devices share **business IDs, immutable entity/operation IDs, durable dedupe and ACK semantics, authorization, invoice-number authority, conflict/tombstone rules**, independent of runtime and storage.
+- Remote browser access outside the shop must use authenticated internet/cloud routing or a secure approved remote access path; no LAN-only discovery outside the shop. Supabase remains background synchronization, not a required local-shop transaction processor.
+
+### Interoperability acceptance matrix
+
+1. Android -> iPhone and iPad -> Android on same shop Wi-Fi with ISP unplugged.
+2. Native phone -> Windows Chrome/Edge browser via LAN gateway, then browser edit -> Android/iPhone, with all authorization and idempotency checks.
+3. Native phone -> Mac Safari browser via gateway, including offline/cached-app tests where supported.
+4. Kiosk check-in fanout -> both phone platforms and authorized desktop browsers without giving kiosk the whole customer directory or financial records.
+5. App closed / device asleep / browser tab closed: sender keeps local change, receiver catches up on next eligible session without duplicate records.
+6. Mixed-platform concurrent edits and numbering leases, with Owner-only final number authority and no silent overwrite of payments.
+7. HTTPS, permission denied, invalid/revoked peer, failed certificate, guest Wi-Fi isolation and LAN gateway unavailable scenarios produce honest status without losing local work.
+
+Design sequence: **native Android <-> native iOS** peer transport and authenticated journal first; **browser via secure LAN gateway** second; reliable cross-device operational workflows and safe number leasing next. Do not require Windows or Mac native applications initially.
