@@ -1,3 +1,4 @@
+// ignore_for_file: prefer_interpolation_to_compose_strings, use_null_aware_elements, curly_braces_in_flow_control_structures
 import 'dart:io';
 
 import 'package:flutter/material.dart';
