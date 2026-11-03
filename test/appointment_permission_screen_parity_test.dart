@@ -56,7 +56,8 @@ void main() {
     expect(documents, contains("tooltip: _estimate ? 'New Estimate' : 'New Invoice'"));
     expect(documents, contains('onPressed: _showCloseInvoices'));
     expect(expenses, contains("tooltip: 'Add transaction'"));
-    expect(expenses, contains('onPressed: _importing || _loading ? null : _showAddMenu'));
+    expect(expenses, contains('onPressed: _importing ? null : _showAddMenu'));
+    expect(expenses, isNot(contains('onPressed: _importing || _loading ? null : _showAddMenu')));
     expect(expenses, contains('FloatingActionButton.extended('));
     expect(jobs, contains('shape: RoundedRectangleBorder('));
     expect(documents, contains('shape: RoundedRectangleBorder('));
