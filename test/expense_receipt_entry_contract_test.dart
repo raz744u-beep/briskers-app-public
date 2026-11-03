@@ -45,14 +45,18 @@ void main() {
     expect(source, contains('backgroundColor: BriskersColors.expenses'));
   });
 
-  test('isolated receipt TEST button exposes camera and gallery choices', () {
+  test('TEST scanner identifies the installed build and acknowledges every tap', () {
     final harness = File('lib/screens/expenses/receipt_scan_test_harness.dart')
         .readAsStringSync();
-    expect(harness, contains('showModalBottomSheet<ImageSource>'));
+    expect(harness, contains("'BRISKERS_SOURCE'"));
+    expect(harness, contains('Installed TEST build:'));
+    expect(harness, contains('onPressed: _openingScanner ? null : _showScanChoices'));
+    expect(harness, contains('_scanTapCount++'));
+    expect(harness, contains('Scanner status:'));
     expect(harness, contains("Text('Take receipt photo')"));
     expect(harness, contains("Text('Choose from gallery')"));
     expect(harness, contains('initialReceiptSource: source'));
-    expect(harness, contains('Could not open the receipt editor:'));
+    expect(harness, contains('Could not open receipt editor'));
   });
 
   test('receipt picker errors are visible and can be retried', () {
