@@ -1810,23 +1810,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                   title: tr('expensesIncome'), logoHeight: 40),
             )
           : null,
-      floatingActionButton: MediaQuery.viewInsetsOf(context).bottom == 0
-          ? FloatingActionButton.extended(
-              heroTag: 'expenses-quick-create',
-              tooltip: 'Add transaction',
-              // Creation opens its own local-first editor. A slow list fetch
-              // must not disable adding today's business transactions.
-              onPressed: _importing ? null : _showAddMenu,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-              backgroundColor: BriskersColors.expenses,
-              foregroundColor: Colors.white,
-              icon: const Icon(Icons.add),
-              label: const Text('New',
-                  style: TextStyle(fontWeight: FontWeight.w800)),
-            )
-          : null,
+
       // Keep the Expenses page mounted and visible while the local first
       // page hydrates. Blocking the whole body on a spinner looks blank on
       // some Android startup paths and prevents immediate navigation.
@@ -2215,7 +2199,25 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                           ],
                         ),
                       ),
-
+                      const SizedBox(width: 8),
+                      FilledButton.icon(
+                        key: const ValueKey('expenses-inline-new'),
+                        // The independent local-first editor can open before
+                        // historical transaction and account lists refresh.
+                        onPressed: _importing ? null : _showAddMenu,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: BriskersColors.expenses,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          minimumSize: const Size(91, 52),
+                          padding: const EdgeInsets.symmetric(horizontal: 13),
+                        ),
+                        icon: const Icon(Icons.add, size: 20),
+                        label: const Text('New',
+                          style: TextStyle(fontWeight: FontWeight.w800)),
+                      ),
                     ],
                   ),
                   if (_searchController.text.trim().isNotEmpty)

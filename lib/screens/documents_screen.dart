@@ -1881,22 +1881,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   ],
                 ))
           : null,
-      floatingActionButton: (widget.isOwner || widget.canManageExpenses) &&
-              MediaQuery.viewInsetsOf(context).bottom == 0
-          ? FloatingActionButton.extended(
-              heroTag: _estimate ? 'estimates-quick-create' : 'invoices-quick-create',
-              tooltip: _estimate ? 'New Estimate' : 'New Invoice',
-              onPressed: _estimate ? _createStandaloneEstimate : _createBlankInvoice,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-              backgroundColor: accent,
-              foregroundColor: Colors.white,
-              icon: const Icon(Icons.add),
-              label: const Text('New',
-                  style: TextStyle(fontWeight: FontWeight.w800)),
-            )
-          : null,
+
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView.builder(
@@ -2077,7 +2062,27 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                     onChanged: (_) => setState(() {}),
                   ),
                 ),
-
+                if (widget.isOwner || widget.canManageExpenses) ...[
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    key: const ValueKey('documents-inline-new'),
+                    onPressed: _estimate
+                        ? _createStandaloneEstimate
+                        : _createBlankInvoice,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: accent,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      minimumSize: const Size(91, 52),
+                      padding: const EdgeInsets.symmetric(horizontal: 13),
+                    ),
+                    icon: const Icon(Icons.add, size: 20),
+                    label: const Text('New',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
+                  ),
+                ],
               ],
             ),
             if (_error != null)
