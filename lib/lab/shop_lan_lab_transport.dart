@@ -160,10 +160,12 @@ class LanLabTransport {
     required this.store,
     required String pairingKey,
     required this.deviceId,
+    this.onRemoteChanged,
   }) : _cipher = LanLabCipher(pairingKey);
 
   final LanLabStore store;
   final String deviceId;
+  final Future<void> Function()? onRemoteChanged;
   LanLabCipher _cipher;
   HttpServer? _server;
 
@@ -175,7 +177,8 @@ class LanLabTransport {
 
   Future<void> start() async {
     if (_server != null) return;
-    _server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
+    // A stable port keeps a QR pairing usable after a phone restarts.
+    _server = await HttpServer.bind(InternetAddress.anyIPv4, 48571);
     _server!.listen((request) { unawaited(_accept(request)); });
   }
 
@@ -235,7 +238,10 @@ class LanLabTransport {
       }
 
       // Durable per-note commit happens BEFORE returning an ACK.
-      await store.saveAll(notes);
+      final inserted = await store.saveAll(notes);
+      if (inserted > 0 && onRemoteChanged != null) {
+        unawaited(onRemoteChanged!());
+      }
       final snapshot = await store.all();
       final sealed = await _cipher.seal(<String, dynamic>{
         'app': lanLabAppId,
