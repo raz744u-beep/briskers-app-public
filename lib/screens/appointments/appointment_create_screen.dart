@@ -3,6 +3,10 @@ import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
+import '../../services/offline_job_admin_service.dart';
+import '../../services/employee_nickname_store.dart';
+import '../../core/employee_role_style.dart';
+import '../../core/connection_mode.dart';
 
 class AppointmentCreateScreen extends StatefulWidget {
   const AppointmentCreateScreen({
@@ -25,6 +29,7 @@ class AppointmentCreateScreen extends StatefulWidget {
 
 class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
   static const _api = BriskersApi();
+  final _offlineEmployees = OfflineJobAdminService();
 
   final _title = TextEditingController(text: 'Service appointment');
   final _description = TextEditingController();
@@ -61,16 +66,19 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
   }
 
   Future<void> _loadEmployees() async {
+    // Cached staff are enough to offer a mechanic selector offline.
+    final cached = await _offlineEmployees.cachedEmployees(widget.businessId);
+    if (!mounted) return;
+    setState(() {
+      _employees = cached;
+      _loadingEmployees = false;
+    });
+    if (BriskersConnectionModeController.instance.forceOffline) return;
     try {
-      final rows = await _api.assignableEmployees(widget.businessId);
-      if (!mounted) return;
-      setState(() {
-        _employees = rows;
-        _loadingEmployees = false;
-      });
+      final refreshed = await _offlineEmployees.refreshEmployees(widget.businessId);
+      if (mounted) setState(() => _employees = refreshed);
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _loadingEmployees = false);
+      // Keep the saved employee choices if refresh fails.
     }
   }
 
@@ -286,17 +294,28 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
                   value: null,
                   child: Text('Unassigned'),
                 ),
-                ..._employees.map(
-                  (employee) => DropdownMenuItem<String?>(
+                ..._employees.map((employee) {
+                  final position =
+                      employee['position_name']?.toString() ?? 'Employee';
+                  final style = employeeRoleStyle(position);
+                  return DropdownMenuItem<String?>(
                     value: employee['id']?.toString(),
-                    child: Text(
-                      '${employee['name'] ?? ''} — '
-                      '${employee['position_name'] ?? 'Employee'}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    child: Row(
+                      children: [
+                        Icon(style.icon, color: style.color, size: 19),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            EmployeeNicknameStore.displayName(employee) +
+                                ' — ' + position,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ),
+                  );
+                }),
               ],
               onChanged: (value) => setState(() => _employeeId = value),
             ),
