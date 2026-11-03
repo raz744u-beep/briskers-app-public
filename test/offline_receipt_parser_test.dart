@@ -62,6 +62,17 @@ TOTAL 26.12
       'Connecting link, Grommet — Inv. 603162 — 10/23/26 — \$26.12');
   });
 
+  test('receipt date and invoice total labels never become invoice numbers', () {
+    final extracted = LocalReceiptParser.parse('''
+Worldpac
+Receipt date 10/27/2026
+Invoice total 191.35
+''');
+    expect(extracted.containsKey('vendor_invoice_number'), isFalse);
+    expect(extracted['receipt_date'], '2026-10-27');
+    expect(extracted['receipt_total'], 191.35);
+  });
+
   test('missing or weak OCR never fabricates invoice number or total', () {
     final extracted = LocalReceiptParser.parse('Brake repair\nSomething unreadable');
     expect(extracted.containsKey('vendor_invoice_number'), isFalse);
