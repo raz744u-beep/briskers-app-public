@@ -21,6 +21,16 @@ class OnDeviceReceiptReader {
       return LocalReceiptParser.parse(
         recognized.text,
         vendors: vendors,
+        positionedLines: [
+          for (final block in recognized.blocks)
+            for (final line in block.lines)
+              ReceiptOcrFragment(
+                text: line.text,
+                left: line.boundingBox.left,
+                top: line.boundingBox.top,
+                height: line.boundingBox.height,
+              ),
+        ],
       );
     } finally {
       await recognizer.close();
