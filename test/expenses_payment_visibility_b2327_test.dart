@@ -46,9 +46,15 @@ void main() {
     final mainAmountStyle = main.substring(mainStart, mainStart+330);
     expect(mainAmountStyle, contains('fontSize: 17.5'));
     expect(mainAmountStyle, contains('fontWeight: FontWeight.w900'));
-    final invoiceStart = invoice.indexOf('// Match the main Expenses & Income card amount style.');
+    final invoiceTabStart = invoice.indexOf('Widget _invoiceExpensesTab()');
+    final invoiceTabEnd =
+        invoice.indexOf('Future<void> _showInvoiceExpenses()', invoiceTabStart);
+    expect(invoiceTabStart, greaterThanOrEqualTo(0));
+    expect(invoiceTabEnd, greaterThan(invoiceTabStart));
+    final invoiceTab = invoice.substring(invoiceTabStart, invoiceTabEnd);
+    final invoiceStart = invoiceTab.indexOf("Text('\${income ? '+' : '-'}\${_money(item['amount'])}'");
     expect(invoiceStart, greaterThanOrEqualTo(0));
-    final invoiceAmountStyle = invoice.substring(invoiceStart, invoiceStart+500);
+    final invoiceAmountStyle = invoiceTab.substring(invoiceStart, invoiceStart+330);
     expect(invoiceAmountStyle, contains('fontSize: 17.5'));
     expect(invoiceAmountStyle, contains('fontWeight: FontWeight.w900'));
     expect(invoiceAmountStyle, contains('color: color'));
