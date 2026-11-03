@@ -112,7 +112,7 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
     final id = row['id']?.toString();
     if (id == null) return;
     final detail = await _cache.loadTransactionDetail(business, id);
-    if (!mounted) return;
+    if (!mounted || !routeContext.mounted) return;
     final attachments = detail?['attachments'] is List
         ? detail!['attachments'] as List : <dynamic>[];
     final items = detail?['receipt_items'] is List
