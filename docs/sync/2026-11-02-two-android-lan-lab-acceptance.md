@@ -16,7 +16,7 @@
 ## Two-phone acceptance procedure
 
 1. Install the **separate** APK built by GitHub Actions: workflow **Briskers LAN two-Android TEST APK** on PR #410. This is a debug-test artifact, not a production signed release.
-2. On **Samsung S26 Ultra** and **Samsung Note 9**, connect to the **same shop Wi-Fi** (do not use guest Wi-Fi or AP/client-isolated SSID). Approve the Android Local Network prompt if displayed.
+2. On **Samsung S26 Ultra** and **Samsung Note 9**, connect to the **same shop Wi-Fi** (do not use guest Wi-Fi or AP/client-isolated SSID). The TEST targets SDK 36, so Android 17 allows its local networking through the INTERNET permission without a new Local Network prompt; SDK 37 production migration will require explicit runtime permission.
 3. Open the LAN TEST app on both phones. Verify the top status shows a private IP address on each and that the local listener started. Keep both apps foreground during first connection.
 4. On S26, leave its QR code visible. On Note 9, tap **Scan other phone pairing QR**, scan the S26 code, and verify the paired peer IP.
 5. On S26, create **"Hello from S26"** using **Save test note**. On Note 9, create **"Hello from Note 9"**.
@@ -42,6 +42,6 @@
 
 ## Build and verification
 
-Workflow file: `.github/workflows/shop-lan-android-lab.yml`. It creates a **distinct Android package** from source in CI, explicitly declares INTERNET and ACCESS_LOCAL_NETWORK permissions, sets target SDK 37, tests the encrypted two-device transport and existing protocol, analyzes code, builds a debug APK with target `lib/shop_lan_lab_main.dart`, and uploads an artifact.
+Workflow file: `.github/workflows/shop-lan-android-lab.yml`. It creates a **distinct Android package** from source in CI, declares INTERNET permission and deliberately targets SDK 36 for compatibility with the available Android CI toolchain (SDK 37 will require a new Local Network runtime-permission implementation), tests the encrypted two-device transport and existing protocol, analyzes code, builds a debug APK with target `lib/shop_lan_lab_main.dart`, and uploads an artifact.
 
 Do **not** report this lab as a complete multi-device business synchronization system. Physical S26 + Note 9 confirmation is required before extending to customer/check-in/job data.
