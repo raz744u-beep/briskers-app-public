@@ -1115,16 +1115,17 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       final rounded = num.parse(amount.toStringAsFixed(2));
       final counterpartyName = _counterpartyController.text.trim();
 
-      // Ordinary income and expenses are local-first even in Auto mode.
-      // Recurring rules and AI extraction currently need additional online
-      // operations; preserve those workflows until their queue is supported.
+      // Confirmed scanned receipts always use the local transaction writer.
+      // Existing recurring schedules still use their legacy online path only
+      // when no scanned receipt is being committed.
       final localFirst = BriskersConnectionModeController.instance.forceOffline ||
+          _receiptExtraction != null ||
           (!_repeat && _recurringRuleId == null);
       if (localFirst) {
-        if (_repeat) {
+        if (_repeat || _recurringRuleId != null) {
           setState(() {
             _saving = false;
-            _error = 'Recurring scheduling needs a connection. Turn Repeat off to save this transaction offline.';
+            _error = 'Scanned receipt expenses must save locally first. Turn Repeat off and use a non-recurring transaction.';
           });
           return;
         }
@@ -1564,6 +1565,14 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                       enabled: !_saving && !_readingReceipt,
                       onChanged: (receipts) => setState(() {
                         _receipts = receipts;
+                        if (_lastScannedReceipt != null &&
+                            !receipts.any((item) =>
+                                item.path == _lastScannedReceipt!.path)) {
+                          _lastScannedReceipt = null;
+                          _receiptExtraction = null;
+                          _receiptReadMessage =
+                              'Scanned photo removed. Previous text is editable, but extracted details will not be attached.';
+                        }
                       }),
                     ),
                   ),
