@@ -351,7 +351,18 @@ class _CustomerVehicleFindingsSectionState
         .where((vehicle) => (vehicle['id']?.toString() ?? '').isNotEmpty)
         .toList();
 
-    if (vehicles.isEmpty) return null;
+    if (vehicles.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Add a vehicle to this customer before recording a finding.',
+            ),
+          ),
+        );
+      }
+      return null;
+    }
     if (vehicles.length == 1) return vehicles.first;
 
     if (!mounted) return null;

@@ -1814,7 +1814,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           ? FloatingActionButton.extended(
               heroTag: 'expenses-quick-create',
               tooltip: 'Add transaction',
-              onPressed: _importing || _loading ? null : _showAddMenu,
+              // Creation opens its own local-first editor. A slow list fetch
+              // must not disable adding today's business transactions.
+              onPressed: _importing ? null : _showAddMenu,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
