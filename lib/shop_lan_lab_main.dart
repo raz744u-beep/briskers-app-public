@@ -222,15 +222,16 @@ class _LanLabScreenState extends State<LanLabScreen> {
           await Future<void>.delayed(const Duration(milliseconds: 400));
         }
       }
-      if (result == null) throw StateError('Peer returned no sync result');
+      final synced = result;
+      if (synced == null) throw StateError('Peer returned no sync result');
       await _refresh();
       final elapsed = DateTime.now().difference(started).inSeconds;
       if (mounted) {
         setState(() => _status =
             'Sync successful: $endpoint responded in ${elapsed}s. '
-            'Sent ${result!.sent} test notes; imported ${result.imported} new '
-            'notes; ${result.totalLocal} saved locally. '
-            '${result.imported == 0 ? "No new incoming notes." : ""}');
+            'Sent ${synced.sent} test notes; imported ${synced.imported} new '
+            'notes; ${synced.totalLocal} saved locally. '
+            '${synced.imported == 0 ? "No new incoming notes." : ""}');
       }
     } on TimeoutException {
       if (mounted) {
