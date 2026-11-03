@@ -6,7 +6,7 @@ void main() {
   testWidgets('review shows on-device OCR without any network action',
       (tester) async {
     const raw = 'WORLDPAC\nINVOICE\n74966713\nTOTAL\n191.35';
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(const MaterialApp(
       home: Scaffold(
         body: ReceiptReviewSheet(
           extraction: const <String, dynamic>{
