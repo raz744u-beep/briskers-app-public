@@ -20,6 +20,9 @@ dependencies:
   pdf: ^3.11.3
   printing: ^5.14.2
   shared_preferences: ^2.5.5
+  # Isolated two-Android LAN TEST: encrypted synthetic notes and QR pairing.
+  cryptography: 2.9.0
+  qr_flutter: 4.1.0
   # Pin last Samsung-verified Android implementation (b2286 startup recovery).
   shared_preferences_android: 2.4.28
   drift: 2.32.1
