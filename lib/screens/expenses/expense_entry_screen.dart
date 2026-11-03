@@ -452,6 +452,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     if (_readingReceipt) return;
     setState(() {
       _readingReceipt = true;
+      // Keep the original selection eligible for explicit online review even
+      // if the on-device OCR engine itself cannot recognize this image.
+      _lastScannedReceipt = file;
       _receiptReadMessage = 'Reading locally on this phone…';
       _error = null;
     });
@@ -464,7 +467,6 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       if (!mounted) return;
       setState(() {
         _readingReceipt = false;
-        _lastScannedReceipt = file;
         _receiptReadMessage = 'Local OCR complete. Review the fields before applying.';
       });
       final reviewed = await showModalBottomSheet<Map<String, dynamic>>(
