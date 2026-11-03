@@ -262,7 +262,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
             }
           }
         }
-      } else {
+      } else if (_receiptExtraction == null) {
+        // Do not reset operator-reviewed vendor/category/account when an Auto
+        // options refresh completes after a locally scanned receipt.
         Map<String, dynamic>? defaultExpenseAccount;
         for (final account in accounts) {
           if (account['is_default_expense'] == true) {
