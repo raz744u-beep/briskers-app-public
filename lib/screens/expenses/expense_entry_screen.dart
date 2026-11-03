@@ -864,9 +864,13 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       source: ImageSource.camera,
     );
     if (file != null && mounted) {
-      setState(() => _receipts = [
-        ..._receipts.where((item) => item.path != file.path), file,
-      ]);
+      setState(() {
+        final byPath = <String, XFile>{
+          for (final receipt in _receipts) receipt.path: receipt,
+          file.path: file,
+        };
+        _receipts = byPath.values.toList();
+      });
       if (scanWithAi) await _readReceipt(file);
     }
   }
