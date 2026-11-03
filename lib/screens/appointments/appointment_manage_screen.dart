@@ -37,7 +37,7 @@ class AppointmentManageScreen extends StatefulWidget {
 
 class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   BriskersApi get _api => widget.api ?? const BriskersApi();
-  final _offlineEmployees = OfflineJobAdminService();
+  OfflineJobAdminService get _offlineEmployees => OfflineJobAdminService(api: _api);
   late final AppointmentSyncService _sync = AppointmentSyncService();
   LocalCustomerRepository get _localCustomers =>
       widget.localCustomers ?? LocalCustomerRepository();
