@@ -38,7 +38,7 @@ class OfflineJobAdminService {
     final raw = prefs.getString(_employeesKey(businessId));
     if (raw == null || raw.isEmpty) return const [];
     try {
-      return _nicknames.decorate(
+      return await _nicknames.decorate(
         businessId,
         List<dynamic>.from(jsonDecode(raw) as List)
             .whereType<Map>()

@@ -689,7 +689,7 @@ class _JobsScreenState extends State<JobsScreen>
                   title: Text(EmployeeNicknameStore.displayName(employee)),
                   subtitle: Text(
                     employee['nickname']?.toString().isNotEmpty == true
-                        ? (employee['name']?.toString() ?? '') + ' • ' + position
+                        ? '${employee['name']} • $position'
                         : position,
                   ),
                   trailing: id == currentId

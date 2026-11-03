@@ -232,7 +232,7 @@ class _EmployeesSettingsScreenState
                         title: Text(name),
                         subtitle: Text(
                           employee['nickname']?.toString().isNotEmpty == true
-                              ? (employee['name']?.toString() ?? '') + ' • ' + position
+                              ? '${employee['name']} • $position'
                               : position,
                         ),
                         trailing: Wrap(
@@ -453,7 +453,7 @@ class _EmployeesSettingsScreenState
                             TextSpan(
                               children: [
                                 if (employee['nickname']?.toString().isNotEmpty == true)
-                                  TextSpan(text: (employee['name']?.toString() ?? '') + ' • '),
+                                  TextSpan(text: '${employee['name']} • '),
                                 TextSpan(
                                   text: position,
                                   style: TextStyle(
