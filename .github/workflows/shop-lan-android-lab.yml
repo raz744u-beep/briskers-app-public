@@ -58,7 +58,7 @@ jobs:
           PY
       - name: Install Android 17 SDK for local-network permission
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" >/dev/null || true
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" >/dev/null
       - name: Resolve Flutter packages
         working-directory: generated
         run: flutter pub get
