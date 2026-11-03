@@ -5,6 +5,7 @@ import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
 import '../../core/module_modal_theme.dart';
 
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
@@ -13,6 +14,7 @@ import '../../services/briskers_api.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/offline_financial_write_service.dart';
 import '../../services/on_device_receipt_reader.dart';
+import '../../services/independent_receipt_ai_gateway.dart';
 import '../../services/local_receipt_parser.dart';
 import 'receipt_review_sheet.dart';
 import 'expense_receipt_attachments.dart';
@@ -89,6 +91,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
   bool _saving = false;
   bool _readingReceipt = false;
   bool _autoScanLaunched = false;
+  XFile? _lastScannedReceipt;
+  bool _onlineAiBusy = false;
+  String? _onlineAiMessage;
   num? _receiptBaseAmount;
   num _receiptSurchargePercent = 0;
   bool _applyReceiptSurcharge = false;
@@ -437,6 +442,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       if (!mounted) return;
       setState(() {
         _readingReceipt = false;
+        _lastScannedReceipt = file;
         _receiptReadMessage = 'Local OCR complete. Review the fields before applying.';
       });
       final reviewed = await showModalBottomSheet<Map<String, dynamic>>(
@@ -452,6 +458,22 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
             'Photo attached. Recognition was not applied.');
         return;
       }
+      _applyReviewedReceipt(reviewed);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _receiptReadMessage =
+          'Local OCR could not read this photo. It remains attached; enter details manually.';
+        _error = error.toString();
+      });
+    } finally {
+      if (mounted && _readingReceipt) {
+        setState(() => _readingReceipt = false);
+      }
+    }
+  }
+
+  void _applyReviewedReceipt(Map<String, dynamic> reviewed) {
       final vendorName = reviewed['vendor_name']?.toString().trim() ?? '';
       final matched = vendorName.isEmpty
           ? null : _matchCounterparty(vendorName);
@@ -492,17 +514,120 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
         _remarksController.text = _receiptNote(reviewed, finalAmount: amount);
         _receiptReadMessage = 'OCR read locally • Reviewed • Not yet saved';
       });
+  }
+
+  Future<void> _enhanceWithOnlineAi() async {
+    final photo = _lastScannedReceipt;
+    if (photo == null || _onlineAiBusy) return;
+    const gateway = IndependentReceiptAiGateway();
+    if (!gateway.configured) {
+      setState(() => _onlineAiMessage =
+        'Online AI gateway not configured. Local OCR remains available.');
+      return;
+    }
+    // Explicit consent each time; Force Offline governs synchronization,
+    // not an independently authorized AI request.
+    final consent = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Send receipt to online AI?'),
+        content: const Text(
+          'This sends the selected receipt image and shop identifier to '
+          'Briskers independent AI gateway for better recognition. '
+          'It does not use Supabase. The local expense will not change '
+          'until you review and accept the new suggestions.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep local only'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Send for AI review'),
+          ),
+        ],
+      ),
+    );
+    if (consent != true || !mounted) return;
+    const secure = FlutterSecureStorage();
+    final key = 'briskers_receipt_ai_token_' + widget.businessId;
+    String token;
+    try {
+      token = (await secure.read(key: key) ?? '').trim();
+      if (token.isEmpty) {
+        final controller = TextEditingController();
+        final entered = await showDialog<String>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Independent AI gateway access'),
+            content: TextField(
+              controller: controller,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Gateway-issued access token',
+                helperText: 'Not a Supabase or AI-provider API key',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(
+                  dialogContext, controller.text.trim()),
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
+        );
+        controller.dispose();
+        if (entered == null || entered.isEmpty || !mounted) return;
+        token = entered;
+        await secure.write(key: key, value: token);
+      }
+    } catch (error) {
+      if (mounted) setState(() =>
+          _onlineAiMessage = 'Gateway authentication unavailable: ' + error.toString());
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _onlineAiBusy = true;
+      _onlineAiMessage = 'Contacting independent AI gateway…';
+    });
+    try {
+      final proposed = await gateway.enhance(
+        receipt: photo,
+        businessId: widget.businessId,
+        accessToken: token,
+        mimeType: _mimeType(photo.name),
+      );
+      if (!mounted) return;
+      final reviewed = await showModalBottomSheet<Map<String, dynamic>>(
+        context: context,
+        useSafeArea: true,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (context) => ReceiptReviewSheet(extraction: proposed),
+      );
+      if (!mounted) return;
+      if (reviewed != null) {
+        _applyReviewedReceipt(reviewed);
+        setState(() => _onlineAiMessage =
+          'Online AI suggestions reviewed and applied locally. Not yet saved.');
+      } else {
+        setState(() => _onlineAiMessage =
+          'Online AI suggestions declined; original local values preserved.');
+      }
     } catch (error) {
       if (!mounted) return;
-      setState(() {
-        _receiptReadMessage =
-          'Local OCR could not read this photo. It remains attached; enter details manually.';
-        _error = error.toString();
-      });
+      setState(() => _onlineAiMessage =
+        'Online AI unavailable. Local OCR and your reviewed values are unchanged. ' +
+        error.toString());
     } finally {
-      if (mounted && _readingReceipt) {
-        setState(() => _readingReceipt = false);
-      }
+      if (mounted) setState(() => _onlineAiBusy = false);
     }
   }
 
@@ -1381,6 +1506,32 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                       ),
                     ),
                   ),
+                if (_lastScannedReceipt != null) ...[
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _saving || _readingReceipt || _onlineAiBusy
+                          ? null : _enhanceWithOnlineAi,
+                      icon: _onlineAiBusy
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.auto_awesome_outlined),
+                      label: const Text('Optional online AI enhancement'),
+                    ),
+                  ),
+                  const Text(
+                    'Local OCR works without internet. Online AI requires '
+                    'a separate configured gateway and your consent.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ],
+                if ((_onlineAiMessage ?? '').isNotEmpty)
+                  Text(_onlineAiMessage!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    )),
                 if (_receipts.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
