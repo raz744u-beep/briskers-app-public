@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+import '../../core/module_modal_theme.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
@@ -29,7 +30,10 @@ class IdentifixEstimateImportScreen extends StatefulWidget {
 }
 
 class _IdentifixEstimateImportScreenState
-    extends State<IdentifixEstimateImportScreen> {
+    extends State<IdentifixEstimateImportScreen>
+    with ModuleModalState<IdentifixEstimateImportScreen> {
+  @override
+  Color get modalAccent => BriskersColors.estimates;
   static const _api = BriskersApi();
 
   final ImagePicker _picker = ImagePicker();
@@ -117,9 +121,9 @@ class _IdentifixEstimateImportScreenState
     final extraction = _extraction;
     if (extraction == null) return;
 
-    final lines = List<dynamic>.from(extraction['lines'] ?? const [])
-        .map((raw) => Map<String, dynamic>.from(raw as Map))
-        .toList();
+    final lines = List<dynamic>.from(
+      extraction['lines'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
     if (index < 0 || index >= lines.length) return;
 
     final edited = await showDialog<Map<String, dynamic>>(
@@ -194,7 +198,7 @@ class _IdentifixEstimateImportScreenState
             vehicle: widget.vehicle,
             importedUnitPrice:
                 num.tryParse(line['imported_unit_price']?.toString() ?? '') ??
-                    0,
+                0,
           );
           final status = result['status']?.toString() ?? '';
           if (status == 'needs_review' || status == 'not_found') {
@@ -282,9 +286,9 @@ class _IdentifixEstimateImportScreenState
         Text(
           _handwritten
               ? 'This estimate will be linked to ${widget.customerName} and this job. '
-                  'Scan the complete handwritten estimate, then review every extracted line before creating it.'
+                    'Scan the complete handwritten estimate, then review every extracted line before creating it.'
               : 'This estimate will be linked to ${widget.customerName} and this job. '
-                  'Scan the complete printed Identifix estimate, then review the extracted lines.',
+                    'Scan the complete printed Identifix estimate, then review the extracted lines.',
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 24),
@@ -296,7 +300,9 @@ class _IdentifixEstimateImportScreenState
           onPressed: () => _pick(ImageSource.camera),
           icon: const Icon(Icons.camera_alt_outlined),
           label: Text(
-            _handwritten ? 'Scan handwritten estimate' : 'Scan printed estimate',
+            _handwritten
+                ? 'Scan handwritten estimate'
+                : 'Scan printed estimate',
           ),
         ),
         const SizedBox(height: 10),
@@ -361,9 +367,9 @@ class _IdentifixEstimateImportScreenState
 
   Widget _preview() {
     final extraction = _extraction!;
-    final lines = List<dynamic>.from(extraction['lines'] ?? const [])
-        .map((raw) => Map<String, dynamic>.from(raw as Map))
-        .toList();
+    final lines = List<dynamic>.from(
+      extraction['lines'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
 
     final sourceVehicle = <String>[
       if (extraction['vehicle_year'] != null)
@@ -399,7 +405,9 @@ class _IdentifixEstimateImportScreenState
                 ),
                 const SizedBox(height: 10),
                 _PreviewRow(
-                  label: _handwritten ? 'Source estimate' : 'Identifix estimate',
+                  label: _handwritten
+                      ? 'Source estimate'
+                      : 'Identifix estimate',
                   value: extraction['estimate_number']?.toString() ?? '—',
                 ),
                 _PreviewRow(
@@ -465,14 +473,15 @@ class _IdentifixEstimateImportScreenState
           return Card(
             child: ListTile(
               leading: CircleAvatar(
-                backgroundColor:
-                    BriskersColors.estimates.withValues(alpha: 0.12),
+                backgroundColor: BriskersColors.estimates.withValues(
+                  alpha: 0.12,
+                ),
                 child: Icon(
                   type == 'labor'
                       ? Icons.handyman_outlined
                       : type == 'supply'
-                          ? Icons.inventory_2_outlined
-                          : Icons.settings_outlined,
+                      ? Icons.inventory_2_outlined
+                      : Icons.settings_outlined,
                   color: BriskersColors.estimates,
                 ),
               ),
@@ -553,8 +562,8 @@ class _IdentifixEstimateImportScreenState
       body: _creating
           ? _creatingView()
           : _extraction == null
-              ? _initialView()
-              : _preview(),
+          ? _initialView()
+          : _preview(),
     );
   }
 }
@@ -652,19 +661,16 @@ class _ImportLineDialogState extends State<_ImportLineDialog> {
       return;
     }
 
-    Navigator.pop(
-      context,
-      <String, dynamic>{
-        'type': _type,
-        'description': _description.text.trim(),
-        'part_number': _partNumber.text.trim().isEmpty
-            ? null
-            : _partNumber.text.trim(),
-        'quantity': quantity,
-        'unit_price': price,
-        'line_total': quantity * price,
-      },
-    );
+    Navigator.pop(context, <String, dynamic>{
+      'type': _type,
+      'description': _description.text.trim(),
+      'part_number': _partNumber.text.trim().isEmpty
+          ? null
+          : _partNumber.text.trim(),
+      'quantity': quantity,
+      'unit_price': price,
+      'line_total': quantity * price,
+    });
   }
 
   @override
@@ -701,15 +707,17 @@ class _ImportLineDialogState extends State<_ImportLineDialog> {
             const SizedBox(height: 10),
             TextField(
               controller: _quantity,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: const InputDecoration(labelText: 'Quantity'),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _price,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: const InputDecoration(
                 labelText: 'Imported unit price',
                 prefixText: '\$ ',
@@ -730,10 +738,7 @@ class _ImportLineDialogState extends State<_ImportLineDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          onPressed: _save,
-          child: const Text('Use line'),
-        ),
+        FilledButton(onPressed: _save, child: const Text('Use line')),
       ],
     );
   }

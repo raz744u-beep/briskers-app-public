@@ -37,7 +37,8 @@ class LocalAppointmentRepository {
     final where = <String>["a.business_id = ?", "a.sync_state <> 'pending_delete'"];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
 
-    if (filter == 'today') {
+    if (filter == 'today' || filter == 'confirmed_today') {
+      if (filter == 'confirmed_today') where.add("a.status = 'confirmed'");
       where.add('a.starts_at >= ? AND a.starts_at < ?');
       variables.add(Variable<DateTime>(today));
       variables.add(Variable<DateTime>(tomorrow));
@@ -99,6 +100,7 @@ class LocalAppointmentRepository {
       FROM local_appointments
       WHERE business_id = ?
         AND status = 'confirmed'
+        AND sync_state <> 'pending_delete'
         AND starts_at >= ?
         AND starts_at < ?
       ''',
@@ -122,6 +124,7 @@ class LocalAppointmentRepository {
           FROM local_appointments
           WHERE business_id = ?
             AND status = 'confirmed'
+            AND sync_state <> 'pending_delete'
             AND starts_at >= ?
             AND starts_at < ?
           ''',

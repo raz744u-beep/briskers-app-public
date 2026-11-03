@@ -12,15 +12,21 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   intl: ^0.20.2
+  local_auth: 3.0.2
+  flutter_secure_storage: 10.3.4
   package_info_plus: ^8.3.1
   image_picker: ^1.2.0
   image: ^4.10.1
   mobile_scanner: ^7.4.2
+  # Bundled on-device Latin OCR for photographing windshield/door-jamb VINs.
+  google_mlkit_text_recognition: 0.17.1
   supabase_flutter: ^2.17.2
   pdf: ^3.11.3
   printing: ^5.14.2
   shared_preferences: ^2.5.5
-  # Pin last Samsung-verified Android implementation (b2286 startup recovery).
+  # b2268 (last phone-working APK) resolved 2.4.28; b2278/b2285
+  # resolved 2.5.0 and fail during native preference/session startup.
+  # Lock only this Android implementation until on-device verification.
   shared_preferences_android: 2.4.28
   drift: 2.32.1
   drift_flutter: 0.3.1

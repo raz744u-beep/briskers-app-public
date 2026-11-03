@@ -13,7 +13,7 @@ EmployeeRoleStyle employeeRoleStyle(String? positionName) {
   if (name == 'owner') {
     return const EmployeeRoleStyle(
       Icons.workspace_premium_outlined,
-      Color(0xFFD97706),
+      Color(0xFF1E3A5F),
     );
   }
   if (name == 'shop foreman' || name == 'foreman') {

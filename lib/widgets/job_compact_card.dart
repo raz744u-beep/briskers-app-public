@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/briskers_i18n.dart';
 import '../core/employee_role_style.dart';
 import '../core/job_status_style.dart';
 
@@ -60,7 +61,15 @@ class JobCompactCard extends StatelessWidget {
         int.tryParse(job['open_findings']?.toString() ?? '') ?? 0;
     final requests =
         int.tryParse(job['pending_requests']?.toString() ?? '') ?? 0;
-    final statusColor = colorFromHex(job['status_color']?.toString());
+    // Three operational states must remain distinguishable even when the
+    // offline snapshot has no server-provided status_color.
+    final status = job['status']?.toString().trim().toLowerCase() ?? '';
+    final statusColor = switch (status) {
+      'open' => const Color(0xFF2864A5),
+      'in_progress' || 'in progress' => const Color(0xFFB66D13),
+      'complete' || 'completed' => const Color(0xFF26844D),
+      _ => colorFromHex(job['status_color']?.toString()),
+    };
     final paymentState = job['status']?.toString() == 'completed'
         ? job['payment_state']?.toString()
         : null;
@@ -79,7 +88,7 @@ class JobCompactCard extends StatelessWidget {
         (3 + (firstName.length / 5).ceil()).clamp(3, 6).toInt();
 
     final cardTint = Color.alphaBlend(
-      statusColor.withValues(alpha: 0.11),
+      statusColor.withValues(alpha: 0.14),
       const Color(0xFFF7FAF9),
     );
 
@@ -301,11 +310,16 @@ class JobCompactCard extends StatelessWidget {
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
-                                Text(
-                                  '${_hours(job['planned_hours'])} hr',
-                                  style: const TextStyle(
-                                    fontSize: 13.5,
-                                    fontWeight: FontWeight.w700,
+                                Flexible(
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '${_hours(job['planned_hours'])} hr',
+                                      style: const TextStyle(
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(width: 4),
@@ -331,6 +345,20 @@ class JobCompactCard extends StatelessWidget {
                       ),
                     ],
                   ),
+                  if (canOpen && onLongPress != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3, right: 3),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          tr('longPressForOptions'),
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),

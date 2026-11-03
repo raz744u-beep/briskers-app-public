@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +8,7 @@ import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/offline_document_draft_service.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_document_repository.dart';
+import 'package:briskers_app/services/local_job_repository.dart';
 
 class _InterruptedSyncApi extends BriskersApi {
   final List<String> operationIds = [];
@@ -57,12 +59,26 @@ class _InterruptedSyncApi extends BriskersApi {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('offline invoice stays queued after interrupted server response, no double invoice',
+  test('new local-numbered invoices stay offline even if a replay worker runs',() async {
+    SharedPreferences.setMockInitialValues({});
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    final api=_InterruptedSyncApi();
+    final service=OfflineDocumentDraftService(database:db,api:api);
+    try {
+      final invoice=await service.createQuickInvoice('shop',customerId:'customer',customerName:'Test');
+      await service.flush('shop');
+      expect(api.operationIds,isEmpty);
+      expect((await LocalDocumentDetailCache(database:db).load('shop',invoice))!['document_number'],'1');
+      expect((await db.customSelect("SELECT state FROM sync_outbox WHERE entity_type='document_draft_create'").getSingle()).read<String>('state'),'pending');
+    } finally { await db.close(); }
+  });
+
+  test('legacy unnumbered invoice retries retain identity, no double invoice',
       () async {
     SharedPreferences.setMockInitialValues({});
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     final api = _InterruptedSyncApi();
-    final cache = const LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database: db);
     final drafts = OfflineDocumentDraftService(
       database: db, api: api, cache: cache,
       documents: LocalDocumentRepository(database:db),
@@ -78,6 +94,12 @@ void main() {
       variables: [Variable<String>(id)],
     ).get();
     expect(before.single.read<String>('job_id'), startsWith('local-job-'));
+    final tempJobNumber = (await cache.load('sandbox', id))?['job_number'];
+    expect(tempJobNumber, 'J-1');
+    // Model an existing pre-upgrade unnumbered creation, not a new local-numbered invoice.
+    final legacy=await db.customSelect("SELECT id,payload_json FROM sync_outbox WHERE entity_type='document_draft_create'").getSingle();
+    final payload=Map<String,dynamic>.from(jsonDecode(legacy.read<String>('payload_json')) as Map)..remove('local_document_number')..remove('local_job_number');
+    await db.customStatement('UPDATE sync_outbox SET payload_json=? WHERE id=?',[jsonEncode(payload),legacy.read<int>('id')]);
     await drafts.flush('sandbox');
     final jobStillQueued = await db.customSelect(
       "select id from local_jobs where business_id='sandbox' and sync_state='pending'",
@@ -96,6 +118,11 @@ void main() {
     final remote = await cache.load('sandbox',id);
     expect(remote?['_server_document_id'],
         '00000000-0000-4000-8000-000000006332');
+    expect(remote?['job_number'], tempJobNumber);
+    final visibleJobs = await LocalJobRepository(database: db).listJobs('sandbox');
+    expect(visibleJobs, hasLength(1));
+    expect(visibleJobs.single['id'], remote?['job_id']);
+    expect(visibleJobs.single['job_number'], tempJobNumber);
     final remains = await db.customSelect(
       "select id from sync_outbox where business_id='sandbox'"
     ).get();
@@ -113,6 +140,8 @@ void main() {
       "select id from local_job_visits where business_id='sandbox' and id like 'local-visit-%'",
     ).get();
     expect(provisionalVisits, isEmpty);
+    await drafts.flush('sandbox');
+    expect(await LocalJobRepository(database: db).jobCount('sandbox'), 1);
     await db.close();
   });
   test('cancel never-uploaded offline invoice removes draft, Job, visit and outbox', () async {
@@ -134,7 +163,7 @@ void main() {
       ).getSingle();
       expect(rows.read<int>('n'), 0, reason: name);
     }
-    expect(await const LocalDocumentDetailCache().load('cancel-shop', id), isNull);
+    expect(await LocalDocumentDetailCache(database: db).load('cancel-shop', id), isNull);
     await drafts.flush('cancel-shop');
     expect(api.operationIds, isEmpty);
     await db.close();
@@ -164,3 +193,4 @@ void main() {
   });
 
 }
+

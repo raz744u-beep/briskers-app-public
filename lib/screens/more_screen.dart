@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
@@ -89,6 +90,23 @@ class MoreScreen extends StatelessWidget {
           ),
         ],
         const Divider(),
+        ListTile(
+          leading: const Icon(Icons.info_outline, color: BriskersColors.settings),
+          title: const Text('About Briskers'),
+          subtitle: FutureBuilder<PackageInfo>(
+            future: PackageInfo.fromPlatform(),
+            builder: (context, snapshot) {
+              final info = snapshot.data;
+              return Text(info == null ? 'App version and build number' : 'Version ${info.version} • Build ${info.buildNumber}');
+            },
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () async {
+            final info = await PackageInfo.fromPlatform();
+            if (!context.mounted) return;
+            showAboutDialog(context: context, applicationName: 'Briskers', applicationVersion: 'Version ${info.version} (Build ${info.buildNumber})');
+          },
+        ),
         ListTile(
           leading: const Icon(Icons.logout),
           title: Text(tr('signOut')),

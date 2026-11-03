@@ -79,8 +79,13 @@ class LocalCustomerRepository {
   Future<List<Map<String, dynamic>>> customers(
     String businessId, {
     String? search,
+    int? limit,
   }) async {
+    if (limit != null && (limit < 1 || limit > 1000)) {
+      throw ArgumentError.value(limit, 'limit');
+    }
     final query = search?.trim() ?? '';
+    final limitSql = limit == null ? '' : 'LIMIT ?';
     final rows = await _database.customSelect(
       query.isEmpty
           ? '''
@@ -94,6 +99,7 @@ class LocalCustomerRepository {
             FROM local_customers c
             WHERE c.business_id = ?
             ORDER BY lower(c.display_name), c.id
+            $limitSql
             '''
           : '''
             SELECT c.*,
@@ -105,14 +111,20 @@ class LocalCustomerRepository {
               ) AS vehicle_count
             FROM local_customers c
             WHERE c.business_id = ?
-              AND lower(c.display_name) LIKE ?
+              AND (lower(c.display_name) LIKE ?
+                   OR lower(COALESCE(c.list_phone, c.phone, '')) LIKE ?
+                   OR lower(COALESCE(c.list_email, c.email, '')) LIKE ?)
             ORDER BY lower(c.display_name), c.id
+            $limitSql
             ''',
       variables: query.isEmpty
-          ? [Variable<String>(businessId)]
+          ? [Variable<String>(businessId), if (limit != null) Variable<int>(limit)]
           : [
               Variable<String>(businessId),
               Variable<String>('%${query.toLowerCase()}%'),
+              Variable<String>('%${query.toLowerCase()}%'),
+              Variable<String>('%${query.toLowerCase()}%'),
+              if (limit != null) Variable<int>(limit),
             ],
     ).get();
 
@@ -134,6 +146,17 @@ class LocalCustomerRepository {
           },
         )
         .toList();
+  }
+
+  /// Notification focus bypasses ordinary list search and other view state.
+  Future<List<Map<String, dynamic>>> customersByIds(
+    String businessId,
+    Iterable<String> customerIds,
+  ) async {
+    final ids = customerIds.toSet();
+    if (ids.isEmpty) return const [];
+    final rows = await customers(businessId);
+    return rows.where((row) => ids.contains(row['id'])).toList();
   }
 
   Future<Map<String, dynamic>?> customerDetail(
@@ -210,6 +233,10 @@ class LocalCustomerRepository {
               'license_state':
                   vehicle.readNullable<String>('license_state'),
               'mileage': vehicle.data['mileage'],
+              'mileage_recorded_date':
+                  vehicle.readNullable<String>('mileage_recorded_date'),
+              'mileage_source_invoice_id':
+                  vehicle.readNullable<String>('mileage_source_invoice_id'),
               'color': vehicle.readNullable<String>('color'),
               'key_password':
                   vehicle.readNullable<String>('key_password'),

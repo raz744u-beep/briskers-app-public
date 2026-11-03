@@ -6,15 +6,17 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_job_quarantine.dart';
+import 'local_job_retirement.dart';
 import 'local_document_detail_cache.dart';
 
 class OfflineEstimateInvoiceService {
   OfflineEstimateInvoiceService({
     BriskersApi api = const BriskersApi(),
-    LocalDocumentDetailCache cache = const LocalDocumentDetailCache(),
+    LocalDocumentDetailCache? cache,
     BriskersLocalDatabase? database,
   })  : _api = api,
-        _cache = cache,
+        _cache = cache ?? LocalDocumentDetailCache(database: database),
         _database = database ?? localDatabase;
 
   final BriskersApi _api;
@@ -84,6 +86,7 @@ class OfflineEstimateInvoiceService {
     final result = <Map<String, dynamic>>[];
     for (final row in rows) {
       final id = row.read<String>('id');
+      if(await LocalJobRetirement.isDocumentBlocked(_database,businessId,id)) continue;
       final cached = await _cache.load(businessId, id);
 
       String prefer(String? primary, Object? fallback) {
@@ -299,14 +302,24 @@ class OfflineEstimateInvoiceService {
       );
 
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database,
+          businessId,
+          outboxId: outboxId,
+        );
         final estimateId = payload['estimate_id'].toString();
         final invoiceId = payload['invoice_id'].toString();
 
-        await _api.addEstimateToExistingInvoice(
+        await LocalJobQuarantine.guardReplay(
+          _database,
           businessId,
-          estimateId: estimateId,
-          invoiceId: invoiceId,
-          operationId: payload['operation_id'].toString(),
+          () => _api.addEstimateToExistingInvoice(
+            businessId,
+            estimateId: estimateId,
+            invoiceId: invoiceId,
+            operationId: payload['operation_id'].toString(),
+          ),
+          outboxId: outboxId,
         );
 
         final details = await Future.wait([
@@ -316,10 +329,19 @@ class OfflineEstimateInvoiceService {
         final estimate = details[0];
         final invoice = details[1];
 
-        await _cache.save(businessId, estimateId, estimate);
-        await _cache.save(businessId, invoiceId, invoice);
-
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database,
+          businessId,
+          outboxId: outboxId,
+        );
         await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database,
+            businessId,
+            outboxId: outboxId,
+          );
+          await _cache.save(businessId, estimateId, estimate);
+          await _cache.save(businessId, invoiceId, invoice);
           await _database.customStatement(
             '''
             UPDATE local_documents
@@ -373,3 +395,4 @@ class OfflineEstimateInvoiceService {
     }
   }
 }
+

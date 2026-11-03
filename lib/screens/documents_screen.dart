@@ -1,7 +1,10 @@
+import 'jobs/owner_local_delete_action.dart';
 import 'dart:async';
-import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+
+import '../core/module_modal_theme.dart';
+
 import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
@@ -9,19 +12,97 @@ import '../core/connection_mode.dart';
 import '../core/invoice_status_style.dart';
 import '../core/briskers_i18n.dart';
 import '../core/document_search.dart';
+import '../core/document_list_refresh.dart';
+import '../core/navigation_content_timing.dart';
 import '../core/document_future_date.dart';
+import '../core/document_presentation.dart';
+import '../core/estimate_list_description.dart';
 import '../services/briskers_api.dart';
+import '../services/invoice_payment_feed.dart';
+import '../services/local_job_retirement.dart';
+import '../local/local_database_provider.dart';
 import '../services/local_financial_cache.dart';
 import '../services/local_document_repository.dart';
+import '../services/local_document_detail_cache.dart';
+import '../services/verified_invoice_close_events.dart';
+import '../services/verified_invoice_payment_events.dart';
+import '../services/local_invoice_payment_coverage_events.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/local_invoice_status_styles_cache.dart';
+import '../services/invoice_finalization_guard.dart';
 import '../widgets/briskers_page_header.dart';
 import '../widgets/connection_header_toggle.dart';
+import '../widgets/stale_keyboard_inset_guard.dart';
 import 'jobs/blank_invoice_setup_screen.dart';
 import 'shell_screen.dart';
 import 'jobs/job_document_screen.dart';
 import 'jobs/invoice_deletion_choice.dart';
 import 'expenses/expense_detail_screen.dart';
+
+/// Stable, language-independent values shared by filters, counts and cards.
+/// Estimate statuses retain their independent workflow and display names.
+String documentListStage(Map<String, dynamic> row, {required bool estimate}) {
+  if (estimate) return row['display_status']?.toString() ?? '';
+  final presentation = DocumentPresentation({...row, 'kind': 'invoice'});
+  switch (presentation.statusCode) {
+    case 'closed':
+      return 'Closed';
+    case 'pending_close':
+      return 'Pending Close';
+    case 'reopened':
+      return 'Reopened';
+    case 'void':
+      return 'Void';
+    default:
+      return 'Open';
+  }
+}
+
+/// The confirmed document lifecycle state outranks a stale receipt index.
+/// For an unclosed invoice, retain the existing receipt-based Open/Pending
+/// Close distinction without ever inventing Closed.
+String invoiceListStageWithReceipts(
+  Map<String, dynamic> row, {
+  required num receipts,
+}) {
+  final existing = documentListStage(row, estimate: false);
+  if (const {'Closed', 'Void', 'Reopened'}.contains(existing)) {
+    return existing;
+  }
+  if (invoiceNeedsPayment(row, receipts: receipts)) {
+    return 'Open';
+  }
+  return existing == 'Open' ? 'Pending Close' : existing;
+}
+
+const invoiceListStatusFilters = [
+  'Open',
+  'Pending Close',
+  'Closed',
+  'Reopened',
+  'Void',
+];
+const estimateListStatusFilters = [
+  'Open',
+  'Draft',
+  'Issued',
+  'Accepted',
+  'Declined',
+  'Expired',
+  'Void',
+];
+
+/// The local index supplies placeholder zeroes, not payment aggregates. Keep
+/// unavailable financial details unknown so they cannot contradict a server
+/// display hint or be mistaken for a verified outstanding balance.
+Map<String, dynamic> documentListIndexPresentation(Map<String, dynamic> row) {
+  final result = Map<String, dynamic>.from(row);
+  if (row['_local_snapshot'] == true) {
+    result.remove('paid_amount');
+    result.remove('pending_payment');
+  }
+  return result;
+}
 
 class DocumentsScreen extends StatefulWidget {
   const DocumentsScreen({
@@ -35,13 +116,35 @@ class DocumentsScreen extends StatefulWidget {
     required this.roleCode,
     this.onPrimaryDestinationSelected,
     this.sharedBottomNavigationBar,
+    this.detailBottomNavigationBar,
+    this.customerId,
+    this.customerName,
+    this.customerVehicles = const [],
+    this.dockDefaultsToOpen = false,
+    this.dockResetToken = 0,
+    this.localDocuments,
+    this.paymentFeed,
+    this.api,
+    this.blockedDocumentIds,
   });
 
+  final LocalDocumentRepository? localDocuments;
+  final InvoicePaymentFeed? paymentFeed;
+  final BriskersApi? api;
+  final Future<Set<String>> Function(String businessId)? blockedDocumentIds;
+  final bool dockDefaultsToOpen;
+  final int dockResetToken;
+  final String? customerId;
+  final String? customerName;
+  final List<dynamic> customerVehicles;
   final bool showAppBar;
   final String businessName;
   final String roleCode;
   final ValueChanged<int>? onPrimaryDestinationSelected;
   final Widget? sharedBottomNavigationBar;
+  /// Navigation dock for pushed invoice/estimate detail routes only.
+  /// Avoids duplicating the parent Shell dock on the document list.
+  final Widget? detailBottomNavigationBar;
   final String businessId;
   final String kind;
   final bool isOwner;
@@ -51,17 +154,50 @@ class DocumentsScreen extends StatefulWidget {
   State<DocumentsScreen> createState() => _DocumentsScreenState();
 }
 
-class _DocumentsScreenState extends State<DocumentsScreen> {
-  static const _api = BriskersApi();
-  final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
-  final OfflineDocumentDraftService _offlineDrafts = OfflineDocumentDraftService();
+class _DocumentsScreenState extends State<DocumentsScreen>
+    with ModuleModalState<DocumentsScreen> {
+  @override
+  Color get modalAccent =>
+      _estimate ? BriskersColors.estimates : BriskersColors.invoices;
+  late final BriskersApi _api = widget.api ?? const BriskersApi();
+  late final LocalDocumentRepository _localDocuments =
+      widget.localDocuments ?? LocalDocumentRepository();
+  final LocalDocumentDetailCache _localDetailCache = const LocalDocumentDetailCache();
+  late final OfflineDocumentDraftService _offlineDrafts =
+      OfflineDocumentDraftService();
   final LocalInvoiceStatusStylesCache _localInvoiceStyles =
       LocalInvoiceStatusStylesCache();
   static final Map<String, List<Map<String, dynamic>>> _styleCache = {};
+  late final InvoiceFinalizationGuard _finalizationGuard =
+      InvoiceFinalizationGuard();
 
   List<Map<String, dynamic>>? _rows;
+  // Keep authoritative snapshots separate from local description enrichment.
+  // A warm refresh need not rewrite the complete SQLite index.
+  List<Map<String, dynamic>>? _serverRows;
+  List<Map<String, dynamic>>? _indexRows;
+  List<Map<String, dynamic>>? _savedRows;
+  List<Map<String, dynamic>>? _orderedSource;
+  List<Map<String, dynamic>> _orderedRows = const [];
+  bool? _orderedEstimate;
+  final DocumentListRefresh _refresh = DocumentListRefresh();
+  int _loadEpoch = 0;
+  int _descriptionEpoch = 0;
+  int _receiptEpoch = 0;
+  StreamSubscription<({String businessId, Set<String> jobIds})>? _retirement;
+  StreamSubscription<VerifiedInvoiceClosed>? _invoiceCloseEvents;
+  StreamSubscription<VerifiedInvoiceFullyPaid>? _invoicePaidEvents;
+  StreamSubscription<LocalInvoicePaymentCoverageChanged>? _localPaymentEvents;
+  final Set<String> _verifiedFullyPaidInvoiceIds = <String>{};
+  // Exact local receipt coverage is enough for Pending Close presentation,
+  // but not for finalized/Closed. Don't wait for an unrelated list RPC to
+  // remove the fully covered invoice from the Open filter.
+  final Set<String> _locallyCoveredInvoiceIds = <String>{};
   List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
+  Map<String, num> _receiptTotals = const {};
+  late final InvoicePaymentFeed _paymentFeed =
+      widget.paymentFeed ?? InvoicePaymentFeed();
   bool _futureDatedOnly = false;
   String? _error;
   final TextEditingController _search = TextEditingController();
@@ -70,33 +206,56 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   bool get _estimate => widget.kind == 'estimate';
 
   String _invoiceStage(Map<String, dynamic> row) {
-    if (_estimate) return row['display_status']?.toString() ?? '';
-    final existing = (row['display_status']?.toString() ?? '').toLowerCase();
-    final code = (row['display_status_code']?.toString() ?? '').toLowerCase();
-    if (existing == 'closed' || code == 'closed' ||
-        row['closed_at'] != null) {
-      return 'Closed';
+    if (_estimate) {
+      return documentListStage(row, estimate: true);
     }
-    final total = num.tryParse(row['total_amount']?.toString() ?? '');
-    final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
-    final pending = num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
-    // Some legacy/list RPCs provide only server-computed status, not amounts.
-    if (total != null && total > 0 && paid + pending >= total - 0.005) {
-      return 'Paid · Pending Close';
+    final status = documentListStage(row, estimate: false);
+    // A fully finalized receipt confirmed by the backend must not return to
+    // Open because its retained row/receipt feed was cached before payment.
+    // This is Pending Close, never an invented authoritative Closed state.
+    if ((_verifiedFullyPaidInvoiceIds.contains(row['id']?.toString()) ||
+          _locallyCoveredInvoiceIds.contains(row['id']?.toString())) &&
+        status != 'Closed' && status != 'Void' && status != 'Reopened') {
+      return 'Pending Close';
     }
-    if (const {'paid', 'pending close'}.contains(existing) ||
-        const {'paid', 'pending_close'}.contains(code)) {
-      return 'Paid · Pending Close';
-    }
-    return 'Open';
+    return invoiceListStageWithReceipts(
+      row, receipts: _receiptTotals[row['id']?.toString()] ?? 0,
+    );
   }
 
-  List<String> get _statuses {
-    if (_estimate) {
-      return const ['Draft', 'Issued', 'Accepted', 'Declined', 'Expired', 'Void'];
+  bool _matchesStatus(Map<String, dynamic> row, String status) {
+    if (_estimate && status == 'Open') {
+      final raw = row['status']?.toString().toLowerCase() ?? '';
+      return row['converted'] != true &&
+          !const {'accepted','declined','expired','void'}.contains(raw);
     }
-    return const ['Open', 'Paid · Pending Close', 'Closed'];
+    return _invoiceStage(row) == status;
   }
+
+  Future<void> _refreshReceiptTotals(
+    int epoch,
+    String businessId, {
+    required bool estimate,
+  }) async {
+    if (estimate) return;
+    final receiptEpoch = ++_receiptEpoch;
+    try {
+      final receipts = await _paymentFeed.load(businessId);
+      if (!mounted || epoch != _loadEpoch || receiptEpoch != _receiptEpoch) {
+        return;
+      }
+      final totals = invoiceRecordedReceiptTotals(receipts);
+      if (!documentListDataEquals(_receiptTotals, totals)) {
+        setState(() => _receiptTotals = totals);
+      }
+    } catch (_) {
+      // Unknown payment data never fabricates a fully paid state.
+    }
+  }
+
+
+  List<String> get _statuses =>
+      _estimate ? estimateListStatusFilters : invoiceListStatusFilters;
 
   String get _title => _estimate ? tr('estimates') : tr('invoices');
 
@@ -105,12 +264,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       case 'Open':
         return tr('invoiceOpen');
       case 'Pending Close':
-      case 'Paid · Pending Close':
-        return 'Paid · Pending Close';
+        return tr('invoicePendingClose');
       case 'Paid':
         return tr('invoicePaid');
       case 'Closed':
         return tr('invoiceClosed');
+      case 'Reopened':
+        return 'Reopened';
       case 'Partial':
         return tr('invoicePartial');
       case 'Draft':
@@ -129,6 +289,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         return status;
     }
   }
+
   Map<String, dynamic>? _invoiceStyleByName(String status) {
     for (final item in _invoiceStyles) {
       if (item['name']?.toString() == status) return item;
@@ -137,6 +298,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 
   Color _statusColor(String status) {
+    if (!_estimate && const {'Open', 'Pending Close', 'Closed', 'Reopened'}.contains(status)) {
+      return invoiceStatusDefaultColor(status);
+    }
     if (!_estimate) {
       final style = _invoiceStyleByName(status);
       if (style != null) {
@@ -175,59 +339,306 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     return Icons.circle;
   }
 
-
   @override
   void initState() {
     super.initState();
+    _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
     final cachedStyles = _styleCache[widget.businessId];
     if (!_estimate && cachedStyles != null) {
       _invoiceStyles = List<Map<String, dynamic>>.from(cachedStyles);
     }
+    if (!_estimate) {
+      _localPaymentEvents = LocalInvoicePaymentCoverageEvents.changes.listen(
+        (event) {
+          if (!mounted || event.businessId != widget.businessId) return;
+          final changed = event.coversRemainingBalance
+              ? _locallyCoveredInvoiceIds.add(event.invoiceId)
+              : _locallyCoveredInvoiceIds.remove(event.invoiceId);
+          if (changed) {
+            setState(() {
+              _orderedSource = null;
+              _descriptionEpoch++;
+            });
+          }
+          // Entry/edit/delete may change the amount. Keep actual receipts
+          // authoritative on subsequent reads; never declare Closed here.
+          unawaited(_load());
+        },
+      );
+      _invoicePaidEvents = VerifiedInvoicePaymentEvents.fullyPaid.listen((event) {
+        if (!mounted || _estimate || event.businessId != widget.businessId) {
+          return;
+        }
+        final existing = _rows;
+        // Keep exactly the paid invoice ID, even if the retained list is
+        // still being hydrated. No unrelated customer/shop cards are made.
+        _verifiedFullyPaidInvoiceIds.add(event.invoiceId);
+        if (existing != null &&
+            existing.any((row) => row['id']?.toString() == event.invoiceId)) {
+          ++_loadEpoch;
+          setState(() {
+            _rows = existing.map((row) =>
+              row['id']?.toString() == event.invoiceId ? <String, dynamic>{
+                ...row,
+                'paid_amount': event.finalizedPaid,
+                'pending_payment': 0.0,
+                'display_status_code': 'pending_close',
+              } : row).toList();
+            _orderedSource = null;
+            _descriptionEpoch++;
+          });
+          unawaited(_load());
+        }
+      });
+      _invoiceCloseEvents = VerifiedInvoiceCloseEvents.changes.listen((event) {
+        if (!mounted || _estimate ||
+            event.businessId != widget.businessId) {
+          return;
+        }
+        // Do not create a card for a different customer or a hidden invoice:
+        // patch only the matching existing row. Preserve all amount/receipt
+        // fields, and invalidate any remote read begun before this closure.
+        Map<String, dynamic> markClosed(Map<String, dynamic> row) =>
+            row['id']?.toString() == event.invoiceId
+                ? <String, dynamic>{
+                    ...row,
+                    'status': 'closed',
+                    'display_status_code': 'closed',
+                  }
+                : row;
+        if (_rows == null ||
+            !_rows!.any((row) => row['id']?.toString() == event.invoiceId)) {
+          return;
+        }
+        _verifiedFullyPaidInvoiceIds.remove(event.invoiceId);
+        _locallyCoveredInvoiceIds.remove(event.invoiceId);
+        ++_loadEpoch;
+        setState(() {
+          _rows = _rows!.map(markClosed).toList();
+          if (_serverRows != null) {
+            _serverRows = _serverRows!.map(markClosed).toList();
+          }
+          if (_indexRows != null) {
+            _indexRows = _indexRows!.map(markClosed).toList();
+          }
+          _orderedSource = null;
+          _descriptionEpoch++;
+        });
+        // Refresh in the background, without gating the Closed pill. A
+        // pre-closure HTTP response is already invalidated by the epoch.
+        unawaited(_load());
+      });
+    }
+    _retirement = LocalJobRetirement.events.listen((event) {
+      if (event.businessId == widget.businessId && mounted) {
+        // Retirement is a strict visibility fence, including before the first
+        // local list frame. Never let a pre-retirement snapshot publish.
+        ++_loadEpoch;
+        // Hide known retired jobs immediately, even when a pre-retirement
+        // network request is still pending or its replacement will fail.
+        if (!_estimate && _rows != null) {
+          setState(() {
+            _rows = _rows!.where((row) =>
+                !event.jobIds.contains(row['job_id']?.toString())).toList();
+            _serverRows = null;
+            _indexRows = null;
+            _descriptionEpoch++;
+          });
+        }
+        unawaited(_load());
+        // The repository also enforces exact invoice tombstones (including
+        // stale reassignment rows). Do not wait for the serialized network
+        // request before applying that durable visibility fence.
+        unawaited(_loadLocalRows(
+          _loadEpoch, widget.businessId, widget.kind, estimate: _estimate,
+        ));
+      }
+    });
+    BriskersConnectionModeController.instance.addListener(_connectionChanged);
+    unawaited(_load(freshAfterCurrent: false));
+  }
+
+  void _connectionChanged() {
+    if (!mounted) return;
+    // Connection-mode changes are authorization/behavior boundaries, unlike
+    // a harmless dock revisit; invalidate the prior HTTP/local epoch even
+    // while the first list is still loading.
+    ++_loadEpoch;
     unawaited(_load());
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      // A stalled remote read must not delay switching to usable offline
+      // content. Its epoch has already been invalidated by _load above.
+      final epoch = _loadEpoch;
+      unawaited(_loadLocalRows(
+        epoch, widget.businessId, widget.kind, estimate: _estimate,
+      ));
+      unawaited(_refreshReceiptTotals(
+        epoch, widget.businessId, estimate: _estimate,
+      ));
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant DocumentsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.kind != widget.kind) {
+      // Prevent a prior shop/kind's in-flight local row from painting here.
+      ++_loadEpoch;
+      _rows = null;
+      _descriptionEpoch++;
+      _serverRows = null;
+      _indexRows = null;
+      _savedRows = null;
+      _receiptTotals = const {};
+      _verifiedFullyPaidInvoiceIds.clear();
+      _locallyCoveredInvoiceIds.clear();
+      _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
+      _futureDatedOnly = false;
+      _search.clear();
+      _invoiceStyles = const [];
+      _error = null;
+      unawaited(_load());
+    } else if (oldWidget.dockResetToken != widget.dockResetToken) {
+      // The Shell retains this page. Returning to it checks freshness without
+      // discarding the user's status, search, or scroll position. Edits may
+      // have happened in another module after an existing read started.
+      unawaited(_load());
+    }
   }
 
   @override
   void dispose() {
+    BriskersConnectionModeController.instance.removeListener(_connectionChanged);
+    _retirement?.cancel();
+    _invoiceCloseEvents?.cancel();
+    _invoicePaidEvents?.cancel();
+    _localPaymentEvents?.cancel();
     _search.dispose();
     _searchFocus.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    var localShown = false;
-    final forceOnline =
-        BriskersConnectionModeController.instance.forceOnline;
-    final forceOffline =
-        BriskersConnectionModeController.instance.forceOffline;
-
-    if (!_estimate && !forceOnline) {
+  // Populate visible estimates from their existing local details, not a full
+  // historical scan. This is read-only and runs after the list first paints.
+  Future<void> _enrichEstimateDescriptions(
+    int epoch, List<Map<String, dynamic>> snapshot,
+  ) async {
+    if (!_estimate) return;
+    final shown = _selectedStatus == null ? snapshot
+        : snapshot.where((row) => _matchesStatus(row, _selectedStatus!)).toList();
+    final summaries = <String, String>{};
+    for (final row in shown.take(75)) {
+      if (!mounted || epoch != _descriptionEpoch) return;
+      final id = row['id']?.toString() ?? '';
+      if (id.isEmpty) continue;
+      final indexed = estimateListDescription(row);
+      if (indexed.isNotEmpty) {
+        summaries[id] = indexed;
+        continue;
+      }
       try {
-        final cachedStyles =
-            await _localInvoiceStyles.load(widget.businessId);
-        if (mounted && cachedStyles.isNotEmpty) {
-          setState(() => _invoiceStyles = cachedStyles);
-        }
-      } catch (_) {}
+        final detail = await _localDetailCache.load(widget.businessId, id);
+        if (detail == null) continue;
+        final summary = estimateListDescription(row, detail: detail);
+        if (summary.isNotEmpty) summaries[id] = summary;
+      } catch (_) {
+        // Missing detail must not block opening Estimates.
+      }
+    }
+    if (!mounted || epoch != _descriptionEpoch || summaries.isEmpty) return;
+    setState(() {
+      _rows = [
+        for (final row in _rows ?? <Map<String, dynamic>>[])
+          if (summaries.containsKey(row['id']?.toString()))
+            {...row, '_estimate_list_description': summaries[row['id']?.toString()]}
+          else
+            row,
+      ];
+    });
+  }
+
+  Future<void> _load({bool freshAfterCurrent = true}) {
+    if (freshAfterCurrent && _rows != null) {
+      // Mutations to a populated list supersede older reads. When the screen
+      // is still on its VERY FIRST local read, harmless repeated navigation
+      // must not invalidate that read and strand the empty UI behind a slow
+      // in-flight network response. The coalescer still schedules a new pass
+      // after the first pass, preserving the requested freshness boundary.
+      _loadEpoch++;
+    }
+    return _refresh.run(_loadOnce, afterCurrent: freshAfterCurrent);
+  }
+
+  Future<void> _loadOnce() async {
+    if (!mounted) return;
+    final epoch = ++_loadEpoch;
+    final businessId = widget.businessId;
+    final kind = widget.kind;
+    final estimate = _estimate;
+
+    // On a cold visit, the first protected local document read MUST be
+    // ahead of the optional receipt-index hydration on the shared SQLite
+    // executor. A large receipt snapshot must never starve the first invoice
+    // card frame. Repeated visits retain their existing fast refresh path.
+    var firstLocalShown = false;
+    if (!BriskersConnectionModeController.instance.forceOnline &&
+        _rows == null) {
+      firstLocalShown = await _loadLocalRows(
+        epoch, businessId, kind, estimate: estimate,
+      );
+    }
+    if (!mounted || epoch != _loadEpoch) return;
+    final receipts = _refreshReceiptTotals(
+      epoch,
+      businessId,
+      estimate: estimate,
+    );
+    try {
+      await _loadRows(
+        epoch, businessId, kind,
+        estimate: estimate, firstLocalShown: firstLocalShown,
+      );
+    } finally {
+      // Receipt work participates in coalescing and cannot outlive the pass
+      // that promises fresh status/payment state to the caller.
+      await receipts;
+    }
+  }
+
+  Future<void> _loadRows(
+    int epoch,
+    String businessId,
+    String kind, {
+    required bool estimate,
+    bool firstLocalShown = false,
+  }) async {
+    var localShown = firstLocalShown;
+    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
+    final forceOffline = BriskersConnectionModeController.instance.forceOffline;
+
+    // Warm online refreshes never replace richer API rows with index-only
+    // placeholders. Offline entries must read the index to pick up edits made
+    // in another module, since there is no server refresh in that mode.
+    if (!forceOnline && !firstLocalShown && (_rows == null || forceOffline)) {
+      localShown = await _loadLocalRows(
+        epoch, businessId, kind, estimate: estimate,
+      );
     }
 
-    if (!forceOnline) {
-      try {
-        final local = await _localDocuments.listByKind(
-          widget.businessId,
-          kind: widget.kind,
-        );
-        if (mounted) {
-          localShown = true;
-          setState(() {
-            _rows = local;
-            _error = null;
-          });
+    // Status colors are cosmetic and must not block the first offline-first
+    // document list frame, including in Auto mode after a cold start.
+    if (!estimate && !forceOnline && _invoiceStyles.isEmpty) {
+      unawaited(_localInvoiceStyles.load(businessId).then((styles) {
+        if (mounted && epoch == _loadEpoch && styles.isNotEmpty) {
+          setState(() => _invoiceStyles = styles);
         }
-      } catch (_) {}
+      }).catchError((Object _) {}));
     }
 
+    if (!mounted || epoch != _loadEpoch) return;
     if (forceOffline) {
-      if (mounted && !localShown) {
+      if (mounted && epoch == _loadEpoch && !localShown) {
         setState(() {
           _rows ??= const [];
           _error = null;
@@ -237,47 +648,80 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
 
     try {
-      final results = await Future.wait<dynamic>([
-        _api.documents(
-          widget.businessId,
-          kind: widget.kind,
-        ),
-        if (!_estimate)
-          _api.invoiceStatusStyles(widget.businessId)
-        else
-          Future.value(const <Map<String, dynamic>>[]),
-      ]);
+      // The document payload is authoritative. Optional invoice colors must
+      // not delay or fail the list when that independent endpoint is slow.
+      final fetched = await _api.documents(businessId, kind: kind);
 
-      final rows = List<Map<String, dynamic>>.from(results[0] as List);
-      final styles = List<Map<String, dynamic>>.from(results[1] as List);
+      if (!mounted || epoch != _loadEpoch) return;
+      final blocked = await (widget.blockedDocumentIds?.call(businessId) ??
+          LocalJobRetirement.blockedDocumentIds(localDatabase, businessId));
+      final rows = List<Map<String, dynamic>>.from(fetched)
+          .where((row) => !blocked.contains('${row['id'] ?? ''}'))
+          .toList();
+      if (!mounted || epoch != _loadEpoch) return;
+      final styles = _invoiceStyles;
 
-      // A complete server snapshot must evict stale synced MobileBiz rows.
-      // Any locally pending documents are preserved by the repository.
-      await _localDocuments.replaceFromServer(
-        widget.businessId,
-        rows,
-        kind: widget.kind,
-      );
-      if (!_estimate) {
-        _styleCache[widget.businessId] =
-            List<Map<String, dynamic>>.from(styles);
-        await _localInvoiceStyles.save(widget.businessId, styles);
-      }
-
-      if (!mounted) return;
-      // A background refresh must not replace an identical snapshot and
-      // cause the entire visible list to flicker several seconds after entry.
-      final sameRows = _rows != null && jsonEncode(_rows) == jsonEncode(rows);
-      final sameStyles = jsonEncode(_invoiceStyles) == jsonEncode(styles);
+      // Preserve first paint and scroll position when the remote response
+      // contains no changes, including financial fields absent in the index.
+      final sameRows = documentListDataEquals(_serverRows, rows);
+      final sameStyles = documentListDataEquals(_invoiceStyles, styles);
       if (!sameRows || !sameStyles || _error != null) {
         setState(() {
-          _rows = rows;
+          if (!sameRows) {
+            _rows = rows;
+            _descriptionEpoch++;
+          }
+          _serverRows = rows;
           _invoiceStyles = styles;
           _error = null;
         });
       }
+      if (estimate && !sameRows) {
+        unawaited(_enrichEstimateDescriptions(_descriptionEpoch, rows));
+      }
+
+      // Paint the authoritative result before doing potentially expensive
+      // persistence. Only changed snapshots replace the complete index; local
+      // pending documents remain protected by the repository.
+      if (!documentListDataEquals(_savedRows, rows)) {
+        try {
+          await _localDocuments.replaceFromServer(businessId, rows, kind: kind);
+          // Track what actually reached disk even if a later refresh has
+          // invalidated this read. Otherwise A -> B (saving) -> A could skip
+          // the final write while the index incorrectly still contains B.
+          if (mounted && widget.businessId == businessId && widget.kind == kind) {
+            _savedRows = rows;
+          }
+        } catch (_) {
+          // Keep the server result; a later refresh retries the failed cache.
+        }
+      }
+      if (!mounted || epoch != _loadEpoch) return;
+      if (!estimate) {
+        unawaited(_api.invoiceStatusStyles(businessId).then((fetchedStyles) async {
+          if (!mounted || epoch != _loadEpoch) return;
+          if (!documentListDataEquals(_invoiceStyles, fetchedStyles)) {
+            setState(() => _invoiceStyles = fetchedStyles);
+          }
+          if (!mounted || widget.businessId != businessId || widget.kind != kind || epoch != _loadEpoch) return;
+          _styleCache[businessId] = fetchedStyles;
+          try {
+            await _localInvoiceStyles.save(businessId, fetchedStyles);
+          } catch (_) {
+            // Status styles are nonessential to document availability.
+          }
+        }).catchError((Object _) {}));
+      }
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || epoch != _loadEpoch) return;
+      if (!forceOnline) {
+        // Auto may have lost connectivity while another module changed local
+        // work. Re-read protected local state only after online refresh fails.
+        localShown = await _loadLocalRows(
+          epoch, businessId, kind, estimate: estimate,
+        ) || localShown;
+      }
+      if (!mounted || epoch != _loadEpoch) return;
       setState(() {
         _rows ??= const [];
         _error = (_rows!.isEmpty && !localShown)
@@ -287,22 +731,39 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
   }
 
-  int _estimateStatusRank(String status) {
-    switch (status) {
-      case 'Draft':
-        return 0;
-      case 'Issued':
-        return 1;
-      case 'Accepted':
-        return 2;
-      case 'Declined':
-        return 3;
-      case 'Expired':
-        return 4;
-      case 'Void':
-        return 5;
-      default:
-        return 6;
+  Future<bool> _loadLocalRows(
+    int epoch,
+    String businessId,
+    String kind, {
+    required bool estimate,
+  }) async {
+    final authoritativeAtStart = _serverRows;
+    try {
+      final local = await _localDocuments.listByKind(businessId, kind: kind);
+      if (!mounted || epoch != _loadEpoch ||
+          !identical(_serverRows, authoritativeAtStart)) {
+        return false;
+      }
+      final rows = local.map(documentListIndexPresentation).toList();
+      final sameRows = _serverRows == null &&
+          documentListDataEquals(_indexRows, rows);
+      if (!sameRows || _error != null) {
+        setState(() {
+          if (!sameRows) {
+            _rows = rows;
+            _descriptionEpoch++;
+          }
+          _indexRows = rows;
+          _serverRows = null;
+          _error = null;
+        });
+      }
+      if (estimate && !sameRows) {
+        unawaited(_enrichEstimateDescriptions(_descriptionEpoch, _rows!));
+      }
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -311,22 +772,23 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   int get _futureDatedCount =>
       (_rows ?? const <Map<String, dynamic>>[])
-          .where(_hasFutureDateTag)
-          .length;
+          .where((row) => widget.customerId == null ||
+              row['customer_id']?.toString() == widget.customerId)
+          .where(_hasFutureDateTag).length;
 
   List<Map<String, dynamic>> get _visibleRows {
-    final rows = List<Map<String, dynamic>>.from(
-      _rows ?? const <Map<String, dynamic>>[],
-    );
+    final source = _rows ?? const <Map<String, dynamic>>[];
+    if (!identical(_orderedSource, source) || _orderedEstimate != _estimate) {
+      _orderedSource = source;
+      _orderedEstimate = _estimate;
+      _orderedRows = orderDocumentListRows(source, estimate: _estimate);
+    }
+    final rows = _orderedRows.where((row) => widget.customerId == null ||
+        row['customer_id']?.toString() == widget.customerId).toList();
 
     var filtered = _selectedStatus == null
         ? rows
-        : rows
-            .where(
-              (row) =>
-                  _invoiceStage(row) == _selectedStatus,
-            )
-            .toList();
+        : rows.where((row) => _matchesStatus(row, _selectedStatus!)).toList();
 
     if (_futureDatedOnly) {
       filtered = filtered.where(_hasFutureDateTag).toList();
@@ -334,69 +796,19 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
     final query = _search.text.trim().toLowerCase();
     if (query.isNotEmpty) {
-      filtered = filtered.where((row) => matchesDocumentSearch(row, query)).toList();
+      filtered = filtered
+          .where((row) => matchesDocumentSearch(row, query))
+          .toList();
     }
-
-    if (!_estimate) {
-      // The invoice number sequence must agree online and offline.
-      // Import timestamps and anomalous legacy dates are not list order.
-      int? invoiceNumber(Map<String, dynamic> row) {
-        final value = row['document_number']?.toString() ?? '';
-        final matches = RegExp(r'[0-9]+').allMatches(value).toList();
-        if (matches.isEmpty) return null;
-        return int.tryParse(matches.last.group(0)!);
-      }
-
-      filtered.sort((a, b) {
-        final aNumber = invoiceNumber(a);
-        final bNumber = invoiceNumber(b);
-        if (aNumber != null && bNumber != null) {
-          final order = bNumber.compareTo(aNumber);
-          if (order != 0) return order;
-        } else if (aNumber == null && bNumber != null) {
-          return -1;
-        } else if (aNumber != null && bNumber == null) {
-          return 1;
-        }
-        return (b['created_at']?.toString() ?? '').compareTo(
-          a['created_at']?.toString() ?? '',
-        );
-      });
-      return filtered;
-    }
-
-    if (_selectedStatus != null) return filtered;
-
-    filtered.sort((a, b) {
-      final statusCompare = _estimateStatusRank(
-        a['display_status']?.toString() ?? '',
-      ).compareTo(
-        _estimateStatusRank(
-          b['display_status']?.toString() ?? '',
-        ),
-      );
-      if (statusCompare != 0) return statusCompare;
-
-      final aDate =
-          DateTime.tryParse(a['document_date']?.toString() ?? '');
-      final bDate =
-          DateTime.tryParse(b['document_date']?.toString() ?? '');
-      if (aDate != null && bDate != null) {
-        return bDate.compareTo(aDate);
-      }
-      if (aDate != null) return -1;
-      if (bDate != null) return 1;
-      return 0;
-    });
 
     return filtered;
   }
 
   int _statusCount(String status) {
     final rows = _rows ?? const <Map<String, dynamic>>[];
-    return rows
-        .where((row) => _invoiceStage(row) == status)
-        .length;
+    return rows.where((row) => widget.customerId == null ||
+        row['customer_id']?.toString() == widget.customerId)
+        .where((row) => _matchesStatus(row, status)).length;
   }
 
   Widget _menuCount(int count, {bool alwaysShow = false}) {
@@ -413,19 +825,21 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     );
   }
 
-  Future<void> _open(
-    Map<String, dynamic> row, {
-    String? initialAction,
-  }) async {
+  Future<void> _open(Map<String, dynamic> row, {String? initialAction}) async {
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          sharedBottomNavigationBar: widget.detailBottomNavigationBar ??
+              widget.sharedBottomNavigationBar,
+          roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: row['id'].toString(),
+          initialDocumentSummary: Map<String, dynamic>.from(row),
           isOwner: widget.isOwner,
           canManageExpenses: widget.canManageExpenses,
-          initialAction: initialAction,
+          initialAction: initialAction == 'payment' ? null : initialAction,
+          initialTab: initialAction == 'payment' ? 'payment' : 'items',
         ),
       ),
     );
@@ -437,9 +851,18 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     if (!widget.isOwner) return;
 
     final isEstimate = row['kind']?.toString() == 'estimate';
+    final localJob=row['job_id']?.toString() ?? '';
+    if(!isEstimate && localJob.isNotEmpty) {
+      try {
+        final deleted=await deleteOwnerLocalJob(context,businessId:widget.businessId,
+          jobId:localJob,label:row['job_number']?.toString() ?? 'Job');
+        if(deleted && mounted) await _load();
+      } catch(error) { if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(error.toString()))); }
+      return;
+    }
+
     final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
-    final pending =
-        num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
+    final pending = num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
 
     if (!isEstimate && paid > 0) {
       await showDialog<void>(
@@ -489,9 +912,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     if (!isEstimate && !localDraft) {
       if (BriskersConnectionModeController.instance.forceOffline) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Reconnect to delete an already-synced invoice.'),
-          ));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Reconnect to delete an already-synced invoice.'),
+            ),
+          );
         }
         return;
       }
@@ -499,14 +924,16 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       final jobId = row['job_id']?.toString() ?? '';
       if (jobId.isNotEmpty) {
         try {
-          plan = await _api.jobDeletionPlan(widget.businessId,jobId);
+          plan = await _api.jobDeletionPlan(widget.businessId, jobId);
         } catch (_) {
           // Invoice-only remains available; the RPC will verify permission.
         }
       }
       if (!mounted) return;
       final choice = await showInvoiceDeletionChoice(
-        context, invoiceNumber: number,jobPlan: plan,
+        context,
+        invoiceNumber: number,
+        jobPlan: plan,
       );
       if (choice == null) return;
       deleteJob = choice;
@@ -552,8 +979,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             builder: (context, message, child) => Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const SizedBox(width: 24, height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
                 const SizedBox(width: 16),
                 Flexible(child: Text(message)),
               ],
@@ -569,10 +999,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           row['id'].toString(),
         );
       } else if (isEstimate) {
-        await _api.deleteEstimate(
-          widget.businessId,
-          row['id'].toString(),
-        );
+        await _api.deleteEstimate(widget.businessId, row['id'].toString());
       } else {
         await _api.deleteInvoiceManaged(
           widget.businessId,
@@ -588,8 +1015,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            deleteJob ? 'Invoice and Job deleted.' :
-                '${isEstimate ? 'Estimate' : 'Invoice'} deleted.',
+            deleteJob
+                ? 'Invoice and Job deleted.'
+                : '${isEstimate ? 'Estimate' : 'Invoice'} deleted.',
           ),
         ),
       );
@@ -634,7 +1062,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final total = num.tryParse(row['total_amount']?.toString() ?? '') ?? 0;
     final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
     final pending = num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
-    final canPayment = !_estimate && status != 'Paid' && total - paid - pending > 0.005;
+    final canPayment =
+        !_estimate &&
+        status == 'Open' &&
+        !DocumentPresentation(row).requiresReconciliation &&
+        total - paid - pending > 0.005;
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -642,9 +1074,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
         child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+          child: ListTileTheme(
+            dense: true,
+            minVerticalPadding: 3,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const _ActionSectionLabel('Edit and copy'),
               if (!estimateConverted)
                 ListTile(
                   leading: Icon(
@@ -673,60 +1109,101 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     color: BriskersColors.invoices,
                   ),
                   title: const Text('Add to Existing Invoice'),
-                  onTap: () =>
-                      Navigator.pop(sheetContext, 'add_to_invoice'),
+                  onTap: () => Navigator.pop(sheetContext, 'add_to_invoice'),
                 ),
               ],
-              if (!_estimate)
-                ListTile(
-                  leading: const Icon(Icons.copy_outlined, color: BriskersColors.invoices),
-                  title: Text(tr('copyInvoice')),
-                  onTap: () => Navigator.pop(sheetContext, 'copy'),
+              ListTile(
+                leading: Icon(
+                  Icons.copy_outlined,
+                  color: _estimate
+                      ? BriskersColors.estimates : BriskersColors.invoices,
                 ),
+                title: Text(_estimate ? 'Copy Estimate' : tr('copyInvoice')),
+                onTap: () => Navigator.pop(sheetContext, 'copy'),
+              ),
+              if (canPayment) ...[
+                const Divider(height: 1),
+                const _ActionSectionLabel('Payment'),
+                ListTile(
+                  leading: const Icon(
+                    Icons.credit_card_outlined,
+                    color: Colors.green,
+                  ),
+                  title: Text(tr('addPayment')),
+                  onTap: () => Navigator.pop(sheetContext, 'payment'),
+                ),
+              ],
+              if (canExpenses) ...[
+                const Divider(height: 1),
+                const _ActionSectionLabel('Expenses'),
+              ],
               if (canExpenses)
                 ListTile(
-                  leading: const Icon(Icons.add_card_outlined, color: BriskersColors.expenses),
+                  leading: const Icon(
+                    Icons.add_card_outlined,
+                    color: BriskersColors.expenses,
+                  ),
                   title: Text(tr('addExpense')),
                   onTap: () => Navigator.pop(sheetContext, 'add_expense'),
                 ),
               if (canExpenses)
                 ListTile(
-                  leading: const Icon(Icons.payments_outlined, color: BriskersColors.expenses),
+                  leading: const Icon(
+                    Icons.payments_outlined,
+                    color: BriskersColors.expenses,
+                  ),
                   title: Text(tr('viewExpenses')),
                   onTap: () => Navigator.pop(sheetContext, 'expenses'),
                 ),
-              if (canPayment)
+              if (!_estimate) ...[
+                const Divider(height: 1),
+                const _ActionSectionLabel('Repair'),
                 ListTile(
-                  leading: const Icon(Icons.credit_card_outlined, color: BriskersColors.invoices),
-                  title: Text(tr('addPayment')),
-                  onTap: () => Navigator.pop(sheetContext, 'payment'),
-                ),
-              if (!_estimate)
-                ListTile(
-                  leading: const Icon(Icons.warning_amber_rounded, color: Color(0xFFC62828)),
+                  leading: const Icon(
+                    Icons.warning_amber_rounded,
+                    color: Color(0xFFC62828),
+                  ),
                   title: Text(tr('vehicleFindings')),
                   onTap: () => Navigator.pop(sheetContext, 'findings'),
                 ),
+              ],
+              const Divider(height: 1),
+              const _ActionSectionLabel('Output'),
               ListTile(
-                leading: Icon(Icons.visibility_outlined, color: _estimate ? BriskersColors.estimates : BriskersColors.invoices),
+                leading: Icon(
+                  Icons.visibility_outlined,
+                  color: _estimate
+                      ? BriskersColors.estimates
+                      : BriskersColors.invoices,
+                ),
                 title: Text(tr('preview')),
                 onTap: () => Navigator.pop(sheetContext, 'preview'),
               ),
               ListTile(
-                leading: Icon(Icons.outbox_outlined, color: _estimate ? BriskersColors.estimates : BriskersColors.invoices),
+                leading: Icon(
+                  Icons.outbox_outlined,
+                  color: _estimate
+                      ? BriskersColors.estimates
+                      : BriskersColors.invoices,
+                ),
                 title: Text(tr('send')),
                 onTap: () => Navigator.pop(sheetContext, 'send'),
               ),
               if (canDelete) ...[
                 const Divider(height: 1),
+                const _ActionSectionLabel('Delete'),
                 ListTile(
                   leading: const Icon(Icons.delete_outline, color: Colors.red),
-                  title: Text(_estimate ? tr('deleteEstimate') : tr('deleteInvoice'), style: const TextStyle(color: Colors.red)),
+                  title: Text(
+                    _estimate ? tr('deleteEstimate') : tr('deleteInvoice'),
+                    style: const TextStyle(color: Colors.red),
+                  ),
                   onTap: () => Navigator.pop(sheetContext, 'delete'),
                 ),
               ],
-              const SizedBox(height: 8),
-            ],
+                const SizedBox(height: 6),
+              ],
+            ),
           ),
         ),
       ),
@@ -741,12 +1218,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       await _open(row, initialAction: action);
     }
   }
+
   Future<void> _showCloseInvoices() async {
     if (_estimate || !widget.isOwner) return;
 
     final eligible = (_rows ?? const <Map<String, dynamic>>[])
-        .where((row) => <String>{'Pending Close', 'Paid'}
-            .contains(row['display_status']?.toString() ?? ''))
+        .where((row) => _invoiceStage(row) == 'Pending Close')
         .toList();
 
     if (eligible.isEmpty) {
@@ -930,7 +1407,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
     if (confirmed != true || selected.isEmpty || !mounted) return;
 
-    final ok = await showDialog<bool>(
+    final ok =
+        await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
             title: const Text('Close selected invoices?'),
@@ -954,13 +1432,38 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           ),
         ) ??
         false;
-    if (!ok) return;
+    if (!ok || !mounted) return;
 
     try {
+      // Check the entire selection before closing any invoice, then recheck
+      // each RPC so a later receipt or connection-mode change cannot bypass it.
+      await _finalizationGuard.check(
+        businessId: widget.businessId,
+        invoiceIds: selected,
+        isOwner: widget.isOwner,
+      );
       for (final id in selected) {
-        await _api.closeInvoice(widget.businessId, id);
+        if (!mounted) return;
+        await _finalizationGuard.run(
+          businessId: widget.businessId,
+          invoiceIds: [id],
+          isOwner: widget.isOwner,
+          action: () => _api.closeInvoice(widget.businessId, id),
+        );
+        // The backend acknowledged this exact close. Update the cached
+        // index and live list now; don't wait for the full invoice query.
+        try {
+          await _localDocuments.recordServerConfirmedClosed(
+            widget.businessId, id,
+          );
+        } catch (_) {
+          // Server confirmation remains valid; cache refresh can retry.
+        }
+        VerifiedInvoiceCloseEvents.serverConfirmed(VerifiedInvoiceClosed(
+          businessId: widget.businessId, invoiceId: id,
+        ));
       }
-      await _load();
+      unawaited(_load());
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -981,11 +1484,17 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       final cached = await LocalFinancialCache().loadLinkedExpenses(
         widget.businessId,
       );
-      final related = cached?.where((item) =>
-        item['document_id']?.toString() == row['id'].toString() ||
-        (row['job_id']?.toString() != null &&
-          item['job_id']?.toString() == row['job_id']?.toString())
-      ).toList() ?? const <Map<String, dynamic>>[];
+      final related =
+          cached
+              ?.where(
+                (item) =>
+                    item['document_id']?.toString() == row['id'].toString() ||
+                    (row['job_id']?.toString() != null &&
+                        item['job_id']?.toString() ==
+                            row['job_id']?.toString()),
+              )
+              .toList() ??
+          const <Map<String, dynamic>>[];
       final expenses = offline
           ? related
           : await _api.documentExpenses(
@@ -1065,21 +1574,17 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     itemBuilder: (context, index) {
                       final expense = expenses[index];
                       final id = expense['id']?.toString() ?? '';
-                      final vendor =
-                          expense['vendor']?.toString() ?? 'Expense';
-                      final category =
-                          expense['category']?.toString() ?? '';
+                      final vendor = expense['vendor']?.toString() ?? 'Expense';
+                      final category = expense['category']?.toString() ?? '';
                       final date =
                           expense['transaction_date']?.toString() ?? '';
-                      final scope =
-                          expense['scope']?.toString() ?? 'invoice';
-                      final jobNumber =
-                          expense['job_number']?.toString() ?? '';
+                      final scope = expense['scope']?.toString() ?? 'invoice';
+                      final jobNumber = expense['job_number']?.toString() ?? '';
                       final scopeLabel = scope == 'invoice'
                           ? tr('invoiceLinked')
                           : (jobNumber.isEmpty
-                              ? tr('jobExpense')
-                              : '${tr('jobLabel')} $jobNumber');
+                                ? tr('jobExpense')
+                                : '${tr('jobLabel')} $jobNumber');
                       final income =
                           expense['direction']?.toString() == 'income';
 
@@ -1089,8 +1594,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
                       return ListTile(
                         leading: CircleAvatar(
-                          backgroundColor:
-                              expenseColor.withValues(alpha: 0.14),
+                          backgroundColor: expenseColor.withValues(alpha: 0.14),
                           child: Icon(
                             income ? Icons.south_west : Icons.north_east,
                             color: expenseColor,
@@ -1154,6 +1658,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                     builder: (_) => ExpenseDetailScreen(
                                       businessId: widget.businessId,
                                       transactionId: id,
+                                      cachedDetail: offline
+                                          ? Map<String, dynamic>.from(expense)
+                                          : null,
                                     ),
                                   ),
                                 );
@@ -1172,6 +1679,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       if (mounted) setState(() => _error = error.toString());
     }
   }
+
   Future<void> _createBlankInvoice() async {
     if (_estimate || !(widget.isOwner || widget.canManageExpenses)) return;
 
@@ -1180,6 +1688,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       MaterialPageRoute(
         builder: (_) => BlankInvoiceSetupScreen(
           businessId: widget.businessId,
+          initialCustomerId: widget.customerId,
+          initialCustomerName: widget.customerName,
+          initialVehicles: widget.customerVehicles,
         ),
       ),
     );
@@ -1189,10 +1700,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          sharedBottomNavigationBar: widget.detailBottomNavigationBar ??
+              widget.sharedBottomNavigationBar,
+          roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: invoiceId,
           isOwner: widget.isOwner,
           canManageExpenses: widget.canManageExpenses,
+          freshlyCreated: true,
           initialAction: 'edit',
         ),
       ),
@@ -1208,6 +1723,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         builder: (_) => BlankInvoiceSetupScreen(
           businessId: widget.businessId,
           kind: 'estimate',
+          initialCustomerId: widget.customerId,
+          initialCustomerName: widget.customerName,
+          initialVehicles: widget.customerVehicles,
         ),
       ),
     );
@@ -1217,6 +1735,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => JobDocumentScreen(
+          sharedBottomNavigationBar: widget.detailBottomNavigationBar ??
+              widget.sharedBottomNavigationBar,
+            roleCode: widget.roleCode,
             businessId: widget.businessId,
             documentId: documentId,
             isOwner: widget.isOwner,
@@ -1230,17 +1751,36 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_rows != null) {
+      NavigationContentTiming.contentVisible(
+        _estimate ? 'estimates' : 'invoices',
+        context: context,
+        source: _serverRows == null ? 'local-or-retained' : 'server-or-retained',
+      );
+    }
     final visible = _visibleRows;
     final selectedLabel = _futureDatedOnly
         ? 'Future-dated'
         : (_selectedStatus == null
-            ? tr('all')
-            : _localizedStatusLabel(_selectedStatus!));
-    final accent = _estimate ? BriskersColors.estimates : BriskersColors.invoices;
+              ? tr('all')
+              : _localizedStatusLabel(_selectedStatus!));
+    final accent = _estimate
+        ? BriskersColors.estimates : BriskersColors.invoices;
+    final scopedRows = (_rows ?? const <Map<String, dynamic>>[])
+        .where((row) => widget.customerId == null ||
+            row['customer_id']?.toString() == widget.customerId).toList();
 
-    return Scaffold(
+    return StaleKeyboardInsetGuard(
+      child: Scaffold(
       backgroundColor: Colors.white,
-      appBar: widget.showAppBar
+      appBar: widget.customerId != null
+          ? AppBar(
+              title: Text(widget.customerName?.trim().isNotEmpty == true
+                  ? widget.customerName! : _title,
+                  style: TextStyle(color: accent, fontWeight: FontWeight.w800)),
+              backgroundColor: accent.withValues(alpha: 0.08),
+            )
+          : widget.showAppBar
           ? AppBar(
               automaticallyImplyLeading: false,
               toolbarHeight: 78,
@@ -1257,76 +1797,133 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 if (widget.isOwner)
                   const Padding(
                     padding: EdgeInsets.only(right: 12),
-                    child: Center(child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: Color(0xFFF6EAD5),
-                        borderRadius: BorderRadius.all(Radius.circular(999)),
+                    child: Center(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Color(0xFFF6EAD5),
+                          borderRadius: BorderRadius.all(Radius.circular(999)),
+                        ),
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 5,
+                          ),
+                          child: Text(
+                            'OWNER',
+                            style: TextStyle(
+                              color: Color(0xFFC47A12),
+                              fontWeight: FontWeight.w700,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
                       ),
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                        child: Text('OWNER', style: TextStyle(
-                          color: Color(0xFFC47A12), fontWeight: FontWeight.w700,
-                          fontSize: 11)),
-                      ),
-                    )),
+                    ),
                   ),
               ],
             )
           : null,
-      bottomNavigationBar: widget.showAppBar && _estimate
-          ? (widget.sharedBottomNavigationBar ?? NavigationBar(
-              selectedIndex: 5,
-              labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-              onDestinationSelected: (index) {
-                final selectDestination = widget.onPrimaryDestinationSelected;
-                if (selectDestination != null) {
-                  selectDestination(index);
-                  return;
-                }
-                Navigator.of(context).pushReplacement(MaterialPageRoute(
-                  builder: (_) => ShellScreen(
-                    businessId: widget.businessId,
-                    businessName: widget.businessName,
-                    roleCode: widget.roleCode,
-                    initialIndex: index,
-                  ),
-                ));
-              },
-              destinations: const [
-                NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Home'),
-                NavigationDestination(icon: Icon(Icons.people_outline), label: 'Customers'),
-                NavigationDestination(icon: Icon(Icons.calendar_month_outlined), label: 'Schedule'),
-                NavigationDestination(icon: Icon(Icons.build_outlined), label: 'Jobs'),
-                NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Invoices'),
-                NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
-              ],
-            ))
+      // The module dock belongs to Shell. Nested customer views may supply
+      // their own dock; never reserve bottom space for New Estimate/Invoice.
+      // Creation lives beside Search for every view, just like Customers.
+      bottomNavigationBar: widget.customerId != null &&
+              widget.sharedBottomNavigationBar != null
+          ? widget.sharedBottomNavigationBar!
+          : widget.showAppBar && _estimate
+          ? (widget.sharedBottomNavigationBar ??
+                NavigationBar(
+                  selectedIndex: 5,
+                  labelBehavior:
+                      NavigationDestinationLabelBehavior.onlyShowSelected,
+                  onDestinationSelected: (index) {
+                    final selectDestination =
+                        widget.onPrimaryDestinationSelected;
+                    if (selectDestination != null) {
+                      selectDestination(index);
+                      return;
+                    }
+                    Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(
+                        builder: (_) => ShellScreen(
+                          businessId: widget.businessId,
+                          businessName: widget.businessName,
+                          roleCode: widget.roleCode,
+                          initialIndex: index,
+                        ),
+                      ),
+                    );
+                  },
+                  destinations: const [
+                    NavigationDestination(
+                      icon: Icon(Icons.dashboard_outlined),
+                      label: 'Home',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.people_outline),
+                      label: 'Customers',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.calendar_month_outlined),
+                      label: 'Schedule',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.build_outlined),
+                      label: 'Jobs',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.receipt_long_outlined),
+                      label: 'Invoices',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.more_horiz),
+                      label: 'More',
+                    ),
+                  ],
+                ))
+          : null,
+      floatingActionButton: (widget.isOwner || widget.canManageExpenses) &&
+              MediaQuery.viewInsetsOf(context).bottom == 0
+          ? FloatingActionButton.extended(
+              heroTag: _estimate ? 'estimates-quick-create' : 'invoices-quick-create',
+              tooltip: _estimate ? 'New Estimate' : 'New Invoice',
+              onPressed: _estimate ? _createStandaloneEstimate : _createBlankInvoice,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              backgroundColor: accent,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
+            )
           : null,
       body: RefreshIndicator(
         onRefresh: _load,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 84),
-          children: [
+        child: ListView.builder(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
+          itemCount: visible.length + 1,
+          itemBuilder: (context, index) {
+            if (index > 0) return _documentCard(visible[index - 1]);
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
             Row(
               children: [
-                if (!_estimate) ...[
-                  Text(
-                    _title,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: accent,
-                        ),
-                  ),
-                  const SizedBox(width: 8),
-                ],
+                Text(
+                  _title,
+                  style: Theme.of(context).textTheme.headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.w800, color: accent),
+                ),
+                const SizedBox(width: 8),
                 PopupMenuButton<String>(
                   tooltip: 'Filter $_title',
                   onSelected: (value) => setState(() {
                     _futureDatedOnly = value == '__future__';
                     _selectedStatus =
                         value == '__all__' || value == '__future__'
-                            ? null
-                            : value;
+                        ? null
+                        : value;
                   }),
                   itemBuilder: (_) => [
                     PopupMenuItem<String>(
@@ -1336,10 +1933,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                           const Icon(Icons.all_inclusive),
                           const SizedBox(width: 10),
                           Expanded(child: Text(tr('all'))),
-                          _menuCount(
-                            _rows?.length ?? 0,
-                            alwaysShow: true,
-                          ),
+                          _menuCount(scopedRows.length, alwaysShow: true),
                         ],
                       ),
                     ),
@@ -1354,10 +1948,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                             ),
                             const SizedBox(width: 10),
                             const Expanded(child: Text('Future-dated')),
-                            _menuCount(
-                              _futureDatedCount,
-                              alwaysShow: true,
-                            ),
+                            _menuCount(_futureDatedCount, alwaysShow: true),
                           ],
                         ),
                       ),
@@ -1374,9 +1965,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                             ),
                             const SizedBox(width: 10),
                             Expanded(
-                              child: Text(
-                                _localizedStatusLabel(status),
-                              ),
+                              child: Text(_localizedStatusLabel(status)),
                             ),
                             _menuCount(count),
                           ],
@@ -1392,19 +1981,21 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(999),
                       border: Border.all(
-                        color: (_futureDatedOnly
-                                ? const Color(0xFFB26A00)
-                                : (_selectedStatus == null
-                                    ? accent
-                                    : _statusColor(_selectedStatus!)))
-                            .withValues(alpha: 0.50),
+                        color:
+                            (_futureDatedOnly
+                                    ? const Color(0xFFB26A00)
+                                    : (_selectedStatus == null
+                                          ? accent
+                                          : _statusColor(_selectedStatus!)))
+                                .withValues(alpha: 0.50),
                       ),
-                      color: (_futureDatedOnly
-                              ? const Color(0xFFB26A00)
-                              : (_selectedStatus == null
-                                  ? accent
-                                  : _statusColor(_selectedStatus!)))
-                          .withValues(alpha: 0.08),
+                      color:
+                          (_futureDatedOnly
+                                  ? const Color(0xFFB26A00)
+                                  : (_selectedStatus == null
+                                        ? accent
+                                        : _statusColor(_selectedStatus!)))
+                              .withValues(alpha: 0.08),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -1415,8 +2006,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                             color: _futureDatedOnly
                                 ? const Color(0xFFB26A00)
                                 : (_selectedStatus == null
-                                    ? accent
-                                    : _statusColor(_selectedStatus!)),
+                                      ? accent
+                                      : _statusColor(_selectedStatus!)),
                             fontWeight: FontWeight.w800,
                           ),
                         ),
@@ -1427,8 +2018,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                           color: _futureDatedOnly
                               ? const Color(0xFFB26A00)
                               : (_selectedStatus == null
-                                  ? accent
-                                  : _statusColor(_selectedStatus!)),
+                                    ? accent
+                                    : _statusColor(_selectedStatus!)),
                         ),
                       ],
                     ),
@@ -1437,7 +2028,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 const Spacer(),
                 if (_rows != null)
                   Text(
-                    '${tr('total')} ${_rows!.length}',
+                    '${tr('total')} ${scopedRows.length}',
                     style: TextStyle(
                       color: accent,
                       fontWeight: FontWeight.w800,
@@ -1465,42 +2056,28 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               children: [
                 Expanded(
                   child: SearchBar(
-              key: const ValueKey('persistent-document-search'),
-              controller: _search,
-              focusNode: _searchFocus,
-              hintText: _estimate
-                  ? 'Search estimate #, customer, job or vehicle'
-                  : 'Search invoice #, customer, job or vehicle',
-              leading: const Icon(Icons.search),
-              trailing: [
-                if (_search.text.isNotEmpty)
-                  IconButton(
-                    tooltip: 'Clear',
-                    onPressed: () {
-                      _search.clear();
-                      setState(() {});
-                    },
-                    icon: const Icon(Icons.close),
-                  ),
-              ],
-              onChanged: (_) => setState(() {}),
+                    key: const ValueKey('persistent-document-search'),
+                    controller: _search,
+                    focusNode: _searchFocus,
+                    hintText: _estimate
+                        ? 'Search estimate #, customer, job or vehicle'
+                        : 'Search invoice #, customer, job or vehicle',
+                    leading: const Icon(Icons.search),
+                    trailing: [
+                      if (_search.text.isNotEmpty)
+                        IconButton(
+                          tooltip: 'Clear',
+                          onPressed: () {
+                            _search.clear();
+                            setState(() {});
+                          },
+                          icon: const Icon(Icons.close),
+                        ),
+                    ],
+                    onChanged: (_) => setState(() {}),
                   ),
                 ),
-                const SizedBox(width: 8),
-                if (widget.isOwner || widget.canManageExpenses)
-                  IconButton.filled(
-                    tooltip: _estimate ? 'New Estimate' : 'New Invoice',
-                    style: IconButton.styleFrom(
-                      backgroundColor: _estimate
-                          ? BriskersColors.estimates
-                          : BriskersColors.invoices,
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: _estimate
-                        ? _createStandaloneEstimate
-                        : _createBlankInvoice,
-                    icon: const Icon(Icons.add),
-                  ),
+
               ],
             ),
             if (_error != null)
@@ -1523,202 +2100,265 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(18),
-                  child: Text(_futureDatedOnly
-                      ? 'No future-dated invoices found. Refresh to check for updates.'
-                      : 'No ${_title.toLowerCase()} in this status.'),
+                  child: Text(
+                    _futureDatedOnly
+                        ? 'No future-dated invoices found. Refresh to check for updates.'
+                        : 'No ${_title.toLowerCase()} in this status.',
+                  ),
                 ),
               )
-            else
-              ...visible.map((row) {
-                final status = row['display_status']?.toString() ?? '';
-                final statusLabel = _localizedStatusLabel(status);
-                final color = _statusColor(status);
-                final number = row['document_number']?.toString() ?? '';
-                final customer = row['customer_name']?.toString() ?? '';
-                final documentTitle = (row['title'] ?? row['job_title'])?.toString().trim() ?? '';
-                final vehicle = row['vehicle']?.toString() ?? '';
-                final jobNumber = row['job_number']?.toString() ?? '';
-                final documentDate = _shortDate(row['document_date']);
-                final displayNumber = number.isEmpty
-                    ? ''
-                    : (_estimate
-                        ? (number.toUpperCase().startsWith('E-')
-                            ? number
-                            : 'E-$number')
-                        : (number.toUpperCase().startsWith('I-')
-                            ? number
-                            : 'I-$number'));
+              ],
+            );
+          },
+        ),
+      ),
+      ),
+    );
+  }
 
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 9),
-                  color: Color.alphaBlend(
-                    color.withValues(alpha: 0.08),
-                    Colors.white,
-                  ),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () => _open(row),
-                    onLongPress: () => _showDocumentActions(row),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    if (displayNumber.isNotEmpty) ...[
-                                      Text(
-                                        displayNumber,
-                                        style: const TextStyle(
-                                          fontSize: 17.5,
-                                          fontWeight: FontWeight.w900,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                    ],
-                                    Expanded(
-                                      child: Text(
-                                        customer,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontSize: 17.5,
-                                          fontWeight: FontWeight.w900,
-                                        ),
-                                      ),
-                                    ),
-                                    if (row['customer_problem_flag'] == true) ...[
-                                      const SizedBox(width: 5),
-                                      const Icon(
-                                        Icons.flag,
-                                        color: Colors.red,
-                                        size: 18,
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                                if (documentTitle.isNotEmpty) ...[
-                                  const SizedBox(height: 3),
-                                  Text(documentTitle, maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-                                ],
-                                const SizedBox(height: 3),
-                                if (vehicle.isNotEmpty)
-                                  Text(
-                                    vehicle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                if (_hasFutureDateTag(row)) ...[
-                                  const SizedBox(height: 4),
-                                  const Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.flag_outlined,
-                                        size: 14,
-                                        color: Color(0xFFB26A00),
-                                      ),
-                                      SizedBox(width: 4),
-                                      Text(
-                                        'Future-dated',
-                                        style: TextStyle(
-                                          color: Color(0xFFB26A00),
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                                if (jobNumber.isNotEmpty ||
-                                    documentDate.isNotEmpty) ...[
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    <String>[
-                                      if (jobNumber.isNotEmpty)
-                                        '${tr('jobLabel')} $jobNumber',
-                                      if (documentDate.isNotEmpty)
-                                        documentDate,
-                                    ].join(' • '),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
-                                      fontSize: 13.5,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ],
+  Widget _documentCard(Map<String, dynamic> row) {
+    final status = _invoiceStage(row);
+    final statusLabel = _localizedStatusLabel(status);
+    final color = _statusColor(status);
+    final number = row['document_number']?.toString() ?? '';
+    final customer = row['customer_name']?.toString() ?? '';
+    final documentTitle =
+        (row['title'] ?? row['job_title'])?.toString().trim() ?? '';
+    final estimateDescription = _estimate
+        ? (row['_estimate_list_description']?.toString().trim() ??
+            estimateListDescription(row))
+        : '';
+    final vehicle = row['vehicle']?.toString() ?? '';
+    final jobNumber = row['job_number']?.toString() ?? '';
+    final documentDate = _shortDate(row['document_date']);
+    final displayNumber = number.isEmpty
+        ? ''
+        : (_estimate
+              ? (number.toUpperCase().startsWith('E-')
+                    ? number
+                    : 'E-$number')
+              : (number.toUpperCase().startsWith('I-')
+                    ? number
+                    : 'I-$number'));
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 9),
+      color: Color.alphaBlend(
+        color.withValues(alpha: 0.08),
+        Colors.white,
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _open(row),
+        onLongPress: () => _showDocumentActions(row),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        if (displayNumber.isNotEmpty) ...[
+                          Text(
+                            displayNumber,
+                            style: const TextStyle(
+                              fontSize: 17.5,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          SizedBox(
-                            width: 98,
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  alignment: Alignment.centerRight,
-                                  child: Text(
-                                    _money(row['total_amount']),
-                                    style: const TextStyle(
-                                      fontSize: 16.5,
-                                      fontWeight: FontWeight.w900,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 5),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: color.withValues(alpha: 0.11),
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text(
-                                      statusLabel,
-                                      style: TextStyle(
-                                        color: color,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
+                          const SizedBox(width: 10),
+                        ],
+                        Expanded(
+                          child: Text(
+                            customer,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 17.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (row['customer_problem_flag'] ==
+                            true) ...[
+                          const SizedBox(width: 5),
+                          const Icon(
+                            Icons.flag,
+                            color: Colors.red,
+                            size: 18,
+                          ),
+                        ],
+                      ],
+                    ),
+                    if (documentTitle.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        documentTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    if (estimateDescription.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        estimateDescription,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w400,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 3),
+                    if (vehicle.isNotEmpty)
+                      Text(
+                        vehicle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    if (_hasFutureDateTag(row)) ...[
+                      const SizedBox(height: 4),
+                      const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.flag_outlined,
+                            size: 14,
+                            color: Color(0xFFB26A00),
+                          ),
+                          SizedBox(width: 4),
+                          Text(
+                            'Future-dated',
+                            style: TextStyle(
+                              color: Color(0xFFB26A00),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ],
                       ),
+                    ],
+                    if (jobNumber.isNotEmpty ||
+                        documentDate.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        <String>[
+                          if (jobNumber.isNotEmpty)
+                            '${tr('jobLabel')} $jobNumber',
+                          if (documentDate.isNotEmpty) documentDate,
+                        ].join(' • '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 98,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        _money(row['total_amount']),
+                        style: const TextStyle(
+                          fontSize: 16.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
-                  ),
-                );
-              }),
-          ],
+                    const SizedBox(height: 5),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.11),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          statusLabel,
+                          style: TextStyle(
+                            color: color,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+                ],
+              ),
+              const SizedBox(height: 3),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  tr('longPressForOptions'),
+                  style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+class _ActionSectionLabel extends StatelessWidget {
+  const _ActionSectionLabel(this.label);
+  final String label;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 10, 16, 5),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        label.toUpperCase(),
+        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+          fontSize: 14,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          letterSpacing: 0.45,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ),
+  );
 }

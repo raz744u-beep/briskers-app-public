@@ -1,29 +1,39 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:drift/drift.dart' show Variable;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../widgets/job_compact_card.dart';
+import '../../widgets/customer_findings_overview_row.dart';
+import '../../widgets/stale_keyboard_inset_guard.dart';
 import '../../core/connection_mode.dart';
 import '../../core/formatters.dart';
+import '../../core/briskers_i18n.dart';
+import '../../core/document_presentation.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_vehicle_sync_service.dart';
-import '../../services/customer_detail_cache.dart';
-import '../../services/local_document_detail_cache.dart';
+import '../../services/customer_document_summary_service.dart';
+import '../../services/local_document_repository.dart';
+import '../../services/local_job_repository.dart';
+import '../../services/customer_document_recency.dart';
+import '../../services/customer_job_recency.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/local_customer_repository.dart';
+import '../../services/job_summary_visibility.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
 import '../appointments/appointment_create_screen.dart';
 import '../jobs/job_create_screen.dart';
 import '../jobs/job_document_screen.dart';
+import '../documents_screen.dart';
 import '../jobs/job_detail_screen.dart';
 import '../appointments/appointment_manage_screen.dart';
 import '../jobs/blank_invoice_setup_screen.dart';
 import 'customer_quick_actions.dart';
 import 'customer_problem_flag_card.dart';
 import 'customer_account_section.dart';
-import 'customer_appointments_section.dart';
 import 'customer_notes_section.dart';
 import 'customer_service_history_section.dart';
 import 'customer_vehicles_section.dart';
@@ -37,11 +47,18 @@ class CustomerDetailScreen extends StatefulWidget {
     required this.businessId,
     required this.customerId,
     required this.roleCode,
+    this.initialCustomerSummary,
+    this.onReviewed,
+    this.sharedBottomNavigationBar,
   });
 
   final String businessId;
   final String customerId;
   final String roleCode;
+  // Permission-scoped selected row for a read-only first-frame preview.
+  final Map<String, dynamic>? initialCustomerSummary;
+  final VoidCallback? onReviewed;
+  final Widget? sharedBottomNavigationBar;
 
   @override
   State<CustomerDetailScreen> createState() => _CustomerDetailScreenState();
@@ -49,7 +66,6 @@ class CustomerDetailScreen extends StatefulWidget {
 
 class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   static const _api = BriskersApi();
-  static const _sectionCache = CustomerDetailCache();
   final CustomerVehicleSyncService _sync =
       CustomerVehicleSyncService();
   final LocalCustomerRepository _localCustomers =
@@ -57,6 +73,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   final OfflineCustomerVehicleAdminService _offlineAdmin =
       OfflineCustomerVehicleAdminService();
 
+  late JobSummaryVisibility _jobVisibility;
   Map<String, dynamic>? _data;
   String? _error;
   bool _onlineReady = false;
@@ -66,335 +83,632 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   bool get _canManageQuickActions => canManageCustomerActions(widget.roleCode);
   final GlobalKey _notesSectionKey = GlobalKey();
   bool _expandQuickNotes = false;
-
-  Future<Map<String, dynamic>> _loadOfflineSections() async {
-    Future<List<Map<String, dynamic>>> listSection(String key) async {
-      final raw = await _sectionCache.load(
-        widget.businessId,
-        widget.customerId,
-        key,
-      );
-      return raw is List
-          ? raw
-              .whereType<Map>()
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList()
-          : <Map<String, dynamic>>[];
-    }
-
-    final appointments = await listSection('appointments');
-
-    final historyRaw = await _sectionCache.load(
-      widget.businessId,
-      widget.customerId,
-      'service_history',
-    );
-    final history = historyRaw is Map
-        ? Map<String, dynamic>.from(historyRaw)
-        : <String, dynamic>{};
-
-    return <String, dynamic>{
-      'appointments': appointments,
-      'history': history,
-    };
-  }
-
-
+  int _customerTab = 0; // Overview, Info, Vehicles, Notes.
+  int _activityRevision = 0;
 
   Future<List<Map<String, dynamic>>> _activeCustomerItems() async {
+    final visibility = _jobVisibility;
+    final generation = visibility.epoch;
     final vars = <Variable<Object>>[
       Variable<String>(widget.businessId),
       Variable<String>(widget.customerId),
     ];
     final rows = <Map<String, dynamic>>[];
     final appointments = await localDatabase.customSelect(
-      "SELECT id,title,status FROM local_appointments WHERE business_id=? AND customer_id=? "
+      "SELECT id,title,status,job_id FROM local_appointments WHERE business_id=? AND customer_id=? "
       "AND lower(status) NOT IN ('cancelled','canceled','no_show','checked_in','completed')",
       variables: vars).get();
     for (final a in appointments) {
       rows.add({'type':'Appointment','id':a.read<String>('id'),
+        'job_id':a.readNullable<String>('job_id'),
         'title':a.read<String>('title'),
         'status':a.read<String>('status')});
     }
-    final jobs = await localDatabase.customSelect(
-      "SELECT id,title,status,payment_state,job_number FROM local_jobs WHERE business_id=? AND customer_id=? "
-      "AND lower(status) NOT IN ('completed','closed','cancelled')",
-      variables: vars).get();
-    for (final j in jobs) {
-      final rawStatus = j.read<String>('status');
-      final formattedStatus = rawStatus.replaceAll('_', ' ');
-      final jobStatus = formattedStatus.isEmpty ? 'Open' :
-          formattedStatus[0].toUpperCase() + formattedStatus.substring(1);
-      rows.add({'type':'Job','id':j.read<String>('id'),
-        'title':j.read<String>('title'),
-        'number':j.readNullable<String>('job_number') ?? 'Pending sync',
-        'status':jobStatus});
+    final jobs = await LocalJobRepository().forCustomer(
+      widget.businessId, widget.customerId);
+    for (final job in jobs) {
+      rows.add({...job, 'type': 'Job', 'job_id': job['id'],
+        'number': job['job_number'] ?? 'Pending sync',
+        'job_snapshot': job});
     }
-    final docs = await localDatabase.customSelect(
-      "SELECT id,kind,status,document_number,total FROM local_documents "
-      "WHERE business_id=? AND customer_id=? AND closed_at IS NULL "
-      "AND lower(COALESCE(status,''))<>'void'",
-      variables: vars).get();
-    for (final d in docs) {
-      final id = d.read<String>('id');
-      final detail = await const LocalDocumentDetailCache().load(widget.businessId,id);
-      rows.add({'type':d.read<String>('kind'),'id':id,
-        'title':detail?['title'] ?? detail?['job_title'] ?? d.read<String>('kind'),
-        'status':d.readNullable<String>('status') ?? '',
-        'number':d.readNullable<String>('document_number') ?? 'Pending sync',
-        'total':d.read<double>('total'),
-        'paid':num.tryParse(detail?['paid_amount']?.toString() ?? '')});
+    final docs = await CustomerDocumentSummaryService().forCustomer(
+      widget.businessId, widget.customerId, includeClosed: true);
+    for (final document in docs) {
+      final presentation = DocumentPresentation(document);
+      rows.add({
+        'type': document['kind'],
+        'id': document['id'],
+        'job_id': document['job_id'],
+        'vehicle': document['vehicle'] ?? document['vehicle_label'],
+        'document_date': document['document_date'],
+        'server_updated_at': document['server_updated_at'] ?? document['updated_at'],
+        'title': document['title'] ?? document['job_title'] ??
+            (presentation.isInvoice ? tr('invoice') : tr('estimate')),
+        'status': presentation.statusLabel,
+        'number': document['document_number'] ?? tr('pendingSync'),
+        'total': num.tryParse(document['total_amount']?.toString() ?? ''),
+        'balance_due_cents': presentation.balanceDueCents,
+        'pending_cents': presentation.paymentDetailsKnown ? presentation.pendingCents : null,
+        'payment_reconciliation_required': presentation.requiresReconciliation,
+      });
     }
-    return rows;
+    final visits = await localDatabase.customSelect(
+      'SELECT v.id,v.job_id,v.reason,j.job_number FROM local_job_visits v '
+      'JOIN local_jobs j ON j.id=v.job_id AND j.business_id=v.business_id '
+      'WHERE v.business_id=? AND j.customer_id=?',
+      variables: vars).get();
+    for (final visit in visits) {
+      rows.add({'type': 'Visit', 'id': visit.read<String>('id'),
+        'job_id': visit.read<String>('job_id'),
+        'number': visit.readNullable<String>('job_number') ?? '',
+        'title': visit.readNullable<String>('reason') ?? 'Shop visit'});
+    }
+    final visibleRows = await visibility.filter(rows, jobIdKey: 'job_id');
+    return visibility.isCurrent(generation) ? visibleRows : [];
   }
 
-  Widget _customerOverviewCard() => FutureBuilder<List<Map<String, dynamic>>>(
-    future: _activeCustomerItems(),
-    builder: (context, snapshot) {
-      final rows = snapshot.data ?? const <Map<String,dynamic>>[];
-      final estimates = rows.where((x) => x['type'] == 'estimate').toList();
-      final invoices = rows.where((x) => x['type'] == 'invoice').toList();
-      final estimateTotal = estimates.fold<double>(0,
-        (sum, x) => sum + ((x['total'] as num?)?.toDouble() ?? 0));
-      final knownInvoiceBalances = invoices.where((x) => x['paid'] is num).toList();
-      final balance = knownInvoiceBalances.fold<double>(0, (sum, x) {
-        final outstanding = ((x['total'] as num?)?.toDouble() ?? 0) -
-          ((x['paid'] as num?)?.toDouble() ?? 0);
-        return sum + (outstanding > 0 ? outstanding : 0);
-      });
-      String money(double value) => '${String.fromCharCode(36)}${value.toStringAsFixed(2)}';
-      return Card(child: ExpansionTile(
-        initiallyExpanded: false,
-        leading: const Icon(Icons.dashboard_outlined, color: BriskersColors.customers),
-        title: const Text('Customer Overview', style: TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(snapshot.hasError ? 'Could not read saved activity'
-          : snapshot.hasData ? '${rows.length} active records' : 'Loading activity...'),
-        children: [
-          ListTile(
-            dense: true,
-            leading: const Icon(Icons.account_balance_wallet_outlined),
-            title: const Text('Invoice balance due (locally verified)'),
-            trailing: Text(money(balance),
-              style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: knownInvoiceBalances.length < invoices.length
-              ? Text('Payment details unavailable for ${invoices.length - knownInvoiceBalances.length} invoice(s)')
-              : const Text('Excludes draft estimates'),
-          ),
-          ListTile(
-            dense: true,
-            leading: const Icon(Icons.request_quote_outlined),
-            title: const Text('Active estimate value (not due)'),
-            trailing: Text(money(estimateTotal)),
-          ),
-          for (final item in rows)
-            ListTile(
-              dense: true,
-              leading: Icon(
-                item['type'] == 'Job' ? Icons.build_outlined :
-                item['type'] == 'Appointment' ? Icons.calendar_month_outlined :
-                item['type'] == 'estimate' ? Icons.description_outlined :
-                Icons.receipt_long_outlined,
-                color: item['type'] == 'Job' ? BriskersColors.jobs :
-                  item['type'] == 'Appointment' ? BriskersColors.schedule :
-                  item['type'] == 'estimate' ? BriskersColors.estimates :
-                  BriskersColors.invoices,
-              ),
-              title: Text(item['title'].toString()),
-              subtitle: Text(item['type'] == 'Job'
-                ? 'Job ${item['number']} · ${item['status']}'
-                : "${item['type']} · ${item['status']}"),
-              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                if (item['total'] is num)
-                  Text(
-                    '${String.fromCharCode(36)}${(item['total'] as num).toStringAsFixed(2)}',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                const SizedBox(width: 6),
-                const Icon(Icons.chevron_right, size: 18),
-              ]),
-              onTap: () {
-                final id = item['id']?.toString();
-                if (id == null || id.isEmpty) return;
-                final type = item['type']?.toString();
-                if (type == 'Job') {
-                  Navigator.push(context, MaterialPageRoute(builder: (_) =>
-                    JobDetailScreen(businessId:widget.businessId,jobId:id,
-                      roleCode:widget.roleCode)));
-                } else if (type == 'Appointment') {
-                  Navigator.push(context, MaterialPageRoute(builder: (_) =>
-                    AppointmentManageScreen(businessId: widget.businessId,
-                      isOwner: widget.roleCode == 'owner',
-                      appointment: {'id':id,'customer_id':widget.customerId,
-                        'title':item['title'],'status':item['status']})));
-                } else {
-                  Navigator.push(context, MaterialPageRoute(builder: (_) =>
-                    JobDocumentScreen(businessId:widget.businessId,
-                      documentId:id,isOwner:widget.roleCode=='owner')));
-                }
-              },
-            ),
-          if (rows.isEmpty && snapshot.hasData)
-            const ListTile(title: Text('No active records saved locally')),
-        ],
-      ));
-    },
-  );
+  // The customer overview reads the local document index, not the customer
+  // identity payload. Invalidate it when an editor/list returns, including
+  // Force Offline paths that do not run the full _load() refresh.
+  void _invalidateCustomerActivity() {
+    if (!mounted) return;
+    setState(() => _activityRevision++);
+  }
 
-  Widget _offlineCountCard({
-    required IconData icon,
-    required String title,
-    required String emptyText,
-    required List<Map<String, dynamic>> rows,
-    String Function(Map<String, dynamic>)? label
-  }) {
-    return Card(
-      child: ExpansionTile(
-        maintainState: false,
-        leading: Icon(icon),
-        title: Text(
-          title,
-          style: const TextStyle(fontWeight: FontWeight.w600),
+  Future<void> _refreshEditedCustomerDocument(String documentId) async {
+    _invalidateCustomerActivity(); // Show any locally saved draft immediately.
+    if (BriskersConnectionModeController.instance.forceOffline ||
+        documentId.isEmpty ||
+        documentId.startsWith('local-estimate-') ||
+        documentId.startsWith('local-invoice-')) {
+      return;
+    }
+    try {
+      // A newly created online document can exist on the server before its
+      // list index is pulled. Refresh only this document rather than syncing
+      // every invoice and estimate whenever a customer editor closes.
+      final detail = await _api.documentDetail(widget.businessId, documentId);
+      if (detail['id']?.toString() != documentId ||
+          detail['customer_id']?.toString() != widget.customerId ||
+          (detail['kind'] != 'invoice' && detail['kind'] != 'estimate')) {
+        return;
+      }
+      await LocalDocumentRepository().upsertFromServer(
+        widget.businessId, [detail]);
+    } catch (_) {
+      // Failed/unauthorized remote refresh cannot hide locally queued changes.
+      // The regular sync or pull-to-refresh will retry when available.
+    } finally {
+      _invalidateCustomerActivity();
+    }
+  }
+
+  Future<void> _openOverviewRecord(Map<String, dynamic> item) async {
+    final id = item['id']?.toString() ?? '';
+    final jobId = item['job_id']?.toString() ?? '';
+    if (id.isEmpty || !mounted) return;
+    final type = item['type']?.toString() ?? '';
+    if (type == 'Job' || type == 'Visit') {
+      if (type == 'Visit' && jobId.isEmpty) return;
+      await Navigator.push<void>(context, MaterialPageRoute(
+        builder: (_) => JobDetailScreen(
+          businessId: widget.businessId,
+          jobId: type == 'Visit' ? jobId : id,
+          roleCode: widget.roleCode,
+          bottomNavigationBar: widget.sharedBottomNavigationBar)));
+    } else if (type == 'Appointment') {
+      await Navigator.push<void>(context, MaterialPageRoute(
+        builder: (_) => AppointmentManageScreen(
+          businessId: widget.businessId,
+          isOwner: widget.roleCode == 'owner',
+          appointment: {'id': id, 'customer_id': widget.customerId,
+            'title': item['title'], 'status': item['status']})));
+    } else if (type == 'invoice' || type == 'estimate') {
+      await Navigator.push<void>(context, MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: id,
+          initialDocumentSummary: Map<String, dynamic>.from(item),
+          isOwner: widget.roleCode == 'owner',
+          roleCode: widget.roleCode)));
+      await _refreshEditedCustomerDocument(id);
+      return;
+    }
+    _invalidateCustomerActivity();
+  }
+
+  Future<void> _showCustomerServiceHistory() async {
+    await Navigator.push<void>(context, MaterialPageRoute(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: const Text('Service History')),
+        body: ListView(children: [CustomerServiceHistorySection(
+          businessId: widget.businessId,
+          customerId: widget.customerId,
+          vehicles: List<dynamic>.from(_data?['vehicles'] ?? const []),
+          roleCode: widget.roleCode,
+          initiallyExpanded: true,
+        )]),
+        bottomNavigationBar: widget.sharedBottomNavigationBar,
+      ),
+    ));
+    _invalidateCustomerActivity();
+  }
+
+  Future<void> _showVehicleRepairHistory(Map<String, dynamic> vehicle) async {
+    final vehicleId = vehicle['id']?.toString() ?? '';
+    final knownVehicles = List<dynamic>.from(_data?['vehicles'] ?? const []);
+    if (vehicleId.isEmpty ||
+        !knownVehicles.whereType<Map>().any((row) =>
+          row['id']?.toString() == vehicleId)) {
+      return;
+    }
+    await Navigator.push<void>(context, MaterialPageRoute(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: const Text('Vehicle Repair History')),
+        body: ListView(children: [
+          CustomerServiceHistorySection(
+            businessId: widget.businessId,
+            customerId: widget.customerId,
+            vehicles: knownVehicles,
+            roleCode: widget.roleCode,
+            initialVehicleId: vehicleId,
+            initiallyExpanded: true,
+          ),
+        ]),
+        bottomNavigationBar: widget.sharedBottomNavigationBar,
+      ),
+    ));
+    _invalidateCustomerActivity();
+  }
+
+  Future<void> _showCustomerDocuments(String title) async {
+    final isEstimate = title == 'Estimates';
+    final customer = Map<String, dynamic>.from(
+      _data?['customer'] is Map ? _data!['customer'] as Map : const {});
+    final vehicles = List<dynamic>.from(_data?['vehicles'] ?? const []);
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DocumentsScreen(
+          businessId: widget.businessId,
+          kind: isEstimate ? 'estimate' : 'invoice',
+          roleCode: widget.roleCode,
+          isOwner: widget.roleCode == 'owner',
+          canManageExpenses: _canManageQuickActions,
+          customerId: widget.customerId,
+          customerName: customer['name']?.toString(),
+          customerVehicles: vehicles,
+          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
         ),
-        subtitle: Text(
-          rows.isEmpty
-              ? emptyText
-              : rows.length == 1
-                  ? '1 saved item'
-                  : '${rows.length} saved items',
-        ),
-        children: rows.isEmpty
-            ? const <Widget>[
-                Padding(
-                  padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('No saved data yet.'),
+      ),
+    );
+    _invalidateCustomerActivity();
+    if (mounted) await _load();
+  }
+
+  Future<void> _showOverviewList(String title, List<Map<String, dynamic>> records) async {
+    Color moduleColor(String type) {
+      switch (type) {
+        case 'Job':
+        case 'Visit':
+          return BriskersColors.jobs;
+        case 'invoice':
+          return BriskersColors.invoices;
+        case 'estimate':
+          return BriskersColors.estimates;
+        case 'Appointment':
+          return BriskersColors.schedule;
+        default:
+          return BriskersColors.invoices;
+      }
+    }
+
+    IconData moduleIcon(String type) {
+      switch (type) {
+        case 'Job':
+          return Icons.build_outlined;
+        case 'Visit':
+          return Icons.history_outlined;
+        case 'invoice':
+          return Icons.receipt_long_outlined;
+        case 'estimate':
+          return Icons.description_outlined;
+        case 'Appointment':
+          return Icons.calendar_today_outlined;
+        default:
+          return Icons.payments_outlined;
+      }
+    }
+
+    Color statusColor(String status, Color fallback) {
+      final key = status.toLowerCase().trim();
+      if (key.contains('pending close') || key.contains('waiting') ||
+          key.contains('draft') || key.contains('pending approval')) {
+        return const Color(0xFFC77700);
+      }
+      if (key.contains('unpaid') || key.contains('overdue')) {
+        return const Color(0xFFC62828);
+      }
+      if (key.contains('closed') || key.contains('completed') ||
+          key.contains('paid') || key.contains('accepted') ||
+          key.contains('converted')) {
+        return const Color(0xFF2E7D32);
+      }
+      if (key.contains('recheck') || key.contains('void') ||
+          key.contains('cancel')) {
+        return const Color(0xFFC62828);
+      }
+      if (key.contains('open') || key.contains('progress') ||
+          key.contains('sent')) {
+        return const Color(0xFF1976D2);
+      }
+      return fallback;
+    }
+    final documentList = title == 'Invoices' || title == 'Estimates';
+    final financialRows = records.where((record) =>
+      title == 'Invoices' ? record['type'] == 'invoice'
+        : record['type'] == 'estimate').toList();
+    final knownAmounts = financialRows.where((record) =>
+      record['total'] is num).toList();
+    final totalValue = knownAmounts.fold<double>(0, (total, record) =>
+      total + (record['total'] as num).toDouble());
+    final money = NumberFormat.currency(locale: 'en_US', symbol: '\$');
+    final missingAmounts = financialRows.length - knownAmounts.length;
+
+    final sheetColor = title == 'Jobs' || title == 'Visits'
+        ? BriskersColors.jobs
+        : title == 'Estimates'
+            ? BriskersColors.estimates
+            : title == 'Appointments'
+                ? BriskersColors.schedule
+                : BriskersColors.invoices;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      builder: (sheetContext) => SafeArea(
+        child: FractionallySizedBox(
+          heightFactor: 0.75,
+          child: Column(children: [
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: sheetColor.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 23,
+                  fontWeight: FontWeight.w800,
+                  color: sheetColor,
+                ),
+              ),
+            ),
+            if (documentList)
+              Container(
+                margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                decoration: BoxDecoration(
+                  color: sheetColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(children: [
+                  Icon(Icons.account_balance_wallet_outlined,
+                    color: sheetColor, size: 21),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title == 'Invoices'
+                          ? 'Total Invoices' : 'Total Estimates',
+                        style: TextStyle(color: sheetColor,
+                          fontWeight: FontWeight.w800, fontSize: 16)),
+                      Text(
+                        '${financialRows.length} records'
+                        '${missingAmounts > 0 ? ' • $missingAmounts amounts unavailable' : ''}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  )),
+                  Text(money.format(totalValue),
+                    style: TextStyle(color: sheetColor,
+                      fontSize: 18, fontWeight: FontWeight.w800)),
+                ]),
+              ),
+            Expanded(child: records.isEmpty
+              ? const Center(child: Text('No records found on this device.'))
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(14, 2, 14, 20),
+                  itemCount: records.length,
+                  itemBuilder: (context, i) {
+                    final item = records[i];
+                    final type = item['type']?.toString() ?? '';
+                    final number = item['number']?.toString().trim() ?? '';
+                    final status = item['status']?.toString().trim() ?? '';
+                    final color = moduleColor(type);
+                    final stateColor = statusColor(status, color);
+                    final amount = item['total'] is num
+                        ? money.format(item['total']) : null;
+                    final recordTitle = number.isEmpty
+                        ? (item['title']?.toString().trim().isNotEmpty == true
+                            ? item['title'].toString()
+                            : type)
+                        : type == 'invoice'
+                            ? 'Invoice #$number'
+                            : type == 'estimate'
+                                ? 'Estimate #$number'
+                                : type == 'Job'
+                                    ? 'Job $number'
+                                    : '$type $number';
+                    final description = [
+                      item['title'],
+                      item['vehicle'],
+                    ].map((value) => value?.toString().trim() ?? '')
+                      .where((value) => value.isNotEmpty && value != recordTitle)
+                      .join(' • ');
+                    if (type == 'Job') {
+                      final jobData = Map<String, dynamic>.from(
+                        item['job_snapshot'] is Map
+                          ? item['job_snapshot'] as Map
+                          : <String, dynamic>{},
+                      );
+                      return JobCompactCard(
+                        job: jobData,
+                        statusControl: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: stateColor.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(status, style: TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w700,
+                            color: stateColor,
+                          )),
+                        ),
+                        onOpen: () {
+                          Navigator.pop(sheetContext);
+                          _openOverviewRecord(item);
+                        },
+                      );
+                    }
+                    return Card(
+                      elevation: 0,
+                      margin: const EdgeInsets.only(bottom: 9),
+                      color: stateColor.withValues(alpha: 0.075),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(15),
+                        side: BorderSide(color: stateColor.withValues(alpha: 0.14)),
+                      ),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(15),
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          _openOverviewRecord(item);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 13),
+                          child: Row(children: [
+                            Icon(moduleIcon(type), color: color, size: 20),
+                            const SizedBox(width: 12),
+                            Expanded(child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(recordTitle,
+                                  style: const TextStyle(
+                                    fontSize: 17, fontWeight: FontWeight.w800),
+                                ),
+                                if (description.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(description,
+                                    style: const TextStyle(fontSize: 14.5),
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis),
+                                ],
+                                if (status.isNotEmpty) ...[
+                                  const SizedBox(height: 7),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 9, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: stateColor.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Text(status,
+                                      style: TextStyle(color: stateColor,
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w700)),
+                                  ),
+                                ],
+                              ],
+                            )),
+                            if (documentList && amount != null) ...[
+                              const SizedBox(width: 6),
+                              Text(amount, style: const TextStyle(
+                                fontSize: 15.5, fontWeight: FontWeight.w800)),
+                            ],
+                            const SizedBox(width: 5),
+                            Icon(Icons.chevron_right, color: color, size: 21),
+                          ]),
+                        ),
+                      ),
+                    );
+                  },
+                )),
+            if (_canManageQuickActions &&
+                (title == 'Jobs' || title == 'Invoices' ||
+                 title == 'Estimates' || title == 'Appointments'))
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: sheetColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(sheetContext);
+                      if (title == 'Jobs') {
+                        _createJob();
+                      } else if (title == 'Invoices') {
+                        _createInvoiceForCustomer();
+                      } else if (title == 'Estimates') {
+                        _createEstimateForCustomer();
+                      } else {
+                        _scheduleAppointment();
+                      }
+                    },
+                    icon: const Icon(Icons.add),
+                    label: Text(title == 'Jobs' ? 'New Job'
+                      : title == 'Invoices' ? 'New Invoice'
+                      : title == 'Estimates' ? 'New Estimate'
+                      : 'New Appointment'),
                   ),
                 ),
-              ]
-            : rows.map((row) {
-                final text = label?.call(row) ?? '';
-                return ListTile(
-                  dense: true,
-                  title: Text(
-                    text.isEmpty ? 'Saved item' : text,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                );
-              }).toList(),
+              ),
+            if (widget.sharedBottomNavigationBar != null)
+              widget.sharedBottomNavigationBar!,
+          ]),
+        ),
       ),
     );
   }
 
-  Widget _offlineCustomerSections() {
-    return FutureBuilder<Map<String, dynamic>>(
-      future: _loadOfflineSections(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Card(
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  SizedBox(width: 12),
-                  Text('Loading saved customer details...'),
-                ],
-              ),
+  Future<void> _openAllVehicleFindings(List<dynamic> vehicles) async {
+    // Both customer Overview and Vehicles tab use the same existing
+    // permission-aware, vehicle-scoped detail screen. Do not create a
+    // second copy of finding records or aggregate them into Jobs.
+    if (!mounted) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('All Vehicle Findings')),
+          body: ListView(children: [
+            CustomerVehicleFindingsSection(
+              businessId: widget.businessId,
+              customerId: widget.customerId,
+              vehicles: vehicles,
+              canManage: _canManageQuickActions,
+              canDelete: widget.roleCode == 'owner',
+              initiallyExpanded: true,
             ),
-          );
-        }
-
-        final data = snapshot.data ?? const <String, dynamic>{};
-        final appointments = List<Map<String, dynamic>>.from(
-          data['appointments'] ?? const <Map<String, dynamic>>[],
-        );
-        final history = Map<String, dynamic>.from(
-          data['history'] ?? const <String, dynamic>{},
-        );
-        final jobs = List<dynamic>.from(history['jobs'] ?? const [])
-            .whereType<Map>()
-            .map((row) => Map<String, dynamic>.from(row))
-            .toList();
-        final documents = List<dynamic>.from(history['documents'] ?? const [])
-            .whereType<Map>()
-            .map((row) => Map<String, dynamic>.from(row))
-            .toList();
-        final expenses = List<dynamic>.from(history['expenses'] ?? const [])
-            .whereType<Map>()
-            .map((row) => Map<String, dynamic>.from(row))
-            .toList();
-
-        return Column(
-          children: [
-
-            _offlineCountCard(
-              icon: Icons.calendar_month_outlined,
-              title: 'Appointments',
-              emptyText: 'No saved appointments',
-              rows: appointments,
-              label: (row) {
-                final title = row['title']?.toString().trim() ?? '';
-                final starts = row['starts_at']?.toString().trim() ?? '';
-                return [starts, title].where((x) => x.isNotEmpty).join(' • ');
-              },
-            ),
-            const SizedBox(height: 18),
-            Card(
-              child: ExpansionTile(
-                leading: const Icon(Icons.history_outlined),
-                title: const Text(
-                  'Service History',
-                  style: TextStyle(fontWeight: FontWeight.w600),
-                ),
-                subtitle: Text(
-                  '${jobs.length} jobs • ${documents.length} documents • ${expenses.length} expenses',
-                ),
-                children: [
-                  if (jobs.isEmpty && documents.isEmpty && expenses.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text('No saved service history yet.'),
-                      ),
-                    )
-                  else ...[
-                    for (final job in jobs.take(12))
-                      ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.build_outlined),
-                        title: Text(
-                          [
-                            job['job_number']?.toString() ?? '',
-                            job['title']?.toString() ?? '',
-                          ].where((x) => x.isNotEmpty).join(' — '),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    if (jobs.length > 12)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text('+ ${jobs.length - 12} more jobs saved'),
-                        ),
-                      ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        );
-      },
+          ]),
+        ),
+      ),
     );
   }
 
+  Widget _customerOverviewCard() => FutureBuilder<List<Map<String, dynamic>>>(
+    key: ValueKey(('customer-overview', widget.customerId,
+        _jobVisibility.epoch, _activityRevision)),
+    future: _activeCustomerItems(),
+    builder: (context, snapshot) {
+      final rows = snapshot.data ?? const <Map<String, dynamic>>[];
+      final jobs = rows.where((item) => item['type'] == 'Job').toList()
+        ..sort(compareCustomerJobRecency);
+      final invoices = rows.where((item) => item['type'] == 'invoice').toList();
+      final estimates = rows.where((item) => item['type'] == 'estimate').toList();
+      final appointments = rows.where((item) => item['type'] == 'Appointment').toList();
+      final docs = [...invoices, ...estimates];
+      docs.sort(compareCustomerDocumentRecency);
+      final balance = invoices.fold<int>(0, (sum, item) =>
+        sum + ((item['balance_due_cents'] as int?) ?? 0));
+      final pending = invoices.fold<int>(0, (sum, item) =>
+        sum + ((item['pending_cents'] as int?) ?? 0));
+      final paymentInvoices = invoices.where((item) =>
+        (item['pending_cents'] as int? ?? 0) > 0 ||
+        (item['balance_due_cents'] is int &&
+          item['balance_due_cents'] != null &&
+          (item['total'] is num) &&
+          (item['balance_due_cents'] as int) <
+            ((item['total'] as num) * 100).round())).toList();
+      Widget link(String title, IconData icon, Color color,
+          List<Map<String, dynamic>> items) => ListTile(
+        dense: true, visualDensity: VisualDensity.compact,
+        leading: Icon(icon, color: color, size: 25),
+        title: Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text('${items.length}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          const SizedBox(width: 6), const Icon(Icons.chevron_right, size: 18),
+        ]),
+        onTap: () => title == 'Jobs'
+            ? _showCustomerServiceHistory()
+            : title == 'Invoices' || title == 'Estimates'
+              ? _showCustomerDocuments(title)
+              : _showOverviewList(title, items),
+      );
+      return Card(child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (snapshot.connectionState == ConnectionState.waiting)
+            const LinearProgressIndicator(minHeight: 2),
+          if (snapshot.hasError)
+            const ListTile(title: Text('Saved customer activity unavailable')),
+          link('Jobs', Icons.build_outlined, BriskersColors.jobs, jobs),
+          CustomerFindingsOverviewRow(
+            businessId: widget.businessId,
+            customerId: widget.customerId,
+            vehicles: List<dynamic>.from(_data?['vehicles'] ?? const []),
+            onOpen: () => _openAllVehicleFindings(
+              List<dynamic>.from(_data?['vehicles'] ?? const []),
+            ),
+          ),
+          link('Invoices', Icons.receipt_long_outlined, BriskersColors.invoices, invoices),
+          link('Estimates', Icons.description_outlined, BriskersColors.estimates, estimates),
+          link('Appointments', Icons.calendar_today_outlined, BriskersColors.schedule, appointments),
+          link('Payments', Icons.payments_outlined, BriskersColors.invoices, paymentInvoices),
+          if (balance > 0 || pending > 0) ...[
+            const Divider(height: 12),
+            if (balance > 0)
+              ListTile(dense: true, title: Text(tr('customerInvoiceBalanceDue')),
+                trailing: Text('\u0024${(balance/100).toStringAsFixed(2)}')),
+            if (pending > 0)
+              ListTile(dense: true, title: Text(tr('customerPendingReceipts')),
+                trailing: Text('\u0024${(pending/100).toStringAsFixed(2)}')),
+          ],
+          const Divider(height: 16),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 3, 16, 5),
+            child: Text('Recent Invoices & Estimates',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800))),
+          for (final item in docs.take(3))
+            ListTile(
+              dense: true,
+              leading: Icon(item['type'] == 'invoice' ?
+                Icons.receipt_long_outlined : Icons.description_outlined,
+                color: item['type'] == 'invoice' ? BriskersColors.invoices :
+                  BriskersColors.estimates),
+              title: Text('${item['type'] == 'invoice' ? 'Invoice' : 'Estimate'} #${item['number'] ?? 'Pending sync'}',
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text([
+                item['status']?.toString() ?? '',
+                item['vehicle']?.toString() ?? '',
+                if ((item['job_id']?.toString() ?? '').isNotEmpty) 'Linked Job',
+              ].where((s) => s.isNotEmpty).join(' • '),
+                maxLines: 2, overflow: TextOverflow.ellipsis),
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (item['total'] is num)
+                  Text('\u0024${(item['total'] as num).toStringAsFixed(2)}'),
+                const Icon(Icons.chevron_right, size: 18),
+              ]),
+              onTap: () => _openOverviewRecord(item),
+            ),
+          if (docs.isEmpty && snapshot.hasData)
+            const Padding(padding: EdgeInsets.all(16),
+              child: Text('No estimates or invoices found on this device.')),
+        ]),
+      ));
+    },
+  );
 
   String get _detailCacheKey =>
       'briskers_customer_detail_${widget.businessId}_${widget.customerId}';
@@ -422,10 +736,58 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _listenForQuarantine();
     _load();
   }
 
+  bool _reportedReview = false;
+
+  void _reportReview() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _reportedReview || _data == null ||
+          ModalRoute.of(context)?.isCurrent != true) {
+        return;
+      }
+      _reportedReview = true;
+      widget.onReviewed?.call();
+    });
+  }
+
+  void _listenForQuarantine() {
+    _jobVisibility = JobSummaryVisibility(
+      businessId: widget.businessId,
+      onQuarantine: (_) {
+        if (!mounted) return;
+        // New FutureBuilder keys discard retained activity/history snapshots.
+        // Customer identity, vehicles, and independently readable invoices stay.
+        setState(() {});
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _jobVisibility.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant CustomerDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.customerId != widget.customerId) {
+      _jobVisibility.dispose();
+      _data = null;
+      _reportedReview = false;
+      _onlineReady = false;
+      _listenForQuarantine();
+      _load();
+    }
+  }
+
   Future<void> _load() async {
+    final visibility = _jobVisibility;
+    final generation = visibility.beginLoad();
     var localShown = false;
     final forceOnline =
         BriskersConnectionModeController.instance.forceOnline;
@@ -440,7 +802,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
               widget.businessId,
               widget.customerId,
             );
-        if (local != null && mounted) {
+        if (local != null && mounted && visibility.isCurrent(generation)) {
           localShown = true;
           setState(() {
             _data = local;
@@ -448,14 +810,17 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             _onlineReady = false;
             _error = null;
           });
+          _reportReview();
         }
       } catch (_) {
         // The online refresh below can still populate the local cache.
       }
     }
 
+    if (!mounted || !visibility.isCurrent(generation)) return;
+
     if (forceOffline) {
-      if (mounted && localShown) {
+      if (mounted && localShown && visibility.isCurrent(generation)) {
         setState(() {
           _onlineReady = false;
           _showingLocal = true;
@@ -482,6 +847,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           widget.businessId,
           widget.customerId,
         );
+        if (!mounted || !visibility.isCurrent(generation)) return;
         await _saveFullDetail(fullDetail);
         await _sync.refreshCustomer(
           widget.businessId,
@@ -499,7 +865,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             widget.customerId,
           );
 
-      if (!mounted) return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
         _data = local;
         _onlineReady = bootstrapped && local != null;
@@ -510,8 +876,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 : 'Customer access is not available for this account.')
             : null;
       });
+      _reportReview();
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
         _onlineReady = false;
         if (localShown && !forceOnline) {
@@ -703,6 +1070,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           customerName: customer['name']?.toString() ?? 'Customer',
           roleCode: widget.roleCode,
           vehicles: vehicles,
+          bottomNavigationBar: widget.sharedBottomNavigationBar,
         ),
       ),
     );
@@ -742,11 +1110,13 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           businessId: widget.businessId,
           documentId: invoiceId,
           isOwner: widget.roleCode == 'owner',
+          roleCode: widget.roleCode,
           canManageExpenses: _canManageQuickActions,
           initialAction: 'add_item',
         ),
       ),
     );
+    await _refreshEditedCustomerDocument(invoiceId);
     if (mounted) await _load();
   }
 
@@ -774,10 +1144,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             businessId:widget.businessId,
             documentId:documentId,
             isOwner:widget.roleCode=='owner',
+            roleCode:widget.roleCode,
             canManageExpenses:_canManageQuickActions,
             initialAction:'add_item',
           ),
         ));
+        _invalidateCustomerActivity();
         return;
       }
       final history = await _api.customerServiceHistory(
@@ -863,10 +1235,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             businessId:widget.businessId,
             documentId:documentId,
             isOwner:widget.roleCode=='owner',
+            roleCode:widget.roleCode,
             canManageExpenses:_canManageQuickActions,
             initialAction:'add_item',
           )),
         );
+        await _refreshEditedCustomerDocument(documentId);
         if (mounted) await _load();
         return;
       }
@@ -882,11 +1256,13 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             businessId: widget.businessId,
             documentId: documentId,
             isOwner: widget.roleCode == 'owner',
+            roleCode: widget.roleCode,
             canManageExpenses: _canManageQuickActions,
             initialAction: 'add_item',
           ),
         ),
       );
+      await _refreshEditedCustomerDocument(documentId);
       if (mounted) await _load();
     } catch (error) {
       if (!mounted) return;
@@ -897,7 +1273,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   void _openCustomerNoteComposer() {
-    setState(() => _expandQuickNotes = true);
+    setState(() { _expandQuickNotes = true; _customerTab = 3; });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final target = _notesSectionKey.currentContext;
       if (mounted && target != null) {
@@ -942,8 +1318,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final customer = Map<String, dynamic>.from(
-      _data?['customer'] ?? const {},
+      _data?['customer'] ?? widget.initialCustomerSummary ?? const {},
     );
+    if (_data == null) customer['name'] ??= customer['display_name'];
     final vehicles = List<dynamic>.from(
       _data?['vehicles'] ?? const [],
     );
@@ -970,7 +1347,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         ].join(' '),
     ].join('\n');
 
-    return Scaffold(
+    return StaleKeyboardInsetGuard(
+      child: Scaffold(
       appBar: AppBar(
         centerTitle: true,
         backgroundColor: BriskersColors.customers.withValues(alpha: 0.12),
@@ -991,7 +1369,13 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           ],
         ),
       ),
-      floatingActionButton: _data == null || !_canManageQuickActions
+      bottomNavigationBar: widget.sharedBottomNavigationBar,
+      // The Overview already has a full-width '+ New' action. Do not
+      // overlay Visits, Payments and the invoice summary with a duplicate FAB.
+      // Keep quick actions available in the other customer tabs.
+      floatingActionButton: _data == null ||
+              !_canManageQuickActions ||
+              _customerTab == 0
           ? null
           : FloatingActionButton(
               onPressed: _showQuickActions,
@@ -999,45 +1383,83 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
               child: const Icon(Icons.add),
             ),
       body: _data == null
-          ? Center(
-              child: _error == null
-                  ? const CircularProgressIndicator()
-                  : Text(_error!),
-            )
+          ? widget.initialCustomerSummary == null
+              ? Center(
+                  child: _error == null
+                      ? const CircularProgressIndicator()
+                      : Text(_error!),
+                )
+              : ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    // Preview is read-only; permission-sensitive full detail
+                    // and financial actions await the validated local record.
+                    Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.person_outline,
+                            color: BriskersColors.customers),
+                        title: Text('${customer['name'] ?? 'Customer'}',
+                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                        subtitle: Text([
+                          if ((customer['phone']?.toString() ?? '').isNotEmpty)
+                            formatUsPhone(customer['phone'].toString()),
+                          if ((customer['email']?.toString() ?? '').isNotEmpty)
+                            customer['email'].toString(),
+                        ].join(' • ')),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (_error != null)
+                      Text(_error!,
+                          style: TextStyle(
+                              color: Theme.of(context).colorScheme.error))
+                    else
+                      const ListTile(
+                        leading: SizedBox(
+                          width: 18, height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        title: Text('Opening saved customer details…'),
+                      ),
+                  ],
+                )
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
                   if (_showingLocal)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: BriskersColors.customers.withValues(
-                          alpha: 0.08,
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 4),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Tooltip(
+                          message: 'Using saved local records. Edits sync on reconnection.',
+                          child: Icon(Icons.cloud_off_outlined,
+                            size: 17, color: Color(0xFF667085)),
                         ),
-                        borderRadius: BorderRadius.circular(9),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.cloud_off_outlined, size: 18),
-                          SizedBox(width: 7),
-                          Expanded(
-                            child: Text(
-                              'Showing saved customer and vehicle data • edits save locally and sync when reconnected',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ],
                       ),
                     ),
-                  Card(
+                  Row(children: [
+                    for (var i = 0; i < 4; i++)
+                      Expanded(child: TextButton(
+                        onPressed: () => setState(() => _customerTab = i),
+                        style: TextButton.styleFrom(
+                          backgroundColor: _customerTab == i
+                            ? BriskersColors.customers.withValues(alpha: 0.14) : null,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(const <IconData>[Icons.dashboard_outlined,
+                            Icons.person_outline, Icons.directions_car_outlined,
+                            Icons.note_alt_outlined][i], size: 25),
+                          Text(const <String>['Overview', 'Info', 'Vehicles', 'Notes'][i],
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                        ]),
+                      )),
+                  ]),
+                  const SizedBox(height: 8),
+                  if (_customerTab == 1) Card(
                     child: ExpansionTile(
                       initiallyExpanded: false,
                       leading: const Icon(Icons.person_outline, color: BriskersColors.customers),
@@ -1101,9 +1523,30 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  _customerOverviewCard(),
+                  if (_customerTab == 0 && _canManageQuickActions)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Row(children: [
+                        Expanded(child: FilledButton.icon(
+                          onPressed: _showQuickActions,
+                          icon: const Icon(Icons.add),
+                          label: const Text('New'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: BriskersColors.customers,
+                            foregroundColor: Colors.white,
+                          ),
+                        )),
+                        const SizedBox(width: 10),
+                        Expanded(child: OutlinedButton.icon(
+                          onPressed: null,
+                          icon: const Icon(Icons.chat_bubble_outline),
+                          label: const Text('New Message • Coming Soon'),
+                        )),
+                      ]),
+                    ),
+                  if (_customerTab == 0) _customerOverviewCard(),
                   const SizedBox(height: 10),
-                  CustomerProblemFlagCard(
+                  if (_customerTab == 1) CustomerProblemFlagCard(
                     customerId: widget.customerId,
                     flagged: customer['problem_flag'] == true,
                     note: customer['problem_flag_note']?.toString() ?? '',
@@ -1111,20 +1554,26 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     onEdit: _editProblemFlag,
                   ),
                   const SizedBox(height: 18),
-                  CustomerVehiclesSection(
+                  if (_customerTab == 2) CustomerVehiclesSection(
                     vehicles: vehicles,
                     onAdd: _addVehicle,
                     onEdit: _editVehicle,
+                    onRepairHistory: _showVehicleRepairHistory,
                     enabled: _canEditLocal,
                   ),
                   const SizedBox(height: 18),
-                  CustomerVehicleFindingsSection(
-                    businessId: widget.businessId,
-                    customerId: widget.customerId,
-                    vehicles: vehicles,
+                  if (_customerTab == 2) Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.car_repair_outlined, color: BriskersColors.vehicles),
+                      title: const Text('All Vehicle Findings',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
+                      subtitle: const Text('View open and resolved findings across vehicles'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => _openAllVehicleFindings(vehicles),
+                    ),
                   ),
                   const SizedBox(height: 18),
-                  Container(
+                  if (_customerTab == 3) Container(
                     key: _notesSectionKey,
                     child: KeyedSubtree(
                       key: ValueKey(_expandQuickNotes),
@@ -1136,19 +1585,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 18),
-                  if (BriskersConnectionModeController.instance.forceOffline)
-                    _offlineCustomerSections()
-                  else ...[
-                    CustomerAppointmentsSection(
-                      businessId: widget.businessId,
-                      customerId: widget.customerId,
-                    ),
-                    const SizedBox(height: 18),
-                    CustomerServiceHistorySection(
-                      businessId: widget.businessId,
-                      customerId: widget.customerId,
-                      vehicles: vehicles,
-                    ),
+                  if (_customerTab == 0) ...[
                     if (_onlineReady && widget.roleCode == 'owner') ...[
                       const SizedBox(height: 18),
                       CustomerAccountSection(
@@ -1163,6 +1600,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 ],
               ),
             ),
+      ),
     );
   }
 }

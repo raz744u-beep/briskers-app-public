@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/employee_role_style.dart';
+import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
 
 class EmployeePositionsScreen extends StatefulWidget {
@@ -116,6 +117,8 @@ class _EmployeePositionsScreenState
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _edit(),
+        backgroundColor: BriskersColors.settings,
+        foregroundColor: Colors.white,
         icon: const Icon(Icons.add),
         label: const Text('Position'),
       ),
@@ -181,7 +184,8 @@ class _EmployeePositionsScreenState
                               value: 'edit',
                               child: ListTile(
                                 contentPadding: EdgeInsets.zero,
-                                leading: Icon(Icons.edit_outlined),
+                                leading: Icon(Icons.edit_outlined,
+                                  color: BriskersColors.settings),
                                 title: Text('Edit'),
                               ),
                             ),
@@ -189,8 +193,10 @@ class _EmployeePositionsScreenState
                               value: 'delete',
                               child: ListTile(
                                 contentPadding: EdgeInsets.zero,
-                                leading: Icon(Icons.delete_outline),
-                                title: Text('Delete'),
+                                leading: Icon(Icons.delete_outline,
+                                  color: Colors.red),
+                                title: Text('Delete',
+                                  style: TextStyle(color: Colors.red)),
                               ),
                             ),
                           ],

@@ -2,12 +2,21 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/connection_mode.dart';
+import '../../core/briskers_colors.dart';
+import '../../local/local_database_provider.dart';
+import '../../widgets/vehicle_findings.dart';
+import '../../services/offline_work_findings_service.dart';
+import '../../services/work_finding_merge.dart';
+import '../../services/vehicle_finding_actions_service.dart';
+import '../../services/finding_job_choice_policy.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
+import '../../services/job_summary_visibility.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/offline_customer_detail_write_service.dart';
 
@@ -17,11 +26,21 @@ class CustomerVehicleFindingsSection extends StatefulWidget {
     required this.businessId,
     required this.customerId,
     required this.vehicles,
+    this.canManage = false,
+    this.canDelete = false,
+    this.initiallyExpanded = false,
+    this.cacheScopeKey,
   });
 
   final String businessId;
   final String customerId;
   final List<dynamic> vehicles;
+  final bool canManage;
+  final bool canDelete;
+  final bool initiallyExpanded;
+  // Invoice entry uses a vehicle-scoped snapshot so it cannot overwrite
+  // the Customer Overview's multi-vehicle cached Findings.
+  final String? cacheScopeKey;
 
   @override
   State<CustomerVehicleFindingsSection> createState() =>
@@ -36,30 +55,100 @@ class _CustomerVehicleFindingsSectionState
   final OfflineCustomerDetailWriteService _offlineWrites =
       OfflineCustomerDetailWriteService();
   final ImagePicker _picker = ImagePicker();
+  final _workFindings = OfflineWorkFindingsService();
+  final _findingActions = VehicleFindingActionsService();
+  StreamSubscription<String>? _findingChanges;
 
+  late JobSummaryVisibility _jobVisibility;
+  final ValueNotifier<int> _quarantineChanges = ValueNotifier(0);
   late Future<List<Map<String, dynamic>>> _findingsFuture;
   bool _expanded = false;
   bool _busy = false;
   String? _error;
+  String get _findingCacheSection => widget.cacheScopeKey ?? 'findings';
+
+  // Flutter parents often rebuild their vehicle list with a new List object.
+  // Compare stable vehicle identities, not List identity, to avoid restarting
+  // Findings loads (and reappearing spinners) on every unrelated rebuild.
+  String _vehicleIds(List<dynamic> vehicles) {
+    final ids = vehicles.whereType<Map>()
+        .map((row) => row['id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty).toList()..sort();
+    return ids.join('|');
+  }
 
   @override
   void initState() {
     super.initState();
+    _expanded = widget.initiallyExpanded;
+    _listenForQuarantine();
     _findingsFuture = _allFindings();
+    _findingChanges = VehicleFindingActionsService.changes.listen((businessId) {
+      if (mounted && businessId == widget.businessId) {
+        setState(() => _findingsFuture = _allFindings(cacheOnly: true));
+      }
+    });
   }
+
+  void _listenForQuarantine() {
+    _jobVisibility = JobSummaryVisibility(
+      businessId: widget.businessId,
+      onQuarantine: (_) {
+        if (!mounted) return;
+        _quarantineChanges.value++;
+        // Reset the FutureBuilder so its retained old data cannot paint while
+        // the exact archived finding identities are checked in the database.
+        setState(() => _findingsFuture = _allFindings(cacheOnly: true));
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _findingChanges?.cancel();
+    _jobVisibility.dispose();
+    _quarantineChanges.dispose();
+    super.dispose();
+  }
+
+  Widget _guardModal(
+    int generation,
+    Widget child,
+  ) => ValueListenableBuilder<int>(
+    valueListenable: _quarantineChanges,
+    child: child,
+    builder: (context, current, content) => current == generation
+        ? content!
+        : const SafeArea(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'Job access changed. Close and reopen to verify this finding.',
+              ),
+            ),
+          ),
+  );
 
   @override
   void didUpdateWidget(covariant CustomerVehicleFindingsSection oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.businessId != widget.businessId ||
+        oldWidget.customerId != widget.customerId) {
+      _jobVisibility.dispose();
+      _quarantineChanges.value++;
+      _listenForQuarantine();
+    }
+    if (oldWidget.businessId != widget.businessId ||
         oldWidget.customerId != widget.customerId ||
-        oldWidget.vehicles != widget.vehicles) {
+        oldWidget.cacheScopeKey != widget.cacheScopeKey ||
+        _vehicleIds(oldWidget.vehicles) != _vehicleIds(widget.vehicles)) {
       _findingsFuture = _allFindings();
     }
   }
 
-  Future<void> _refresh() async {
-    final future = _allFindings();
+  Future<void> _refresh({bool cacheOnly = false}) async {
+    if (!mounted) return;
+    final future = _allFindings(cacheOnly: cacheOnly);
     setState(() {
       _findingsFuture = future;
       _error = null;
@@ -67,36 +156,105 @@ class _CustomerVehicleFindingsSectionState
     await future;
   }
 
-  Future<List<Map<String, dynamic>>> _allFindings() async {
-    if (BriskersConnectionModeController.instance.forceOffline) {
+  Future<List<Map<String, dynamic>>> _allFindings({
+    bool cacheOnly = false,
+  }) async {
+    final visibility = _jobVisibility;
+    final generation = visibility.beginLoad();
+    final businessId = widget.businessId;
+    final customerId = widget.customerId;
+    Future<List<Map<String, dynamic>>> cachedFindings() async {
       final cached = await _cache.load(
-        widget.businessId,
-        widget.customerId,
-        'findings',
-      );
-      return cached is List
+        businessId, customerId, _findingCacheSection);
+      final rows = cached is List
           ? cached
-              .whereType<Map>()
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList()
+                .whereType<Map>()
+                .map((row) => Map<String, dynamic>.from(row))
+                .toList()
           : <Map<String, dynamic>>[];
+      await _findingActions.recoverPendingCustomerCache(businessId, rows);
+      final local = <Map<String, dynamic>>[];
+      for (final raw in widget.vehicles.whereType<Map>()) {
+        final vehicle = Map<String, dynamic>.from(raw);
+        final vehicleId = vehicle['id']?.toString() ?? '';
+        if (vehicleId.isEmpty) continue;
+        final found = await _workFindings.loadLocalFindings(
+          businessId,
+          vehicleId,
+        );
+        local.addAll(
+          found.map(
+            (row) => {
+              ...row,
+              '_vehicle_id': vehicleId,
+              '_vehicle_label': _vehicleLabel(vehicle),
+            },
+          ),
+        );
+      }
+      final vehicleIds = widget.vehicles.whereType<Map>()
+          .map((v) => v['id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty).toSet();
+      final scopedRows = rows.where((row) {
+        final vehicle = row['_vehicle_id']?.toString() ??
+            row['vehicle_id']?.toString() ?? '';
+        return vehicleIds.contains(vehicle);
+      }).toList();
+      final cachedVisible = await visibility.filterFindings(
+          scopedRows, cached: true);
+      final localVisible = await visibility.filterFindings(local);
+      final visible = await _findingActions.project(
+        businessId,
+        mergeWorkFindings(cachedVisible, localVisible),
+      );
+      if (!visibility.isCurrent(generation)) return [];
+      // Writing the photo-rich cache must not delay displaying the already
+      // permission-filtered local findings. Stamp the quarantine generation
+      // and fence the asynchronous write against later account changes.
+      unawaited(() async {
+        try {
+          final snapshot = await visibility.captureSnapshotGeneration();
+          if (!mounted || !visibility.isCurrent(generation)) return;
+          await _cache.save(businessId, customerId, _findingCacheSection,
+            JobSummaryVisibility.stampSnapshot(visible, snapshot));
+        } catch (_) {
+          // The displayed local read remains valid if cache persistence fails.
+        }
+      }());
+      return visibility.isCurrent(generation) ? visible : [];
     }
 
+    if (cacheOnly || BriskersConnectionModeController.instance.forceOffline) {
+      return cachedFindings();
+    }
+
+    Future<List<Map<String, dynamic>>> loadRemote() async {
     final all = <Map<String, dynamic>>[];
     try {
+      final snapshotGeneration = await visibility.captureSnapshotGeneration();
       for (final raw in widget.vehicles) {
+        if (!visibility.isCurrent(generation)) return [];
         final vehicle = Map<String, dynamic>.from(raw as Map);
         final vehicleId = vehicle['id']?.toString() ?? '';
         if (vehicleId.isEmpty) continue;
-
         final rows = await _api.vehicleFindings(
-          widget.businessId,
+          businessId,
           vehicleId,
           includeResolved: true,
         );
-
+        final permitted = await visibility.filterFindings(rows);
+        if (!visibility.isCurrent(generation)) return [];
+        await _workFindings.seedServerFindingsIfClean(
+          businessId,
+          vehicleId,
+          permitted,
+        );
+        final local = await _workFindings.loadLocalFindings(
+          businessId,
+          vehicleId,
+        );
         final vehicleLabel = _vehicleLabel(vehicle);
-        for (final row in rows) {
+        for (final row in mergeWorkFindings(permitted, local)) {
           all.add(<String, dynamic>{
             ...row,
             '_vehicle_id': vehicleId,
@@ -104,55 +262,75 @@ class _CustomerVehicleFindingsSectionState
           });
         }
       }
+      final visible = await visibility.filterFindings(all);
+      if (!visibility.isCurrent(generation)) return [];
       await _cache.save(
-        widget.businessId,
-        widget.customerId,
-        'findings',
-        all,
+        businessId,
+        customerId,
+        _findingCacheSection,
+        JobSummaryVisibility.stampSnapshot(visible, snapshotGeneration),
       );
-      final pending = <Future<dynamic>>[];
-      for (final finding in all) {
-        final attachments = List<dynamic>.from(
-          finding['attachments'] ?? const [],
-        ).whereType<Map>().map((raw) {
-          return Map<String, dynamic>.from(raw);
-        });
-        for (final attachment in attachments) {
-          final bucket =
-              attachment['bucket']?.toString() ?? 'briskers-private';
-          final key = attachment['key']?.toString() ?? '';
-          if (key.isEmpty) continue;
-          pending.add(_attachmentCache.getOrDownload(bucket, key));
-          if (pending.length >= 4) {
-            await Future.wait(pending);
-            pending.clear();
+      // Image downloads must never delay the findings list. Each file is
+      // stored in the persistent attachment cache when it becomes available.
+      unawaited(() async {
+        final pending = <Future<dynamic>>[];
+        try {
+          for (final finding in visible) {
+            if (!visibility.isCurrent(generation)) return;
+            final attachments = List<dynamic>.from(
+              finding['attachments'] ?? const [],
+            ).whereType<Map>().map((raw) => Map<String, dynamic>.from(raw));
+            for (final attachment in attachments) {
+              final bucket =
+                  attachment['bucket']?.toString() ?? 'briskers-private';
+              final key = attachment['key']?.toString() ?? '';
+              if (key.isEmpty) continue;
+              pending.add(_attachmentCache.getOrDownload(bucket, key));
+              if (pending.length >= 4) {
+                await Future.wait(pending);
+                pending.clear();
+              }
+            }
           }
+          if (pending.isNotEmpty) await Future.wait(pending);
+        } catch (_) {
+          // A photo download error cannot interrupt record navigation.
         }
-      }
-      if (pending.isNotEmpty) await Future.wait(pending);
-      return all;
+      }());
+      return visibility.isCurrent(generation) ? visible : [];
     } catch (_) {
-      final cached = await _cache.load(
-        widget.businessId,
-        widget.customerId,
-        'findings',
-      );
-      return cached is List
-          ? cached
-              .whereType<Map>()
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList()
-          : <Map<String, dynamic>>[];
+      if (!visibility.isCurrent(generation)) return [];
+      return cachedFindings();
     }
+    }
+
+    // Force Online explicitly requests the server; regular Auto mode must
+    // paint the permission-scoped local snapshot first instead of waiting
+    // through serial per-vehicle RPCs or attachment downloads.
+    if (BriskersConnectionModeController.instance.forceOnline) {
+      return loadRemote();
+    }
+    final local = await cachedFindings();
+    if (visibility.isCurrent(generation)) {
+      unawaited(() async {
+        final remote = await loadRemote();
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        setState(() {
+          _findingsFuture =
+              Future<List<Map<String, dynamic>>>.value(remote);
+        });
+      }());
+    }
+    return local;
   }
 
   String _vehicleLabel(Map<String, dynamic> vehicle) => <String>[
-        if (vehicle['year'] != null) vehicle['year'].toString(),
-        if ((vehicle['make']?.toString() ?? '').isNotEmpty)
-          vehicle['make'].toString(),
-        if ((vehicle['model']?.toString() ?? '').isNotEmpty)
-          vehicle['model'].toString(),
-      ].join(' ');
+    if (vehicle['year'] != null) vehicle['year'].toString(),
+    if ((vehicle['make']?.toString() ?? '').isNotEmpty)
+      vehicle['make'].toString(),
+    if ((vehicle['model']?.toString() ?? '').isNotEmpty)
+      vehicle['model'].toString(),
+  ].join(' ');
 
   String _dateLabel(Object? raw) {
     final parsed = DateTime.tryParse(raw?.toString() ?? '');
@@ -212,8 +390,56 @@ class _CustomerVehicleFindingsSectionState
     );
   }
 
+  Future<void> _previewStagedFindingPhoto(XFile photo) async {
+    if (!mounted) return;
+    // The selected file is local to this draft. Previewing it must not
+    // create, upload, or delete a finding or any photo on disk.
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        insetPadding: const EdgeInsets.all(12),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('Finding photo',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close photo preview',
+                    onPressed: () => Navigator.pop(dialogContext),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              SizedBox(
+                height: MediaQuery.sizeOf(dialogContext).height * 0.65,
+                child: InteractiveViewer(
+                  minScale: 0.8,
+                  maxScale: 5,
+                  child: Image.file(
+                    File(photo.path),
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) =>
+                        const Text('Cannot preview the selected photo.'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _addFinding() async {
-    if (_busy) return;
+    if (_busy || !widget.canManage) return;
 
     final vehicle = await _chooseVehicle();
     if (vehicle == null || !mounted) return;
@@ -227,18 +453,24 @@ class _CustomerVehicleFindingsSectionState
     final save = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
+      useSafeArea: true,
       isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            16,
-            0,
-            16,
-            MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
-          ),
-          child: SafeArea(
-            top: false,
+        builder: (context, setSheetState) => SafeArea(
+          top: false,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: MediaQuery.sizeOf(sheetContext).height * 0.48,
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.84,
+            ),
             child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                12,
+                20,
+                MediaQuery.viewInsetsOf(sheetContext).bottom + 28,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -255,7 +487,7 @@ class _CustomerVehicleFindingsSectionState
                   const SizedBox(height: 10),
                   TextField(
                     controller: controller,
-                    autofocus: true,
+                    autofocus: false,
                     minLines: 3,
                     maxLines: 7,
                     decoration: const InputDecoration(
@@ -265,22 +497,76 @@ class _CustomerVehicleFindingsSectionState
                   ),
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Include on invoice notes'),
+                    title: const Text('Include in Invoice Notes'),
                     value: includeOnInvoice,
-                    onChanged: (value) => setSheetState(
-                      () => includeOnInvoice = value == true,
-                    ),
+                    onChanged: (value) =>
+                        setSheetState(() => includeOnInvoice = value == true),
                   ),
-                  if (photos.isNotEmpty)
+                  if (photos.isNotEmpty) ...[
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
                         photos.length == 1
-                            ? '1 photo selected'
-                            : '${photos.length} photos selected',
+                            ? '1 photo selected — tap to preview'
+                            : '${photos.length} photos selected — tap to preview',
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                     ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 120,
+                      child: ListView.separated(
+                        key: const ValueKey('finding-selected-photo-strip'),
+                        scrollDirection: Axis.horizontal,
+                        itemCount: photos.length,
+                        separatorBuilder: (_, _) =>
+                            const SizedBox(width: 10),
+                        itemBuilder: (context, index) {
+                          final photo = photos[index];
+                          return SizedBox(
+                            width: 118,
+                            child: Stack(
+                              children: [
+                                Positioned.fill(
+                                  child: InkWell(
+                                    key: ValueKey('finding-photo-preview-$index'),
+                                    onTap: () => _previewStagedFindingPhoto(photo),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: Image.file(
+                                        File(photo.path),
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, _, _) =>
+                                            const Center(
+                                              child: Icon(Icons.broken_image_outlined),
+                                            ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                Positioned(
+                                  right: 0,
+                                  top: 0,
+                                  child: IconButton.filledTonal(
+                                    key: ValueKey('finding-photo-remove-$index'),
+                                    tooltip: 'Remove selected photo',
+                                    onPressed: () => setSheetState(
+                                      () => photos.removeAt(index),
+                                    ),
+                                    icon: const Icon(Icons.close, size: 18),
+                                    iconSize: 18,
+                                    constraints: const BoxConstraints(
+                                      minWidth: 35, minHeight: 35,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 6),
                   Row(
                     children: [
@@ -288,15 +574,16 @@ class _CustomerVehicleFindingsSectionState
                         child: OutlinedButton.icon(
                           onPressed: () async {
                             final picked = await _picker.pickMultiImage(
-                              imageQuality: 88,
+                              imageQuality: 100,
                               maxWidth: 1920,
                               maxHeight: 1920,
                             );
+                            if (!sheetContext.mounted) return;
                             if (picked.isNotEmpty) {
                               setSheetState(() => photos.addAll(picked));
                             }
                           },
-                          icon: const Icon(Icons.photo_library_outlined),
+                          icon: const Icon(Icons.photo_library_outlined, color: Colors.teal),
                           label: const Text('Gallery'),
                         ),
                       ),
@@ -306,15 +593,16 @@ class _CustomerVehicleFindingsSectionState
                           onPressed: () async {
                             final photo = await _picker.pickImage(
                               source: ImageSource.camera,
-                              imageQuality: 88,
+                              imageQuality: 100,
                               maxWidth: 1920,
                               maxHeight: 1920,
                             );
+                            if (!sheetContext.mounted) return;
                             if (photo != null) {
                               setSheetState(() => photos.add(photo));
                             }
                           },
-                          icon: const Icon(Icons.photo_camera_outlined),
+                          icon: const Icon(Icons.photo_camera_outlined, color: Colors.teal),
                           label: const Text('Camera'),
                         ),
                       ),
@@ -324,6 +612,9 @@ class _CustomerVehicleFindingsSectionState
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.teal.shade700,
+                      ),
                       onPressed: () {
                         if (controller.text.trim().isEmpty) return;
                         Navigator.pop(sheetContext, true);
@@ -368,7 +659,7 @@ class _CustomerVehicleFindingsSectionState
         photos: stagedPhotos,
       );
 
-      await _refresh();
+      await _refresh(cacheOnly: true);
 
       if (!BriskersConnectionModeController.instance.forceOffline) {
         unawaited(
@@ -388,6 +679,7 @@ class _CustomerVehicleFindingsSectionState
     int initialIndex = 0,
   }) async {
     if (attachments.isEmpty) return;
+    final quarantine = _quarantineChanges.value;
 
     final images = <ImageProvider>[];
     for (final attachment in attachments) {
@@ -400,8 +692,7 @@ class _CustomerVehicleFindingsSectionState
         }
       }
 
-      final bucket =
-          attachment['bucket']?.toString() ?? 'briskers-private';
+      final bucket = attachment['bucket']?.toString() ?? 'briskers-private';
       final key = attachment['key']?.toString() ?? '';
       if (key.isEmpty) continue;
 
@@ -419,7 +710,11 @@ class _CustomerVehicleFindingsSectionState
       }
     }
 
-    if (images.isEmpty || !context.mounted) return;
+    if (images.isEmpty ||
+        !context.mounted ||
+        quarantine != _quarantineChanges.value) {
+      return;
+    }
 
     var current = initialIndex.clamp(0, images.length - 1);
     final controller = PageController(initialPage: current);
@@ -428,64 +723,63 @@ class _CustomerVehicleFindingsSectionState
       context: context,
       barrierColor: Colors.black87,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => Dialog(
-          insetPadding: const EdgeInsets.all(12),
-          backgroundColor: Colors.black,
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: PageView.builder(
-                  controller: controller,
-                  itemCount: images.length,
-                  onPageChanged: (index) =>
-                      setDialogState(() => current = index),
-                  itemBuilder: (context, index) => InteractiveViewer(
-                    minScale: 1,
-                    maxScale: 5,
-                    child: Center(
-                      child: Image(
-                        image: images[index],
-                        fit: BoxFit.contain,
+        builder: (context, setDialogState) => _guardModal(quarantine,
+          Dialog(
+            insetPadding: const EdgeInsets.all(12),
+            backgroundColor: Colors.black,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: PageView.builder(
+                    controller: controller,
+                    itemCount: images.length,
+                    onPageChanged: (index) =>
+                        setDialogState(() => current = index),
+                    itemBuilder: (context, index) => InteractiveViewer(
+                      minScale: 1,
+                      maxScale: 5,
+                      child: Center(
+                        child: Image(image: images[index], fit: BoxFit.contain),
                       ),
                     ),
                   ),
                 ),
-              ),
-              Positioned(
-                top: 6,
-                right: 6,
-                child: IconButton.filled(
-                  tooltip: 'Close photo',
-                  onPressed: () => Navigator.pop(dialogContext),
-                  icon: const Icon(Icons.close),
-                ),
-              ),
-              if (images.length > 1)
                 Positioned(
-                  bottom: 12,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        '${current + 1} / ${images.length}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
+                  top: 6,
+                  right: 6,
+                  child: IconButton.filled(
+                    tooltip: 'Close photo',
+                    onPressed: () => Navigator.pop(dialogContext),
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+                if (images.length > 1)
+                  Positioned(
+                    bottom: 12,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '${current + 1} / ${images.length}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -533,8 +827,7 @@ class _CustomerVehicleFindingsSectionState
       );
     }
 
-    final bucket =
-        first['bucket']?.toString() ?? 'briskers-private';
+    final bucket = first['bucket']?.toString() ?? 'briskers-private';
     final key = first['key']?.toString() ?? '';
     if (key.isEmpty) {
       return Container(
@@ -620,7 +913,7 @@ class _CustomerVehicleFindingsSectionState
     if (source == 'gallery') {
       picked.addAll(
         await _picker.pickMultiImage(
-          imageQuality: 88,
+          imageQuality: 100,
           maxWidth: 1920,
           maxHeight: 1920,
         ),
@@ -628,7 +921,7 @@ class _CustomerVehicleFindingsSectionState
     } else {
       final photo = await _picker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 88,
+        imageQuality: 100,
         maxWidth: 1920,
         maxHeight: 1920,
       );
@@ -666,7 +959,14 @@ class _CustomerVehicleFindingsSectionState
 
   Future<void> _openFinding(Map<String, dynamic> finding) async {
     final findingId = finding['id']?.toString() ?? '';
-    if (findingId.isEmpty || !mounted) return;
+    if (findingId.isEmpty || !mounted || !widget.canManage) return;
+    final visibility = _jobVisibility;
+    final generation = visibility.epoch;
+    final allowed = await visibility.filterFindings([finding]);
+    if (!mounted || !visibility.isCurrent(generation) || allowed.isEmpty) {
+      return;
+    }
+    final quarantine = _quarantineChanges.value;
 
     var localBody = finding['body']?.toString().trim() ?? '';
     var localAttachments = List<dynamic>.from(
@@ -681,85 +981,422 @@ class _CustomerVehicleFindingsSectionState
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setSheetState) {
-          final vehicle = finding['_vehicle_label']?.toString().trim() ?? '';
-          final date = _dateLabel(finding['created_at']);
-          final rawStatus = finding['status']?.toString() ?? 'open';
-          final status = rawStatus == 'resolved'
-              ? 'Resolved'
-              : rawStatus == 'in_job'
-                  ? 'In Job'
-                  : 'Open';
+      builder: (sheetContext) => _guardModal(
+        quarantine,
+        StatefulBuilder(
+          builder: (context, setSheetState) {
+            final vehicle = finding['_vehicle_label']?.toString().trim() ?? '';
+            final date = _dateLabel(finding['created_at']);
+            final rawStatus = finding['status']?.toString() ?? 'open';
+            final status = rawStatus == 'resolved'
+                ? 'Resolved'
+                : rawStatus == 'in_job'
+                ? 'In Job'
+                : 'Open';
 
-          Future<void> editFinding() async {
-            final controller = TextEditingController(text: localBody);
-            final updatedBody = await showDialog<String>(
-              context: sheetContext,
-              builder: (dialogContext) => AlertDialog(
-                title: const Text('Edit finding'),
-                content: TextField(
-                  controller: controller,
-                  autofocus: true,
-                  minLines: 3,
-                  maxLines: 7,
-                  decoration: const InputDecoration(
-                    labelText: 'Finding',
+            Future<void> editFinding() async {
+              final controller = TextEditingController(text: localBody);
+              final updatedBody = await showDialog<String>(
+                context: sheetContext,
+                builder: (dialogContext) => _guardModal(
+                  quarantine,
+                  AlertDialog(
+                    title: const Text('Edit finding'),
+                    content: TextField(
+                      controller: controller,
+                      autofocus: true,
+                      minLines: 3,
+                      maxLines: 7,
+                      decoration: const InputDecoration(labelText: 'Finding'),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        child: const Text('Cancel'),
+                      ),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: BriskersColors.vehicles,
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: () {
+                          final value = controller.text.trim();
+                          if (value.isNotEmpty) {
+                            Navigator.pop(dialogContext, value);
+                          }
+                        },
+                        child: const Text('Save'),
+                      ),
+                    ],
                   ),
                 ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(dialogContext),
-                    child: const Text('Cancel'),
+              );
+              controller.dispose();
+              if (quarantine != _quarantineChanges.value ||
+                  updatedBody == null ||
+                  updatedBody == localBody) {
+                return;
+              }
+
+              setSheetState(() => actionBusy = true);
+              try {
+                final foundJobId = finding['found_job_id']?.toString() ?? '';
+                if (foundJobId.isNotEmpty) {
+                  await _workFindings.updateLocalFinding(widget.businessId,
+                    foundJobId, findingId, body: updatedBody);
+                  if (!BriskersConnectionModeController.instance.forceOffline) {
+                    unawaited(_workFindings.flush(widget.businessId));
+                  }
+                } else {
+                  await _offlineWrites.updateFinding(
+                    widget.businessId, widget.customerId, findingId,
+                    body: updatedBody);
+                  if (!BriskersConnectionModeController.instance.forceOffline) {
+                    unawaited(_offlineWrites.flush(widget.businessId));
+                  }
+                }
+                changed = true;
+                setSheetState(() => localBody = updatedBody);
+              } catch (error) {
+                if (sheetContext.mounted) {
+                  ScaffoldMessenger.of(sheetContext)
+                      .showSnackBar(SnackBar(content: Text(error.toString())));
+                }
+              } finally {
+                if (sheetContext.mounted) {
+                  setSheetState(() => actionBusy = false);
+                }
+              }
+            }
+
+            Future<void> deleteFinding() async {
+              if (!widget.canDelete || finding['can_delete'] != true ||
+                  findingId.startsWith('local-finding-') ||
+                  BriskersConnectionModeController.instance.forceOffline) { return; }
+              final confirmed = await showDialog<bool>(
+                context: sheetContext,
+                builder: (dialogContext) => _guardModal(
+                  quarantine,
+                  AlertDialog(
+                    title: const Text('Delete finding?'),
+                    content: const Text(
+                      'This will permanently delete this vehicle finding.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialogContext, false),
+                        child: const Text('Cancel'),
+                      ),
+                      FilledButton(
+                        onPressed: () => Navigator.pop(dialogContext, true),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('Delete'),
+                      ),
+                    ],
                   ),
-                  FilledButton(
-                    onPressed: () {
-                      final value = controller.text.trim();
-                      if (value.isNotEmpty) {
-                        Navigator.pop(dialogContext, value);
-                      }
-                    },
-                    child: const Text('Save'),
+                ),
+              );
+              if (confirmed != true || quarantine != _quarantineChanges.value) {
+                return;
+              }
+
+              setSheetState(() => actionBusy = true);
+              try {
+                await _api.deleteVehicleFinding(widget.businessId, findingId);
+                changed = true;
+                if (sheetContext.mounted) Navigator.pop(sheetContext);
+              } catch (error) {
+                if (sheetContext.mounted) {
+                  setSheetState(() => actionBusy = false);
+                  ScaffoldMessenger.of(sheetContext)
+                      .showSnackBar(SnackBar(content: Text(error.toString())));
+                }
+              }
+            }
+
+            Future<void> toggleInvoiceNotes(bool value) async {
+              setSheetState(() => actionBusy = true);
+              try {
+                await _findingActions.setInvoiceFlag(
+                  widget.businessId,
+                  finding,
+                  value,
+                  customerId: widget.customerId,
+                );
+                if (!BriskersConnectionModeController.instance.forceOffline) {
+                  unawaited(_offlineWrites.flush(widget.businessId));
+                }
+                changed = true;
+                setSheetState(() => includeOnInvoice = value);
+              } catch (error) {
+                if (sheetContext.mounted) {
+                  ScaffoldMessenger.of(sheetContext)
+                      .showSnackBar(SnackBar(content: Text(error.toString())));
+                }
+              } finally {
+                if (sheetContext.mounted) {
+                  setSheetState(() => actionBusy = false);
+                }
+              }
+            }
+
+            Future<void> addPhotos() async {
+              try {
+                final updated = await _uploadMorePhotos(
+                  findingId,
+                  localAttachments,
+                );
+                if (updated.length != localAttachments.length) {
+                  changed = true;
+                  if (sheetContext.mounted) {
+                    setSheetState(() => localAttachments = updated);
+                  }
+                }
+              } catch (error) {
+                if (sheetContext.mounted) {
+                  ScaffoldMessenger.of(sheetContext)
+                      .showSnackBar(SnackBar(content: Text(error.toString())));
+                }
+              }
+            }
+
+            return SafeArea(
+              child: ListView(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+                children: [
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Vehicle finding',
+                          style: TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        status,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: status == 'Open'
+                              ? const Color(0xFFA56B00)
+                              : status == 'In Job'
+                              ? Colors.blue
+                              : Colors.green,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (vehicle.isNotEmpty)
+                    Text(
+                      vehicle,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  if (date.isNotEmpty) Text(date),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Wrap(
+                      spacing: 4,
+                      children: [
+                        TextButton.icon(
+                          onPressed: actionBusy ? null : editFinding,
+                          icon: const Icon(Icons.edit_outlined),
+                          label: const Text('Edit'),
+                        ),
+                        if (widget.canDelete && finding['can_delete'] == true &&
+                            !findingId.startsWith('local-finding-') &&
+                            !BriskersConnectionModeController.instance.forceOffline)
+                        TextButton.icon(
+                          onPressed: actionBusy ? null : deleteFinding,
+                          icon: const Icon(Icons.delete_outline),
+                          label: const Text('Delete'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.red,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    localBody.isEmpty ? 'Vehicle finding' : localBody,
+                    style: const TextStyle(fontSize: 16, height: 1.35),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    localAttachments.isEmpty
+                        ? 'Photos'
+                        : 'Photos (${localAttachments.length})',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ...localAttachments.map(
+                        (attachment) =>
+                            _findingThumbnail(sheetContext, [attachment]),
+                      ),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: actionBusy || _busy ? null : addPhotos,
+                        child: Container(
+                          width: 76,
+                          height: 76,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .outlineVariant,
+                            ),
+                          ),
+                          child: const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.add, size: 30),
+                              SizedBox(height: 2),
+                              Text(
+                                'Add photo',
+                                style: TextStyle(fontSize: 11.5),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(height: 1),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: includeOnInvoice,
+                    onChanged: actionBusy
+                        ? null
+                        : (value) => toggleInvoiceNotes(value == true),
+                    title: const Text(
+                      'Include in Invoice Notes',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(
+                      includeOnInvoice
+                          ? 'Included in invoice notes.'
+                          : 'Not included in invoice notes.',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: actionBusy
+                        ? null
+                        : () {
+                            addAnother = true;
+                            Navigator.pop(sheetContext);
+                          },
+                    icon: const Icon(Icons.add_circle_outline),
+                    label: const Text('Add another finding'),
                   ),
                 ],
               ),
             );
-            controller.dispose();
-            if (updatedBody == null || updatedBody == localBody) return;
+          },
+        ),
+      ),
+    );
 
-            setSheetState(() => actionBusy = true);
-            try {
-              await _offlineWrites.updateFinding(
-                widget.businessId,
-                widget.customerId,
-                findingId,
-                body: updatedBody,
-              );
-              if (!BriskersConnectionModeController.instance.forceOffline) {
-                unawaited(_offlineWrites.flush(widget.businessId));
-              }
-              changed = true;
-              setSheetState(() => localBody = updatedBody);
-            } catch (error) {
-              if (sheetContext.mounted) {
-                ScaffoldMessenger.of(sheetContext).showSnackBar(
-                  SnackBar(content: Text(error.toString())),
-                );
-              }
-            } finally {
-              if (sheetContext.mounted) {
-                setSheetState(() => actionBusy = false);
-              }
-            }
-          }
+    if (quarantine != _quarantineChanges.value) return;
+    if (changed && mounted) await _refresh();
+    if (addAnother && mounted) await _addFinding();
+  }
 
-          Future<void> deleteFinding() async {
+  Future<String?> _chooseFindingJob(
+    Map<String, dynamic> finding, {
+    bool resolving = false,
+  }) async {
+    final linked = finding['repair_job_id']?.toString() ?? '';
+    if (resolving && linked.isNotEmpty) return linked;
+    final vehicleId =
+        (finding['vehicle_id'] ?? finding['_vehicle_id'])?.toString() ?? '';
+    if (vehicleId.isEmpty) return null;
+    final local = await localDatabase
+        .customSelect(
+          'SELECT id,job_number,title,status FROM local_jobs '
+          'WHERE business_id=? AND customer_id=? AND vehicle_id=?',
+          variables: [
+            Variable<String>(widget.businessId),
+            Variable<String>(widget.customerId),
+            Variable<String>(vehicleId),
+          ],
+        )
+        .get();
+    var jobs = local.map((row) => Map<String, dynamic>.from(row.data)).toList();
+    if (!BriskersConnectionModeController.instance.forceOffline) {
+      try {
+        // Unlike the generic Jobs list, customer service history includes
+        // the vehicle ID and completed Jobs, and is scoped by customer on
+        // the server before anything reaches this picker.
+        final remote = await _api.customerServiceHistory(
+          widget.businessId, widget.customerId);
+        jobs = {
+          for (final row in jobs) row['id'].toString(): row,
+          for (final row in remote)
+            if (row['vehicle_id']?.toString() == vehicleId &&
+                (row['id']?.toString() ?? '').isNotEmpty)
+              row['id'].toString(): row,
+        }.values.toList();
+      } catch (_) {
+        // Only already-saved jobs remain selectable while disconnected.
+      }
+    }
+    jobs = await _jobVisibility.filter(jobs);
+    final active = jobs.where((job) =>
+        findingJobChoice(job['status'], resolving: resolving) ==
+        FindingJobChoice.active).toList();
+    final historical = jobs.where((job) =>
+        findingJobChoice(job['status'], resolving: resolving) ==
+        FindingJobChoice.completedHistory).toList();
+    if (!mounted) return null;
+    if (active.isEmpty && historical.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(resolving
+            ? 'No eligible Jobs found for this vehicle.'
+            : 'Open a Job for this vehicle first.')),
+      );
+      return null;
+    }
+
+    Widget jobChoice(BuildContext sheetContext, Map<String, dynamic> job,
+        {required bool completed}) {
+      final jobId = job['id']?.toString() ?? '';
+      final number = job['job_number']?.toString().trim() ?? '';
+      final label = number.isNotEmpty ? 'Job $number' : 'Job';
+      return ListTile(
+        leading: Icon(completed ? Icons.history_outlined : Icons.work_outline),
+        title: Text(label),
+        subtitle: Text([
+          job['title']?.toString() ?? '',
+          if (completed) 'Completed',
+        ].where((part) => part.isNotEmpty).join(' • ')),
+        onTap: jobId.isEmpty ? null : () async {
+          if (completed) {
             final confirmed = await showDialog<bool>(
               context: sheetContext,
               builder: (dialogContext) => AlertDialog(
-                title: const Text('Delete finding?'),
-                content: const Text(
-                  'This will permanently delete this vehicle finding.',
+                title: const Text('Resolve using completed Job?'),
+                content: Text(
+                  'Confirm that the repair on $label resolved this finding. '
+                  'Briskers will record that historical '
+                  'Job and mark the finding Resolved. It will NOT reopen the '
+                  'Job, change its invoice, payments or payroll. The '
+                  'resolution is recorded now; the repair date is not changed.',
                 ),
                 actions: [
                   TextButton(
@@ -768,299 +1405,123 @@ class _CustomerVehicleFindingsSectionState
                   ),
                   FilledButton(
                     onPressed: () => Navigator.pop(dialogContext, true),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Delete'),
+                    child: const Text('Confirm resolved'),
                   ),
                 ],
               ),
             );
-            if (confirmed != true) return;
-
-            setSheetState(() => actionBusy = true);
-            try {
-              await _api.deleteVehicleFinding(
-                widget.businessId,
-                findingId,
-              );
-              changed = true;
-              if (sheetContext.mounted) Navigator.pop(sheetContext);
-            } catch (error) {
-              if (sheetContext.mounted) {
-                setSheetState(() => actionBusy = false);
-                ScaffoldMessenger.of(sheetContext).showSnackBar(
-                  SnackBar(content: Text(error.toString())),
-                );
-              }
-            }
+            if (confirmed != true || !sheetContext.mounted) return;
           }
-
-          Future<void> toggleInvoiceNotes(bool value) async {
-            setSheetState(() => actionBusy = true);
-            try {
-              await _api.setVehicleFindingInvoiceFlag(
-                widget.businessId,
-                findingId,
-                value,
-              );
-              changed = true;
-              setSheetState(() => includeOnInvoice = value);
-            } catch (error) {
-              if (sheetContext.mounted) {
-                ScaffoldMessenger.of(sheetContext).showSnackBar(
-                  SnackBar(content: Text(error.toString())),
-                );
-              }
-            } finally {
-              if (sheetContext.mounted) {
-                setSheetState(() => actionBusy = false);
-              }
-            }
-          }
-
-          Future<void> addPhotos() async {
-            try {
-              final updated = await _uploadMorePhotos(
-                findingId,
-                localAttachments,
-              );
-              if (updated.length != localAttachments.length) {
-                changed = true;
-                if (sheetContext.mounted) {
-                  setSheetState(() => localAttachments = updated);
-                }
-              }
-            } catch (error) {
-              if (sheetContext.mounted) {
-                ScaffoldMessenger.of(sheetContext).showSnackBar(
-                  SnackBar(content: Text(error.toString())),
-                );
-              }
-            }
-          }
-
-          return SafeArea(
-            child: ListView(
-              shrinkWrap: true,
-              padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
-              children: [
-                Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Vehicle finding',
-                        style: TextStyle(
-                          fontSize: 21,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      status,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: status == 'Open'
-                            ? const Color(0xFFA56B00)
-                            : status == 'In Job'
-                                ? Colors.blue
-                                : Colors.green,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                if (vehicle.isNotEmpty)
-                  Text(
-                    vehicle,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                if (date.isNotEmpty) Text(date),
-                const SizedBox(height: 4),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Wrap(
-                    spacing: 4,
-                    children: [
-                      TextButton.icon(
-                        onPressed: actionBusy ? null : editFinding,
-                        icon: const Icon(Icons.edit_outlined),
-                        label: const Text('Edit'),
-                      ),
-                      TextButton.icon(
-                        onPressed: actionBusy ? null : deleteFinding,
-                        icon: const Icon(Icons.delete_outline),
-                        label: const Text('Delete'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.red,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  localBody.isEmpty ? 'Vehicle finding' : localBody,
-                  style: const TextStyle(fontSize: 16, height: 1.35),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  localAttachments.isEmpty
-                      ? 'Photos'
-                      : 'Photos (${localAttachments.length})',
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ...localAttachments.map(
-                      (attachment) => _findingThumbnail(
-                        sheetContext,
-                        [attachment],
-                      ),
-                    ),
-                    InkWell(
-                      borderRadius: BorderRadius.circular(8),
-                      onTap: actionBusy || _busy ? null : addPhotos,
-                      child: Container(
-                        width: 76,
-                        height: 76,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .outlineVariant,
-                          ),
-                        ),
-                        child: const Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.add, size: 30),
-                            SizedBox(height: 2),
-                            Text(
-                              'Add photo',
-                              style: TextStyle(fontSize: 11.5),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                const Divider(height: 1),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  value: includeOnInvoice,
-                  onChanged: actionBusy
-                      ? null
-                      : (value) =>
-                          toggleInvoiceNotes(value == true),
-                  title: const Text(
-                    'Include on invoice notes',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  subtitle: Text(
-                    includeOnInvoice
-                        ? 'Included in invoice notes.'
-                        : 'Not included in invoice notes.',
-                  ),
-                ),
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  onPressed: actionBusy
-                      ? null
-                      : () {
-                          addAnother = true;
-                          Navigator.pop(sheetContext);
-                        },
-                  icon: const Icon(Icons.add_circle_outline),
-                  label: const Text('Add another finding'),
-                ),
-              ],
-            ),
-          );
+          if (sheetContext.mounted) Navigator.pop(sheetContext, jobId);
         },
-      ),
-    );
+      );
+    }
 
-    if (changed && mounted) await _refresh();
-    if (addAnother && mounted) await _addFinding();
-  }
-
-  Widget _findingRow(
-    BuildContext context,
-    Map<String, dynamic> finding, {
-    required bool showVehicle,
-  }) {
-    final attachments = List<dynamic>.from(
-      finding['attachments'] ?? const [],
-    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-
-    final body = finding['body']?.toString().trim() ?? '';
-    final date = _dateLabel(finding['created_at']);
-    final vehicle = finding['_vehicle_label']?.toString().trim() ?? '';
-
-    final status = finding['status']?.toString() ?? 'open';
-    final repairJob = finding['repair_job_number']?.toString() ?? '';
-    final subtitle = <String>[
-      if (status == 'in_job')
-        repairJob.isEmpty ? 'In job' : 'In $repairJob',
-      if (date.isNotEmpty) date,
-      if (showVehicle && vehicle.isNotEmpty) vehicle,
-    ].join(' • ');
-
-    return InkWell(
-      onTap: () => _openFinding(finding),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 7, 12, 7),
-        child: Row(
-          children: [
-            _findingThumbnail(context, attachments),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    body.isEmpty ? 'Vehicle finding' : body,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
+    return showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: FractionallySizedBox(
+          heightFactor: 0.68,
+          child: ListView(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  resolving ? 'Resolve on Job' : 'Add to Job',
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
                   ),
-                  if (subtitle.isNotEmpty) ...[
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontSize: 12.5,
-                      ),
-                    ),
-                  ],
-                ],
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            const Icon(
-              Icons.chevron_right,
-              size: 24,
-              color: Color(0xFF374151),
-            ),
-          ],
+              if (active.isNotEmpty) ...[
+                const ListTile(title: Text('Active Jobs')),
+                for (final job in active)
+                  jobChoice(sheetContext, job, completed: false),
+              ],
+              if (resolving && historical.isNotEmpty) ...[
+                const Divider(),
+                const ListTile(
+                  title: Text('Completed Jobs — historical repair'),
+                  subtitle: Text(
+                    'Select only the Job on which the issue was repaired. '
+                    'Existing invoices and payroll will not be changed.',
+                  ),
+                ),
+                for (final job in historical)
+                  jobChoice(sheetContext, job, completed: true),
+              ],
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  Future<void> _changeFinding(Future<dynamic> Function() change) async {
+    if (_busy || !widget.canManage) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await change();
+      await _refresh(cacheOnly: true);
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        unawaited(
+          _offlineWrites
+              .flush(widget.businessId)
+              .then((_) => _refresh(cacheOnly: true)),
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _addFindingToJob(Map<String, dynamic> finding) async {
+    final jobId = await _chooseFindingJob(finding);
+    if (jobId != null && mounted) {
+      await _changeFinding(
+        () => _findingActions.addToJob(
+          widget.businessId,
+          finding,
+          jobId,
+          customerId: widget.customerId,
+        ),
+      );
+    }
+  }
+
+  Future<void> _resolveFinding(Map<String, dynamic> finding) async {
+    final jobId = await _chooseFindingJob(finding, resolving: true);
+    if (jobId != null && mounted) {
+      await _changeFinding(
+        () => _findingActions.resolve(
+          widget.businessId,
+          finding,
+          jobId,
+          customerId: widget.customerId,
+        ),
+      );
+    }
+  }
+
+  Future<void> _addFindingPhotos(Map<String, dynamic> finding) async {
+    try {
+      final current = (finding['attachments'] as List? ?? const [])
+          .whereType<Map>()
+          .map((raw) => Map<String, dynamic>.from(raw))
+          .toList();
+      await _uploadMorePhotos(finding['id'].toString(), current);
+      await _refresh(cacheOnly: true);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
   }
 
   @override
@@ -1068,15 +1529,12 @@ class _CustomerVehicleFindingsSectionState
     if (widget.vehicles.isEmpty) return const SizedBox.shrink();
 
     return FutureBuilder<List<Map<String, dynamic>>>(
+      key: ValueKey(('vehicle-findings', _jobVisibility.epoch)),
       future: _findingsFuture,
       builder: (context, snapshot) {
         final allRows = snapshot.data ?? const <Map<String, dynamic>>[];
         final open = allRows
-            .where((finding) =>
-                finding['status']?.toString() != 'resolved')
-            .toList();
-        final resolved = allRows
-            .where((finding) => finding['status']?.toString() == 'resolved')
+            .where((finding) => finding['status']?.toString() != 'resolved')
             .toList();
 
         final showVehicle = widget.vehicles.length > 1;
@@ -1084,9 +1542,8 @@ class _CustomerVehicleFindingsSectionState
         return Card(
           clipBehavior: Clip.antiAlias,
           child: ExpansionTile(
-            initiallyExpanded: false,
-            onExpansionChanged: (value) =>
-                setState(() => _expanded = value),
+            initiallyExpanded: widget.initiallyExpanded,
+            onExpansionChanged: (value) => setState(() => _expanded = value),
             tilePadding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
             childrenPadding: EdgeInsets.zero,
             leading: const Icon(
@@ -1128,7 +1585,7 @@ class _CustomerVehicleFindingsSectionState
                 child: Align(
                   alignment: Alignment.centerRight,
                   child: TextButton.icon(
-                    onPressed: _busy ? null : _addFinding,
+                    onPressed: _busy || !widget.canManage ? null : _addFinding,
                     icon: const Icon(Icons.add_circle_outline, size: 19),
                     label: const Text('Add finding'),
                   ),
@@ -1147,60 +1604,43 @@ class _CustomerVehicleFindingsSectionState
                     ),
                   ),
                 ),
-              if (open.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 8, 16, 18),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('No open findings'),
+              VehicleFindings(
+                findings: allRows,
+                busy: _busy,
+                canEdit: widget.canManage,
+                canManage: widget.canManage,
+                canIncludeOnInvoice: widget.canManage,
+                showVehicle: showVehicle,
+                onEdit: _openFinding,
+                onAddPhotos: _addFindingPhotos,
+                onAddToJob: _addFindingToJob,
+                onResolve: _resolveFinding,
+                onReopen: (finding) => _changeFinding(
+                  () => _findingActions.reopen(
+                    widget.businessId,
+                    finding,
+                    customerId: widget.customerId,
                   ),
-                )
-              else
-                for (var index = 0; index < open.length; index++) ...[
-                  _findingRow(
-                    context,
-                    open[index],
-                    showVehicle: showVehicle,
-                  ),
-                  if (index != open.length - 1)
-                    const Divider(
-                      height: 1,
-                      indent: 86,
-                      endIndent: 16,
-                    ),
-                ],
-              if (resolved.isNotEmpty) ...[
-                const Divider(height: 1),
-                ExpansionTile(
-                  tilePadding:
-                      const EdgeInsets.symmetric(horizontal: 16),
-                  leading: const Icon(
-                    Icons.check_circle_outline,
-                    color: Colors.green,
-                  ),
-                  title: Text(
-                    resolved.length == 1
-                        ? '1 resolved finding'
-                        : '${resolved.length} resolved findings',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  children: [
-                    for (var index = 0; index < resolved.length; index++) ...[
-                      _findingRow(
-                        context,
-                        resolved[index],
-                        showVehicle: showVehicle,
-                      ),
-                      if (index != resolved.length - 1)
-                        const Divider(
-                          height: 1,
-                          indent: 86,
-                          endIndent: 16,
-                        ),
-                    ],
-                  ],
                 ),
-              ],
+                onRemoveFromJob: (finding) => _changeFinding(
+                  () => _findingActions.removeFromJob(
+                    widget.businessId,
+                    finding,
+                    finding['repair_job_id'].toString(),
+                    customerId: widget.customerId,
+                  ),
+                ),
+                onInvoiceChanged: (finding, include) => _changeFinding(
+                  () => _findingActions.setInvoiceFlag(
+                    widget.businessId,
+                    finding,
+                    include,
+                    customerId: widget.customerId,
+                  ),
+                ),
+                photoBuilder: (finding, photo) =>
+                    _findingThumbnail(context, [photo]),
+              ),
             ],
           ),
         );

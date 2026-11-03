@@ -1,9 +1,13 @@
+import 'local_recovery_review_screen.dart';
+import 'owner_offline_numbering_screen.dart';
 import 'dart:convert';
 import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_i18n.dart';
+import '../../core/connection_mode.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/appointment_sync_service.dart';
 import '../../services/customer_vehicle_sync_service.dart';
@@ -11,6 +15,7 @@ import '../../services/catalog_sync_service.dart';
 import '../../services/document_index_sync_service.dart';
 import '../../services/linked_expense_sync_service.dart';
 import '../../services/job_sync_service.dart';
+import '../../services/local_sync_status_repository.dart';
 import '../../services/import_cache_repair_service.dart';
 import '../../services/kiosk_registration_service.dart';
 import '../../services/offline_preinspection_service.dart';
@@ -24,7 +29,10 @@ import '../../services/offline_document_edit_service.dart';
 import '../../services/local_tax_settings_cache.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
 import '../../services/offline_estimate_invoice_service.dart';
+import '../../services/offline_invoice_mileage_service.dart';
+import '../../services/offline_invoice_payment_ledger.dart';
 import '../../services/offline_work_findings_service.dart';
+import '../../services/offline_attachment_mirror_service.dart';
 
 class LocalSyncStatusScreen extends StatefulWidget {
   const LocalSyncStatusScreen({
@@ -70,10 +78,13 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       LocalInvoiceStatusStylesCache();
   final OfflineEstimateInvoiceService _estimateInvoice =
       OfflineEstimateInvoiceService();
+  final OfflineInvoiceMileageService _mileage = OfflineInvoiceMileageService();
+  final OfflineInvoicePaymentLedger _payments = OfflineInvoicePaymentLedger();
 
   bool _loading = true;
   bool _syncing = false;
-  static const int _syncStepCount = 19;
+  bool _targetedRecovery = false;
+  static const int _syncStepCount = 22;
   int _syncStep = 0;
   String? _syncStage;
   String? _error;
@@ -83,6 +94,9 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
   List<Map<String, dynamic>> _syncStates = const [];
   List<Map<String, dynamic>> _outbox = const [];
   List<Map<String, dynamic>> _pendingDetails = const [];
+  final OfflineAttachmentMirrorService _mediaMirror =
+      OfflineAttachmentMirrorService();
+  late Future<OfflineAttachmentInventory> _mediaInventory;
 
   @override
   void initState() {
@@ -104,33 +118,38 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       setState(() {
         _loading = true;
         _error = null;
+        // This read-only disk check is independent from database sync.
+        _mediaInventory = _mediaMirror.inventory(widget.businessId);
       });
     }
 
     try {
-      final counts = <String, int>{
-        'customers': await _count('local_customers'),
-        'vehicles': await _count('local_vehicles'),
-        'appointments': await _count('local_appointments'),
-        'jobs': await _count('local_jobs'),
-        'catalog': await _count('local_catalog_items'),
-        'documents': await _count('local_documents'),
-        'findings': await _count('local_findings'),
-        'inspections': await _count('local_pre_inspections'),
-        'photoPending': await _count('local_expense_iq_photos',
+      // Independent read-only counts do not need fourteen sequential round
+      // trips through SQLite before the diagnostics screen can paint.
+      final names = <String>[
+        'customers', 'vehicles', 'appointments', 'jobs', 'catalog',
+        'documents', 'findings', 'inspections', 'photoPending',
+        'photoUploaded', 'photoFailed', 'pending', 'conflicts',
+      ];
+      final values = await Future.wait<int>([
+        _count('local_customers'),
+        _count('local_vehicles'),
+        _count('local_appointments'),
+        _count('local_jobs'),
+        _count('local_catalog_items'),
+        _count('local_documents'),
+        _count('local_findings'),
+        _count('local_pre_inspections'),
+        _count('local_expense_iq_photos',
             where: "state IN ('pending','uploading')"),
-        'photoUploaded': await _count('local_expense_iq_photos',
-            where: "state = 'uploaded'"),
-        'photoFailed': await _count('local_expense_iq_photos',
+        _count('local_expense_iq_photos', where: "state = 'uploaded'"),
+        _count('local_expense_iq_photos',
             where: "state IN ('failed','missing')"),
-        'pending': await _count(
-          'sync_outbox',
-          where: "state = 'pending'",
-        ),
-        'conflicts': await _count(
-          'sync_outbox',
-          where: "state = 'conflict'",
-        ),
+        _count('sync_outbox', where: "state = 'pending'"),
+        _count('sync_outbox', where: "state = 'conflict'"),
+      ]);
+      final counts = <String, int>{
+        for (var i = 0; i < names.length; i++) names[i]: values[i],
       };
 
       final stateRows = await localDatabase.customSelect(
@@ -155,6 +174,30 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         ''',
         variables: [Variable<String>(widget.businessId)],
       ).get();
+
+      // Paint the local counts and sync history before performing expensive
+      // per-outbox-record relationship checks (which can involve 120+ rows).
+      // Those checks are diagnostic only and must not hold the entire screen
+      // on a spinner.
+      if (!mounted) return;
+      setState(() {
+        _counts = counts;
+        _syncStates = stateRows.map((row) => <String, dynamic>{
+          'scope': row.read<String>('scope'),
+          'cursor': row.readNullable<int>('last_server_cursor'),
+          'last_pull_at': row.data['last_pull_at'],
+          'last_push_at': row.data['last_push_at'],
+          'last_error': row.readNullable<String>('last_error'),
+          'bootstrapped': row.read<int>('bootstrapped') == 1,
+        }).toList();
+        _outbox = outboxRows.map((row) => <String, dynamic>{
+          'entity_type': row.read<String>('entity_type'),
+          'state': row.read<String>('state'),
+          'count': row.read<int>('count'),
+          'last_error': row.readNullable<String>('last_error'),
+        }).toList();
+        _loading = false;
+      });
 
       // Read-only owner-facing inspection: never mutate or retry a queued
       // operation from the diagnostic panel. Keep raw IDs for safe cleanup.
@@ -208,6 +251,10 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
           'job_id': payload['job_id']?.toString() ??
               payload['provisional_job_id']?.toString() ?? '',
           'kind': payload['kind']?.toString() ?? '',
+          // Read-only evidence for a stalled finding_action. Neither value
+          // authorizes retry or acknowledgement of the saved mutation.
+          'finding_action': payload['action']?.toString() ?? '',
+          'finding_mutation_attempted': payload['_mutation_attempted'] == true,
           'error': row.readNullable<String>('last_error') ?? '',
         });
       }
@@ -530,10 +577,216 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     }
   }
 
+  // One purpose only: recover already queued customer, vehicle, invoice and
+  // recorded payment operations.  Do not refresh unrelated catalog/tax,
+  // appointments or jobs when a single invoice is awaiting its number.
+  // These services retain their original durable operation IDs.
+  // Owner-only and read-only. No network calls, mutations, or queue ACKs.
+  // Captures the exact four known Gloria outbox rows plus linked local tables.
+  Future<void> _copyGloriaRecoverySnapshot() async {
+    if (!widget.isOwner) return;
+    try {
+      const expected = <int, String>{
+        252: 'customer_create',
+        253: 'vehicle_create',
+        254: 'document_draft_create',
+        255: 'invoice_payment_received',
+      };
+      final operations = <Map<String, dynamic>>[];
+      for (final entry in expected.entries) {
+        final rows = await localDatabase.customSelect(
+          'SELECT * FROM sync_outbox WHERE business_id=? AND id=? AND entity_type=?',
+          variables: [
+            Variable<String>(widget.businessId),
+            Variable<int>(entry.key),
+            Variable<String>(entry.value),
+          ],
+        ).get();
+        if (rows.length != 1) {
+          throw StateError('Expected Gloria outbox #${entry.key} (${entry.value}) was not found. No export copied.');
+        }
+        operations.add(Map<String, dynamic>.from(rows.single.data));
+      }
+      final customerId = operations[0]['entity_id'].toString();
+      final vehicleId = operations[1]['entity_id'].toString();
+      final invoiceId = operations[2]['entity_id'].toString();
+      const knownCustomer = 'local-customer-1793301637612107';
+      const knownVehicle = 'local-vehicle-1793301794872090';
+      const knownInvoice = 'local-invoice-f9eaf3b3-3a9c-427a-8c8f-8f01d0fa6385';
+      if (customerId != knownCustomer ||
+          vehicleId != knownVehicle ||
+          invoiceId != knownInvoice) {
+        throw StateError('Gloria record identifiers have changed. Stop and inspect before exporting.');
+      }
+      Future<List<Map<String, dynamic>>> read(
+        String sql, List<Variable> params,
+      ) async => (await localDatabase.customSelect(sql, variables: params).get())
+          .map((row) => Map<String, dynamic>.from(row.data)).toList();
+      final customer = await read(
+        'SELECT * FROM local_customers WHERE business_id=? AND id=?',
+        [Variable<String>(widget.businessId), Variable<String>(customerId)],
+      );
+      final vehicle = await read(
+        'SELECT * FROM local_vehicles WHERE business_id=? AND id=?',
+        [Variable<String>(widget.businessId), Variable<String>(vehicleId)],
+      );
+      final documents = await read(
+        'SELECT * FROM local_documents WHERE business_id=? AND id=?',
+        [Variable<String>(widget.businessId), Variable<String>(invoiceId)],
+      );
+      final jobs = await read(
+        'SELECT * FROM local_jobs WHERE business_id=? AND id=?',
+        [Variable<String>(widget.businessId),
+          const Variable<String>('local-job-f9eaf3b3-3a9c-427a-8c8f-8f01d0fa6385')],
+      );
+      if (customer.length != 1 || vehicle.length != 1 || documents.length != 1) {
+        throw StateError('One of Gloria local source records is missing. Nothing exported.');
+      }
+      final invoiceDetail = await const LocalDocumentDetailCache().load(widget.businessId, invoiceId);
+      if (invoiceDetail == null || invoiceDetail['lines'] is! List || (invoiceDetail['lines'] as List).isEmpty) {
+        throw StateError('Gloria invoice line details are unavailable. Nothing copied.');
+      }
+      final evidence = <String, dynamic>{
+        'format': 'briskers-gloria-recovery-readonly-v1',
+        'purpose': 'Restricted private financial recovery; do not publicly share',
+        'business_id': widget.businessId,
+        'operations': operations,
+        'local_customer': customer.single,
+        'local_vehicle': vehicle.single,
+        'local_document': documents.single,
+        'local_invoice_detail': invoiceDetail,
+        'local_jobs': jobs,
+      };
+      final snapshot = const JsonEncoder.withIndent('  ').convert(evidence);
+      await Clipboard.setData(ClipboardData(text: snapshot));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gloria recovery snapshot copied (${snapshot.length} characters). Paste into a private recovery message. No records changed.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gloria export stopped safely: $error')),
+      );
+    }
+  }
+
+  Future<int> _pendingRecoveryOperations(String type) async {
+    final row = await localDatabase.customSelect(
+      "SELECT COUNT(*) AS n FROM sync_outbox "
+      "WHERE business_id=? AND entity_type=? "
+      "AND state IN ('pending','inflight','conflict')",
+      variables: [
+        Variable<String>(widget.businessId),
+        Variable<String>(type),
+      ],
+    ).getSingle();
+    return row.read<int>('n');
+  }
+
+  Future<void> _recoverPendingInvoices() async {
+    if (!widget.isOwner) {
+      setState(() {
+        _error = 'Only the Owner can run exact-total invoice recovery.';
+      });
+      return;
+    }
+    if (_syncing) { return; }
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      setState(() {
+        _error = 'Switch out of Force Offline before attempting recovery.';
+      });
+      return;
+    }
+    setState(() {
+      _syncing = true;
+      _targetedRecovery = true;
+      _syncStep = 0;
+      _syncStage = 'Inspecting local invoice queue';
+      _syncMessage = null;
+      _error = null;
+    });
+
+    String? failure;
+    String? message;
+    try {
+      final customer = await _pendingRecoveryOperations('customer_create');
+      final vehicle = await _pendingRecoveryOperations('vehicle_create');
+      final invoice = await _pendingRecoveryOperations('document_draft_create');
+      final payment = await _pendingRecoveryOperations('invoice_payment_received');
+      if (customer + vehicle + invoice + payment == 0) {
+        message = 'No pending customer, vehicle, invoice or received-payment '
+            'uploads found. Confirm invoice number and payment separately.';
+      } else {
+        if (mounted) {
+          setState(() => _syncStage = '1/3 Customer and vehicle uploads');
+        }
+        if (customer + vehicle > 0) {
+          await _customerVehicleAdmin.flush(widget.businessId);
+        }
+        if (await _pendingRecoveryOperations('customer_create') > 0 ||
+            await _pendingRecoveryOperations('vehicle_create') > 0) {
+          throw StateError(
+            'Customer or vehicle is still waiting for server confirmation. '
+            'Invoice and payment uploads were not retried. '
+            'Review the pending operation error.',
+          );
+        }
+        if (mounted) { setState(() => _syncStep = 1); }
+
+        if (mounted) { setState(() => _syncStage = '2/3 Invoice upload'); }
+        if (invoice > 0) {
+          await _documentDrafts.flush(
+            widget.businessId, exactTotalRecovery: true);
+        }
+        if (await _pendingRecoveryOperations('document_draft_create') > 0) {
+          throw StateError(
+            'Invoice is still awaiting server confirmation. '
+            'Payment upload was not retried. '
+            'Review the invoice operation error.',
+          );
+        }
+        if (mounted) { setState(() => _syncStep = 2); }
+
+        if (mounted) { setState(() => _syncStage = '3/3 Recorded payment upload'); }
+        if (payment > 0) { await _payments.flush(widget.businessId); }
+        if (await _pendingRecoveryOperations('invoice_payment_received') > 0) {
+          throw StateError(
+            'The payment is still waiting for an authoritative server receipt. '
+            'Do not enter it a second time.',
+          );
+        }
+        if (mounted) { setState(() => _syncStep = 3); }
+        message = 'The queued customer, vehicle, invoice and received-payment '
+            'uploads have cleared. Check the invoice number and confirm the '
+            'payment separately before finalizing anything.';
+      }
+    } catch (error) {
+      failure = error.toString();
+    } finally {
+      // Inspection alone is read-only; refresh the queue after uploads.
+      try {
+        await _load();
+      } catch (_) {
+        // Preserve the upload error even if refreshing the UI fails.
+      }
+      if (mounted) {
+        setState(() {
+          _syncing = false;
+          _targetedRecovery = false;
+          _syncStage = null;
+          _error = failure;
+          _syncMessage = message;
+        });
+      }
+    }
+  }
+
   Future<void> _syncNow() async {
     if (_syncing) return;
     setState(() {
       _syncing = true;
+      _targetedRecovery = false;
       _syncStep = 0;
       _syncStage = 'Preparing sync';
       _syncMessage = null;
@@ -541,6 +794,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     });
 
     final failures = <String>[];
+    final failedStages = <String>[];
 
     Future<void> attempt(
       String label,
@@ -551,6 +805,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         await action();
       } catch (error) {
         failures.add('$label: $error');
+        failedStages.add(label);
       } finally {
         if (mounted) setState(() => _syncStep += 1);
       }
@@ -600,6 +855,20 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       'Estimate / invoice changes',
       () => _estimateInvoice.flush(widget.businessId),
     );
+    // Invoice creation has to reconcile its local ID before any payment
+    // or mileage write can safely target the permanent server invoice.
+    await attempt(
+      'Invoice mileage changes',
+      () => _mileage.flush(widget.businessId),
+    );
+    await attempt(
+      'Received invoice payments',
+      () => _payments.flush(widget.businessId),
+    );
+    await attempt(
+      'Pending payment corrections',
+      () => _payments.flushPendingServerEdits(widget.businessId),
+    );
     await attempt(
       tr('preInspection'),
       () => _preInspections.flush(widget.businessId),
@@ -643,6 +912,15 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       'Invoice status styles',
       () => _invoiceStatusStyles.refresh(widget.businessId),
     );
+
+    try {
+      await LocalSyncStatusRepository.recordManualRefreshResult(
+        widget.businessId, failedStages,
+      );
+    } catch (error) {
+      // The in-memory warning remains available even if preferences fail.
+      failures.add('Saving sync status: $error');
+    }
 
     await _load();
     if (!mounted) return;
@@ -726,10 +1004,10 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                             Text(_syncStage ?? 'Working…'),
                             const SizedBox(height: 8),
                             LinearProgressIndicator(
-                              value: _syncStep / _syncStepCount,
+                              value: _syncStep / (_targetedRecovery ? 3 : _syncStepCount),
                             ),
                             const SizedBox(height: 6),
-                            Text('Step $_syncStep of $_syncStepCount completed'),
+                            Text('Step $_syncStep of ${_targetedRecovery ? 3 : _syncStepCount} completed'),
                           ],
                         ),
                       ),
@@ -800,6 +1078,43 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                     Icons.search,
                     tr('preInspections'),
                     _counts['inspections'] ?? 0,
+                  ),
+                  FutureBuilder<OfflineAttachmentInventory>(
+                    future: _mediaInventory,
+                    builder: (context, snapshot) {
+                      final available = snapshot.data?.available;
+                      final known = snapshot.data?.known;
+                      final missing = snapshot.data?.missing;
+                      return Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.photo_library_outlined),
+                          title: const Text('Offline photo copies'),
+                          subtitle: Text(
+                            snapshot.hasError
+                                ? 'Photo inventory unavailable — refresh to retry'
+                                : known == null
+                                    ? 'Checking files already saved on this device…'
+                                    : '$available of $known known photos stored locally '
+                                        '• $missing missing. '
+                                        'Only synced photo references are counted; '
+                                        'the full historical total may be higher.',
+                          ),
+                          trailing: snapshot.connectionState ==
+                                  ConnectionState.done
+                              ? Icon(snapshot.hasError
+                                  ? Icons.warning_amber_outlined
+                                  : missing == 0
+                                      ? Icons.check_circle_outline
+                                      : Icons.cloud_download_outlined)
+                              : const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2),
+                                ),
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 10),
                   Text(
@@ -880,6 +1195,8 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                           'Record: ${operation['entity']}',
                           if ((operation['kind'] as String).isNotEmpty)
                             'Kind: ${operation['kind']}',
+                          if (operation['type'] == 'finding_action')
+                            'Finding action: ${operation['finding_action']} · previously attempted: ${operation['finding_mutation_attempted']}',
                           if ((operation['customer_id'] as String).isNotEmpty)
                             'Customer ID: ${operation['customer_id']}',
                           if ((operation['vehicle_id'] as String).isNotEmpty)
@@ -891,7 +1208,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                           'Linked local jobs: ${operation['linked_jobs']}',
                           if ((operation['error'] as String).isNotEmpty)
                             'Error: ${operation['error']}',
-                        ].join('\\n')),
+                        ].join('\n')),
                       ),
                     )),
                     const Text(
@@ -948,19 +1265,25 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          subtitle: Text(
-                            '${tr('lastPull')}: '
-                            '${_dateLabel(row['last_pull_at'])}\n'
-                            '${tr('lastPush')}: '
-                            '${_dateLabel(row['last_push_at'])}',
-                          ),
+                          subtitle: Text([
+                            "${tr('lastPull')}: ${_dateLabel(row['last_pull_at'])}",
+                            "${tr('lastPush')}: ${_dateLabel(row['last_push_at'])}",
+                            if ((row['last_error']?.toString() ?? '').isNotEmpty)
+                              "Download failed: ${row['last_error']}",
+                            if (row['bootstrapped'] != true)
+                              'Download incomplete; offline list may be partial',
+                          ].join('\n')),
                           trailing: Icon(
-                            row['bootstrapped'] == true
-                                ? Icons.check_circle_outline
-                                : Icons.hourglass_empty,
-                            color: row['bootstrapped'] == true
-                                ? Colors.green
-                                : Colors.orange,
+                            (row['last_error']?.toString() ?? '').isNotEmpty
+                                ? Icons.error_outline
+                                : row['bootstrapped'] == true
+                                    ? Icons.check_circle_outline
+                                    : Icons.hourglass_empty,
+                            color: (row['last_error']?.toString() ?? '').isNotEmpty
+                                ? Colors.red
+                                : row['bootstrapped'] == true
+                                    ? Colors.green
+                                    : Colors.orange,
                           ),
                           isThreeLine: true,
                         ),
@@ -1012,6 +1335,60 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                     ),
                   ],
                   const SizedBox(height: 14),
+                  if (widget.isOwner) ...[
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => LocalRecoveryReviewScreen(
+                            businessId: widget.businessId,
+                            isOwner: widget.isOwner,
+                          ),
+                        ),
+                      ),
+                      icon: const Icon(Icons.fact_check_outlined),
+                      label: const Text('Review and reconcile recovered records'),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => OwnerOfflineNumberingScreen(
+                            businessId: widget.businessId,
+                            isOwner: widget.isOwner,
+                          ),
+                        ),
+                      ),
+                      icon: const Icon(Icons.numbers),
+                      label: const Text('Assign local invoice and Job numbers'),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: _copyGloriaRecoverySnapshot,
+                      icon: const Icon(Icons.copy_all_outlined),
+                      label: const Text('Copy Gloria recovery snapshot (read-only)'),
+                    ),
+                    const Text(
+                      'Copies private customer, invoice and payment recovery data. Share only in a private conversation. No upload or local changes.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  FilledButton.icon(
+                    onPressed: (_syncing || !widget.isOwner)
+                        ? null : _recoverPendingInvoices,
+                    icon: const Icon(Icons.receipt_long_outlined),
+                    label: const Text('Recover pending invoices'),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Uploads queued customers, vehicles, invoices and recorded '
+                    'payments only. Does not run the 22-step full sync, '
+                    'delete records or finalize payments.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
                   FilledButton.icon(
                     onPressed: _syncing ? null : _syncNow,
                     icon: _syncing
