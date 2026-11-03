@@ -19,11 +19,11 @@ class LocalReceiptParser {
     caseSensitive: false,
   );
   static final _skuStart = RegExp(
-    r'^((?:[A-Z]{1,5}\d[A-Z0-9\-]*|\d{4,12}|\d{2}(?:[\s\-]\d{2,3}){3,6}))\s+(.+)$',
+    r'^((?:[A-Z]{1,5}\d[A-Z0-9\-]*|\d{4,12}|\d{2}(?:[\s\-]\d{1,3}){3,6}))\s+(.+)$',
     caseSensitive: false,
   );
   static final _skuEnd = RegExp(
-    r'^(.+?)\s+((?:[A-Z]{1,5}\d[A-Z0-9\-]*|\d{4,12}|\d{2}(?:[\s\-]\d{2,3}){3,6}))$',
+    r'^(.+?)\s+((?:[A-Z]{1,5}\d[A-Z0-9\-]*|\d{4,12}|\d{2}(?:[\s\-]\d{1,3}){3,6}))$',
     caseSensitive: false,
   );
   static const _knownNames = ['Worldpac', 'AutoZone', 'Peake BMW'];
