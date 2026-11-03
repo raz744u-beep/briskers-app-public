@@ -681,7 +681,22 @@ class _CustomerVehicleFindingsSectionState
         photos: stagedPhotos,
       );
 
-      await _refresh(cacheOnly: true);
+      // The durable local write is complete. A later cache refresh failure
+      // is not a failed save and must not invite a duplicate submission.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Finding saved on this device.')),
+        );
+      }
+      try {
+        await _refresh(cacheOnly: true);
+      } catch (_) {
+        if (mounted) {
+          setState(() {
+            _error = 'Finding saved locally. Reopen Findings to refresh the list.';
+          });
+        }
+      }
 
       if (!BriskersConnectionModeController.instance.forceOffline) {
         unawaited(
