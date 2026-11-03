@@ -14,7 +14,7 @@ void main() {
           opened.add(source);
           return Scaffold(
             appBar: AppBar(title: const Text('TEST receipt editor')),
-            body: Center(child: Text('Source: ' + source.name)),
+            body: Center(child: Text('Source: ${source.name}')),
           );
         },
       ),
