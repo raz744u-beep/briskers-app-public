@@ -9,6 +9,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'lab/shop_lan_lab_auto_sync.dart';
 import 'lab/shop_lan_lab_store.dart';
 import 'lab/shop_lan_lab_transport.dart';
 
@@ -29,10 +30,13 @@ class LanLabScreen extends StatefulWidget {
   State<LanLabScreen> createState() => _LanLabScreenState();
 }
 
-class _LanLabScreenState extends State<LanLabScreen> {
+class _LanLabScreenState extends State<LanLabScreen> with WidgetsBindingObserver {
   final _text = TextEditingController();
   LanLabStore? _store;
   LanLabTransport? _transport;
+  LanLabAutoSyncController? _auto;
+  bool _autoSyncing = false;
+  String _autoStatus = 'Automatic sync initializing...';
   List<LanLabNote> _notes = const [];
   LanLabPairing? _peer;
   String _pairingKey = '';
@@ -44,7 +48,19 @@ class _LanLabScreenState extends State<LanLabScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_initialize());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _auto?.resume();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _auto?.pause();
+    }
   }
 
   Future<String?> _findLocalIp() async {
@@ -119,6 +135,19 @@ class _LanLabScreenState extends State<LanLabScreen> {
             ? 'No private Wi-Fi IP found. Connect both phones to shop Wi-Fi.'
             : 'Listening on ' + ip + ':' + transport.port.toString();
       });
+      final auto = LanLabAutoSyncController(
+        transfer: transport.syncWith,
+        onState: (state) {
+          if (!mounted) return;
+          setState(() {
+            _autoStatus = state.message;
+            _autoSyncing = state.isSyncing;
+          });
+        },
+        onSuccess: _refresh,
+      );
+      _auto = auto;
+      auto.start(peer);
     } catch (e) {
       if (mounted) setState(() => _status = 'Setup failed: ' + e.toString());
     }
@@ -145,6 +174,7 @@ class _LanLabScreenState extends State<LanLabScreen> {
       await store.save(note);
       _text.clear();
       await _refresh();
+      _auto?.requestNow();
       if (mounted) setState(() => _status = 'Test note saved locally.');
     } catch (e) {
       if (mounted) setState(() => _status = 'Save failed: ' + e.toString());
@@ -167,6 +197,7 @@ class _LanLabScreenState extends State<LanLabScreen> {
         'briskers_lan_lab_peer', jsonEncode(peer.toJson()),
       );
       _transport!.updatePairingKey(peer.key);
+      _auto?.setPeer(peer);
       setState(() {
         _pairingKey = peer.key;
         _peer = peer;
@@ -178,88 +209,20 @@ class _LanLabScreenState extends State<LanLabScreen> {
     }
   }
 
-  Future<void> _sync() async {
-    final peer = _peer;
-    final transport = _transport;
-    if (_busy) return;
-    if (peer == null || transport == null) {
-      if (mounted) {
-        setState(() => _status =
-            'Sync is not ready. Scan the other phone QR and reopen this '
-            'test app if its local listener is not available.');
-      }
+  void _sync() {
+    if (_peer == null) {
+      setState(() {
+        _autoStatus = 'Scan the other phone pairing QR first.';
+      });
       return;
     }
-
-    final started = DateTime.now();
-    final endpoint = '${peer.host}:${peer.port}';
-    setState(() {
-      _busy = true;
-      _status = 'Connecting to $endpoint over shop Wi-Fi...';
-    });
-    try {
-      LanLabSyncResult? result;
-      for (var attempt = 1; attempt <= 2; attempt++) {
-        try {
-          result = await transport.syncWith(peer).timeout(
-            const Duration(seconds: 25),
-          );
-          break;
-        } on SocketException catch (error) {
-          if (attempt == 2) rethrow;
-          if (mounted) {
-            setState(() => _status =
-                'Connection interrupted (${error.message}). '
-                'Retrying once with $endpoint...');
-          }
-          await Future<void>.delayed(const Duration(milliseconds: 400));
-        } on TimeoutException {
-          if (attempt == 2) rethrow;
-          if (mounted) {
-            setState(() => _status =
-                'No response yet from $endpoint. Retrying once...');
-          }
-          await Future<void>.delayed(const Duration(milliseconds: 400));
-        }
-      }
-      final synced = result;
-      if (synced == null) throw StateError('Peer returned no sync result');
-      await _refresh();
-      final elapsed = DateTime.now().difference(started).inSeconds;
-      if (mounted) {
-        setState(() => _status =
-            'Sync successful: $endpoint responded in ${elapsed}s. '
-            'Sent ${synced.sent} test notes; imported ${synced.imported} new '
-            'notes; ${synced.totalLocal} saved locally. '
-            '${synced.imported == 0 ? "No new incoming notes." : ""}');
-      }
-    } on TimeoutException {
-      if (mounted) {
-        setState(() => _status =
-            'Sync timeout: $endpoint did not respond in time. '
-            'Keep the other phone app open, check both are on the same Wi-Fi, '
-            'then retry. All notes remain saved locally.');
-      }
-    } on SocketException catch (error) {
-      if (mounted) {
-        setState(() => _status =
-            'Wi-Fi peer unreachable at $endpoint: ${error.message}. '
-            'Check the other app is open and the phone Wi-Fi IP has not '
-            'changed. All notes remain saved locally.');
-      }
-    } catch (error) {
-      if (mounted) {
-        setState(() => _status =
-            'Sync failed with $endpoint: $error. '
-            'All notes remain saved locally; retry after checking pairing.');
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    _auto?.requestNow();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _auto?.dispose();
     _text.dispose();
     final transport = _transport;
     if (transport != null) unawaited(transport.close());
@@ -290,14 +253,16 @@ class _LanLabScreenState extends State<LanLabScreen> {
           ),
           const SizedBox(height: 12),
           Text(_status),
+          const SizedBox(height: 6),
+          Text(_autoStatus, style: const TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           Text('Local device: ' + (_deviceId.isEmpty
               ? 'Not ready' : _deviceId.substring(0, 8))),
           const SizedBox(height: 12),
           const Text('1. On first phone: show pairing QR.',
               style: TextStyle(fontWeight: FontWeight.bold)),
-          const Text('2. On second phone: scan QR, then tap Sync. '
-              'Both phones must be on the same Wi-Fi.'),
+          const Text('2. On second phone: scan QR once. Automatic sync '
+              'then runs while the app is open and both phones share Wi-Fi.'),
           const SizedBox(height: 12),
           if (pairing != null) ...[
             Center(
@@ -340,18 +305,18 @@ class _LanLabScreenState extends State<LanLabScreen> {
           const SizedBox(height: 8),
           FilledButton.icon(
             onPressed: _peer != null && !_busy ? _sync : null,
-            icon: _busy
+            icon: _autoSyncing
                 ? const SizedBox(
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.sync),
-            label: Text(_busy
-                ? 'Synchronizing — check status above'
-                : _peer == null
-                    ? 'Scan QR to enable synchronization'
-                    : 'Sync both directions over shop Wi-Fi'),
+            label: Text(_peer == null
+                ? 'Scan QR to enable synchronization'
+                : _autoSyncing
+                    ? 'Synchronizing automatically...'
+                    : 'Sync Now (optional)'),
           ),
           TextButton.icon(
             onPressed: _store != null && !_busy ? _refresh : null,
@@ -371,7 +336,7 @@ class _LanLabScreenState extends State<LanLabScreen> {
             ),
           const SizedBox(height: 20),
           const Text(
-            'Keep the receiving phone app open during the first test. '
+            'Automatic sync runs while the test app is in the foreground. '
             'If it sleeps or Wi-Fi disconnects, the sending phone retains '
             'its notes and a later sync retries. The pairing QR grants access '
             'to synthetic test notes only; do not share it publicly.',
