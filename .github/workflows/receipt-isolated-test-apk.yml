@@ -38,6 +38,7 @@ jobs:
           flutter test test/offline_receipt_persistence_test.dart
           flutter test test/expense_receipt_entry_contract_test.dart
           flutter test test/offline_receipt_scanner_navigation_test.dart
+          flutter test test/offline_receipt_review_raw_ocr_test.dart
       - name: Create Android project
         run: flutter create --platforms=android --org com.briskers --project-name briskers_app .
       - name: Set distinct isolated package and visible TEST label
