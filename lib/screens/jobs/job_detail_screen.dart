@@ -2540,6 +2540,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     final controller = TextEditingController();
     var includeOnInvoice = false;
     final photos = <XFile>[];
+    String? findingInputError;
 
     final save = await showModalBottomSheet<bool>(
       context: context,
@@ -2574,12 +2575,18 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   const SizedBox(height: 6),
                   TextField(
                     controller: controller,
-                    autofocus: true,
+                    autofocus: false,
                     minLines: 3,
                     maxLines: 7,
+                    onChanged: (_) {
+                      if (findingInputError != null) {
+                        setSheetState(() => findingInputError = null);
+                      }
+                    },
                     decoration: InputDecoration(
                       labelText: tr('finding'),
                       hintText: tr('findingExample'),
+                      errorText: findingInputError,
                     ),
                   ),
                   if (_canSeeFinancial)
@@ -2655,7 +2662,11 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                         foregroundColor: Colors.white,
                       ),
                       onPressed: () {
-                        if (controller.text.trim().isEmpty) return;
+                        if (controller.text.trim().isEmpty) {
+                          setSheetState(() => findingInputError =
+                              'Describe the finding before saving.');
+                          return;
+                        }
                         Navigator.pop(sheetContext, true);
                       },
                       icon: const Icon(Icons.add),

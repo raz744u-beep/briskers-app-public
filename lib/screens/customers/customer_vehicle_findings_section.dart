@@ -449,6 +449,7 @@ class _CustomerVehicleFindingsSectionState
     final controller = TextEditingController();
     final photos = <XFile>[];
     var includeOnInvoice = false;
+    String? findingInputError;
 
     final save = await showModalBottomSheet<bool>(
       context: context,
@@ -490,9 +491,15 @@ class _CustomerVehicleFindingsSectionState
                     autofocus: false,
                     minLines: 3,
                     maxLines: 7,
-                    decoration: const InputDecoration(
+                    onChanged: (_) {
+                      if (findingInputError != null) {
+                        setSheetState(() => findingInputError = null);
+                      }
+                    },
+                    decoration: InputDecoration(
                       labelText: 'Finding',
                       hintText: 'Example: Oil leak visible around valve cover',
+                      errorText: findingInputError,
                     ),
                   ),
                   CheckboxListTile(
@@ -616,7 +623,11 @@ class _CustomerVehicleFindingsSectionState
                         backgroundColor: Colors.teal.shade700,
                       ),
                       onPressed: () {
-                        if (controller.text.trim().isEmpty) return;
+                        if (controller.text.trim().isEmpty) {
+                          setSheetState(() => findingInputError =
+                              'Describe the finding before saving.');
+                          return;
+                        }
                         Navigator.pop(sheetContext, true);
                       },
                       icon: const Icon(Icons.add),
