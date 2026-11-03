@@ -11,6 +11,7 @@ import '../core/employee_role_style.dart';
 import '../core/job_list_options.dart';
 import '../core/module_modal_theme.dart';
 import '../services/briskers_api.dart';
+import '../services/employee_nickname_store.dart';
 import '../services/job_sync_service.dart';
 import '../services/owner_job_retirement_service.dart';
 import '../services/job_summary_visibility.dart';
@@ -75,6 +76,7 @@ class _JobsScreenState extends State<JobsScreen>
   late final LocalDocumentRepository _localDocuments =
       widget.documentRepository ?? LocalDocumentRepository();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
+  final _nicknameStore = EmployeeNicknameStore();
 
   List<Map<String, dynamic>>? _rows;
   List<Map<String, dynamic>> _statuses = const [];
@@ -419,6 +421,24 @@ class _JobsScreenState extends State<JobsScreen>
         _onlineReady = online;
         _error = null;
       });
+      // First paint remains independent of preferences and nickname lookup.
+      unawaited(() async {
+        final aliases = await _nicknameStore.all(businessId);
+        if (aliases.isEmpty || !mounted || !visibility.isCurrent(generation)) {
+          return;
+        }
+        setState(() {
+          _rows = [
+            for (final row in _rows ?? const <Map<String, dynamic>>[])
+              {
+                ...row,
+                if (aliases[row['assigned_employee_id']?.toString()] != null)
+                  'assigned_employee_nickname':
+                      aliases[row['assigned_employee_id']?.toString()],
+              },
+          ];
+        });
+      }());
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !visibility.isCurrent(generation)) return;
         // Defer metadata until the painted Job cards are visible. SQLite uses
@@ -631,6 +651,8 @@ class _JobsScreenState extends State<JobsScreen>
         return;
       }
 
+      employees = await _nicknameStore.decorate(widget.businessId, employees);
+      if (!mounted) return;
       final currentId = job['assigned_employee_id']?.toString();
       final selected = await showModalBottomSheet<String?>(
         context: context,
@@ -664,8 +686,12 @@ class _JobsScreenState extends State<JobsScreen>
                     backgroundColor: roleStyle.color.withValues(alpha: 0.14),
                     child: Icon(roleStyle.icon, color: roleStyle.color),
                   ),
-                  title: Text(employee['name']?.toString() ?? ''),
-                  subtitle: Text(position),
+                  title: Text(EmployeeNicknameStore.displayName(employee)),
+                  subtitle: Text(
+                    employee['nickname']?.toString().isNotEmpty == true
+                        ? (employee['name']?.toString() ?? '') + ' • ' + position
+                        : position,
+                  ),
                   trailing: id == currentId
                       ? const Icon(Icons.check, color: BriskersColors.jobs)
                       : null,
@@ -701,6 +727,7 @@ class _JobsScreenState extends State<JobsScreen>
       // already-authorized Job card; don't await a large sorted list query.
       _patchQuickAdminCard(job['id'].toString(), {
         'assigned_employee': selectedEmployee?['name'],
+        'assigned_employee_nickname': selectedEmployee?['nickname'],
         'assigned_employee_id': selected.isEmpty ? null : selected,
         'assigned_position': selectedEmployee?['position_name'],
         'is_unassigned': selected.isEmpty,

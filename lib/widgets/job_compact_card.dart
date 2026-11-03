@@ -56,7 +56,10 @@ class JobCompactCard extends StatelessWidget {
             ? job['assigned_position'].toString().trim()
             : 'Employee';
     final roleStyle = employeeRoleStyle(position);
-    final firstName = employee.isEmpty ? 'Unassigned' : _firstName(employee);
+    final nickname = job['assigned_employee_nickname']?.toString().trim() ?? '';
+    final firstName = nickname.isNotEmpty
+        ? nickname
+        : (employee.isEmpty ? 'Unassigned' : _firstName(employee));
     final findings =
         int.tryParse(job['open_findings']?.toString() ?? '') ?? 0;
     final requests =
