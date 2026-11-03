@@ -2164,6 +2164,21 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+              // Restore the circular document/status picture used by the
+              // approved Invoice/Estimate card design. This visual indicator
+              // is not a substitute for separately saved attachment photos.
+              CircleAvatar(
+                radius: 21,
+                backgroundColor: color.withValues(alpha: 0.13),
+                child: Icon(
+                  _estimate
+                      ? Icons.request_quote_outlined
+                      : Icons.receipt_long_outlined,
+                  color: color,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
