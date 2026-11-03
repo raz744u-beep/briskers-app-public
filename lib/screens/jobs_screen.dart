@@ -7,6 +7,7 @@ import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
 import '../core/job_status_style.dart';
+import '../core/employee_role_style.dart';
 import '../core/job_list_options.dart';
 import '../core/module_modal_theme.dart';
 import '../services/briskers_api.dart';
@@ -655,12 +656,16 @@ class _JobsScreenState extends State<JobsScreen>
               const Divider(),
               ...employees.map((employee) {
                 final id = employee['id']?.toString() ?? '';
+                final position =
+                    employee['position_name']?.toString() ?? 'Employee';
+                final roleStyle = employeeRoleStyle(position);
                 return ListTile(
-                  leading: const Icon(Icons.person_outline),
-                  title: Text(employee['name']?.toString() ?? ''),
-                  subtitle: Text(
-                    employee['position_name']?.toString() ?? 'Employee',
+                  leading: CircleAvatar(
+                    backgroundColor: roleStyle.color.withValues(alpha: 0.14),
+                    child: Icon(roleStyle.icon, color: roleStyle.color),
                   ),
+                  title: Text(employee['name']?.toString() ?? ''),
+                  subtitle: Text(position),
                   trailing: id == currentId
                       ? const Icon(Icons.check, color: BriskersColors.jobs)
                       : null,
