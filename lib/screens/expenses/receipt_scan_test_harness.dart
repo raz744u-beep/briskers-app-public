@@ -171,11 +171,11 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Briskers Receipt TEST',
+      title: 'Briskers Receipt TEST 3',
       debugShowCheckedModeBanner: true,
       theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.blueGrey),
       home: Builder(builder: (routeContext) => Scaffold(
-        appBar: AppBar(title: const Text('Briskers Receipt TEST')),
+        appBar: AppBar(title: const Text('Briskers Receipt TEST 3')),
         body: RefreshIndicator(
           onRefresh: _reload,
           child: ListView(
