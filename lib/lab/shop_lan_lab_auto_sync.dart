@@ -171,8 +171,8 @@ class LanLabAutoSyncController {
         } else {
           final base = interval.inMilliseconds;
           final ceiling = maxRetry.inMilliseconds;
-          final shift = (_failures - 1).clamp(0, 5);
-          final millis = (base * (1 << shift)).clamp(base, ceiling);
+          final shift = (_failures - 1).clamp(0, 5).toInt();
+          final millis = (base * (1 << shift)).clamp(base, ceiling).toInt();
           _schedule(Duration(milliseconds: millis));
         }
       }
