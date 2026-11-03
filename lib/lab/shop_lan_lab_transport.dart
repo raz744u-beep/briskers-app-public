@@ -163,11 +163,15 @@ class LanLabTransport {
     required String pairingKey,
     required this.deviceId,
     this.onRemoteChanged,
+    this.preferredPort = 48572,
   }) : _cipher = LanLabCipher(pairingKey);
 
   final LanLabStore store;
   final String deviceId;
   final Future<void> Function()? onRemoteChanged;
+  /// TEST #17's preferred LAN port, distinct from TEST #15/#16's 48571.
+  /// If occupied, the operating system supplies a free temporary port.
+  final int preferredPort;
   LanLabCipher _cipher;
   HttpServer? _server;
 
@@ -179,8 +183,16 @@ class LanLabTransport {
 
   Future<void> start() async {
     if (_server != null) return;
-    // A stable port keeps a QR pairing usable after a phone restarts.
-    _server = await HttpServer.bind(InternetAddress.anyIPv4, 48571);
+    // TEST #15/#16 use port 48571. Prefer a separate listener for TEST #17.
+    // If another process has the preferred port, avoid a fatal setup error.
+    // The actual bound port is shown in the QR pairing payload.
+    try {
+      _server = await HttpServer.bind(InternetAddress.anyIPv4, preferredPort);
+    } on SocketException catch (error) {
+      // EADDRINUSE (errno 98): an older test/other app owns this port.
+      if (error.osError?.errorCode != 98) rethrow;
+      _server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
+    }
     _server!.listen((request) { unawaited(_accept(request)); });
   }
 
