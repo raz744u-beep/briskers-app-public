@@ -25,12 +25,15 @@ class FinancialSummaryRow extends StatelessWidget {
       case FinancialSummaryTone.subtotal:
         background = dark ? const Color(0xFF27374A) : const Color(0xFFE6EDF5);
         foreground = dark ? const Color(0xFFE8F0FA) : const Color(0xFF172A46);
+        break;
       case FinancialSummaryTone.total:
         background = dark ? const Color(0xFF183F2C) : const Color(0xFFE2F6E4);
         foreground = dark ? const Color(0xFFB2EBC4) : const Color(0xFF086B3E);
+        break;
       case FinancialSummaryTone.balanceDue:
         background = dark ? const Color(0xFF4D252B) : const Color(0xFFFBE5E5);
         foreground = dark ? const Color(0xFFFFB8B8) : const Color(0xFFAF2027);
+        break;
     }
 
     return Container(
