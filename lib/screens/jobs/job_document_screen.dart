@@ -1492,18 +1492,50 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               final vendor = (item['vendor'] ?? item['counterparty'] ?? 'Expense').toString();
               final income = item['direction']?.toString() == 'income';
               final color = income ? const Color(0xFF169B62) : BriskersColors.expenses;
+              // The full-screen Invoice Expenses tab previously omitted
+              // the receipt picture count shown by the invoice's expense
+              // action sheet. Display only documented metadata; do not imply
+              // any remote photograph has already been downloaded offline.
+              final receiptCount = int.tryParse(
+                item['receipt_count']?.toString() ?? '',
+              ) ?? (item['attachments'] is List
+                  ? (item['attachments'] as List).length
+                  : 0);
               return Card(child: ListTile(
                 leading: Icon(income ? Icons.south_west : Icons.north_east, color: color),
                 title: Text(vendor, maxLines: 1, overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 16.5,
                     fontWeight: FontWeight.w800)),
                 subtitle: Text(item['transaction_date']?.toString() ?? ''),
-                // Match the main Expenses & Income card amount style.
-                trailing: Text('${income ? '+' : '-'}${_money(item['amount'])}',
-                  maxLines: 1, overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.end,
-                  style: TextStyle(fontSize: 17.5,
-                    fontWeight: FontWeight.w900, color: color)),
+                // Match the main Expenses & Income amount style, and keep
+                // receipt photo metadata visible on the invoice's Expenses tab.
+                trailing: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('${income ? '+' : '-'}${_money(item['amount'])}',
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                      style: TextStyle(fontSize: 17.5,
+                        fontWeight: FontWeight.w900, color: color)),
+                    if (receiptCount > 0) ...[
+                      const SizedBox(height: 3),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.photo_outlined, color: color, size: 16),
+                          const SizedBox(width: 3),
+                          Text('$receiptCount',
+                            style: TextStyle(
+                              color: color,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                            )),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
                 onTap: id.isEmpty ? null : () async {
                   await Navigator.push<void>(context, MaterialPageRoute(
                     builder: (_) => ExpenseDetailScreen(
