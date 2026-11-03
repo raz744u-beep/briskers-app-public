@@ -305,8 +305,13 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     if (widget.autoScanReceipt && !_autoScanLaunched && !_editing && !_copying) {
       _autoScanLaunched = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _takeReceiptPhoto(
-          scanWithAi: true, source: widget.initialReceiptSource);
+        if (!mounted) return;
+        if (widget.initialReceiptSource == ImageSource.camera) {
+          _takeReceiptPhoto(scanWithAi: true);
+        } else {
+          _takeReceiptPhotoFromSource(
+            scanWithAi: true, source: widget.initialReceiptSource);
+        }
       });
     }
   }
@@ -1015,7 +1020,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     if (value != null && mounted) setState(() => _endDate = value);
   }
 
-  Future<void> _takeReceiptPhoto({
+  // Preserve the existing manual-photo API. Only the isolated TEST entry
+  // point needs an explicit gallery source.
+  Future<void> _takeReceiptPhoto({bool scanWithAi = false}) =>
+      _takeReceiptPhotoFromSource(scanWithAi: scanWithAi);
+
+  Future<void> _takeReceiptPhotoFromSource({
     bool scanWithAi = false,
     ImageSource source = ImageSource.camera,
   }) async {
