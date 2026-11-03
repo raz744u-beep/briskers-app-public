@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/diagnostics_service.dart';
 import '../../services/functional_diagnostics_service.dart';
+import '../../services/local_invoice_link_audit.dart';
 import '../../widgets/briskers_page_header.dart';
 
 class DiagnosticsScreen extends StatefulWidget {
@@ -32,6 +33,10 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
   bool _functionalRunning = false;
   DiagnosticsReport? _report;
   FunctionalDiagnosticsReport? _functionalReport;
+  final _invoiceLinkAudit = LocalInvoiceLinkAudit();
+  Map<String, dynamic>? _invoiceLinkReport;
+  String? _invoiceLinkError;
+  bool _invoiceLinkRunning = false;
 
   Future<void> _run({required bool full}) async {
     if (_running || _functionalRunning || widget.roleCode != 'owner') return;
@@ -58,6 +63,61 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     } finally {
       if (mounted) setState(() => _functionalRunning = false);
     }
+  }
+
+  Future<void> _inspectJ18Invoice() async {
+    if (widget.roleCode != 'owner' ||
+        _invoiceLinkRunning || _running || _functionalRunning) {
+      return;
+    }
+    setState(() {
+      _invoiceLinkRunning = true;
+      _invoiceLinkError = null;
+      _invoiceLinkReport = null;
+    });
+    try {
+      final report = await _invoiceLinkAudit.inspect(
+        businessId: widget.businessId,
+        jobNumber: 'J-18',
+        invoiceNumber: '6346',
+      );
+      if (mounted) setState(() => _invoiceLinkReport = report);
+    } catch (error) {
+      if (mounted) setState(() => _invoiceLinkError = error.toString());
+    } finally {
+      if (mounted) setState(() => _invoiceLinkRunning = false);
+    }
+  }
+
+  String _invoiceLinkSummary(Map<String, dynamic> report) {
+    final jobs = List<Map<String, dynamic>>.from(
+      report['target_jobs'] as List? ?? const [],
+    );
+    final refs = List<Map<String, dynamic>>.from(
+      report['references'] as List? ?? const [],
+    );
+    return [
+      'READ ONLY — J-18 / Invoice #6346',
+      'Matching local Jobs: ${jobs.length}',
+      'Matching invoice-number references: ${refs.length}',
+      'Ambiguous: ${report['ambiguous'] == true ? 'YES' : 'NO'}',
+      for (final job in jobs)
+        'Job ID: ${job['job_id']}; number: ${job['job_number']}',
+      for (final row in refs)
+        'Document ID: ${row['document_id']}; linked Job ID: '
+        '${row['job_id']}; linked Job number: ${row['linked_job_number']}; '
+        'matches J-18: ${row['matches_target_job']}',
+    ].join('\n');
+  }
+
+  Future<void> _copyInvoiceLinkAudit() async {
+    final report = _invoiceLinkReport;
+    if (widget.roleCode != 'owner' || report == null) return;
+    await Clipboard.setData(ClipboardData(text: _invoiceLinkSummary(report)));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Private local link report copied.')),
+    );
   }
 
   Future<void> _copyReport() async {
@@ -230,6 +290,61 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                     const LinearProgressIndicator(),
                     const SizedBox(height: 6),
                     const Text('Running health diagnostics…'),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.manage_search, color: BriskersColors.settings),
+                      SizedBox(width: 8),
+                      Expanded(child: Text(
+                        'J-18 / Invoice #6346 Link Audit',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      )),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Read-only inspection of saved records on this phone. '
+                    'Checks exact IDs and does not fix, delete or renumber '
+                    'invoices. No online request is made.',
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: _invoiceLinkRunning || _running ||
+                            _functionalRunning ? null : _inspectJ18Invoice,
+                    icon: const Icon(Icons.fact_check_outlined),
+                    label: const Text('Inspect local J-18 link'),
+                  ),
+                  if (_invoiceLinkRunning) ...[
+                    const SizedBox(height: 8),
+                    const LinearProgressIndicator(),
+                  ],
+                  if (_invoiceLinkError != null)
+                    Text(_invoiceLinkError!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        )),
+                  if (_invoiceLinkReport != null) ...[
+                    const SizedBox(height: 10),
+                    SelectableText(_invoiceLinkSummary(_invoiceLinkReport!)),
+                    TextButton.icon(
+                      onPressed: _copyInvoiceLinkAudit,
+                      icon: const Icon(Icons.copy_outlined),
+                      label: const Text('Copy private report'),
+                    ),
                   ],
                 ],
               ),
