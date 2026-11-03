@@ -181,20 +181,77 @@ class _LanLabScreenState extends State<LanLabScreen> {
   Future<void> _sync() async {
     final peer = _peer;
     final transport = _transport;
-    if (peer == null || transport == null) return;
-    setState(() => _busy = true);
-    try {
-      final result = await transport.syncWith(peer);
-      await _refresh();
+    if (_busy) return;
+    if (peer == null || transport == null) {
       if (mounted) {
-        setState(() => _status = 'Sync confirmed: sent ' +
-            result.sent.toString() + ' synthetic notes; imported ' +
-            result.imported.toString() + '; total saved ' +
-            result.totalLocal.toString() + '.');
+        setState(() => _status =
+            'Sync is not ready. Scan the other phone QR and reopen this '
+            'test app if its local listener is not available.');
       }
-    } catch (e) {
-      if (mounted) setState(() => _status = 'Sync failed: ' +
-          e.toString() + '. Notes remain stored locally; retry later.');
+      return;
+    }
+
+    final started = DateTime.now();
+    final endpoint = '${peer.host}:${peer.port}';
+    setState(() {
+      _busy = true;
+      _status = 'Connecting to $endpoint over shop Wi-Fi...';
+    });
+    try {
+      LanLabSyncResult? result;
+      for (var attempt = 1; attempt <= 2; attempt++) {
+        try {
+          result = await transport.syncWith(peer).timeout(
+            const Duration(seconds: 25),
+          );
+          break;
+        } on SocketException catch (error) {
+          if (attempt == 2) rethrow;
+          if (mounted) {
+            setState(() => _status =
+                'Connection interrupted (${error.message}). '
+                'Retrying once with $endpoint...');
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 400));
+        } on TimeoutException {
+          if (attempt == 2) rethrow;
+          if (mounted) {
+            setState(() => _status =
+                'No response yet from $endpoint. Retrying once...');
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 400));
+        }
+      }
+      if (result == null) throw StateError('Peer returned no sync result');
+      await _refresh();
+      final elapsed = DateTime.now().difference(started).inSeconds;
+      if (mounted) {
+        setState(() => _status =
+            'Sync successful: $endpoint responded in ${elapsed}s. '
+            'Sent ${result!.sent} test notes; imported ${result.imported} new '
+            'notes; ${result.totalLocal} saved locally. '
+            '${result.imported == 0 ? "No new incoming notes." : ""}');
+      }
+    } on TimeoutException {
+      if (mounted) {
+        setState(() => _status =
+            'Sync timeout: $endpoint did not respond in time. '
+            'Keep the other phone app open, check both are on the same Wi-Fi, '
+            'then retry. All notes remain saved locally.');
+      }
+    } on SocketException catch (error) {
+      if (mounted) {
+        setState(() => _status =
+            'Wi-Fi peer unreachable at $endpoint: ${error.message}. '
+            'Check the other app is open and the phone Wi-Fi IP has not '
+            'changed. All notes remain saved locally.');
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _status =
+            'Sync failed with $endpoint: $error. '
+            'All notes remain saved locally; retry after checking pairing.');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -282,8 +339,18 @@ class _LanLabScreenState extends State<LanLabScreen> {
           const SizedBox(height: 8),
           FilledButton.icon(
             onPressed: _peer != null && !_busy ? _sync : null,
-            icon: const Icon(Icons.sync),
-            label: const Text('Sync both directions over shop Wi-Fi'),
+            icon: _busy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.sync),
+            label: Text(_busy
+                ? 'Synchronizing — check status above'
+                : _peer == null
+                    ? 'Scan QR to enable synchronization'
+                    : 'Sync both directions over shop Wi-Fi'),
           ),
           TextButton.icon(
             onPressed: _store != null && !_busy ? _refresh : null,
