@@ -12,6 +12,9 @@ import '../../core/briskers_i18n.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/offline_financial_write_service.dart';
+import '../../services/on_device_receipt_reader.dart';
+import '../../services/local_receipt_parser.dart';
+import 'receipt_review_sheet.dart';
 import 'expense_receipt_attachments.dart';
 
 class ExpenseEntryScreen extends StatefulWidget {
@@ -313,6 +316,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     }
 
     if (forceOffline) {
+      if (widget.autoScanReceipt && !_autoScanLaunched && !_editing && !_copying) {
+        _autoScanLaunched = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _addReceipts(scanWithAi: true);
+        });
+      }
       if (!localShown && mounted) {
         setState(() {
           _loading = false;
@@ -345,7 +354,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
           !_copying) {
         _autoScanLaunched = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _takeReceiptPhoto(scanWithAi: true);
+          if (mounted) _addReceipts(scanWithAi: true);
         });
       }
     } catch (error) {
@@ -398,43 +407,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     _amountController.text = amount.toStringAsFixed(2);
   }
 
-  String _receiptNote(Map<String, dynamic> extraction, {num? finalAmount}) {
-    final rawItems = extraction['items'];
-    final descriptions = <String>[];
-    if (rawItems is List) {
-      for (final raw in rawItems) {
-        if (raw is! Map) continue;
-        final description = raw['description']?.toString().trim() ?? '';
-        if (description.isNotEmpty && !descriptions.contains(description)) {
-          descriptions.add(description);
-        }
-        if (descriptions.length >= 10) break;
-      }
-    }
-
-    final vendor = extraction['vendor_name']?.toString().trim() ?? '';
-    final invoice =
-        extraction['vendor_invoice_number']?.toString().trim() ?? '';
-    final rawDate = extraction['receipt_date']?.toString().trim() ?? '';
-    String dateLabel = '';
-    final parsedDate = DateTime.tryParse(rawDate);
-    if (parsedDate != null) {
-      dateLabel =
-          '${parsedDate.month}/${parsedDate.day}/${parsedDate.year.toString().substring(2)}';
-    }
-    final visibleTotal = _numValue(extraction['receipt_total']);
-    final amount = finalAmount ?? (visibleTotal > 0 ? visibleTotal : null);
-
-    return <String>[
-      if (descriptions.isNotEmpty)
-        descriptions.join(', ')
-      else if (vendor.isNotEmpty)
-        vendor,
-      if (invoice.isNotEmpty) 'Inv. $invoice',
-      if (dateLabel.isNotEmpty) dateLabel,
-      if (amount != null && amount > 0) '\$${amount.toStringAsFixed(2)}',
-    ].join(' — ');
-  }
+  String _receiptNote(Map<String, dynamic> extraction, {num? finalAmount}) =>
+      LocalReceiptParser.formatDescription(extraction, finalAmount: finalAmount);
 
   void _mergeReceiptNote(String summary) {
     final clean = summary.trim();
@@ -449,120 +423,86 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
 
   Future<void> _readReceipt(XFile file) async {
     if (_readingReceipt) return;
-    if (BriskersConnectionModeController.instance.forceOffline) {
-      if (mounted) {
-        setState(() {
-          _receiptReadMessage = 'Receipt saved locally. Automatic reading will be available when online.';
-          _error = null;
-        });
-      }
-      return;
-    }
     setState(() {
       _readingReceipt = true;
-      _receiptReadMessage = 'Reading receipt...';
+      _receiptReadMessage = 'Reading locally on this phone…';
       _error = null;
     });
 
     try {
-      final bytes = await file.readAsBytes();
-      final result = await _api.parseReceiptImage(
-        widget.businessId,
-        bytes: bytes,
-        mimeType: _mimeType(file.name),
-        vendorId: _counterpartyId,
+      // No Briskers sync-mode or Supabase dependency.
+      final extracted = await const OnDeviceReceiptReader().recognize(
+        file, vendors: _counterparties,
       );
-      final rawExtraction = result['extraction'];
-      if (rawExtraction is! Map) {
-        throw Exception('The receipt reader returned no usable data.');
-      }
-      final extraction = Map<String, dynamic>.from(rawExtraction);
-      final vendorName = extraction['vendor_name']?.toString().trim() ?? '';
-      final matched = vendorName.isEmpty
-          ? null
-          : _matchCounterparty(vendorName);
-
-      final visibleTotal = _numValue(extraction['receipt_total']);
-      final visibleSubtotal = _numValue(extraction['subtotal']);
-      final visibleSurcharge = _numValue(extraction['surcharge_percent']);
-      final visibleSurchargeAmount = _numValue(extraction['surcharge_amount']);
-
-      num? baseAmount;
-      num surchargePercent = 0;
-      var applySurcharge = false;
-
-      if (visibleSurcharge > 0) {
-        surchargePercent = visibleSurcharge;
-        applySurcharge = true;
-        if (visibleSubtotal > 0) {
-          baseAmount = visibleSubtotal;
-        } else if (visibleTotal > 0) {
-          baseAmount = visibleTotal / (1 + visibleSurcharge / 100);
-        }
-      } else if (visibleSurchargeAmount > 0 && visibleTotal > 0) {
-        baseAmount = visibleSubtotal > 0
-            ? visibleSubtotal
-            : visibleTotal - visibleSurchargeAmount;
-        if (baseAmount > 0) {
-          surchargePercent = (visibleSurchargeAmount / baseAmount) * 100;
-          applySurcharge = true;
-        }
-      } else {
-        baseAmount = visibleTotal > 0
-            ? visibleTotal
-            : (visibleSubtotal > 0 ? visibleSubtotal : null);
-        if (matched != null) {
-          surchargePercent = _numValue(matched['default_surcharge_percent']);
-          applySurcharge = surchargePercent > 0;
-        }
-      }
-
-      final receiptDate = DateTime.tryParse(
-        extraction['receipt_date']?.toString() ?? '',
-      );
-
       if (!mounted) return;
       setState(() {
-        _receiptExtraction = extraction;
-        _receiptBaseAmount = baseAmount;
-        _receiptSurchargePercent = surchargePercent;
-        _applyReceiptSurcharge = applySurcharge;
-
+        _readingReceipt = false;
+        _receiptReadMessage = 'Local OCR complete. Review the fields before applying.';
+      });
+      final reviewed = await showModalBottomSheet<Map<String, dynamic>>(
+        context: context,
+        useSafeArea: true,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (context) => ReceiptReviewSheet(extraction: extracted),
+      );
+      if (!mounted) return;
+      if (reviewed == null) {
+        setState(() => _receiptReadMessage =
+            'Photo attached. Recognition was not applied.');
+        return;
+      }
+      final vendorName = reviewed['vendor_name']?.toString().trim() ?? '';
+      final matched = vendorName.isEmpty
+          ? null : _matchCounterparty(vendorName);
+      final total = _numValue(reviewed['receipt_total']);
+      final subtotal = _numValue(reviewed['subtotal']);
+      // Printed TOTAL already includes taxes/fees. Never silently add a
+      // vendor default surcharge a second time.
+      final num? base = total > 0 ? total :
+          (subtotal > 0 ? subtotal : null);
+      final receiptDate = DateTime.tryParse(
+        reviewed['receipt_date']?.toString() ?? '',
+      );
+      setState(() {
+        _receiptExtraction = reviewed;
+        _receiptBaseAmount = base;
+        _receiptSurchargePercent = 0;
+        _applyReceiptSurcharge = false;
         if (matched != null) {
           final id = matched['id']?.toString();
           _counterpartyId = (id ?? '').isEmpty ? null : id;
           _counterpartyController.text =
               matched['name']?.toString() ?? vendorName;
-          final defaultCategoryId = matched['default_category_id']?.toString();
+          final defaultCategoryId =
+              matched['default_category_id']?.toString();
           if (_direction == 'expense' &&
               (defaultCategoryId ?? '').isNotEmpty &&
-              _categories.any(
-                (category) => category['id']?.toString() == defaultCategoryId,
-              )) {
+              _categories.any((category) =>
+                  category['id']?.toString() == defaultCategoryId)) {
             _categoryId = defaultCategoryId;
           }
         } else if (vendorName.isNotEmpty) {
           _counterpartyId = null;
           _counterpartyController.text = vendorName;
         }
-
-        if (receiptDate != null) {
-          _date = receiptDate;
-        }
-
-        _setAmountFromReceipt();
-        final finalAmount = num.tryParse(_amountController.text.trim());
-        _mergeReceiptNote(_receiptNote(extraction, finalAmount: finalAmount));
-        _receiptReadMessage = tr('receiptReadReview');
+        if (receiptDate != null) _date = receiptDate;
+        if (base != null && base > 0) _setAmountFromReceipt();
+        final amount = num.tryParse(_amountController.text.trim());
+        _remarksController.text = _receiptNote(reviewed, finalAmount: amount);
+        _receiptReadMessage = 'OCR read locally • Reviewed • Not yet saved';
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _receiptReadMessage = 'Could not read this receipt automatically. You can still enter it manually.';
+        _receiptReadMessage =
+          'Local OCR could not read this photo. It remains attached; enter details manually.';
         _error = error.toString();
       });
     } finally {
-      if (mounted) setState(() => _readingReceipt = false);
+      if (mounted && _readingReceipt) {
+        setState(() => _readingReceipt = false);
+      }
     }
   }
 
@@ -922,11 +862,11 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     _counterpartyFocusNode.unfocus();
     final file = await _picker.pickImage(
       source: ImageSource.camera,
-      imageQuality: 82,
-      maxWidth: 2200,
     );
     if (file != null && mounted) {
-      setState(() => _receipts = [..._receipts, file]);
+      setState(() => _receipts = [
+        ..._receipts.where((item) => item.path != file.path), file,
+      ]);
       if (scanWithAi) await _readReceipt(file);
     }
   }
@@ -963,12 +903,15 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     if (source == null) return;
 
     if (source == ImageSource.gallery) {
-      final files = await _picker.pickMultiImage(
-        imageQuality: 82,
-        maxWidth: 2200,
-      );
+      final files = await _picker.pickMultiImage();
       if (files.isNotEmpty && mounted) {
-        setState(() => _receipts = [..._receipts, ...files]);
+        setState(() {
+          final byPath = <String, XFile>{
+            for (final receipt in _receipts) receipt.path: receipt,
+            for (final receipt in files) receipt.path: receipt,
+          };
+          _receipts = byPath.values.toList();
+        });
         if (scanWithAi) await _readReceipt(files.first);
       }
     } else {
@@ -1023,7 +966,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       // Recurring rules and AI extraction currently need additional online
       // operations; preserve those workflows until their queue is supported.
       final localFirst = BriskersConnectionModeController.instance.forceOffline ||
-          (!_repeat && _recurringRuleId == null && _receiptExtraction == null);
+          (!_repeat && _recurringRuleId == null);
       if (localFirst) {
         if (_repeat) {
           setState(() {
@@ -1064,6 +1007,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                 : _remarksController.text.trim(),
             contextLabel: _contextLabel,
             receipts: stagedReceipts,
+            receiptExtraction: _receiptExtraction,
           );
         } else {
           await _offlineFinancial.createLocalTransaction(
@@ -1086,6 +1030,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                 : _remarksController.text.trim(),
             contextLabel: _contextLabel,
             receipts: stagedReceipts,
+            receiptExtraction: _receiptExtraction,
           );
         }
 
