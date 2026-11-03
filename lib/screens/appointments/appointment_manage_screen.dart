@@ -9,6 +9,9 @@ import '../../core/connection_mode.dart';
 import '../../services/appointment_sync_service.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/briskers_api.dart';
+import '../../services/offline_job_admin_service.dart';
+import '../../services/employee_nickname_store.dart';
+import '../../core/employee_role_style.dart';
 
 class AppointmentManageScreen extends StatefulWidget {
   const AppointmentManageScreen({
@@ -34,6 +37,7 @@ class AppointmentManageScreen extends StatefulWidget {
 
 class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   BriskersApi get _api => widget.api ?? const BriskersApi();
+  final _offlineEmployees = OfflineJobAdminService();
   late final AppointmentSyncService _sync = AppointmentSyncService();
   LocalCustomerRepository get _localCustomers =>
       widget.localCustomers ?? LocalCustomerRepository();
@@ -129,10 +133,11 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
 
   Future<void> _loadEmployeesInBackground() async {
     try {
-      final rows = List<Map<String, dynamic>>.from(
-        await _api.assignableEmployees(widget.businessId)
-            .timeout(const Duration(seconds: 8)),
-      );
+      var rows = await _offlineEmployees.cachedEmployees(widget.businessId);
+      if (mounted && rows.isNotEmpty) setState(() => _employees = rows);
+      if (BriskersConnectionModeController.instance.forceOffline) return;
+      rows = await _offlineEmployees.refreshEmployees(widget.businessId)
+          .timeout(const Duration(seconds: 8));
       if (!mounted) return;
       final selected = _employeeId;
       if (selected != null &&
@@ -142,7 +147,7 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
       }
       setState(() => _employees = rows);
     } catch (_) {
-      // The optional mechanic list may be unavailable; never block scheduling.
+      // A failed optional mechanic refresh never blocks editing.
     }
   }
 
@@ -529,17 +534,28 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                 value: null,
                 child: Text('Unassigned'),
               ),
-              ..._employees.map(
-                (employee) => DropdownMenuItem<String?>(
+              ..._employees.map((employee) {
+                final position =
+                    employee['position_name']?.toString() ?? 'Employee';
+                final style = employeeRoleStyle(position);
+                return DropdownMenuItem<String?>(
                   value: employee['id']?.toString(),
-                  child: Text(
-                    '${employee['name'] ?? ''} — '
-                    '${employee['position_name'] ?? 'Employee'}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  child: Row(
+                    children: [
+                      Icon(style.icon, color: style.color, size: 19),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          EmployeeNicknameStore.displayName(employee) +
+                              ' — ' + position,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ),
+                );
+              }),
             ],
             onChanged: (value) => setState(() => _employeeId = value),
           ),
