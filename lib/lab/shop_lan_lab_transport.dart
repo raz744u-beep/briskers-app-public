@@ -193,7 +193,8 @@ class LanLabTransport {
       // same-process test the Dart socket runtime may instead report the
       // shared-bind requirement. Both mean the preferred port is occupied.
       final occupied = error.osError?.errorCode == 98 ||
-          error.message.contains('shared flag to bind') ||
+          (error.osError?.message.contains('shared flag to bind') ?? false) ||
+          (error.osError?.message.contains('Address already in use') ?? false) ||
           error.message.contains('Address already in use');
       if (!occupied) rethrow;
       _server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
