@@ -1825,9 +1825,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                   style: TextStyle(fontWeight: FontWeight.w800)),
             )
           : null,
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
+      // Keep the Expenses page mounted and visible while the local first
+      // page hydrates. Blocking the whole body on a spinner looks blank on
+      // some Android startup paths and prevents immediate navigation.
+      body: RefreshIndicator(
               onRefresh: () => _load(forceTotals: true),
               child: ListView(
                 controller: _scrollController,
@@ -2245,7 +2246,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                   : '$unverifiedCount income receipt${unverifiedCount == 1 ? '' : 's'} need${unverifiedCount == 1 ? 's' : ''} verification. Gross amounts remain shown for those rows; no processing fee is assumed.',
                       ),
                     ),
-                  if (visible.isEmpty)
+                  if (_loading && visible.isEmpty)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(20),
+                        child: Text('Opening saved transactions on this device…'),
+                      ),
+                    )
+                  else if (visible.isEmpty)
                     const Card(
                       child: Padding(
                         padding: EdgeInsets.all(20),
