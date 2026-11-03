@@ -10,7 +10,15 @@ import 'expense_entry_screen.dart';
 /// Entry point only for -DBRISKERS_RECEIPT_TEST=true builds.
 /// Uses a unique business ID and separate Android application package.
 class ReceiptScanTestHarness extends StatefulWidget {
-  const ReceiptScanTestHarness({super.key});
+  const ReceiptScanTestHarness({
+    super.key,
+    this.testEditorBuilder,
+    this.testOnlySkipDatabase = false,
+  });
+
+  /// Test seam: keep navigation behavior real, mock only the destination.
+  final Widget Function(ImageSource source)? testEditorBuilder;
+  final bool testOnlySkipDatabase;
 
   @override
   State<ReceiptScanTestHarness> createState() => _ReceiptScanTestHarnessState();
@@ -35,7 +43,7 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
   @override
   void initState() {
     super.initState();
-    _reload();
+    if (!widget.testOnlySkipDatabase) _reload();
   }
 
   Future<void> _reload() async {
@@ -62,7 +70,7 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
     });
   }
 
-  Future<void> _scan(ImageSource source) async {
+  Future<void> _scan(ImageSource source, BuildContext routeContext) async {
     if (_openingScanner) return;
     setState(() {
       _openingScanner = true;
@@ -72,18 +80,21 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
       _error = null;
     });
     try {
-      await Navigator.of(context).push<bool>(
+      // The State context is above the MaterialApp. Use a context created
+      // inside its home Builder so Navigator.of finds the actual app route.
+      await Navigator.of(routeContext).push<bool>(
         MaterialPageRoute<bool>(
-          builder: (_) => ExpenseEntryScreen(
-            businessId: business,
-            autoScanReceipt: true,
-            initialReceiptSource: source,
-          ),
+          builder: (_) => widget.testEditorBuilder?.call(source) ??
+              ExpenseEntryScreen(
+                businessId: business,
+                autoScanReceipt: true,
+                initialReceiptSource: source,
+              ),
         ),
       );
       if (!mounted) return;
       setState(() => _scanStage = 'Returned from receipt editor');
-      await _reload();
+      if (!widget.testOnlySkipDatabase) await _reload();
     } catch (error, stack) {
       debugPrint('Receipt test navigation failed: $error\n$stack');
       if (mounted) {
@@ -97,7 +108,7 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
     }
   }
 
-  Future<void> _open(Map<String, dynamic> row) async {
+  Future<void> _open(Map<String, dynamic> row, BuildContext routeContext) async {
     final id = row['id']?.toString();
     if (id == null) return;
     final detail = await _cache.loadTransactionDetail(business, id);
@@ -107,7 +118,7 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
     final items = detail?['receipt_items'] is List
         ? detail!['receipt_items'] as List : <dynamic>[];
     await showModalBottomSheet<void>(
-      context: context,
+      context: routeContext,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (_) => SafeArea(
@@ -163,7 +174,7 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
       title: 'Briskers Receipt TEST',
       debugShowCheckedModeBanner: true,
       theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.blueGrey),
-      home: Scaffold(
+      home: Builder(builder: (routeContext) => Scaffold(
         appBar: AppBar(title: const Text('Briskers Receipt TEST')),
         body: RefreshIndicator(
           onRefresh: _reload,
@@ -205,13 +216,13 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
                         const SizedBox(height: 8),
                         OutlinedButton.icon(
                           onPressed: _openingScanner
-                              ? null : () => _scan(ImageSource.camera),
+                              ? null : () => _scan(ImageSource.camera, routeContext),
                           icon: const Icon(Icons.camera_alt_outlined),
                           label: const Text('Take receipt photo'),
                         ),
                         OutlinedButton.icon(
                           onPressed: _openingScanner
-                              ? null : () => _scan(ImageSource.gallery),
+                              ? null : () => _scan(ImageSource.gallery, routeContext),
                           icon: const Icon(Icons.photo_library_outlined),
                           label: const Text('Choose from gallery'),
                         ),
@@ -235,13 +246,13 @@ class _ReceiptScanTestHarnessState extends State<ReceiptScanTestHarness> {
                     title: Text(row['counterparty']?.toString() ?? 'Expense'),
                     subtitle: Text(row['remarks']?.toString() ?? ''),
                     trailing: Text(row['amount']?.toString() ?? ''),
-                    onTap: () => _open(row),
+                    onTap: () => _open(row, routeContext),
                   ),
                 ),
             ],
           ),
         ),
-      ),
+      )),
     );
   }
 }
