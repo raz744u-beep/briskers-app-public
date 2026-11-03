@@ -51,6 +51,9 @@ jobs:
           manifest = Path('android/app/src/main/AndroidManifest.xml')
           xml = manifest.read_text()
           assert 'android:label="briskers_app"' in xml
+          assert 'android:name=".MainActivity"' in xml
+          xml = xml.replace('android:name=".MainActivity"',
+                            'android:name="com.briskers.briskers_app.MainActivity"')
           manifest.write_text(xml.replace(
               'android:label="briskers_app"',
               'android:label="Briskers Receipt TEST"'))
