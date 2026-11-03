@@ -1,0 +1,83 @@
+name: Briskers LAN two-Android TEST APK
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'lib/lab/**'
+      - 'lib/shop_lan_lab_main.dart'
+      - 'lib/core/shop_lan_**'
+      - 'test/shop_lan_**'
+      - 'pubspec.yaml'
+      - '.github/workflows/shop-lan-android-lab.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  lan-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Create isolated Android package
+        run: |
+          mkdir generated
+          cd generated
+          # Different applicationId from the installed Briskers business app.
+          flutter create --platforms=android --org com.briskers.lanlab --project-name briskers_app .
+          rm -rf lib test
+          cp -R ../lib ./lib
+          cp -R ../test ./test
+          cp ../pubspec.yaml ./pubspec.yaml
+          cp ../analysis_options.yaml ./analysis_options.yaml
+          if [ -d ../assets ]; then cp -R ../assets ./assets; fi
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          content = p.read_text()
+          content = content.replace(
+              '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+              '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
+              '    <uses-permission android:name="android.permission.INTERNET" />\n'
+              '    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />')
+          content = content.replace('android:label="briskers_app"', 'android:label="Briskers LAN TEST"')
+          p.write_text(content)
+          gradle = Path('android/app/build.gradle.kts')
+          code = gradle.read_text()
+          code = code.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 37')
+          code = code.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 37')
+          gradle.write_text(code)
+          assert 'ACCESS_LOCAL_NETWORK' in p.read_text()
+          assert 'com.briskers.lanlab' in Path('android/app/build.gradle.kts').read_text()
+          assert 'targetSdk = 37' in gradle.read_text()
+          PY
+      - name: Install Android 17 SDK for local-network permission
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" >/dev/null || true
+      - name: Resolve Flutter packages
+        working-directory: generated
+        run: flutter pub get
+      - name: Generate Drift code for shared library compilation
+        working-directory: generated
+        run: dart run build_runner build --delete-conflicting-outputs
+      - name: Test encrypted two-device LAN protocol
+        working-directory: generated
+        run: flutter test test/shop_lan_lab_two_android_test.dart test/shop_lan_probe_test.dart test/shop_lan_sync_protocol_test.dart
+      - name: Analyze Flutter code
+        working-directory: generated
+        run: flutter analyze
+      - name: Build separate two-phone TEST APK
+        working-directory: generated
+        run: flutter build apk --debug --target=lib/shop_lan_lab_main.dart
+      - name: Upload synthetic-only APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: briskers-lan-two-android-test-${{ github.run_number }}
+          path: generated/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
