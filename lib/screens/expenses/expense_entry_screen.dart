@@ -1,3 +1,4 @@
+// ignore_for_file: prefer_interpolation_to_compose_strings, curly_braces_in_flow_control_structures
 import 'dart:async';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
@@ -444,17 +445,6 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
   String _receiptNote(Map<String, dynamic> extraction, {num? finalAmount}) =>
       LocalReceiptParser.formatDescription(extraction, finalAmount: finalAmount);
 
-  void _mergeReceiptNote(String summary) {
-    final clean = summary.trim();
-    if (clean.isEmpty) return;
-    final current = _remarksController.text.trim();
-    if (current.isEmpty) {
-      _remarksController.text = clean;
-    } else if (!current.contains(clean)) {
-      _remarksController.text = '$current\n$clean';
-    }
-  }
-
   Future<void> _readReceipt(XFile file) async {
     if (_readingReceipt) return;
     setState(() {
@@ -585,6 +575,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     try {
       token = (await secure.read(key: key) ?? '').trim();
       if (token.isEmpty) {
+        if (!mounted) return;
         final controller = TextEditingController();
         final entered = await showDialog<String>(
           context: context,
