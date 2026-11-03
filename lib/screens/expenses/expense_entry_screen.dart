@@ -354,7 +354,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       if (widget.autoScanReceipt && !_autoScanLaunched && !_editing && !_copying) {
         _autoScanLaunched = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _addReceipts(scanWithAi: true);
+          if (mounted) _takeReceiptPhoto(scanWithAi: true);
         });
       }
       if (!localShown && mounted) {
@@ -389,7 +389,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
           !_copying) {
         _autoScanLaunched = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _addReceipts(scanWithAi: true);
+          if (mounted) _takeReceiptPhoto(scanWithAi: true);
         });
       }
     } catch (error) {
