@@ -33,6 +33,7 @@ class ExpenseEntryScreen extends StatefulWidget {
     this.quickTemplate,
     this.allowRecurring = true,
     this.autoScanReceipt = false,
+    this.initialReceiptSource = ImageSource.camera,
   });
 
   final String businessId;
@@ -45,6 +46,8 @@ class ExpenseEntryScreen extends StatefulWidget {
   final Map<String, dynamic>? quickTemplate;
   final bool allowRecurring;
   final bool autoScanReceipt;
+  /// TEST entry point may choose gallery before the expense editor opens.
+  final ImageSource initialReceiptSource;
 
   @override
   State<ExpenseEntryScreen> createState() => _ExpenseEntryScreenState();
@@ -302,7 +305,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     if (widget.autoScanReceipt && !_autoScanLaunched && !_editing && !_copying) {
       _autoScanLaunched = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _takeReceiptPhoto(scanWithAi: true);
+        if (mounted) _takeReceiptPhoto(
+          scanWithAi: true, source: widget.initialReceiptSource);
       });
     }
   }
@@ -1011,12 +1015,21 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     if (value != null && mounted) setState(() => _endDate = value);
   }
 
-  Future<void> _takeReceiptPhoto({bool scanWithAi = false}) async {
+  Future<void> _takeReceiptPhoto({
+    bool scanWithAi = false,
+    ImageSource source = ImageSource.camera,
+  }) async {
     _counterpartyFocusNode.unfocus();
-    final file = await _picker.pickImage(
-      source: ImageSource.camera,
-    );
-    if (file != null && mounted) {
+    try {
+      final file = await _picker.pickImage(source: source);
+      if (!mounted) return;
+      if (file == null) {
+        if (widget.autoScanReceipt && scanWithAi) {
+          setState(() => _receiptReadMessage =
+              'No photo selected. Tap AI Scan Receipt below to retry.');
+        }
+        return;
+      }
       setState(() {
         final byPath = <String, XFile>{
           for (final receipt in _receipts) receipt.path: receipt,
@@ -1025,6 +1038,18 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
         _receipts = byPath.values.toList();
       });
       if (scanWithAi) await _readReceipt(file);
+    } catch (error, stack) {
+      debugPrint('Receipt photo picker failed: $error\\n$stack');
+      if (!mounted) return;
+      final place = source == ImageSource.camera ? 'camera' : 'photo gallery';
+      setState(() {
+        _receiptReadMessage =
+            'Could not open the $place. You can retry or select a photo below.';
+        _error = 'Receipt photo picker error: $error';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open $place. Try again below.')),
+      );
     }
   }
 
