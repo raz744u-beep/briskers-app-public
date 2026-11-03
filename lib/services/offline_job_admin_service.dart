@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'local_number_allocator.dart';
 import 'job_status_local_events.dart';
+import 'employee_nickname_store.dart';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
@@ -20,6 +21,7 @@ class OfflineJobAdminService {
 
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
+  final _nicknames = EmployeeNicknameStore();
 
   String _employeesKey(String businessId) =>
       'briskers_job_employees_$businessId';
@@ -28,7 +30,7 @@ class OfflineJobAdminService {
     final rows = await _api.assignableEmployees(businessId);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_employeesKey(businessId), jsonEncode(rows));
-    return rows;
+    return _nicknames.decorate(businessId, rows);
   }
 
   Future<List<Map<String, dynamic>>> cachedEmployees(String businessId) async {
@@ -36,10 +38,13 @@ class OfflineJobAdminService {
     final raw = prefs.getString(_employeesKey(businessId));
     if (raw == null || raw.isEmpty) return const [];
     try {
-      return List<dynamic>.from(jsonDecode(raw) as List)
-          .whereType<Map>()
-          .map((row) => Map<String, dynamic>.from(row))
-          .toList();
+      return _nicknames.decorate(
+        businessId,
+        List<dynamic>.from(jsonDecode(raw) as List)
+            .whereType<Map>()
+            .map((row) => Map<String, dynamic>.from(row))
+            .toList(),
+      );
     } catch (_) {
       return const [];
     }
