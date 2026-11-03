@@ -497,11 +497,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       final matched = vendorName.isEmpty
           ? null : _matchCounterparty(vendorName);
       final total = _numValue(reviewed['receipt_total']);
-      final subtotal = _numValue(reviewed['subtotal']);
-      // Printed TOTAL already includes taxes/fees. Never silently add a
-      // vendor default surcharge a second time.
-      final num? base = total > 0 ? total :
-          (subtotal > 0 ? subtotal : null);
+      // Subtotal is NOT a safe substitute for missing printed TOTAL because
+      // sales tax, fees and discounts may be present. Leave amount blank
+      // for manual review rather than silently underpaying an invoice.
+      final num? base = total > 0 ? total : null;
       final receiptDate = DateTime.tryParse(
         reviewed['receipt_date']?.toString() ?? '',
       );
