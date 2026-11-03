@@ -103,3 +103,40 @@ Owner-confirmed target mix: Android phones, iPhones, iPads, Android tablet kiosk
 7. HTTPS, permission denied, invalid/revoked peer, failed certificate, guest Wi-Fi isolation and LAN gateway unavailable scenarios produce honest status without losing local work.
 
 Design sequence: **native Android <-> native iOS** peer transport and authenticated journal first; **browser via secure LAN gateway** second; reliable cross-device operational workflows and safe number leasing next. Do not require Windows or Mac native applications initially.
+
+
+## Device-specific shop data access — Owner clarification (November 3, 2026)
+
+Owner confirmed: **Owner and Secretary should normally receive the broad operational shop dataset; Mechanics only the information needed for their own duties.** Do not conflate broad *data visibility* with unrestricted authority to edit, delete, finalize or pay. Kiosk remains narrowly check-in only.
+
+### Baseline distribution
+
+| Authorized role/device | Sync subset (not just hidden menus) | Guardrails |
+| --- | --- | --- |
+| Owner / enrolled personal devices | Full authorized shop dataset: customers, vehicles, visits, jobs, estimates/invoices, expenses, payments, tasks, payroll, reports, settings, attachments | Owner-only financial finalization, deletion, sensitive employee/private fields and numbering remain protected by explicit operations and local authentication |
+| Secretary / enrolled phone, tablet or desktop | Broad operational dataset: customers, vehicles, appointments, check-ins, jobs, invoices/estimates, business expenses, permitted payments, tasks, operational reporting | Does **not** inherit Owner-only delete/payment finalization, protected tax/SSN/W-9 and unrestricted employee payroll by default. Specific payroll/HR permissions can be granted explicitly. |
+| Mechanic / enrolled individual phone | Assigned jobs and tasks, vehicle/service details needed to work, task photos, own time/earned work credits, optionally visible unassigned jobs available for request | No invoice financial amounts, estimates, full business expenses, other employee compensation, other workers' private tasks, complete customer directory, or unneeded PII. Mechanic may request unassigned jobs where permitted; actual work credit access is restricted to the user. |
+| Android check-in kiosk | Its own check-in registrations, vehicle basics, reason for visit, consent/disclaimer version and constrained acknowledgements | Cannot receive full customer directory, invoices, payments, payroll, private settings. |
+| Foreman / custom role | Role-specified service workload and optional additional modules | Custom permission grants, never implicitly Owner authority. |
+
+### Security and joining behavior
+
+- **Enrollment:** Owner approves new device, identifies person/role, binds encrypted device credentials to shop membership and current permission revision. A QR shared key from LAN TEST #15 does not grant authorization to production records; it only pairs synthetic notes.
+- **Initial sync:** Produce an authenticated permission-scoped snapshot/cursor from an authorized peer or hub. Then send incremental changes. A Secretary may normally receive a broad dataset; a Mechanic may receive only own work slice. No full database file copying or unrestricted fanout.
+- **Field-level filtering:** The sender and receiver both enforce permissions, including redacting protected employee pay, SSN/tax information, billing/payment and customer identity fields before writing the recipient's local database. Merely hiding screens is **not** access control.
+- **Changes:** Permissions are evaluated both at subscription/snapshot generation and on every change. Don't leak restricted data through notes, attachments, sync logs, notifications, or relationship joins.
+- **Revocation/reassignment:** If an employee leaves, role changes or a device is lost, stop future replication, invalidate keys/leases as appropriate, and make existing locally cached sensitive data inaccessible or securely purge it on next contact. Remote wipe cannot be guaranteed on a permanently disconnected device: use strong local encryption, device lock, expiry/re-auth policies, and clearly document residual risk.
+- **Offline:** Previously authorized cached records remain available according to local offline policy; new role changes cannot propagate to an isolated device until reconnection, so privileged actions need risk-aware local auth and expiry safeguards.
+- **Multiple devices:** A single person can enroll more than one device; each device has its own identity, cursor and ACK. The relay cannot treat a note accepted by Owner as also delivered to Secretary or Mechanic.
+- **Commercial design:** Module-based permissions, custom roles and per-user overrides are retained; the role is the default, not a permanent hardcoded restriction. Respect packaging, paid modules and per-employee overrides without sending unavailable modules' data.
+
+### Required multi-device acceptance before real shop rollout
+
+1. Owner and Secretary devices receive correctly scoped synthetic customer/job records and permissioned changes, not arbitrary full SQLite copies.
+2. Mechanic receives assigned job and own tasks but **not** Owner/Secretary financial records, other staff payroll or unassigned jobs outside configured request visibility.
+3. Kiosk receives only consent/check-in-related data, even when its LAN relay forwards encrypted records between authorized phones.
+4. Role changes and revoked devices cannot request new data; test a disconnected mechanic returning after reassignment, stale ACKs and cache cleanup.
+5. Same op ID delivered to multiple authorized devices is idempotent **per destination**, and source retains pending status until each required recipient has durably acknowledged.
+6. Confirm that only Owner credentials can finalize payments, delete eligible jobs, and allocate official invoice numbers even when the Secretary holds a complete operational copy.
+
+**Implementation status:** This is the target for role-scoped multi-device synchronization; LAN TEST #15 has only encrypted synthetic notes and a shared test pairing secret. No production-role enforcement or real financial/customer replication has shipped.
