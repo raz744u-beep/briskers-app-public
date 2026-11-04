@@ -19,12 +19,17 @@ Future<T> runAttachmentMutation<T>(
 class BriskersApi {
   const BriskersApi();
 
-  Future<String?> myPayrollAssignment(String businessId, String jobId) async {
-    final result = await networkSupabase.rpc(
-      'briskers_my_payroll_assignment',
-      params: {'p_business_id': businessId, 'p_job_id': jobId},
-    ).timeout(const Duration(seconds: 15));
-    return result as String?;
+  Future<List<Map<String, dynamic>>> payrollRows(
+    String function, Map<String, dynamic> params,
+  ) async {
+    final data = await networkSupabase.rpc(function, params: params)
+        .timeout(const Duration(seconds: 20));
+    return (data as List).map((row) => Map<String, dynamic>.from(row as Map)).toList();
+  }
+
+  Future<void> writeSharedPayroll(String function, Map<String, dynamic> params) async {
+    await networkSupabase.rpc(function, params: params)
+        .timeout(const Duration(seconds: 20));
   }
 
   Future<Map<String, dynamic>> reconcilePayrollPayment(

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 
@@ -117,14 +116,38 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   Future<void> _load() async {
     final repository = _repository;
     final job = widget.jobId;
+    final online = !BriskersConnectionModeController.instance.forceOffline;
+    final scope = {'p_business_id': widget.businessId, 'p_job_id': job};
+    final shared = online
+        ? await const BriskersApi().payrollRows('briskers_list_payroll_labor', scope)
+        : <Map<String, dynamic>>[];
     final employees = job == null
-        ? await repository.employees()
+        ? <Map<String, dynamic>>[
+            ...{
+              for (final row in await repository.employees()) row['id']: row,
+              for (final row in shared)
+                row['employee_id']: {
+                  'id': row['employee_id'], 'name': row['employee_name'],
+                },
+            }.values,
+          ]
         : await repository.assignedEmployees(job);
     final employee = _employee ?? (employees.firstOrNull?['id'] as String?);
-    final work = await repository.work(employee: _jobMode ? null : employee, job: job);
+    final work = online
+        ? shared.where((row) => _jobMode || row['employee_id'] == employee).toList()
+        : await repository.work(employee: _jobMode ? null : employee, job: job);
     final history = employee == null || _jobMode
         ? <Map<String, dynamic>>[]
-        : await repository.history(employee);
+        : <Map<String, dynamic>>[
+            ...{
+              for (final row in await repository.history(employee)) row['operation_id']: row,
+              if (online)
+                for (final row in await const BriskersApi().payrollRows(
+                  'briskers_payroll_payment_history',
+                  {'p_business_id': widget.businessId, 'p_employee_id': employee},
+                )) row['operation_id']: row,
+            }.values,
+          ]..sort((a, b) => b['verified_date'].toString().compareTo(a['verified_date'].toString()));
     _assertOwner();
     if (!mounted) return;
     setState(() {
@@ -158,32 +181,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     );
     if (employee == null || !mounted) return;
     await _run(() async {
-      final employeeId = employee['employee_id'] as String;
-      var name = employee['name']?.toString();
-      var cents = employee['rate'] as int?;
-      if (!BriskersConnectionModeController.instance.forceOffline) {
-        final profile = await const BriskersApi()
-            .employeeSettingsDetail(widget.businessId, employeeId);
-        if (profile['active'] == false ||
-            profile['compensation_enabled'] == false ||
-            profile['payment_type'] != 'hourly') {
-          throw StateError('An active hourly employee is required.');
-        }
-        final rate = num.tryParse(profile['hourly_rate']?.toString() ?? '');
-        name = profile['name']?.toString();
-        cents = rate != null && rate.isFinite ? (rate * 100).round() : null;
-      }
-      if (name == null || cents == null || cents <= 0) {
-        throw StateError('No verified hourly rate is saved on this device for this employee.');
-      }
-      await _repository.registerAssignedLabor(
-        jobId: widget.jobId!,
-        invoiceId: widget.invoiceId!,
-        lineId: line['id'] as String,
-        employeeId: employeeId,
-        employeeName: name,
-        rateCents: cents,
-      );
+      _assertOwner();
+      await const BriskersApi().writeSharedPayroll('briskers_assign_payroll_labor', {
+        'p_business_id': widget.businessId,
+        'p_job_id': widget.jobId,
+        'p_invoice_id': widget.invoiceId,
+        'p_line_id': line['id'],
+        'p_employee_id': employee['employee_id'],
+      });
+
     });
   }
 
@@ -215,24 +221,17 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     );
     if (result == null || !mounted) return;
     final (date, method, reason) = result;
-    final random = Random.secure();
-    final operation = List.generate(16, (_) => random.nextInt(256)
-        .toRadixString(16).padLeft(2, '0')).join();
-    final monday = DateTime(date.year, date.month, date.day - date.weekday + 1);
     await _run(() async {
-      await _repository.verify(
-        operation: operation,
-        employee: employee,
-        week: _date(monday),
-        date: _date(date),
-        method: method,
-        selected: selected,
-        base: 0,
-        hourlyAdjustment: 0,
-        adjustmentReason: reason,
-        repayment: 0,
-        confirmedNet: gross,
-      );
+      _assertOwner();
+      await const BriskersApi().writeSharedPayroll('briskers_record_shared_payroll', {
+        'p_business_id': widget.businessId,
+        'p_employee_id': employee,
+        'p_ids': selected.map((row) => row['id'] as String).toList(),
+        'p_date': _date(date),
+        'p_method': method,
+        'p_confirmed_net': gross,
+        'p_reason': reason,
+      });
       _selected.clear();
     }, verifyPayment: true);
   }
@@ -257,7 +256,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                   ListTile(
                     title: Text((line['description'] ?? line['name'] ?? 'Invoice labor').toString()),
                     trailing: TextButton(
-                      onPressed: _busy || _employees.isEmpty ? null : () => _assign(line),
+                      onPressed: _busy || _employees.isEmpty || BriskersConnectionModeController.instance.forceOffline
+                          ? null : () => _assign(line),
                       child: const Text('Assign'),
                     ),
                   ),
@@ -266,7 +266,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                 ListTile(
                   title: Text(row['description'].toString()),
                   subtitle: Text('${row['employee_name']} · ${row['state']} · ${row['actual_minutes']} min'),
-                  trailing: row['state'] == 'Done' ? null : TextButton(
+                  trailing: row['state'] == 'Done' || !BriskersConnectionModeController.instance.forceOffline
+                      ? null : TextButton(
                     onPressed: _busy ? null : () => _editWork(row),
                     child: Text(row['state'] == 'Open' ? 'Start' : 'Complete'),
                   ),
@@ -309,7 +310,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                   }),
                 ),
               FilledButton(
-                onPressed: _busy || _selected.isEmpty ? null : _pay,
+                onPressed: _busy || _selected.isEmpty || BriskersConnectionModeController.instance.forceOffline
+                    ? null : _pay,
                 child: const Text('Verify Payment'),
               ),
               OutlinedButton(
@@ -386,7 +388,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('${widget.amount} will be recorded on this device. No money is sent.'),
+              Text('${widget.amount} will be recorded in shared payroll. No money is sent.'),
               TextButton(
                 onPressed: () async {
                   final value = await showDatePicker(

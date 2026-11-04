@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/supabase_config.dart';
-import '../../local/local_database_provider.dart';
 import '../../services/briskers_api.dart';
-import '../../services/local_payroll_repository.dart';
 
 class MechanicLaborScreen extends StatefulWidget {
   const MechanicLaborScreen({
@@ -18,9 +16,6 @@ class MechanicLaborScreen extends StatefulWidget {
 }
 
 class _MechanicLaborScreenState extends State<MechanicLaborScreen> {
-  late final _repository = LocalPayrollRepository(
-    localDatabase, business: widget.businessId, owner: false,
-  );
   List<Map<String, dynamic>> _rows = [];
   bool _busy = false;
   String? _error;
@@ -46,25 +41,20 @@ class _MechanicLaborScreenState extends State<MechanicLaborScreen> {
           throw StateError('Your session changed. Refresh to continue.');
         }
       }
-      final employee = await const BriskersApi()
-          .myPayrollAssignment(widget.businessId, widget.jobId);
-      assertSession();
-      if (employee == null) throw StateError('No active mechanic assignment.');
+      const api = BriskersApi();
+      final scope = {'p_business_id': widget.businessId, 'p_job_id': widget.jobId};
       if (update != null && minutes != null) {
-        await _repository.updateMechanicWork(
-          job: widget.jobId,
-          employee: employee,
-          id: update['id'] as String,
-          state: update['state'] == 'Open' ? 'In Progress' : 'Done',
-          minutes: minutes,
-          date: DateTime.now().toIso8601String().substring(0, 10),
-          expectedRevision: update['revision'] as int,
-          assertSession: assertSession,
-        );
+        assertSession();
+        await api.writeSharedPayroll('briskers_update_my_payroll_labor', {
+          ...scope,
+          'p_id': update['id'],
+          'p_state': update['state'] == 'Open' ? 'In Progress' : 'Done',
+          'p_minutes': minutes,
+          'p_revision': update['revision'],
+        });
       }
-      final rows = await _repository.mechanicWork(
-        job: widget.jobId, employee: employee, assertSession: assertSession,
-      );
+      final rows = await api.payrollRows('briskers_list_payroll_labor', scope);
+      assertSession();
       if (mounted) setState(() => _rows = rows);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -123,7 +113,7 @@ class _MechanicLaborScreenState extends State<MechanicLaborScreen> {
         if (_busy) const LinearProgressIndicator(),
         if (_error != null) Text(_error!),
         if (!_busy && _error == null && _rows.isEmpty)
-          const Text('No labor tasks are saved for your assignment on this device.'),
+          const Text('No labor tasks are assigned to you for this job.'),
         for (final row in _rows)
           ListTile(
             title: Text(row['description'].toString()),

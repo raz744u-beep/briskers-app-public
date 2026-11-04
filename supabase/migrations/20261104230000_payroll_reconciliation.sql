@@ -24,6 +24,26 @@ alter table briskers.payroll_reconciliation_credits enable row level security;
 revoke all on briskers.payroll_reconciliation_payments,
   briskers.payroll_reconciliation_credits from public, anon, authenticated;
 
+-- One independent work portion per assigned mechanic and invoice line.
+create table if not exists briskers.payroll_shared_labor (
+  business_id uuid not null,
+  id uuid not null default gen_random_uuid(),
+  employee_id uuid not null,
+  job_id uuid not null,
+  invoice_id uuid not null,
+  line_id uuid not null,
+  description text not null,
+  rate_cents bigint not null check (rate_cents > 0),
+  actual_minutes integer not null default 0,
+  revision integer not null default 0,
+  state text not null default 'Open' check (state in ('Open', 'In Progress', 'Done')),
+  completed_date date,
+  primary key (business_id, id),
+  unique (business_id, employee_id, job_id, invoice_id, line_id)
+);
+alter table briskers.payroll_shared_labor enable row level security;
+revoke all on briskers.payroll_shared_labor from public, anon, authenticated;
+
 create or replace function public.briskers_reconcile_payroll_payment(
   p_business_id uuid, p_operation_id text, p_payload jsonb
 )
@@ -92,6 +112,17 @@ begin
        or (credit->>'rate')::bigint is null or (credit->>'rate')::bigint <= 0 then
       raise exception 'Invalid payroll work credit' using errcode = '22023';
     end if;
+    if not exists (
+      select 1 from briskers.payroll_shared_labor w
+      where w.business_id=p_business_id and w.employee_id=employee
+        and w.job_id=(task->>0)::uuid and w.invoice_id=(task->>1)::uuid
+        and w.line_id=(task->>2)::uuid and w.state='Done'
+        and w.actual_minutes=(credit->>'minutes')::integer
+        and w.rate_cents=(credit->>'rate')::bigint
+        and w.revision=(credit->>'version')::integer
+    ) then
+      raise exception 'Payroll work is not verified on the server' using errcode='22023';
+    end if;
     gross := gross + ((credit->>'minutes')::bigint * (credit->>'rate')::bigint + 30) / 60;
     insert into briskers.payroll_reconciliation_credits
       (business_id, employee_id, job_id, invoice_id, line_id, operation_id)
@@ -131,3 +162,198 @@ as $$
 $$;
 revoke all on function public.briskers_my_payroll_assignment(uuid, uuid) from public, anon;
 grant execute on function public.briskers_my_payroll_assignment(uuid, uuid) to authenticated;
+
+create or replace function public.briskers_assign_payroll_labor(
+  p_business_id uuid, p_job_id uuid, p_invoice_id uuid, p_line_id uuid, p_employee_id uuid
+)
+returns void language plpgsql security definer set search_path = ''
+as $$
+declare
+  assigned integer;
+begin
+  if auth.uid() is null or briskers.is_owner(p_business_id) is distinct from true then
+    raise exception 'Owner payroll access required' using errcode='42501';
+  end if;
+  insert into briskers.payroll_shared_labor
+    (business_id,employee_id,job_id,invoice_id,line_id,description,rate_cents)
+  select p_business_id,e.id,d.job_id,d.id,l.id,
+    coalesce(nullif(trim(l.description),''),l.name,'Invoice labor'),
+    round(rate.hourly_rate * 100)::bigint
+  from briskers.sales_documents d
+  join briskers.sales_document_lines l on l.business_id=d.business_id and l.document_id=d.id
+  join briskers.employees e on e.business_id=d.business_id and e.id=p_employee_id
+  join lateral (
+    select c.hourly_rate,c.payment_type
+    from briskers.employee_compensation c
+    where c.business_id=e.business_id and c.employee_id=e.id and c.effective_from<=current_date
+    order by c.effective_from desc,c.id desc limit 1
+  ) rate on true
+  where d.business_id=p_business_id and d.job_id=p_job_id and d.id=p_invoice_id
+    and d.kind='invoice' and d.status<>'void' and l.id=p_line_id
+    and (l.line_kind in ('labor','labour') or
+      (l.line_kind='item' and lower(trim(l.name)) in ('labor','labour')))
+    and e.active and e.compensation_enabled and rate.payment_type='hourly'
+    and round(rate.hourly_rate * 100)>0
+    and exists (select 1 from briskers.job_assignments a
+      where a.business_id=d.business_id and a.job_id=d.job_id and a.employee_id=e.id and a.active)
+  on conflict (business_id,employee_id,job_id,invoice_id,line_id) do nothing;
+  get diagnostics assigned = row_count;
+  if assigned=0 and not exists (
+    select 1 from briskers.payroll_shared_labor w
+    where w.business_id=p_business_id and w.employee_id=p_employee_id
+      and w.job_id=p_job_id and w.invoice_id=p_invoice_id and w.line_id=p_line_id
+  ) then
+    raise exception 'Active assignment, saved invoice labor, or hourly rate is missing'
+      using errcode='22023';
+  end if;
+end;
+$$;
+
+create or replace function public.briskers_list_payroll_labor(
+  p_business_id uuid, p_job_id uuid default null
+)
+returns jsonb language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  is_owner boolean := briskers.is_owner(p_business_id) is true;
+  mechanic uuid;
+  result jsonb;
+begin
+  if not is_owner then
+    mechanic := public.briskers_my_payroll_assignment(p_business_id,p_job_id);
+    if mechanic is null then
+      raise exception 'Active payroll assignment required' using errcode='42501';
+    end if;
+  end if;
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id',w.id,'description',w.description,'state',w.state,
+    'actual_minutes',w.actual_minutes,'revision',w.revision,
+    'paid',case when c.operation_id is null then 0 else 1 end
+  ) || case when is_owner then jsonb_build_object(
+    'employee_id',w.employee_id,'employee_name',e.display_name,
+    'job_id',w.job_id,'invoice_id',w.invoice_id,'line_id',w.line_id,
+    'completed_date',w.completed_date,'rate_cents',w.rate_cents,
+    'gross_cents',(w.actual_minutes*w.rate_cents+30)/60
+  ) else '{}'::jsonb end order by w.id),'[]'::jsonb) into result
+  from briskers.payroll_shared_labor w
+  join briskers.employees e on e.business_id=w.business_id and e.id=w.employee_id
+  left join briskers.payroll_reconciliation_credits c
+    on c.business_id=w.business_id and c.employee_id=w.employee_id
+      and c.job_id=w.job_id::text and c.invoice_id=w.invoice_id::text and c.line_id=w.line_id::text
+  where w.business_id=p_business_id and (p_job_id is null or w.job_id=p_job_id)
+    and (is_owner or w.employee_id=mechanic);
+  return result;
+end;
+$$;
+
+create or replace function public.briskers_update_my_payroll_labor(
+  p_business_id uuid, p_job_id uuid, p_id uuid, p_revision integer,
+  p_minutes integer, p_state text
+)
+returns void language plpgsql security definer set search_path = ''
+as $$
+declare
+  mechanic uuid := public.briskers_my_payroll_assignment(p_business_id,p_job_id);
+  saved briskers.payroll_shared_labor%rowtype;
+begin
+  if mechanic is null then
+    raise exception 'Active payroll assignment required' using errcode='42501';
+  end if;
+  select * into saved from briskers.payroll_shared_labor w
+    where w.business_id=p_business_id and w.job_id=p_job_id and w.id=p_id
+      and w.employee_id=mechanic for update;
+  if not found then raise exception 'Labor portion not available' using errcode='42501'; end if;
+  if saved.revision=p_revision+1 and saved.state=p_state
+     and saved.actual_minutes=p_minutes then return; end if;
+  if p_revision is null or p_minutes is null or p_minutes not between 0 and 14400
+    or p_state is null or saved.revision<>p_revision
+    or not ((saved.state='Open' and p_state='In Progress' and p_minutes=0)
+      or (saved.state='In Progress' and p_state='Done' and p_minutes>0)) then
+    raise exception 'Labor changed or invalid work time' using errcode='22023';
+  end if;
+  update briskers.payroll_shared_labor w
+    set state=p_state, actual_minutes=p_minutes, revision=w.revision+1,
+      completed_date=case when p_state='Done' then (now() at time zone 'America/Chicago')::date end
+    where w.business_id=p_business_id and w.id=p_id;
+end;
+$$;
+revoke all on function public.briskers_assign_payroll_labor(uuid,uuid,uuid,uuid,uuid),
+  public.briskers_list_payroll_labor(uuid,uuid),
+  public.briskers_update_my_payroll_labor(uuid,uuid,uuid,integer,integer,text) from public, anon;
+grant execute on function public.briskers_assign_payroll_labor(uuid,uuid,uuid,uuid,uuid),
+  public.briskers_list_payroll_labor(uuid,uuid),
+  public.briskers_update_my_payroll_labor(uuid,uuid,uuid,integer,integer,text) to authenticated;
+
+-- The operation key is derived from the same set of labor portions on every
+-- device. Lost responses and restarts therefore cannot mint another receipt.
+create or replace function public.briskers_record_shared_payroll(
+  p_business_id uuid, p_employee_id uuid, p_ids uuid[], p_date date,
+  p_method text, p_confirmed_net bigint, p_reason text
+)
+returns jsonb language plpgsql security definer set search_path = ''
+as $$
+declare
+  work jsonb;
+  matched integer;
+  operation text;
+  week_start date := date_trunc('week',p_date)::date;
+begin
+  if auth.uid() is null or briskers.is_owner(p_business_id) is distinct from true then
+    raise exception 'Owner payroll access required' using errcode='42501';
+  end if;
+  if coalesce(cardinality(p_ids),0) not between 1 and 1000 or p_date is null
+     or p_date>(now() at time zone 'America/Chicago')::date
+     or p_method is null or p_method not in ('Cash','Zelle','Check','Card','Other')
+     or p_confirmed_net is null or p_confirmed_net<0 then
+    raise exception 'Invalid payment confirmation' using errcode='22023';
+  end if;
+  select count(*),jsonb_agg(jsonb_build_object(
+    'id',jsonb_build_array(
+      jsonb_build_array(w.job_id,w.invoice_id,w.line_id)::text,w.employee_id
+    )::text,'version',w.revision,'minutes',w.actual_minutes,'rate',w.rate_cents
+  ) order by w.id) into matched,work
+  from briskers.payroll_shared_labor w
+  where w.business_id=p_business_id and w.employee_id=p_employee_id
+    and w.id=any(p_ids) and w.state='Done'
+    and (w.completed_date>=week_start and w.completed_date<week_start+7
+      or nullif(trim(p_reason),'') is not null);
+  if matched<>cardinality(p_ids) then
+    raise exception 'Labor is missing, incomplete, duplicated or outside the confirmed week'
+      using errcode='22023';
+  end if;
+  select 'shared-' || md5(string_agg(id::text,',' order by id))
+    into operation from unnest(p_ids) ids(id);
+  return public.briskers_reconcile_payroll_payment(
+    p_business_id,operation,jsonb_build_object(
+      'employee',p_employee_id,'week',week_start,'date',p_date,'method',p_method,
+      'work',work,'base',0,'adjustment',0,'reason',coalesce(p_reason,''),
+      'repayment',0,'confirmed_net',p_confirmed_net
+    )
+  );
+end;
+$$;
+
+create or replace function public.briskers_payroll_payment_history(
+  p_business_id uuid, p_employee_id uuid
+)
+returns jsonb language plpgsql stable security definer set search_path = ''
+as $$
+declare result jsonb;
+begin
+  if auth.uid() is null or briskers.is_owner(p_business_id) is distinct from true then
+    raise exception 'Owner payroll access required' using errcode='42501';
+  end if;
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'operation_id',p.operation_id,'net',(p.payload->>'confirmed_net')::bigint,
+    'method',p.payload->>'method','verified_date',p.payload->>'date',
+    'reconciliation_state','reconciled'
+  ) order by p.recorded_at desc),'[]'::jsonb) into result
+  from briskers.payroll_reconciliation_payments p
+  where p.business_id=p_business_id and p.employee_id=p_employee_id;
+  return result;
+end;
+$$;
+revoke all on function public.briskers_record_shared_payroll(uuid,uuid,uuid[],date,text,bigint,text),
+  public.briskers_payroll_payment_history(uuid,uuid) from public, anon;
+grant execute on function public.briskers_record_shared_payroll(uuid,uuid,uuid[],date,text,bigint,text),
+  public.briskers_payroll_payment_history(uuid,uuid) to authenticated;
