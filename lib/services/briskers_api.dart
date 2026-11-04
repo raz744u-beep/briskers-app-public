@@ -19,6 +19,22 @@ Future<T> runAttachmentMutation<T>(
 class BriskersApi {
   const BriskersApi();
 
+  Future<Map<String, dynamic>> reconcilePayrollPayment(
+    String businessId,
+    String operation,
+    Map<String, dynamic> payload,
+  ) async {
+    final result = await networkSupabase.rpc(
+      'briskers_reconcile_payroll_payment',
+      params: {
+        'p_business_id': businessId,
+        'p_operation_id': operation,
+        'p_payload': payload,
+      },
+    ).timeout(const Duration(seconds: 20));
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<List<Map<String, dynamic>>> myBusinesses() async {
     final result = await networkSupabase.rpc('briskers_my_businesses');
     return (result as List<dynamic>)

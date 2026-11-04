@@ -307,7 +307,18 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                 onPressed: _busy || _selected.isEmpty ? null : _pay,
                 child: const Text('Verify Payment'),
               ),
-              const ListTile(title: Text('Payment history')),
+              const ListTile(title: Text('Reports · Payment history')),
+              OutlinedButton(
+                onPressed: _busy || BriskersConnectionModeController.instance.forceOffline
+                    ? null
+                    : () => _run(() async {
+                          await _repository.reconcile(
+                            send: (operation, payload) => const BriskersApi()
+                                .reconcilePayrollPayment(widget.businessId, operation, payload),
+                          );
+                        }, verifyPayment: true),
+                child: const Text('Reconcile recorded payments'),
+              ),
               for (final row in _history)
                 ListTile(
                   title: Text(_money(row['net'] as int)),

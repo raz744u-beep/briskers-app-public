@@ -98,6 +98,9 @@ void main() {
     await payroll.updateWork(id, 'Done', 250, '2026-11-04');
     expect((await payroll.work(employee: 'employee-b')).single['state'], 'Open');
     expect((await payroll.jobs()).single['done'], 0);
+    final otherId = (await payroll.work(employee: 'employee-b')).single['id'] as String;
+    await payroll.updateWork(otherId, 'In Progress', 100, '2026-11-04');
+    await payroll.updateWork(otherId, 'Done', 100, '2026-11-04');
     final selected = await payroll.work(employee: 'employee-a');
     Future<bool> verify(String operation) => payroll.verify(
           operation: operation,
@@ -141,15 +144,42 @@ void main() {
     );
     expect(await payroll.history('employee-a'), isEmpty);
     expect(await verify('pay-a'), isTrue);
+    final receipts = <String, Map<String, dynamic>>{};
+    var loseResponse = true;
+    Future<Map<String, dynamic>> server(
+      String operation, Map<String, dynamic> payload,
+    ) async {
+      expect(operation, 'pay-a');
+      expect(payload['employee'], 'employee-a');
+      final prior = receipts.putIfAbsent(operation, () => payload);
+      expect(payload, equals(prior));
+      if (loseResponse) throw StateError('Connection lost after server commit');
+      return {'operation_id': operation, 'status': 'recorded'};
+    }
+    await expectLater(payroll.reconcile(send: server), throwsStateError);
+    expect(receipts, hasLength(1));
     await db.close();
     db = BriskersLocalDatabase(NativeDatabase(file));
     payroll = LocalPayrollRepository(db, business: 'shop-a', owner: true);
     source = LocalPayrollWorkSource(db);
     expect((await payroll.history('employee-a')).single['net'], 10000);
+    expect(await payroll.history('employee-b'), isEmpty);
+    final unpaid = (await payroll.work(employee: 'employee-b')).single;
+    expect(unpaid['state'], 'Done');
+    expect(unpaid['paid'], 0);
+    expect(unpaid['gross_cents'], 4000);
+    final jobs = await db.customSelect("SELECT status FROM local_jobs WHERE id='job-a'").get();
+    expect(jobs.single.data['status'], 'open');
+    loseResponse = false;
+    expect(await payroll.reconcile(send: server), 1);
+    expect(await payroll.reconcile(send: server), 0);
+    expect(receipts, hasLength(1));
+    expect(await payroll.history('employee-a'), hasLength(1));
     expect(await verify('pay-a'), isFalse);
     await expectLater(verify('pay-a-again'), throwsStateError);
     final nonOwner = LocalPayrollRepository(db, business: 'shop-a', owner: false);
     await expectLater(nonOwner.history('employee-a'), throwsStateError);
+    await expectLater(nonOwner.reconcile(send: server), throwsStateError);
     final otherShop = LocalPayrollRepository(db, business: 'shop-b', owner: true);
     expect(await otherShop.history('employee-a'), isEmpty);
 

@@ -290,6 +290,46 @@ class LocalPayrollRepository {
     );
   }
 
+  /// Sends immutable receipts by their original operation IDs. A failed or
+  /// interrupted delivery remains pending, including after an app restart.
+  Future<int> reconcile({
+    required Future<Map<String, dynamic>> Function(
+      String operation, Map<String, dynamic> payload,
+    ) send,
+  }) async {
+    _authorize();
+    await prepare();
+    final pending = await _read(
+      "SELECT operation_id,payload FROM regular_payroll_sync_outbox "
+      "WHERE business_id=? AND state='held_local' ORDER BY operation_id",
+      [business],
+    );
+    var acknowledged = 0;
+    for (final row in pending) {
+      _authorize();
+      final operation = row['operation_id'] as String;
+      final payload = row['payload'] as String;
+      final reply = await send(
+        operation,
+        Map<String, dynamic>.from(jsonDecode(payload) as Map),
+      );
+      if (reply['operation_id'] != operation || reply['status'] != 'recorded') {
+        throw StateError('Payroll reconciliation returned an invalid receipt.');
+      }
+      await db.transaction(() async {
+        _authorize();
+        await db.customStatement(
+          "UPDATE regular_payroll_sync_outbox SET state='reconciled' "
+          "WHERE business_id=? AND operation_id=? AND payload=? AND state='held_local'",
+          [business, operation, payload],
+        );
+        _authorize();
+      });
+      acknowledged++;
+    }
+    return acknowledged;
+  }
+
   void _date(String value) {
     final d = DateTime.tryParse(value);
     if (d == null || d.toIso8601String().substring(0, 10) != value)
@@ -442,8 +482,7 @@ class LocalPayrollRepository {
         'INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) VALUES(?,?,?,?)',
         [business, operation, 'verify_payment', payload],
       );
-      // Deliberately separate from the production outbox: delivery is disabled
-      // until a server idempotency contract exists.
+      // Keep payroll reconciliation separate from ordinary shop sync.
       await db.customStatement(
         'INSERT INTO regular_payroll_sync_outbox(business_id,operation_id,payload) VALUES(?,?,?)',
         [business, operation, payload],
