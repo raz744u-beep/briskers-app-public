@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:briskers_app/core/briskers_i18n.dart';
 import 'package:briskers_app/screens/expenses/expense_receipt_attachments.dart';
@@ -8,41 +8,47 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+class _ReceiptFile extends XFile {
+  _ReceiptFile() : super('synthetic-receipt.png');
+
+  @override
+  Future<Uint8List> readAsBytes() async => base64Decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGP4z8DwH4QZYAwAR8oH+WdZbrcAAAAASUVORK5CYII=',
+  );
+
+  @override
+  Future<DateTime> lastModified() async => DateTime(2026, 11, 3);
+}
+
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+    await BriskersLanguageController.instance.setLanguage('es');
+  });
+  tearDown(() async {
+    await BriskersLanguageController.instance.setLanguage('en');
+  });
+
   testWidgets('receipt preview works before intl date locale initialization', (
     tester,
   ) async {
-    SharedPreferences.setMockInitialValues({});
-    await BriskersLanguageController.instance.setLanguage('es');
-    final root = await Directory.systemTemp.createTemp('receipt-locale-');
-    final image = File('${root.path}/receipt.png');
-    await image.writeAsBytes(
-      base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGP4z8DwH4QZYAwAR8oH+WdZbrcAAAAASUVORK5CYII=',
-      ),
-    );
-    try {
-      // Deliberately omit GlobalMaterialLocalizations and initializeDateFormatting.
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: ExpenseReceiptAttachments(
-              receipts: [XFile(image.path)],
-              onChanged: (_) {},
-            ),
+    // Deliberately omit GlobalMaterialLocalizations and initializeDateFormatting.
+    // The fake file supplies both bytes and a modification date without OS I/O.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ExpenseReceiptAttachments(
+            receipts: [_ReceiptFile()],
+            onChanged: (_) {},
           ),
         ),
-      );
-      await tester.runAsync(() async {
-        await Future<void>.delayed(const Duration(milliseconds: 30));
-      });
-      await tester.pumpAndSettle();
-      expect(find.byType(Image), findsOneWidget);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-    } finally {
-      await BriskersLanguageController.instance.setLanguage('en');
-      await root.delete(recursive: true);
-    }
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(Image), findsOneWidget);
+    expect(find.textContaining('2026'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 }

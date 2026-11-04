@@ -90,6 +90,7 @@ jobs:
           test/bugs26_mileage_restart_and_scope_test.dart
           test/bugs26_small_phone_entry_controls_test.dart
           test/expense_detail_preview_hydration_test.dart
+          test/offline_expense_detail_route_test.dart
 
       - name: Run diagnostic and regression tests
         working-directory: generated

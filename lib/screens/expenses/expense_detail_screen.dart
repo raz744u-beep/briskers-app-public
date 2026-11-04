@@ -293,7 +293,6 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         _detail = detail;
         _detailSource = 'local';
         _loading = false;
-        _error = null;
       });
       unawaited(_enrichVisibleExpense(detail, generation));
     } catch (_) {

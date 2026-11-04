@@ -229,7 +229,8 @@ void main() {
     await open(tester, api: api, cache: cache);
     expect(api.detailCalls, 1);
     expect(api.permissionCalls, 1);
-    expect(cache.reads, 0);
+    expect(cache.reads, 1,
+        reason: 'Auto/online routes hydrate saved detail while authoritative reads run');
     expect(cache.persisted, server);
     expect(find.text('Authoritative online description'), findsOneWidget);
     expect(find.text('Saved full detail'), findsNothing);
