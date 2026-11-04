@@ -7,6 +7,10 @@ import '../../services/briskers_api.dart';
 import '../../core/connection_mode.dart';
 import '../../services/offline_document_draft_service.dart';
 import '../../services/local_customer_repository.dart';
+import '../../services/local_number_allocator.dart';
+import '../../services/device_owner_authorization.dart';
+import '../../services/local_owner_authorization.dart';
+import '../../local/local_database_provider.dart';
 
 class BlankInvoiceSetupScreen extends StatefulWidget {
   const BlankInvoiceSetupScreen({
@@ -54,10 +58,51 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
   bool _loadingVehicles = false;
   bool _saving = false;
   String? _error;
+  List<int> _availableInvoices = const [];
+  List<int> _availableJobs = const [];
+  int? _reuseInvoice;
+  int? _reuseJob;
+
+  Future<void> _loadAvailableNumbers() async {
+    if (widget.kind != 'invoice' ||
+        !BriskersConnectionModeController.instance.forceOffline) return;
+    try {
+      final numbers = LocalNumberAllocator(localDatabase);
+      final invoices = await numbers.availableNumbers(widget.businessId, 'invoice');
+      final jobs = await numbers.availableNumbers(widget.businessId, 'job');
+      if (!mounted) return;
+      setState(() {
+        _availableInvoices = invoices;
+        _availableJobs = jobs;
+        if (!invoices.contains(_reuseInvoice)) _reuseInvoice = null;
+        if (!jobs.contains(_reuseJob)) _reuseJob = null;
+      });
+    } catch (_) {
+      // A pool lookup must not prevent ordinary invoice creation.
+    }
+  }
+
+  Widget _numberChoice(String label, List<int> numbers, int? selected,
+      ValueChanged<int?> onChanged, {bool job = false}) {
+    return DropdownButtonFormField<int>(
+      key: ValueKey('$label-$selected'),
+      initialValue: selected,
+      isExpanded: true,
+      decoration: InputDecoration(labelText: label),
+      items: [
+        const DropdownMenuItem<int>(value: null, child: Text('Use next number')),
+        for (final number in numbers)
+          DropdownMenuItem<int>(value: number,
+            child: Text(job ? 'Reuse J-$number' : 'Reuse #$number')),
+      ],
+      onChanged: _saving ? null : onChanged,
+    );
+  }
 
   @override
   void initState() {
     super.initState();
+    unawaited(_loadAvailableNumbers());
     final selected = widget.initialCustomerId;
     if (selected != null) {
       _customerId = selected;
@@ -263,6 +308,15 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
 
     try {
       final isEstimate=widget.kind=='estimate';
+      LocalOwnerGrant? reuseGrant;
+      if (!isEstimate && (_reuseInvoice != null || _reuseJob != null)) {
+        if (!BriskersConnectionModeController.instance.forceOffline) {
+          throw StateError('Keep Force Offline enabled to use the local number pool.');
+        }
+        reuseGrant = await DeviceOwnerAuthorization.instance.authority
+            .authorizeLocal(widget.businessId);
+        if (!mounted) return;
+      }
       final invoiceId = isEstimate
           ? (BriskersConnectionModeController.instance.forceOffline
               ? await _offlineDrafts.createStandaloneEstimate(
@@ -282,6 +336,9 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
           : BriskersConnectionModeController.instance.forceOffline
           ? await _offlineDrafts.createQuickInvoice(
               widget.businessId,
+              reuseInvoiceNumber: _reuseInvoice,
+              reuseJobNumber: _reuseJob,
+              reuseGrant: reuseGrant,
               customerId: customerId,
               customerName: widget.initialCustomerName ??
                   _customers.where((row) => row['id']?.toString() == customerId)
@@ -433,6 +490,20 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
               _error!,
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
+          ],
+          if (widget.kind == 'invoice' &&
+              BriskersConnectionModeController.instance.forceOffline &&
+              (_availableInvoices.isNotEmpty || _availableJobs.isNotEmpty)) ...[
+            const SizedBox(height: 16),
+            const Text('Unused numbers available',
+              style: TextStyle(fontWeight: FontWeight.w700)),
+            const Text('Choose released numbers to reuse, or keep the next numbers. Owner approval is required for reuse.'),
+            if (_availableInvoices.isNotEmpty)
+              _numberChoice('Invoice number', _availableInvoices, _reuseInvoice,
+                (value) => setState(() => _reuseInvoice = value)),
+            if (_availableJobs.isNotEmpty)
+              _numberChoice('Job number', _availableJobs, _reuseJob,
+                (value) => setState(() => _reuseJob = value), job: true),
           ],
           const SizedBox(height: 22),
           FilledButton.icon(
