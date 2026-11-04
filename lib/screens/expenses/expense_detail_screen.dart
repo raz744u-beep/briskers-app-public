@@ -436,7 +436,11 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                           fit: BoxFit.cover,
                         ),
                       )
-                    : const Icon(Icons.image_outlined),
+                    : Icon(
+                        snapshot.hasError
+                            ? Icons.image_not_supported_outlined
+                            : Icons.image_outlined,
+                      ),
               ),
         title: Text(photo['filename']?.toString() ?? 'ExpenseIQ photo'),
         subtitle: Text(
@@ -1646,9 +1650,11 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                 ),
             ],
           ),
-          if (_localExpenseIqPhoto != null &&
-              (attachments.isEmpty ||
-                  _localExpenseIqPhoto!['state'] != 'uploaded'))
+          // A successful upload is not proof that this phone can still
+          // render the cloud attachment. Preserve the original local-photo
+          // entry whenever it exists, even if an uploaded attachment is also
+          // listed. The user can open either source independently.
+          if (_localExpenseIqPhoto != null)
             _localExpenseIqReceiptCard(),
           if (attachments.isEmpty && _localExpenseIqPhoto == null)
             Card(
