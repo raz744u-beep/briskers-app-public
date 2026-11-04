@@ -78,7 +78,7 @@ void main() {
       "(assignment_id, business_id, job_id, employee_id) "
       "VALUES ('assignment-b', 'shop-a', 'job-a', 'employee-b')",
     );
-    var payroll = LocalPayrollRepository(db, business: 'shop-a', owner: true);
+    var payroll = LocalPayrollRepository(db, business: 'shop-a', owner: true, deviceId: 'owner-device');
     Future<void> register(String employee) => payroll.registerAssignedLabor(
           jobId: 'job-a',
           invoiceId: 'invoice-a',
@@ -87,6 +87,9 @@ void main() {
           employeeName: employee,
           rateCents: 4000,
         );
+    await payroll.bindPaymentAuthority(
+      writerDeviceId: 'owner-device', assertVerifiedPairing: () {},
+    );
     await register('employee-a');
     await register('employee-a');
     await register('employee-b');
@@ -140,6 +143,7 @@ void main() {
       db,
       business: 'shop-a',
       owner: true,
+      deviceId: 'owner-device',
       assertOwnerGrant: () {
         if (!grantValid) throw StateError('Expired grant');
       },
@@ -162,6 +166,38 @@ void main() {
       throwsStateError,
     );
     expect(await payroll.history('employee-a'), isEmpty);
+    // Both devices now have the same unpaid snapshot and cannot communicate.
+    await db.close();
+    final peerFile = await file.copy('${directory.path}/peer.sqlite');
+    db = BriskersLocalDatabase(NativeDatabase(file));
+    payroll = LocalPayrollRepository(
+      db, business: 'shop-a', owner: true, deviceId: 'owner-device',
+    );
+    final peerDb = BriskersLocalDatabase(NativeDatabase(peerFile));
+    try {
+      final disconnected = LocalPayrollRepository(
+        peerDb, business: 'shop-a', owner: true, deviceId: 'second-device',
+      );
+      await expectLater(disconnected.bindPaymentAuthority(
+        writerDeviceId: 'second-device', assertVerifiedPairing: () {},
+      ), throwsStateError);
+      await expectLater(disconnected.verify(
+        operation: 'disconnected-attempt',
+        employee: 'employee-a',
+        week: '2026-11-02',
+        date: '2026-11-04',
+        method: 'Cash',
+        selected: selected,
+        base: 0,
+        hourlyAdjustment: 0,
+        adjustmentReason: '',
+        repayment: 0,
+        confirmedNet: 10000,
+      ), throwsStateError);
+      expect(await disconnected.history('employee-a'), isEmpty);
+    } finally {
+      await peerDb.close();
+    }
     expect(await verify('pay-a'), isTrue);
     final receipts = <String, Map<String, dynamic>>{};
     var loseResponse = true;
@@ -179,7 +215,7 @@ void main() {
     expect(receipts, hasLength(1));
     await db.close();
     db = BriskersLocalDatabase(NativeDatabase(file));
-    payroll = LocalPayrollRepository(db, business: 'shop-a', owner: true);
+    payroll = LocalPayrollRepository(db, business: 'shop-a', owner: true, deviceId: 'owner-device');
     source = LocalPayrollWorkSource(db);
     expect((await payroll.history('employee-a')).single['net'], 10000);
     expect(await payroll.history('employee-b'), isEmpty);

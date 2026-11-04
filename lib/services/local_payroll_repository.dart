@@ -12,11 +12,13 @@ class LocalPayrollRepository {
     required this.business,
     required this.owner,
     this.assertOwnerGrant,
+    this.deviceId,
   });
   final BriskersLocalDatabase db;
   final String business;
   final bool owner;
   final void Function()? assertOwnerGrant;
+  final String? deviceId;
   Future<void>? _prepared;
   void _authorize() {
     if (!owner || business.trim().isEmpty)
@@ -46,6 +48,7 @@ class LocalPayrollRepository {
   Future<void> _prepare() async {
     await LocalMechanicWorkCreditRepository(database: db).prepare();
     for (final sql in [
+      '''CREATE TABLE IF NOT EXISTS regular_payroll_payment_authority (business_id TEXT PRIMARY KEY, device_id TEXT NOT NULL)''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_jobs (business_id TEXT NOT NULL, id TEXT NOT NULL, label TEXT NOT NULL, PRIMARY KEY(business_id,id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_tasks (business_id TEXT NOT NULL, id TEXT NOT NULL, job_id TEXT NOT NULL, labor_id TEXT NOT NULL, description TEXT NOT NULL, planned INTEGER NOT NULL CHECK(planned>=0), PRIMARY KEY(business_id,id), UNIQUE(business_id,job_id,labor_id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_portions (business_id TEXT NOT NULL, id TEXT NOT NULL, task_id TEXT NOT NULL, employee_id TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('Open','In Progress','Done')), version INTEGER NOT NULL DEFAULT 0, completed_date TEXT, PRIMARY KEY(business_id,id), UNIQUE(business_id,task_id,employee_id))''',
@@ -362,6 +365,46 @@ class LocalPayrollRepository {
     );
   }
 
+  /// Install a verified, non-transferable payment authority. This is for
+  /// trusted LAN enrollment, never self-election by a disconnected device.
+  Future<void> bindPaymentAuthority({
+    required String writerDeviceId,
+    required void Function() assertVerifiedPairing,
+  }) async {
+    _authorize();
+    assertVerifiedPairing();
+    if (writerDeviceId.trim().isEmpty) {
+      throw ArgumentError('A verified payroll device is required.');
+    }
+    await prepare();
+    await db.transaction(() async {
+      assertVerifiedPairing();
+      await db.customStatement(
+        'INSERT OR IGNORE INTO regular_payroll_payment_authority VALUES(?,?)',
+        [business, writerDeviceId],
+      );
+      final saved = await _read(
+        'SELECT device_id FROM regular_payroll_payment_authority WHERE business_id=?',
+        [business],
+      );
+      if (saved.single['device_id'] != writerDeviceId) {
+        throw StateError('Conflicting payroll authority. Payments are not transferable.');
+      }
+      _authorize();
+    });
+  }
+
+  Future<void> _assertPaymentAuthority() async {
+    final saved = await _read(
+      'SELECT device_id FROM regular_payroll_payment_authority WHERE business_id=?',
+      [business],
+    );
+    if (deviceId == null || saved.length != 1 ||
+        saved.single['device_id'] != deviceId) {
+      throw StateError('Only the enrolled payroll device can record payments.');
+    }
+  }
+
   /// Sends immutable receipts by their original operation IDs. A failed or
   /// interrupted delivery remains pending, including after an app restart.
   Future<int> reconcile({
@@ -465,6 +508,7 @@ class LocalPayrollRepository {
       'confirmed_net': confirmedNet,
     });
     return db.transaction(() async {
+      await _assertPaymentAuthority();
       final prior = await _read(
         'SELECT payload FROM regular_payroll_payments WHERE business_id=? AND operation_id=?',
         [business, operation],
