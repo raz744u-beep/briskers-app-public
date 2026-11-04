@@ -20,6 +20,7 @@ import '../../services/local_financial_cache.dart';
 import '../../services/expenseiq_local_photo_sync.dart';
 import 'expense_entry_screen.dart';
 import 'transaction_recurring_dialog.dart';
+import '../../core/recurring_schedule_status.dart';
 
 /// Bottom-sheet useSafeArea does not protect Android system navigation.
 @visibleForTesting
@@ -1333,8 +1334,12 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       'yearly' => 'Yearly',
       _ => 'Monthly',
     };
-    final next = rule['next_date']?.toString() ?? '';
-    return next.isEmpty ? label : '$label · next $next';
+    final status = recurringScheduleStatus(
+      rule,
+      today: DateTime.now(),
+      cached: BriskersConnectionModeController.instance.forceOffline,
+    );
+    return '$label · $status';
   }
 
   Future<void> _manageRecurring() async {

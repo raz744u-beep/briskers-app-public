@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/module_modal_theme.dart';
 import '../../core/connection_mode.dart';
+import '../../core/recurring_schedule_status.dart';
 import '../../core/supabase_config.dart';
 import '../../services/briskers_api.dart';
 
@@ -1922,7 +1923,6 @@ class _RecurringTransactionsScreenState
                     )
                   else
                     ...rows!.map((row) {
-                      final paused = row['paused_reason']?.toString() ?? '';
                       return Card(
                         child: ListTile(
                           leading: CircleAvatar(
@@ -1943,8 +1943,11 @@ class _RecurringTransactionsScreenState
                             <String>[
                               row['category']?.toString() ?? '',
                               _frequency(row),
-                              'Next ${row['next_date']}',
-                              if (paused.isNotEmpty) 'Paused: $paused',
+                              recurringScheduleStatus(
+                                row,
+                                today: DateTime.now(),
+                                cached: _showingSavedList,
+                              ),
                             ].where((x) => x.isNotEmpty).join(' • '),
                           ),
                           trailing: Row(
