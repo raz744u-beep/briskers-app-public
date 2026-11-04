@@ -243,7 +243,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         return;
       }
       final detail = _normalizedDetail(rawDetail)
-        ..['editable'] = saved != null
+        ..['editable'] = saved != null && saved['recurring_engine_owned'] != true
         ..['deletable'] = false;
       setState(() {
         _detail = detail;
@@ -329,6 +329,16 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   }
 
   Future<void> _load({bool hydrateLocal = true}) async {
+    final recurringBusiness = widget.businessId;
+    final recurringId = widget.transactionId;
+    final savedRecurring = await _localFinancial.loadTransactionDetail(
+      recurringBusiness, recurringId);
+    if (!mounted || widget.businessId != recurringBusiness ||
+        widget.transactionId != recurringId) return;
+    if (savedRecurring?['recurring_engine_owned'] == true) {
+      await _loadOffline();
+      return;
+    }
     if (BriskersConnectionModeController.instance.forceOffline) {
       await _loadOffline();
       return;
@@ -1877,3 +1887,4 @@ class _DetailRow extends StatelessWidget {
     );
   }
 }
+

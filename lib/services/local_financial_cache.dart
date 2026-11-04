@@ -178,6 +178,8 @@ class LocalFinancialCache {
         return {
           ...server,
           'recurring_verified_download': true,
+          if (cached['recurring_engine_owned'] == true)
+            'recurring_engine_owned': true,
           'recurring_rule_id': cached['recurring_rule_id'],
           'recurring_occurrence_date': cached['recurring_occurrence_date'],
         };
@@ -464,3 +466,4 @@ class LocalFinancialCache {
     return rows.first.read<String>('payload_json');
   }
 }
+

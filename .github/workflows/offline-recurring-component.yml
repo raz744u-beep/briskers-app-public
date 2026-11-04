@@ -4,7 +4,12 @@ on:
   pull_request:
     paths:
       - 'lib/services/offline_recurring_repository.dart'
+      - 'lib/services/recurring_*.dart'
+      - 'lib/screens/settings/offline_recurring_screen.dart'
       - 'test/offline_recurring_repository_test.dart'
+      - 'test/recurring_*_test.dart'
+      - 'tools/patches/offline_recurring_*.sql'
+      - 'tools/tests/*offline_recurring*'
       - '.github/workflows/offline-recurring-component.yml'
   workflow_dispatch:
 
@@ -36,7 +41,7 @@ jobs:
           rm -rf lib test
           cp -R ../lib ./lib
           mkdir test
-          cp ../test/offline_recurring_repository_test.dart ./test/
+          cp ../test/offline_recurring_repository_test.dart ../test/recurring_*_test.dart ./test/
           cp ../pubspec.yaml ./pubspec.yaml
           cp ../analysis_options.yaml ./analysis_options.yaml
           if [ -d ../assets ]; then cp -R ../assets ./assets; fi
@@ -44,7 +49,38 @@ jobs:
           dart run build_runner build --delete-conflicting-outputs
       - name: Analyze component
         working-directory: generated
-        run: dart analyze lib/services/offline_recurring_repository.dart test/offline_recurring_repository_test.dart
+        run: dart analyze --fatal-infos lib/services/offline_recurring_repository.dart lib/services/recurring_*.dart lib/screens/settings/offline_recurring_screen.dart test/offline_recurring_repository_test.dart test/recurring_*_test.dart
       - name: SQLite recurrence regressions
         working-directory: generated
-        run: flutter test --reporter expanded test/offline_recurring_repository_test.dart
+        run: flutter test --reporter expanded
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: synthetic-test-only
+          POSTGRES_DB: recurring_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: synthetic-test-only
+      PGDATABASE: recurring_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prepare isolated database and proposed patches
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -f tools/tests/offline_recurring_fixture.sql
+          psql -X -v ON_ERROR_STOP=1 -f tools/patches/offline_recurring_recovery.sql
+          psql -X -v ON_ERROR_STOP=1 -f tools/patches/offline_recurring_sync.sql
+      - name: Verify recovery and reconciliation
+        run: python3 tools/tests/test_offline_recurring_server.py

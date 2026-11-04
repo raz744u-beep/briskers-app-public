@@ -343,6 +343,10 @@ class OfflineFinancialWriteService {
           await _cache.loadTransactionDetail(businessId, transactionId) ??
           <String, dynamic>{};
 
+      if (existing['recurring_engine_owned'] == true) {
+        throw StateError('Edit this expense from Recurring transactions so its occurrence identity is preserved.');
+      }
+
       final pendingCreate = await _database
           .customSelect(
             '''
@@ -459,6 +463,31 @@ class OfflineFinancialWriteService {
       await _cache.saveTransactionDetail(businessId, transactionId, detail);
 
       return detail;
+    });
+  }
+
+  /// Receipt-only write: never creates a manual financial transaction or
+  /// changes the recurring amount. Uploaded after recurrence reconciliation.
+  Future<void> attachRecurringReceipts(String businessId, String transactionId, {
+    required List<Map<String, dynamic>> receipts,
+    required void Function() assertAuthorized,
+  }) async {
+    assertAuthorized();
+    await _database.transaction(() async {
+      final existing = await _cache.loadTransactionDetail(businessId, transactionId);
+      if (existing == null || existing['recurring_engine_owned'] != true) {
+        throw StateError('Recurring expense is not available locally.');
+      }
+      final attachments = <Map<String, dynamic>>[
+        for (final raw in existing['attachments'] as List? ?? [])
+          Map<String, dynamic>.from(raw as Map),
+        ...await _queueReceipts(businessId, transactionId, receipts),
+      ];
+      final updated = {...existing, 'attachments': attachments,
+        'receipt_count': attachments.length};
+      await _cache.saveTransactionDetail(businessId, transactionId, updated);
+      await _upsertSummary(businessId, updated);
+      assertAuthorized();
     });
   }
 
@@ -679,7 +708,8 @@ class OfflineFinancialWriteService {
     Map<String, dynamic> payload,
   ) async {
     final transactionId = payload['transaction_id']?.toString() ?? '';
-    if (transactionId.startsWith('local-transaction-')) return;
+    if (transactionId.startsWith('local-transaction-') ||
+        transactionId.startsWith('local-recurring-')) return;
     final extraction = payload['extraction'];
     if (extraction is! Map || extraction['review_confirmed'] != true) {
       throw StateError('Unconfirmed receipt cannot be synchronized.');
@@ -712,7 +742,8 @@ class OfflineFinancialWriteService {
     Map<String, dynamic> payload,
   ) async {
     final transactionId = payload['transaction_id']?.toString() ?? '';
-    if (transactionId.startsWith('local-transaction-')) {
+    if (transactionId.startsWith('local-transaction-') ||
+        transactionId.startsWith('local-recurring-')) {
       return;
     }
 
@@ -794,3 +825,4 @@ class OfflineFinancialWriteService {
     });
   }
 }
+

@@ -246,7 +246,9 @@ class OfflineRecurringRepository {
         };
         await _put(kind, key, merged,
             (old?['_revision'] as int? ?? 0) + 1, 'synced');
-        if (!isRule) await projectOccurrence(database, old, merged);
+        if (!isRule) {
+          await projectOccurrence(database, old, {...merged, '_state': 'synced'});
+        }
       }
     }
   });
@@ -302,7 +304,7 @@ class OfflineRecurringRepository {
             'attachments': <dynamic>[],
           };
           await _put('occurrence', key, row, 1, 'pending');
-          await projectOccurrence(database, null, row);
+          await projectOccurrence(database, null, {...row, '_state': 'pending'});
           all[key] = row;
           generated++;
         }
@@ -335,7 +337,30 @@ class OfflineRecurringRepository {
     if (old['_state'] == 'conflict') throw StateError('Occurrence has a conflict.');
     final updated = {...old, 'amount_minor': amountMinor};
     await _put('occurrence', key, updated, (old['_revision'] as int) + 1, 'pending');
-    await projectOccurrence(database, old, updated);
+    await projectOccurrence(database, old, {...updated, '_state': 'pending'});
+  }, write: true);
+
+  /// Explicit Owner conflict choice; downloading never invokes this itself.
+  Future<void> resolveConflict({required bool rule, required String key,
+      required int revision, required bool useServer}) => _atomic(() async {
+    final kind = rule ? 'rule' : 'occurrence';
+    final matches = (await _rows(kind)).where((r) => r['_key'] == key);
+    if (matches.isEmpty) throw StateError('Conflict no longer exists.');
+    final old = matches.single;
+    if (old['_revision'] != revision || old['_state'] != 'conflict' ||
+        old['_server'] is! Map) {
+      throw StateError('Conflict changed; review it again.');
+    }
+    final server = Map<String, dynamic>.from(old['_server'] as Map);
+    _validate(server, rule: rule);
+    final chosen = useServer ? server : <String, dynamic>{
+      ...old, 'id': server['id'], 'row_version': server['row_version'],
+    };
+    final state = useServer ? 'synced' : 'pending';
+    await _put(kind, key, chosen, revision + 1, state);
+    if (!rule) {
+      await projectOccurrence(database, old, {...chosen, '_state': state});
+    }
   }, write: true);
 
   /// Call only after a server CAS/idempotent write returns the canonical row.
@@ -361,11 +386,13 @@ class OfflineRecurringRepository {
       await _put(kind, key, old, revision, 'conflict', server: canonical);
       return false;
     }
-    final merged = {...canonical,
+    final merged = {..._payload(old), ...canonical,
       if (!rule && old['attachments'] != null) 'attachments': old['attachments'],
     };
     await _put(kind, key, merged, revision + 1, 'synced');
-    if (!rule) await projectOccurrence(database, old, merged);
+    if (!rule) {
+      await projectOccurrence(database, old, {...merged, '_state': 'synced'});
+    }
     return true;
   }, write: true);
 }
