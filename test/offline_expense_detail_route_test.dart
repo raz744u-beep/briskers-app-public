@@ -240,6 +240,30 @@ void main() {
     expect(find.text('Delete transaction'), findsOneWidget);
   });
 
+  for (final withSummary in [true, false]) {
+    testWidgets('recurring detail stays local and read-only (summary: $withSummary)',
+        (tester) async {
+      await BriskersConnectionModeController.instance.setMode(
+        BriskersConnectionMode.online,
+      );
+      final saved = {..._fullDetail(), 'recurring_engine_owned': true};
+      final api = _Api(onlineDetail: {
+        ..._fullDetail(),
+        'remarks': 'Stale server expense',
+      });
+      final cache = _Cache(database, detail: saved);
+      await open(tester, api: api, cache: cache,
+          summary: withSummary ? saved : null);
+      expect(find.text('Saved full detail'), findsOneWidget);
+      expect(find.text('Stale server expense'), findsNothing);
+      expect(find.byType(PopupMenuButton<String>), findsNothing);
+      expect(api.permissionCalls, 0);
+      expect(cache.persisted, isNull);
+      expect(cache.reads, 1);
+      if (withSummary) expect(api.detailCalls, 0);
+    });
+  }
+
   test(
     'Job and invoice routes pass safe visible previews in Auto and Offline',
     () async {
