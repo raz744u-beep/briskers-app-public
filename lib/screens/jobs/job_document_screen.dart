@@ -1,3 +1,4 @@
+import '../payroll/owner_payroll_screen.dart';
 import 'owner_local_delete_action.dart';
 import '../../services/device_owner_authorization.dart';
 import '../../services/local_invoice_number_service.dart';
@@ -7756,6 +7757,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               if (!_estimate) ...[
                 const Divider(height: 1),
                 const _DocumentActionSectionLabel('Repair'),
+                if (widget.isOwner && _detail?['job_id'] is String)
+                  ListTile(
+                    leading: const Icon(Icons.assignment_outlined),
+                    title: const Text('Job labor tasks'),
+                    onTap: () => Navigator.pop(sheetContext, 'labor_tasks'),
+                  ),
                 ListTile(
                   leading: const Icon(Icons.car_repair_outlined),
                   title: Text(tr('vehicleFindings')),
@@ -7836,6 +7843,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         await _editDocumentHeader();
       case 'copy':
         await _copyDocument();
+      case 'labor_tasks':
+        final detail = _detail;
+        final job = detail?['job_id'];
+        if (!widget.isOwner || _estimate || job is! String || job.isEmpty) return;
+        final raw = detail?['lines'] ?? detail?['items'];
+        await Navigator.push<void>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => OwnerPayrollScreen(
+              businessId: widget.businessId,
+              jobId: job,
+              invoiceId: widget.documentId,
+              invoiceLines: raw is List
+                  ? raw.whereType<Map>().map(Map<String, dynamic>.from).toList()
+                  : const [],
+            ),
+          ),
+        );
       case 'findings':
         await _showInvoiceFindings();
       case 'expenses':

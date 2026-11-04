@@ -113,6 +113,33 @@ void main() {
           confirmedNet: 10000,
         );
 
+    var grantValid = true;
+    final guardedPayroll = LocalPayrollRepository(
+      db,
+      business: 'shop-a',
+      owner: true,
+      assertOwnerGrant: () {
+        if (!grantValid) throw StateError('Expired grant');
+      },
+    );
+    await expectLater(
+      guardedPayroll.verify(
+        operation: 'expired-payment',
+        employee: 'employee-a',
+        week: '2026-11-02',
+        date: '2026-11-04',
+        method: 'Cash',
+        selected: selected,
+        base: 0,
+        hourlyAdjustment: 0,
+        adjustmentReason: '',
+        repayment: 0,
+        confirmedNet: 10000,
+        beforeCommit: () async { grantValid = false; },
+      ),
+      throwsStateError,
+    );
+    expect(await payroll.history('employee-a'), isEmpty);
     expect(await verify('pay-a'), isTrue);
     await db.close();
     db = BriskersLocalDatabase(NativeDatabase(file));

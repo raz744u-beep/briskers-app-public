@@ -11,14 +11,17 @@ class LocalPayrollRepository {
     this.db, {
     required this.business,
     required this.owner,
+    this.assertOwnerGrant,
   });
   final BriskersLocalDatabase db;
   final String business;
   final bool owner;
+  final void Function()? assertOwnerGrant;
   Future<void>? _prepared;
   void _authorize() {
     if (!owner || business.trim().isEmpty)
       { throw StateError('Owner payroll access required'); }
+    assertOwnerGrant?.call();
   }
 
   Future<List<Map<String, dynamic>>> _read(
@@ -70,6 +73,20 @@ class LocalPayrollRepository {
     return _read('SELECT * FROM regular_payroll_employees WHERE business_id=? ORDER BY id', [
       business,
     ]);
+  }
+
+  Future<List<Map<String, dynamic>>> assignedEmployees(String jobId) async {
+    _authorize();
+    await prepare();
+    final rows = await _read(
+      'SELECT DISTINCT a.employee_id, a.employee_name, e.name, e.rate '
+      'FROM local_job_assignments a LEFT JOIN regular_payroll_employees e '
+      'ON e.business_id=a.business_id AND e.id=a.employee_id '
+      'WHERE a.business_id=? AND a.job_id=? AND a.active=1',
+      [business, jobId],
+    );
+    _authorize();
+    return rows;
   }
 
   /// Capture the actual Job, invoice line and assignment in one transaction.
@@ -129,6 +146,7 @@ class LocalPayrollRepository {
         [business, employeeId],
       );
       await _assign(task, employeeId);
+      _authorize();
     });
   }
 
@@ -191,6 +209,7 @@ class LocalPayrollRepository {
         'UPDATE regular_payroll_portions SET state=?,version=version+1,completed_date=? WHERE business_id=? AND id=?',
         [state, state == 'Done' ? date : null, business, id],
       );
+      _authorize();
     });
   }
 
@@ -213,12 +232,12 @@ class LocalPayrollRepository {
     ]);
   }
 
-  Future<List<Map<String, dynamic>>> work({String? employee}) async {
+  Future<List<Map<String, dynamic>>> work({String? employee, String? job}) async {
     _authorize();
     await prepare();
     return _read(
-      '''SELECT p.business_id,p.id,p.task_id,p.employee_id,p.state,p.completed_date,c.revision AS version,t.description,t.job_id,c.completed AS credit_completed,c.actual_minutes,(c.actual_minutes*100+30)/60 AS hours_hundredths,c.rate_cents,(c.actual_minutes*c.rate_cents+30)/60 AS gross_cents,CASE WHEN c.paid_operation_id IS NULL THEN 0 ELSE 1 END AS paid FROM regular_payroll_portions p JOIN regular_payroll_tasks t ON t.business_id=p.business_id AND t.id=p.task_id JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id WHERE p.business_id=? ${employee == null ? '' : 'AND p.employee_id=?'} ORDER BY p.id''',
-      [business, ?employee],
+      '''SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,p.state,p.completed_date,c.revision AS version,t.description,t.job_id,c.completed AS credit_completed,c.actual_minutes,(c.actual_minutes*100+30)/60 AS hours_hundredths,c.rate_cents,(c.actual_minutes*c.rate_cents+30)/60 AS gross_cents,CASE WHEN c.paid_operation_id IS NULL THEN 0 ELSE 1 END AS paid FROM regular_payroll_portions p JOIN regular_payroll_tasks t ON t.business_id=p.business_id AND t.id=p.task_id JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id WHERE p.business_id=? ${employee == null ? '' : 'AND p.employee_id=?'} ${job == null ? '' : 'AND t.job_id=?'} ORDER BY p.id''',
+      [business, ?employee, ?job],
     );
   }
 
@@ -426,6 +445,7 @@ class LocalPayrollRepository {
         [business, operation, payload],
       );
       if (beforeCommit != null) { await beforeCommit(); }
+      _authorize();
       return true;
     });
   }
