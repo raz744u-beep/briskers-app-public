@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/core/connection_mode.dart';
@@ -24,6 +25,7 @@ void main() {
   late LocalOwnerGrant grant;
   const identity = OwnerSessionIdentity('owner', 'session');
   setUp(() async {
+    SharedPreferences.setMockInitialValues({});
     dir = await Directory.systemTemp.createTemp('available-numbers-');
     db = BriskersLocalDatabase(NativeDatabase(File('${dir.path}/test.sqlite')));
     BriskersConnectionModeController.instance.useSafeOfflineFallback();
