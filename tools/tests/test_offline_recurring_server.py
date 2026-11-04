@@ -58,6 +58,9 @@ snapshot = json.loads(sql(f"SELECT public.briskers_recurring_recovery_v1('{B}');
 assert snapshot['complete'] and snapshot['occurrence_count'] == 1
 assert snapshot['rules'][0]['amount_minor'] == 10000
 assert snapshot['occurrences'][0]['recurring_occurrence_date'] == '2026-11-04'
+listed = json.loads(sql(f"SELECT public.briskers_list_transactions_recurring_v1('{B}');"))
+assert listed[0]['recurring_rule_id'] == R
+assert listed[0]['recurring_occurrence_date'] == '2026-11-04'
 
 # Stale conflicting local edits do not mutate the schedule or existing expense.
 bundle('stale', r={**rule, 'amount_minor': 12000}, success=False)

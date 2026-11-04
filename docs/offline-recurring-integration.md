@@ -25,15 +25,20 @@ Remaining release verification: apply/test patches against a schema-equivalent
 staging database with the real accounting triggers and permissions (the isolated
 CI fixture covers the relevant interface, not every production trigger); verify
 authenticated RPC transport and final APK update/install on a device. A complete
-financial baseline refresh is needed after reconciliation. Test ordinary list
-refreshes that omit occurrence keys before enabling general sync: the recurring
-endpoint preserves keys, but unrelated older list endpoints may not supply them.
+financial baseline refresh is needed after reconciliation. Deploy offline_recurring_lists.sql along with the recovery and sync patches: the
+new list wrapper preserves the legacy filters/order and adds immutable occurrence
+keys. Pending list rows overlay by occurrence rather than temporary ID. Full
+period reconciliation adjusts the journal to the local-versus-server difference
+so a posted occurrence is not counted twice before its ID is acknowledged.
 
 ## Files and ownership
 
 - `lib/services/offline_recurring_repository.dart`: isolated SQLite engine.
 - `test/offline_recurring_repository_test.dart`: real SQLite restart/rollback tests.
-- `.github/workflows/offline-recurring-component.yml`: focused analyzer and tests.
+- `.github/workflows/offline-recurring-component.yml`: analyzer, SQLite tests and isolated PostgreSQL tests.
+- `recurring_financial_projection.dart`, recovery/sync services and RPC transport: real application connections.
+- `offline_recurring_screen.dart`: Owner management, recovery, correction, conflict choice and local receipt capture.
+- `tools/patches/offline_recurring_{recovery,sync,lists}.sql`: proposed server patch set.
 
 The constructor takes the existing `BriskersLocalDatabase`, business/user scope,
 live authorization callbacks, and a required transactional projection adapter.

@@ -98,6 +98,26 @@ void main() {
     expect(await cache.loadTransactions('shop'), hasLength(1));
   });
 
+  test('ordinary server refresh overlays by occurrence and totals count difference only', () async {
+    await repo.saveRule(baseRule);
+    await repo.generateThrough('2026-11-04');
+    await repo.correctAmount('weekly','2026-11-04',12000);
+    final canonical = <String,dynamic>{
+      'id':'server-id','direction':'expense','amount':100,
+      'transaction_date':'2026-11-04','recurring_rule_id':'weekly',
+      'recurring_occurrence_date':'2026-11-04',
+    };
+    await cache.mergeServerTransactions('shop',[canonical]);
+    final visible = await cache.loadTransactions('shop');
+    expect(visible,hasLength(1));
+    expect(visible.single['amount'],120);
+    const refreshed = ExpensesPeriodTotals(income:0,expenses:100,transactions:1,feesUnverified:false);
+    await journal.reconcileAndSaveBaseline('shop','scope',refreshed,DateTime.now(),[canonical]);
+    final total = await journal.apply('shop',refreshed);
+    expect(total.expenses,120);
+    expect(total.transactions,1);
+  });
+
   test('pending ordinary expense edit rejects recovery and rolls back rules', () async {
     await cache.saveTransactionDetail('shop', 'server-id', {
       'id': 'server-id', 'business_id': 'shop', 'amount': 150, 'sync_state': 'pending',

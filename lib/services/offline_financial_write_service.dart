@@ -471,6 +471,7 @@ class OfflineFinancialWriteService {
   Future<void> attachRecurringReceipts(String businessId, String transactionId, {
     required List<Map<String, dynamic>> receipts,
     required void Function() assertAuthorized,
+    Map<String, dynamic>? receiptExtraction,
   }) async {
     assertAuthorized();
     await _database.transaction(() async {
@@ -483,8 +484,15 @@ class OfflineFinancialWriteService {
           Map<String, dynamic>.from(raw as Map),
         ...await _queueReceipts(businessId, transactionId, receipts),
       ];
+      if (receiptExtraction != null) {
+        if (receiptExtraction['review_confirmed'] != true) {
+          throw StateError('Confirm receipt details before saving.');
+        }
+        await _enqueueReceiptExtraction(businessId, transactionId, receiptExtraction);
+      }
       final updated = {...existing, 'attachments': attachments,
-        'receipt_count': attachments.length};
+        'receipt_count': attachments.length,
+        if (receiptExtraction != null) ..._receiptProjection(transactionId, receiptExtraction)};
       await _cache.saveTransactionDetail(businessId, transactionId, updated);
       await _upsertSummary(businessId, updated);
       assertAuthorized();

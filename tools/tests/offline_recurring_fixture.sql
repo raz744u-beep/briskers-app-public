@@ -48,6 +48,13 @@ CREATE FUNCTION public.briskers_transaction_options(b uuid) RETURNS jsonb LANGUA
   $$ SELECT jsonb_build_object('accounts',(SELECT jsonb_agg(to_jsonb(a)) FROM briskers.financial_accounts a WHERE business_id=b),
     'categories',(SELECT jsonb_agg(to_jsonb(c)) FROM briskers.financial_categories c WHERE business_id=b),
     'counterparties',(SELECT jsonb_agg(to_jsonb(v)) FROM briskers.vendors v WHERE business_id=b)) $$;
+CREATE FUNCTION public.briskers_list_transactions_v2(
+ b uuid,l int,o int,s date,e date,q text,d text,a uuid,c uuid,v uuid
+) RETURNS jsonb LANGUAGE sql STABLE AS $$
+ SELECT coalesce(jsonb_agg(jsonb_build_object('id',t.id,'amount',abs(t.amount))), '[]'::jsonb)
+ FROM (SELECT * FROM briskers.financial_transactions WHERE business_id=b
+       ORDER BY transaction_date,id LIMIT l OFFSET o) t
+$$;
 INSERT INTO briskers.financial_accounts VALUES
  ('00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001','Checking',true,'USD');
 INSERT INTO briskers.financial_categories VALUES

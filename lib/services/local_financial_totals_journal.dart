@@ -476,11 +476,22 @@ class LocalFinancialTotalsJournal {
       if (raw is! Map || raw['after'] is! Map) continue;
       final value = Map<String, dynamic>.from(raw['after'] as Map);
       final id = value['id']?.toString() ?? '';
-      final posted = canonical[id] ??
+      final recurringMatches = value['recurring_engine_owned'] == true
+          ? canonicalRows.where((row) => row['recurring_rule_id'] != null &&
+              row['recurring_rule_id'] == value['recurring_rule_id'] &&
+              row['recurring_occurrence_date'] == value['recurring_occurrence_date']).toList()
+          : <Map<String,dynamic>>[];
+      final posted = canonical[id] ?? (recurringMatches.length == 1 ? recurringMatches.single : null) ??
           (key.startsWith('invoice-payment:')
               ? canonical[linkedOperations[key.substring('invoice-payment:'.length)]]
               : null);
       if (posted == null) continue;
+      if (value['recurring_engine_owned'] == true && recurringMatches.length == 1) {
+        // The new full baseline already contains the server occurrence. Keep
+        // only the local-vs-server difference until the correction is accepted.
+        entries[key] = {'before': posted, 'after': value};
+        changed = true;
+      }
       if (posted['direction'] == value['direction'] &&
           posted['transaction_date']?.toString().split('T').first ==
               value['transaction_date']?.toString().split('T').first &&
@@ -492,3 +503,4 @@ class LocalFinancialTotalsJournal {
     if (changed) await _write(businessId, entries);
   }
 }
+

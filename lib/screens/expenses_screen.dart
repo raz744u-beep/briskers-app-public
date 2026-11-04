@@ -597,19 +597,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         // Retain locally committed, not-yet-synced financial entries if
         // the authenticated server's first page has not received them.
         // Identity-scoped replacement avoids duplicate list cards.
-        final localPending = {
-          for (final row in _transactions)
-            if (row['sync_state']?.toString() == 'pending')
-              row['id']?.toString(): row,
-        };
-        final seen = <String>{};
-        _transactions = [
-          for (final row in rows)
-            if (seen.add(row['id']?.toString() ?? ''))
-              localPending[row['id']?.toString()] ?? row,
-          for (final entry in localPending.entries)
-            if (!seen.contains(entry.key)) entry.value,
-        ];
+        _transactions = LocalFinancialCache.overlayPending(rows, _transactions);
         _hasMore = rows.length == _pageSize;
         _loading = false;
         _showingLocal = false;
@@ -1030,7 +1018,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           rows.map((row) => row['id']?.toString() ?? '')
               .where((id) => id.isNotEmpty),
         );
-        _transactions = [..._transactions, ...rows];
+        _transactions = LocalFinancialCache.overlayPending([..._transactions, ...rows], _transactions);
         _hasMore = rows.length == _pageSize;
         _loadingMore = false;
       });
@@ -2592,3 +2580,4 @@ class _ActionSectionLabel extends StatelessWidget {
           letterSpacing: 0.8, fontWeight: FontWeight.w700))),
   );
 }
+
