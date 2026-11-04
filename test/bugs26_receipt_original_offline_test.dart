@@ -118,7 +118,7 @@ void main() {
           'original-receipt-shop-a-expense-a-content://synthetic/original',
         ),
       );
-      await tester.ensureVisible(original);
+      await tester.scrollUntilVisible(original, 150);
       expect(original, findsOneWidget);
       expect(
         find.byType(Image),

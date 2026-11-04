@@ -228,6 +228,7 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(seconds: 16));
     expect(find.text('Cold saved detail'), findsOneWidget);
+    await tester.scrollUntilVisible(find.textContaining('timed out'), 150);
     expect(find.textContaining('timed out'), findsOneWidget);
     expectReadOnly();
     await tester.pumpWidget(const SizedBox.shrink());
