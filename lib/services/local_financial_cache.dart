@@ -141,6 +141,35 @@ class LocalFinancialCache {
 
   final BriskersLocalDatabase _database;
 
+  /// Server and local IDs may differ until recurrence acknowledgement. Overlay
+  /// by the immutable occurrence key, never by amount/payee/date heuristics.
+  static List<Map<String, dynamic>> overlayPending(
+    List<Map<String, dynamic>> serverRows, List<Map<String, dynamic>> localRows,
+  ) {
+    String? occurrence(Map<String, dynamic> row) =>
+      row['recurring_rule_id'] != null && row['recurring_occurrence_date'] != null
+        ? jsonEncode([row['recurring_rule_id'],row['recurring_occurrence_date']]) : null;
+    final pending = <String,Map<String,dynamic>>{
+      for (final row in localRows)
+        if (row['sync_state'] == 'pending') row['id'].toString(): row,
+    };
+    final byOccurrence = <String,Map<String,dynamic>>{
+      for (final row in pending.values)
+        if (row['recurring_engine_owned'] == true && occurrence(row) != null)
+          occurrence(row)!: row,
+    };
+    final result = <Map<String,dynamic>>[];
+    final seen = <String>{};
+    for (final server in serverRows) {
+      final selected = byOccurrence[occurrence(server)] ?? pending[server['id']] ?? server;
+      if (seen.add(selected['id'].toString())) result.add(selected);
+    }
+    for (final row in pending.values) {
+      if (seen.add(row['id'].toString())) result.add(row);
+    }
+    return result;
+  }
+
   Future<void> saveTransactions(
     String businessId,
     List<Map<String, dynamic>> rows,
@@ -160,12 +189,6 @@ class LocalFinancialCache {
   ) async {
     await _database.transaction(() async {
       final saved = await loadTransactions(businessId);
-      final pending = <String, Map<String, dynamic>>{
-        for (final row in saved)
-          if (row['sync_state']?.toString() == 'pending' &&
-              (row['id']?.toString() ?? '').isNotEmpty)
-            row['id'].toString(): row,
-      };
       final downloaded = <String, Map<String, dynamic>>{
         for (final row in saved)
           if (row['recurring_verified_download'] == true &&
@@ -178,18 +201,17 @@ class LocalFinancialCache {
         return {
           ...server,
           'recurring_verified_download': true,
+          if (cached['recurring_engine_owned'] == true)
+            'recurring_engine_owned': true,
           'recurring_rule_id': cached['recurring_rule_id'],
           'recurring_occurrence_date': cached['recurring_occurrence_date'],
         };
       }
 
-      final seen = <String>{};
+      final overlay = overlayPending(serverRows.map(preserveOccurrence).toList(), saved);
+      final seen = overlay.map((r) => r['id'].toString()).toSet();
       final merged = <Map<String, dynamic>>[
-        for (final row in serverRows)
-          if (seen.add(row['id']?.toString() ?? ''))
-            pending[row['id']?.toString()] ?? preserveOccurrence(row),
-        for (final entry in pending.entries)
-          if (seen.add(entry.key)) entry.value,
+        ...overlay,
         for (final entry in downloaded.entries)
           if (seen.add(entry.key)) entry.value,
       ];
@@ -378,6 +400,13 @@ class LocalFinancialCache {
     if (!matchesTransaction(detail, businessId, transactionId)) {
       throw ArgumentError('Expense detail does not match its business and transaction.');
     }
+    final existing = await loadTransactionDetail(businessId, transactionId);
+    if (existing?['recurring_engine_owned'] == true &&
+        detail['recurring_engine_owned'] != true) {
+      // Ordinary detail prefetch cannot erase an engine-owned correction or
+      // local receipt. Explicit recurring recovery performs versioned merges.
+      return;
+    }
     await _save(
       businessId,
       'transaction_detail_$transactionId',
@@ -464,3 +493,4 @@ class LocalFinancialCache {
     return rows.first.read<String>('payload_json');
   }
 }
+

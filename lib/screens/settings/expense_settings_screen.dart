@@ -11,6 +11,7 @@ import '../../core/recurring_schedule_status.dart';
 import '../../core/supabase_config.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_financial_cache.dart';
+import 'offline_recurring_screen.dart';
 
 class ExpenseSettingsScreen extends StatelessWidget {
   const ExpenseSettingsScreen({
@@ -114,7 +115,7 @@ class ExpenseSettingsScreen extends StatelessWidget {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _push(
               context,
-              RecurringTransactionsScreen(businessId: businessId),
+              OfflineRecurringScreen(businessId: businessId),
             ),
           ),
         ],
@@ -2434,3 +2435,4 @@ class _RecurringDialogState extends State<_RecurringDialog> {
     );
   }
 }
+

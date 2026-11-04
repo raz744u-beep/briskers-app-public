@@ -1548,16 +1548,17 @@ class BriskersApi {
   }
 
   Future<List<Map<String, dynamic>>> transactions(
-    String businessId, {
-    int limit = 500,
-  }) async {
-    final result = await networkSupabase.rpc(
-      'briskers_list_transactions',
-      params: {'p_business_id': businessId, 'p_limit': limit},
-    );
-    return (result as List<dynamic>)
-        .map((row) => Map<String, dynamic>.from(row as Map))
-        .toList();
+    String businessId, {int limit = 500}
+  ) async {
+    final count = limit.clamp(1, 2000);
+    final rows = <Map<String,dynamic>>[];
+    while (rows.length < count) {
+      final size = (count - rows.length).clamp(1, 200);
+      final page = await transactionsPaged(businessId, limit: size, offset: rows.length);
+      rows.addAll(page);
+      if (page.length < size) break;
+    }
+    return rows;
   }
 
   Future<List<Map<String, dynamic>>> transactionsPaged(
@@ -1573,7 +1574,7 @@ class BriskersApi {
     String? counterpartyId,
   }) async {
     final result = await networkSupabase.rpc(
-      'briskers_list_transactions_v2',
+      'briskers_list_transactions_recurring_v1',
       params: {
         'p_business_id': businessId,
         'p_limit': limit,
@@ -4622,3 +4623,4 @@ class BriskersApi {
     );
   }
 }
+

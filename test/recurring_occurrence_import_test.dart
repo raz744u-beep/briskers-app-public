@@ -79,3 +79,4 @@ void main() {
     expect((await cache.loadTransactionDetail('shop', 'server-expense'))?['amount'], 106);
   });
 }
+
