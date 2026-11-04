@@ -329,15 +329,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   }
 
   Future<void> _load({bool hydrateLocal = true}) async {
-    final recurringBusiness = widget.businessId;
-    final recurringId = widget.transactionId;
-    final savedRecurring = await _localFinancial.loadTransactionDetail(
-      recurringBusiness, recurringId);
-    if (!mounted || widget.businessId != recurringBusiness ||
-        widget.transactionId != recurringId) {
-      return;
-    }
-    if (savedRecurring?['recurring_engine_owned'] == true) {
+    if (widget.cachedDetail?['recurring_engine_owned'] == true ||
+        _detail?['recurring_engine_owned'] == true ||
+        widget.transactionId.startsWith('local-recurring-')) {
       await _loadOffline();
       return;
     }
@@ -360,6 +354,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
           BriskersConnectionModeController.instance.forceOffline) {
         return;
       }
+      if (_detail?['recurring_engine_owned'] == true) return;
       final detail = _normalizedDetail(rawDetail);
       setState(() {
         _detail = detail;
