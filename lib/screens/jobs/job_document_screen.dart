@@ -2,6 +2,7 @@ import '../payroll/owner_payroll_screen.dart';
 import 'owner_local_delete_action.dart';
 import '../../services/device_owner_authorization.dart';
 import '../../services/local_invoice_number_service.dart';
+import '../../services/local_job_number_service.dart';
 import '../../services/local_numbered_document_overlay.dart';
 import 'dart:async';
 import 'dart:io' show Platform;
@@ -7716,6 +7717,64 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     );
   }
 
+  Future<void> _assignJobNumber() async {
+    if (!widget.isOwner || _estimate || _busy || _detail == null) return;
+    final jobId = _detail!['job_id']?.toString() ?? '';
+    if (jobId.isEmpty) return;
+    final controller = TextEditingController(
+        text: _detail!['job_number']?.toString() ?? '');
+    final entered = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit job number'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Job number',
+            hintText: 'J-34',
+            helperText: 'Changes only this job’s number. Keep Force Offline enabled.',
+            helperMaxLines: 3,
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    // Wait for the closing dialog to stop using its controller.
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    controller.dispose();
+    if (entered == null || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final number = LocalJobNumberService.parse(entered);
+      final grant = await DeviceOwnerAuthorization.instance.authority
+          .authorizeLocal(widget.businessId);
+      if (!mounted) return;
+      await LocalJobNumberService(localDatabase).assign(
+          widget.businessId, widget.documentId, jobId, number, grant);
+      if (!mounted) return;
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Job number saved as J-$number.')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.toString())),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _assignInvoiceNumber() async {
     if(!widget.isOwner || _estimate || _busy) return;
     final controller=TextEditingController(text:_detail?['document_number']?.toString() ?? '');
@@ -7751,6 +7810,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               if(widget.isOwner && !_estimate)
                 ListTile(leading:const Icon(Icons.numbers),title:const Text('Assign invoice number'),
                   onTap:()=>Navigator.pop(sheetContext,'number')),
+              if (widget.isOwner && !_estimate &&
+                  (_detail?['job_id']?.toString().isNotEmpty ?? false))
+                ListTile(
+                  leading: const Icon(Icons.numbers),
+                  title: const Text('Edit job number'),
+                  onTap: () => Navigator.pop(sheetContext, 'job_number'),
+                ),
               const _DocumentActionSectionLabel('Edit and copy'),
               if (!_readOnly)
                 ListTile(
@@ -7855,6 +7921,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
     if (!mounted || action == null) return;
     switch (action) {
+      case 'job_number':
+        await _assignJobNumber();
+        break;
       case 'number':
         await _assignInvoiceNumber();
         break;

@@ -24,7 +24,9 @@ class LocalNumberAllocator {
   };
   int? _parse(Object? raw, String kind) {
     var value = raw?.toString().trim() ?? '';
-    if (kind == 'job' && value.toUpperCase().startsWith('J-')) value=value.substring(2);
+    if (kind == 'job') {
+      value = value.toUpperCase().replaceFirst(RegExp(r'^J-?'), '');
+    }
     return RegExp(r'^\d+$').hasMatch(value) ? int.tryParse(value) : null;
   }
   String display(String kind, int number) => kind == 'job' ? 'J-$number' : '$number';
