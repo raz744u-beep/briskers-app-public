@@ -79,6 +79,16 @@ class RecurringFinancialProjection {
       'editable': false,
       'deletable': false,
     };
+    final pendingMetadata = await database.customSelect('''
+      SELECT id FROM sync_outbox WHERE business_id=?
+      AND entity_type='financial_receipt_extraction' AND state='pending'
+      AND entity_id IN (?,?) LIMIT 1
+    ''', variables: [Variable<String>(businessId),Variable<String>(oldId),Variable<String>(id)]).get();
+    if (pendingMetadata.isNotEmpty && existing != null) {
+      for (final field in ['receipt_extraction','receipt_details','receipt_items']) {
+        if (existing.containsKey(field)) detail[field] = existing[field];
+      }
+    }
     if (detail['receipt_details'] is Map) {
       detail['receipt_details'] = {
         ...Map<String, dynamic>.from(detail['receipt_details'] as Map),

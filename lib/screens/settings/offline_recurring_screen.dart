@@ -161,6 +161,15 @@ class _OfflineRecurringScreenState extends State<OfflineRecurringScreen> {
         'Local next/date: ${row['next_date'] ?? row['date']}\n'
         'Server next/date: ${server?['next_date'] ?? server?['date']}\n'
         'Local active: ${row['is_repeating']}\nServer active: ${server?['is_repeating']}\n\n'
+        'Local frequency: ${row['frequency']} / ${row['interval_count']}\n'
+        'Server frequency: ${server?['frequency']} / ${server?['interval_count']}\n'
+        'Local account: ${row['account'] ?? row['account_id']}\n'
+        'Server account: ${server?['account'] ?? server?['account_id']}\n'
+        'Local category: ${row['category'] ?? row['category_id']}\n'
+        'Server category: ${server?['category'] ?? server?['category_id']}\n'
+        'Local payee: ${row['counterparty'] ?? row['vendor_id']}\n'
+        'Server payee: ${server?['counterparty'] ?? server?['vendor_id']}\n'
+        'Local remarks: ${row['remarks'] ?? ''}\nServer remarks: ${server?['remarks'] ?? ''}\n\n'
         'Keep local preserves your values for the next sync. Use server replaces this local record.')),
       actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep local')),

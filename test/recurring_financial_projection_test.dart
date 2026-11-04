@@ -67,13 +67,15 @@ void main() {
       INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,payload_json)
       VALUES ('shop','financial_receipt_extraction',?,'apply',?)
     ''', [localId, jsonEncode({'transaction_id': localId, 'extraction': {'review_confirmed': true}})]);
-    final canonical = {...occurrence, 'id': 'server-id', 'row_version': 1};
+    final canonical = {...occurrence, 'id': 'server-id', 'row_version': 1,
+      'receipt_details': {'vendor_invoice_number': 'stale-server-value'}};
     expect(await repo.acknowledge(rule: false, key: occurrence['_key'] as String,
       revision: occurrence['_revision'] as int, canonical: canonical), isTrue);
     expect(await cache.loadTransactionDetail('shop', localId), isNull);
     final saved = (await cache.loadTransactionDetail('shop', 'server-id'))!;
     expect((saved['attachments'] as List).single['local_file_path'], '/original.jpg');
     expect(saved['receipt_details']['transaction_id'], 'server-id');
+    expect(saved['receipt_details']['vendor_invoice_number'], '123');
     expect(saved['receipt_items'][0]['transaction_id'], 'server-id');
     final queued = await db.customSelect('SELECT * FROM sync_outbox').getSingle();
     expect(queued.read<String>('entity_id'), 'server-id');
