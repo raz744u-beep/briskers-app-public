@@ -358,7 +358,12 @@ class LocalJobGraphDelete {
       // Preserve the original author and operation across restart. This is
       // identity-only sync metadata, not a recovery copy of deleted records.
       // No server path is activated until its reconciliation contract is verified.
-      final identities = current.map((row) => {
+      // Financial caches are shared containers, not identities owned by a
+      // Job. Keep their snapshots in race checks and clean only matching
+      // entries below, but never reserve the container for one deletion.
+      // Previously installed immutable cache markers can remain untouched.
+      final deletedEntities = current.where((row) => row['kind'] != 'financial_cache').toList();
+      final identities = deletedEntities.map((row) => {
         'entity_kind': row['kind'], 'entity_id': row['id'],
       }).toList()..sort((a, b) => jsonEncode(a).compareTo(jsonEncode(b)));
       await db.customStatement(
@@ -369,7 +374,7 @@ class LocalJobGraphDelete {
           'awaiting_backend', DateTime.now().toUtc().millisecondsSinceEpoch]);
       // Permanent local tombstones are committed in the SAME transaction as
       // deletion. Sync can propagate them later, without server approval.
-      for (final entry in current) {
+      for (final entry in deletedEntities) {
         await db.customStatement(
           'INSERT INTO local_offline_job_purge_entities '
           '(business_id,job_id,operation_id,entity_kind,entity_id) VALUES (?,?,?,?,?)',

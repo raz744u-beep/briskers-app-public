@@ -124,6 +124,52 @@ void main() {
     expect(await LocalNumberAllocator(db).nextNumber(business,'job'),1);
   });
 
+  test('sequential paid deletions retain shared totals and tolerate old immutable cache markers',() async {
+    final first=await create();
+    final firstJob=(await cache.load(business,first))!['job_id'] as String;
+    final second=await create();
+    final keep=await create();
+    final ledger=OfflineInvoicePaymentLedger(database:db);
+    for(final invoice in [first,second,keep]) {
+      await ledger.recordReceivedPayment(business,invoice,amount:25,
+        remainingBeforePaymentCents:2500,methodId:'cash',methodName:'Cash');
+    }
+    const key='financial_totals_local_delta_v1';
+    Future<Map<String,dynamic>> journal() async => Map<String,dynamic>.from(jsonDecode(
+      (await db.customSelect("SELECT payload_json FROM local_financial_cache WHERE cache_key='financial_totals_local_delta_v1'").getSingle()).read<String>('payload_json')) as Map);
+    final before=await journal();
+    final retained=before.entries.where((e)=>jsonEncode(e.value).contains(keep)).single;
+    await purge(first);
+    expect((await db.customSelect("SELECT * FROM local_offline_job_purge_entities WHERE entity_kind='financial_cache'").get()),isEmpty);
+    // Reproduce the immutable marker left by an older installed version.
+    await db.customStatement('INSERT INTO local_offline_job_purge_entities VALUES (?,?,?,?,?)',
+      [business,firstJob,'old-delete','financial_cache',key]);
+    await db.customStatement("CREATE TRIGGER old_cancel_no_replace BEFORE INSERT ON local_offline_job_purge_entities WHEN EXISTS(SELECT 1 FROM local_offline_job_purge_entities e WHERE e.business_id=NEW.business_id AND e.entity_kind=NEW.entity_kind AND e.entity_id=NEW.entity_id AND (e.job_id<>NEW.job_id OR e.operation_id<>NEW.operation_id)) BEGIN SELECT RAISE(ABORT,'Canceled identities cannot be replaced'); END");
+    final markers=(await db.customSelect("SELECT * FROM local_offline_job_purge_entities WHERE entity_kind='financial_cache'").get()).map((r)=>r.data).toList();
+    await purge(second);
+    expect(await cache.load(business,second),isNull);
+    expect((await journal())[retained.key],retained.value);
+    expect(await cache.load(business,keep),isNotNull);
+    expect((await db.customSelect("SELECT * FROM local_offline_job_purge_entities WHERE entity_kind='financial_cache'").get()).map((r)=>r.data).toList(),markers);
+    await expectLater(db.customStatement('INSERT INTO local_offline_job_purge_entities VALUES (?,?,?,?,?)',
+      [business,'another-job','another-delete','financial_cache',key]),throwsA(anything));
+    // The same shared container remains writable after both deletions.
+    await ledger.recordReceivedPayment(business,keep,amount:5,
+      remainingBeforePaymentCents:500,methodId:'cash',methodName:'Cash');
+    expect((await journal())[retained.key],retained.value);
+    await db.close();
+    db=BriskersLocalDatabase(NativeDatabase(File('${dir.path}/data.sqlite')));
+    await LocalDocumentDetailCache.initialize(db);
+    cache=LocalDocumentDetailCache(database:db);
+    drafts=OfflineDocumentDraftService(database:db,cache:cache);
+    expect(await cache.load(business,second),isNull);
+    expect(await cache.load(business,keep),isNotNull);
+    await purge(keep);
+    expect(await cache.load(business,keep),isNull);
+    final replacement=await create();
+    expect((await cache.load(business,replacement))!['document_number'],'7301');
+  });
+
   test('older number stays manual; duplicates reject and old reservation rolls back',() async {
     final first=await create();
     final second=await create();
