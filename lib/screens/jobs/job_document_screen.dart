@@ -4379,7 +4379,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _deleteOrVoidInvoice() async {
-    if (!widget.isOwner || _estimate || _detail == null || _busy) return;
+    if (!widget.isOwner || _estimate || _detail == null) return;
+    if (_busy) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Another invoice action is still running. Try Delete again when it finishes.'),
+      ));
+      return;
+    }
 
     final localJob=_detail!['job_id']?.toString() ?? '';
     if(localJob.isNotEmpty) {
@@ -4388,7 +4394,25 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         final deleted=await deleteOwnerLocalJob(context,businessId:widget.businessId,
           jobId:localJob,label:_detail!['job_number']?.toString() ?? 'Job');
         if(deleted && mounted) Navigator.pop(context,true);
-      } catch(error) { if(mounted) setState(()=>_error=error.toString()); }
+      } catch (error) {
+        if (!mounted) return;
+        setState(() => _error = error.toString());
+        // The loaded invoice does not render _error. Keep a failed deletion
+        // visible until acknowledged, including failures before confirmation.
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Invoice was not deleted'),
+            content: SelectableText(error.toString()),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
       finally { if(mounted) setState(()=>_busy=false); }
       return;
     }
