@@ -181,6 +181,58 @@ class LocalFinancialCache {
     });
   }
 
+  /// Add one verified occurrence without replacing the rest of the cache
+  /// or overwriting queued edits. This never creates an outbox operation.
+  Future<void> importRecurringExpenseOccurrence(
+    String businessId,
+    String ruleId,
+    String dueDate,
+    Map<String, dynamic> detail,
+  ) async {
+    final id = detail['id'];
+    if (id is! String || id.isEmpty || ruleId.isEmpty || dueDate.isEmpty ||
+        detail['business_id'] != businessId ||
+        detail['recurring_rule_id'] != ruleId ||
+        detail['recurring_occurrence_date'] != dueDate ||
+        detail['direction'] != 'expense' || detail['status'] != 'posted') {
+      throw StateError('The download did not match the requested occurrence.');
+    }
+    await _database.transaction(() async {
+      final rows = await loadTransactions(businessId);
+      for (final row in rows) {
+        if (row['recurring_rule_id'] == ruleId &&
+            row['recurring_occurrence_date'] == dueDate && row['id'] != id) {
+          throw StateError('A different local transaction already claims this occurrence.');
+        }
+      }
+      final previous = await loadTransactionDetail(businessId, id);
+      if (previous?['sync_state'] == 'pending' || rows.any(
+        (row) => row['id'] == id && row['sync_state'] == 'pending',
+      )) {
+        throw StateError('This expense has pending local changes.');
+      }
+      final snapshot = {
+        ...detail,
+        'transaction_date': detail['date'],
+        'sync_state': 'synced',
+      };
+      final identity = {
+        'recurring_rule_id': ruleId,
+        'recurring_occurrence_date': dueDate,
+      };
+      await saveTransactionDetail(businessId, id, {
+        ...snapshot,
+        if (previous != null) ...previous,
+        ...identity,
+      });
+      await saveTransactions(businessId, [
+        if (!rows.any((row) => row['id'] == id)) snapshot,
+        for (final row in rows)
+          if (row['id'] == id) {...row, ...identity} else row,
+      ]);
+    });
+  }
+
   Future<List<Map<String, dynamic>>> loadTransactions(
     String businessId, {
     DateTime? startDate,
