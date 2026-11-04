@@ -857,12 +857,15 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     final today = DateTime.now();
     final cutoff = DateTime(today.year, today.month, today.day);
     DateTime occurrence(int n) {
-      if (frequency == 'daily')
+      if (frequency == 'daily') {
         return DateTime(start.year, start.month, start.day + n);
-      if (frequency == 'weekly')
+      }
+      if (frequency == 'weekly') {
         return DateTime(start.year, start.month, start.day + 7 * n);
-      if (frequency == 'biweekly')
+      }
+      if (frequency == 'biweekly') {
         return DateTime(start.year, start.month, start.day + 14 * n);
+      }
       final months = frequency == 'yearly' ? 12 * n : n;
       final targetFirst = DateTime(start.year, start.month + months);
       final end = DateTime(targetFirst.year, targetFirst.month + 1, 0).day;
@@ -897,11 +900,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       firstDate: DateTime(2000),
       lastDate: DateTime.now().add(const Duration(days: 3650)),
     );
-    if (value != null && mounted)
+    if (value != null && mounted) {
       setState(() {
         _date = value;
         if (_repeat) _nextDate = _calculatedNextTransaction(_repeatPreset);
       });
+    }
   }
 
   Future<void> _pickNextDate() async {
@@ -1674,10 +1678,11 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                         ? null
                         : (value) => setState(() {
                             _repeat = value;
-                            if (value)
+                            if (value) {
                               _nextDate = _calculatedNextTransaction(
                                 _repeatPreset,
                               );
+                            }
                           }),
                   ),
                   if (_repeat) ...[
