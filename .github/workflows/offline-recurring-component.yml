@@ -1,0 +1,50 @@
+name: Offline recurring component
+
+on:
+  pull_request:
+    paths:
+      - 'lib/services/offline_recurring_repository.dart'
+      - 'test/offline_recurring_repository_test.dart'
+      - '.github/workflows/offline-recurring-component.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CI: 'true'
+  FLUTTER_SUPPRESS_ANALYTICS: 'true'
+  DASH__SUPPRESS_ANALYTICS: 'true'
+
+jobs:
+  recurrence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Prepare test shell
+        run: |
+          mkdir generated
+          cd generated
+          flutter create --platforms=android --org com.briskers --project-name briskers_app .
+          rm -rf lib test
+          cp -R ../lib ./lib
+          mkdir test
+          cp ../test/offline_recurring_repository_test.dart ./test/
+          cp ../pubspec.yaml ./pubspec.yaml
+          cp ../analysis_options.yaml ./analysis_options.yaml
+          if [ -d ../assets ]; then cp -R ../assets ./assets; fi
+          flutter pub get
+          dart run build_runner build --delete-conflicting-outputs
+      - name: Analyze component
+        working-directory: generated
+        run: dart analyze lib/services/offline_recurring_repository.dart test/offline_recurring_repository_test.dart
+      - name: SQLite recurrence regressions
+        working-directory: generated
+        run: flutter test --reporter expanded test/offline_recurring_repository_test.dart
