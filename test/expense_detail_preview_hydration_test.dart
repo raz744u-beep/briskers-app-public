@@ -213,6 +213,26 @@ void main() {
     expect(find.byTooltip('Delete receipt photo'), findsNothing);
   }
 
+  testWidgets('cold Auto open paints saved expense while network remains blocked', (tester) async {
+    await tester.pumpWidget(MaterialApp(home: ExpenseDetailScreen(
+      businessId: _business, transactionId: _transaction,
+      api: api, financialCache: cache, localPhotoSync: photos,
+      receiptReporting: reporting,
+    )));
+    expect(cache.reads, hasLength(1));
+    cache.reads.single.result.complete(_detail('Cold saved detail'));
+    await flushFrame(tester);
+    expect(find.text('Cold saved detail'), findsOneWidget);
+    expect(find.text('-\$45.67'), findsOneWidget);
+    expectReadOnly();
+    expect(tester.takeException(), isNull);
+    await tester.pump(const Duration(seconds: 16));
+    expect(find.text('Cold saved detail'), findsOneWidget);
+    expect(find.textContaining('timed out'), findsOneWidget);
+    expectReadOnly();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('first frame shows summary while disk and network stay blocked', (
     tester,
   ) async {

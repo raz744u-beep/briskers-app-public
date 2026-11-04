@@ -2,7 +2,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:briskers_app/core/connection_mode.dart';
-import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/local/briskers_local_database.dart'
+    show BriskersLocalDatabase;
 import 'package:briskers_app/screens/expenses/expense_detail_screen.dart';
 import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/expenseiq_local_photo_sync.dart';

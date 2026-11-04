@@ -96,6 +96,44 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   int _recordGeneration = 0;
   bool _hasAuthoritativeDetail = false;
   String _detailSource = 'preview';
+  final Set<Timer> _readDeadlines = {};
+
+  Future<T> _boundedRead<T>(Future<T> operation) {
+    final result = Completer<T>();
+    late Timer deadline;
+    void finish() {
+      deadline.cancel();
+      _readDeadlines.remove(deadline);
+    }
+    deadline = Timer(const Duration(seconds: 15), () {
+      finish();
+      if (!result.isCompleted) {
+        result.completeError(TimeoutException('Expense read timed out. Saved local records remain available.'));
+      }
+    });
+    _readDeadlines.add(deadline);
+    unawaited(operation.then<void>((value) {
+      finish();
+      if (!result.isCompleted) result.complete(value);
+    }, onError: (Object error, StackTrace stack) {
+      finish();
+      if (!result.isCompleted) result.completeError(error, stack);
+    }));
+    return result.future;
+  }
+
+  void _cancelReadDeadlines() {
+    for (final timer in _readDeadlines) {
+      timer.cancel();
+    }
+    _readDeadlines.clear();
+  }
+
+  @override
+  void dispose() {
+    _cancelReadDeadlines();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -118,6 +156,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   }
 
   void _initializeRecord() {
+    _cancelReadDeadlines();
     // Also invalidates every old response when Flutter reuses this State for
     // another transaction or business, including an A -> B -> A navigation.
     _loadGeneration++;
@@ -253,6 +292,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       setState(() {
         _detail = detail;
         _detailSource = 'local';
+        _loading = false;
+        _error = null;
       });
       unawaited(_enrichVisibleExpense(detail, generation));
     } catch (_) {
@@ -287,7 +328,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     });
   }
 
-  Future<void> _load({bool hydrateLocal = false}) async {
+  Future<void> _load({bool hydrateLocal = true}) async {
     if (BriskersConnectionModeController.instance.forceOffline) {
       await _loadOffline();
       return;
@@ -301,7 +342,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     if (hydrateLocal) unawaited(_loadLocalPreview(generation));
     try {
       final rawDetail = Map<String, dynamic>.from(
-        await api.transactionDetail(businessId, transactionId),
+        await _boundedRead(api.transactionDetail(businessId, transactionId)),
       );
       if (!_isCurrent(generation) ||
           BriskersConnectionModeController.instance.forceOffline) {
@@ -496,10 +537,10 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     final cacheKey = _attachmentCacheKey(attachment);
     return _attachmentUrls.putIfAbsent(
       cacheKey,
-      () => _api.signedAttachmentUrl(
+      () => _boundedRead(_api.signedAttachmentUrl(
         attachment['bucket']?.toString() ?? 'briskers-private',
         attachment['key']?.toString() ?? '',
-      ),
+      )),
     );
   }
 
