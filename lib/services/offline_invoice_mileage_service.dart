@@ -83,7 +83,11 @@ class OfflineInvoiceMileageService {
   Future<Map<String,dynamic>> project(
     String businessId, String invoiceId, Map<String,dynamic> detail,
   ) async {
-    if (detail['kind'] != 'invoice' ||
+    if (businessId.trim().isEmpty || invoiceId.trim().isEmpty ||
+        (detail['id'] != null && detail['id']?.toString() != invoiceId) ||
+        (detail['business_id'] != null &&
+         detail['business_id']?.toString() != businessId) ||
+        detail['kind'] != 'invoice' ||
         detail['mileage_schema_version'] != 2) {
       return detail;
     }

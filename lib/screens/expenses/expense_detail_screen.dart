@@ -51,6 +51,7 @@ class ExpenseDetailScreen extends StatefulWidget {
     this.financialCache,
     this.localPhotoSync,
     this.receiptReporting,
+    this.localPhotoReader,
     this.onChanged,
   });
 
@@ -64,6 +65,7 @@ class ExpenseDetailScreen extends StatefulWidget {
   final LocalFinancialCache? financialCache;
   final ExpenseIqLocalPhotoSync? localPhotoSync;
   final WarrantyReceiptReporting? receiptReporting;
+  final Future<Uint8List> Function(String uri)? localPhotoReader;
 
   @override
   State<ExpenseDetailScreen> createState() => _ExpenseDetailScreenState();
@@ -109,7 +111,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         oldWidget.api != widget.api ||
         oldWidget.financialCache != widget.financialCache ||
         oldWidget.localPhotoSync != widget.localPhotoSync ||
-        oldWidget.receiptReporting != widget.receiptReporting) {
+        oldWidget.receiptReporting != widget.receiptReporting ||
+        oldWidget.localPhotoReader != widget.localPhotoReader) {
       _initializeRecord();
     }
   }
@@ -136,7 +139,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     _error = null;
     final cached = widget.cachedDetail;
     final offline = BriskersConnectionModeController.instance.forceOffline;
-    if (cached != null) {
+    if (cached != null && LocalFinancialCache.matchesTransaction(
+        cached, widget.businessId, widget.transactionId)) {
       _loadCached(cached, offline: offline);
     } else if (offline) {
       unawaited(_loadOffline());
@@ -147,11 +151,17 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
 
   bool _isCurrent(int generation) => mounted && generation == _loadGeneration;
 
-  Map<String, dynamic> _normalizedDetail(Map<String, dynamic> raw) => {
-    ...raw,
-    'date': raw['date'] ?? raw['transaction_date'],
-    'attachments': raw['attachments'] ?? const <dynamic>[],
-  };
+  Map<String, dynamic> _normalizedDetail(Map<String, dynamic> raw) {
+    if (!LocalFinancialCache.matchesTransaction(
+        raw, widget.businessId, widget.transactionId)) {
+      throw StateError('Expense identity differs from the selected record. No changes were made.');
+    }
+    return {
+      ...raw,
+      'date': raw['date'] ?? raw['transaction_date'],
+      'attachments': raw['attachments'] ?? const <dynamic>[],
+    };
+  }
 
   Future<Map<String, dynamic>> _withReceiptReporting(
     Map<String, dynamic> raw, {
@@ -389,11 +399,12 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     }
   }
 
-  Future<void> _openLocalExpenseIqPhoto(String uri) async {
+  Future<bool> _openLocalExpenseIqPhoto(String uri, {bool reportError = true}) async {
     final generation = _loadGeneration;
     try {
       final bytes = await _readLocalPhoto(uri);
-      if (!mounted || !_isCurrent(generation)) return;
+      if (!mounted || !_isCurrent(generation)) return false;
+      if (bytes.isEmpty) throw StateError('Original photo is empty.');
       await showDialog<void>(
         context: context,
         builder: (_) => Dialog(
@@ -404,17 +415,38 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
           ),
         ),
       );
+      return true;
     } catch (error) {
-      if (mounted && _isCurrent(generation)) {
+      if (reportError && mounted && _isCurrent(generation)) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Original photo unavailable: $error')),
         );
       }
+      return false;
     }
   }
 
   Future<Uint8List> _readLocalPhoto(String uri) =>
-      _localPhotoBytes.putIfAbsent(uri, () => Saf().readFileBytes(uri));
+      _localPhotoBytes.putIfAbsent(uri,
+        () => (widget.localPhotoReader ?? Saf().readFileBytes)(uri));
+
+  // The original is looked up by this exact business + expense. A filename
+  // alone must never connect images from separate expenses or ambiguous rows.
+  String? _originalPhotoUriFor(Map<String, dynamic> attachment) {
+    final photo = _localExpenseIqPhoto;
+    if (photo == null) return null;
+    final filename = photo['filename']?.toString() ?? '';
+    final uri = photo['source_uri']?.toString() ?? '';
+    if (filename.isEmpty || uri.isEmpty ||
+        attachment['filename']?.toString() != filename ||
+        (attachment['transaction_id'] != null &&
+         attachment['transaction_id']?.toString() != widget.transactionId)) {
+      return null;
+    }
+    final rows = (_detail?['attachments'] as List? ?? const []).whereType<Map>();
+    return rows.where((row) => row['filename']?.toString() == filename).length == 1
+        ? uri : null;
+  }
 
   Widget _localExpenseIqReceiptCard() {
     final photo = _localExpenseIqPhoto!;
@@ -441,7 +473,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         title: Text(photo['filename']?.toString() ?? 'ExpenseIQ photo'),
         subtitle: Text(
           state == 'uploaded'
-              ? 'Synced to cloud'
+              ? 'Uploaded previously · original file location saved'
               : state == 'missing'
               ? 'Original file not found'
               : state == 'failed'
@@ -697,6 +729,12 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   Future<void> _openAttachment(Map<String, dynamic> attachment) async {
     final generation = _loadGeneration;
     try {
+      final originalUri = _originalPhotoUriFor(attachment);
+      if (originalUri != null &&
+          await _openLocalExpenseIqPhoto(originalUri, reportError: false)) {
+        return;
+      }
+      if (!_isCurrent(generation)) return;
       final local = await _localAttachment(attachment);
       String? url;
       if (!mounted || !_isCurrent(generation)) return;
@@ -1296,6 +1334,29 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   }
 
   Widget _receiptThumbnail(Map<String, dynamic> attachment) {
+    final uri = _originalPhotoUriFor(attachment);
+    if (uri == null) return _storedReceiptThumbnail(attachment);
+    return FutureBuilder<Uint8List>(
+      key: ValueKey('original-receipt-${widget.businessId}-${widget.transactionId}-$uri'),
+      future: _readLocalPhoto(uri),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const SizedBox(width: 52, height: 52,
+            child: Icon(Icons.image_outlined));
+        }
+        final bytes = snapshot.connectionState == ConnectionState.done
+            ? snapshot.data : null;
+        if (bytes == null || bytes.isEmpty) return _storedReceiptThumbnail(attachment);
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.memory(bytes, width: 52, height: 52, fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => _storedReceiptThumbnail(attachment)),
+        );
+      },
+    );
+  }
+
+  Widget _storedReceiptThumbnail(Map<String, dynamic> attachment) {
     const size = 52.0;
     final localPath = attachment['local_file_path']?.toString() ?? '';
     final bucket = attachment['bucket']?.toString() ?? 'briskers-private';
@@ -1647,8 +1708,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
             ],
           ),
           if (_localExpenseIqPhoto != null &&
-              (attachments.isEmpty ||
-                  _localExpenseIqPhoto!['state'] != 'uploaded'))
+              !attachments.any((row) => _originalPhotoUriFor(row) != null))
             _localExpenseIqReceiptCard(),
           if (attachments.isEmpty && _localExpenseIqPhoto == null)
             Card(

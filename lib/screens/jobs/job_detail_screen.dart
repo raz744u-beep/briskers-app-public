@@ -381,7 +381,11 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           widget.businessId, invoiceId,
         );
         if (!_currentLoad(epoch)) return;
-        if (cached == null) continue;
+        if (cached == null || cached['id']?.toString() != invoiceId ||
+            (cached['business_id'] != null &&
+             cached['business_id']?.toString() != widget.businessId)) {
+          continue;
+        }
         final projected = await _invoiceMileage.project(
           widget.businessId, invoiceId, cached,
         );

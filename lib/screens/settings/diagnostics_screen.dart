@@ -96,6 +96,9 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     final refs = List<Map<String, dynamic>>.from(
       report['references'] as List? ?? const [],
     );
+    final targetInvoices = List<Map<String, dynamic>>.from(
+      report['target_job_invoices'] as List? ?? const [],
+    );
     return [
       'READ ONLY — J-18 / Invoice #6346',
       'Matching local Jobs: ${jobs.length}',
@@ -106,7 +109,12 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
       for (final row in refs)
         'Document ID: ${row['document_id']}; linked Job ID: '
         '${row['job_id']}; linked Job number: ${row['linked_job_number']}; '
-        'matches J-18: ${row['matches_target_job']}',
+        'matches J-18: ${row['matches_target_job']}; '
+        'customer identity conflict: ${row['customer_identity_conflict']}',
+      'Invoices actually linked to the selected Job: ${targetInvoices.length}',
+      for (final row in targetInvoices)
+        'Invoice ${row['invoice_number']}; document ID: ${row['document_id']}; '
+        'Job ID: ${row['job_id']}; status: ${row['status']}',
     ].join('\n');
   }
 

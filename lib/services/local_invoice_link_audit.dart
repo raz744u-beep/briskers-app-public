@@ -55,6 +55,15 @@ class LocalInvoiceLinkAudit {
     ).get();
 
     final targetIds = jobs.map((row) => row.read<String>('id')).toSet();
+    final targetDocuments = await _database.customSelect(
+      '''SELECT d.id,d.job_id,d.document_number,d.customer_id,d.status
+         FROM local_documents d
+         JOIN local_jobs j ON j.business_id=d.business_id AND j.id=d.job_id
+         WHERE d.business_id=? AND d.kind='invoice'
+           AND lower(trim(j.job_number))=lower(trim(?))
+         ORDER BY d.id''',
+      variables: [Variable<String>(businessId), Variable<String>(jobNumber)],
+    ).get();
     final references = [
       for (final doc in documents)
         <String, dynamic>{
@@ -67,11 +76,17 @@ class LocalInvoiceLinkAudit {
               doc.readNullable<String>('linked_job_customer_id'),
           'matches_target_job':
               targetIds.contains(doc.readNullable<String>('job_id')),
+          'customer_identity_conflict':
+              (doc.readNullable<String>('customer_id') ?? '').isNotEmpty &&
+              (doc.readNullable<String>('linked_job_customer_id') ?? '').isNotEmpty &&
+              doc.readNullable<String>('customer_id') !=
+                  doc.readNullable<String>('linked_job_customer_id'),
         },
     ];
 
     final unmatched = references.where((row) =>
-        row['matches_target_job'] != true).toList();
+        row['matches_target_job'] != true ||
+        row['customer_identity_conflict'] == true).toList();
 
     return <String, dynamic>{
       'job_number': jobNumber,
@@ -86,6 +101,15 @@ class LocalInvoiceLinkAudit {
           },
       ],
       'references': references,
+      'target_job_invoices': [
+        for (final row in targetDocuments) {
+          'document_id': row.read<String>('id'),
+          'job_id': row.readNullable<String>('job_id'),
+          'invoice_number': row.readNullable<String>('document_number'),
+          'customer_id': row.readNullable<String>('customer_id'),
+          'status': row.readNullable<String>('status'),
+        },
+      ],
       'ambiguous': jobs.length != 1 || references.length != 1 ||
           unmatched.isNotEmpty,
       'has_duplicate_invoice_number': references.length > 1,
