@@ -50,6 +50,18 @@ void main() {
     expect(saved, containsPair('amount', 105.29));
     expect(saved, containsPair('remarks', 'weekly supplies'));
 
+    // An ordinary limited refresh may omit the downloaded historical row.
+    await cache.mergeServerTransactions('shop', []);
+    expect(await cache.loadTransactions('shop'), hasLength(2));
+    // If a later page includes it, merge by server ID and keep provenance.
+    await cache.mergeServerTransactions('shop', [
+      {'id': 'server-expense', 'amount': 105.29},
+    ]);
+    final refreshed = await cache.loadTransactions('shop');
+    expect(refreshed, hasLength(2));
+    expect(refreshed.singleWhere((row) => row['id'] == 'server-expense'),
+        containsPair('recurring_occurrence_date', '2026-11-04'));
+
     await expectLater(
       cache.importRecurringExpenseOccurrence('shop', 'weekly-rule',
           '2026-11-04', {...occurrence, 'id': 'different-server-expense'}),

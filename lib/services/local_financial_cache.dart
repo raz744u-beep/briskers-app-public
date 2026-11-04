@@ -166,13 +166,32 @@ class LocalFinancialCache {
               (row['id']?.toString() ?? '').isNotEmpty)
             row['id'].toString(): row,
       };
+      final downloaded = <String, Map<String, dynamic>>{
+        for (final row in saved)
+          if (row['recurring_verified_download'] == true &&
+              (row['id']?.toString() ?? '').isNotEmpty)
+            row['id'].toString(): row,
+      };
+      Map<String, dynamic> preserveOccurrence(Map<String, dynamic> server) {
+        final cached = downloaded[server['id']?.toString()];
+        if (cached == null) return server;
+        return {
+          ...server,
+          'recurring_verified_download': true,
+          'recurring_rule_id': cached['recurring_rule_id'],
+          'recurring_occurrence_date': cached['recurring_occurrence_date'],
+        };
+      }
+
       final seen = <String>{};
       final merged = <Map<String, dynamic>>[
         for (final row in serverRows)
           if (seen.add(row['id']?.toString() ?? ''))
-            pending[row['id']?.toString()] ?? row,
+            pending[row['id']?.toString()] ?? preserveOccurrence(row),
         for (final entry in pending.entries)
-          if (!seen.contains(entry.key)) entry.value,
+          if (seen.add(entry.key)) entry.value,
+        for (final entry in downloaded.entries)
+          if (seen.add(entry.key)) entry.value,
       ];
       merged.sort((a, b) =>
         (b['transaction_date']?.toString() ?? '').compareTo(
@@ -217,6 +236,7 @@ class LocalFinancialCache {
         'sync_state': 'synced',
       };
       final identity = {
+        'recurring_verified_download': true,
         'recurring_rule_id': ruleId,
         'recurring_occurrence_date': dueDate,
       };
@@ -226,7 +246,7 @@ class LocalFinancialCache {
         ...identity,
       });
       await saveTransactions(businessId, [
-        if (!rows.any((row) => row['id'] == id)) snapshot,
+        if (!rows.any((row) => row['id'] == id)) {...snapshot, ...identity},
         for (final row in rows)
           if (row['id'] == id) {...row, ...identity} else row,
       ]);
