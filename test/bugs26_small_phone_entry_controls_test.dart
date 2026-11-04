@@ -41,7 +41,11 @@ void main() {
           await tester.pumpWidget(app(row.$1));
           await tester.pumpAndSettle();
           final save = find.text(row.$2);
-          await tester.scrollUntilVisible(save, 200);
+          await tester.scrollUntilVisible(
+            save,
+            200,
+            scrollable: find.byType(Scrollable).first,
+          );
           await tester.pumpAndSettle();
           expect(save.hitTestable(), findsOneWidget);
           expect(
@@ -53,12 +57,20 @@ void main() {
         }
         await tester.pumpWidget(app(const VinScannerScreen()));
         await tester.pumpAndSettle();
-        await tester.scrollUntilVisible(find.text('Enter manually'), 200);
+        await tester.scrollUntilVisible(
+          find.text('Enter manually'),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
         await tester.tap(find.text('Enter manually'));
         await tester.pumpAndSettle();
         await tester.enterText(find.byType(TextField), '1HGCM82633A004352');
         final use = find.text('Use this VIN');
-        await tester.scrollUntilVisible(use, 150);
+        await tester.scrollUntilVisible(
+          use,
+          150,
+          scrollable: find.byType(Scrollable).first,
+        );
         await tester.pumpAndSettle();
         expect(use.hitTestable(), findsOneWidget);
         expect(tester.takeException(), isNull);
