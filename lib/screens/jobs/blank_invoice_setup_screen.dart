@@ -65,7 +65,9 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
 
   Future<void> _loadAvailableNumbers() async {
     if (widget.kind != 'invoice' ||
-        !BriskersConnectionModeController.instance.forceOffline) return;
+        !BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     try {
       final numbers = LocalNumberAllocator(localDatabase);
       final invoices = await numbers.availableNumbers(widget.businessId, 'invoice');
@@ -316,6 +318,9 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
         reuseGrant = await DeviceOwnerAuthorization.instance.authority
             .authorizeLocal(widget.businessId);
         if (!mounted) return;
+        if (!BriskersConnectionModeController.instance.forceOffline) {
+          throw StateError('Keep Force Offline enabled to use the local number pool.');
+        }
       }
       final invoiceId = isEstimate
           ? (BriskersConnectionModeController.instance.forceOffline
