@@ -7872,7 +7872,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         final detail = _detail;
         final job = detail?['job_id'];
         if (!OwnerPayrollScreen.enabled || !widget.isOwner || _estimate ||
-            job is! String || job.isEmpty) return;
+            job is! String || job.isEmpty) {
+          return;
+        }
         final raw = detail?['lines'] ?? detail?['items'];
         await Navigator.push<void>(
           context,

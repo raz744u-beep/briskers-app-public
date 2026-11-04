@@ -334,7 +334,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     final savedRecurring = await _localFinancial.loadTransactionDetail(
       recurringBusiness, recurringId);
     if (!mounted || widget.businessId != recurringBusiness ||
-        widget.transactionId != recurringId) return;
+        widget.transactionId != recurringId) {
+      return;
+    }
     if (savedRecurring?['recurring_engine_owned'] == true) {
       await _loadOffline();
       return;

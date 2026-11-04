@@ -717,7 +717,9 @@ class OfflineFinancialWriteService {
   ) async {
     final transactionId = payload['transaction_id']?.toString() ?? '';
     if (transactionId.startsWith('local-transaction-') ||
-        transactionId.startsWith('local-recurring-')) return;
+        transactionId.startsWith('local-recurring-')) {
+      return;
+    }
     final extraction = payload['extraction'];
     if (extraction is! Map || extraction['review_confirmed'] != true) {
       throw StateError('Unconfirmed receipt cannot be synchronized.');
