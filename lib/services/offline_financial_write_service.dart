@@ -615,8 +615,15 @@ class OfflineFinancialWriteService {
         if (photoPayload['transaction_id']?.toString() != localId) continue;
         photoPayload['transaction_id'] = serverId;
         await _database.customStatement(
-          'UPDATE sync_outbox SET payload_json = ? WHERE id = ?',
-          [jsonEncode(photoPayload), photoRow.read<int>('id')],
+          "UPDATE sync_outbox SET payload_json = ?, "
+          "entity_id = CASE WHEN entity_type = 'financial_receipt_extraction' "
+          "THEN ? ELSE entity_id END WHERE id = ? AND business_id = ?",
+          [
+            jsonEncode(photoPayload),
+            serverId,
+            photoRow.read<int>('id'),
+            businessId,
+          ],
         );
       }
 

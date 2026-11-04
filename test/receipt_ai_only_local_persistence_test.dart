@@ -5,13 +5,94 @@ import 'dart:typed_data';
 import 'package:briskers_app/local/briskers_local_database.dart'
     show BriskersLocalDatabase;
 import 'package:briskers_app/services/local_financial_cache.dart';
+import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/offline_financial_write_service.dart';
 import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+class _ReceiptSyncApi extends BriskersApi {
+  @override
+  Future<Map<String, dynamic>> syncCreateManualTransaction(
+    String businessId, {
+    required String operationId,
+    required String direction,
+    required String accountId,
+    required String categoryId,
+    required num amount,
+    required DateTime date,
+    String? jobId,
+    String? documentId,
+    String? counterpartyId,
+    String? counterpartyName,
+    String? remarks,
+  }) async => {'transaction_id': 'server-transaction'};
+
+  @override
+  Future<Map<String, dynamic>> applyExpenseReceiptExtraction(
+    String businessId,
+    String transactionId,
+    Map<String, dynamic> extraction,
+  ) async => throw StateError('Synthetic receipt service unavailable');
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('receipt revision replaces remapped pending extraction after interrupted sync', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final cache = LocalFinancialCache(database: db);
+    final service = OfflineFinancialWriteService(
+      database: db,
+      cache: cache,
+      api: _ReceiptSyncApi(),
+    );
+    addTearDown(db.close);
+    const business = 'synthetic-receipt-shop';
+    const extraction = <String, dynamic>{
+      'review_confirmed': true,
+      'receipt_total': 10,
+    };
+    await service.createLocalTransaction(
+      business,
+      direction: 'expense',
+      accountId: 'account',
+      categoryId: 'category',
+      amount: 10,
+      date: DateTime(2026, 11, 3),
+      receipts: const [],
+      receiptExtraction: extraction,
+    );
+    // Fake transport only: no Supabase initialization or external request.
+    await service.flush(business);
+    var rows = await db
+        .customSelect(
+          "SELECT entity_id FROM sync_outbox WHERE entity_type = 'financial_receipt_extraction'",
+        )
+        .get();
+    expect(rows.single.read<String>('entity_id'), 'server-transaction');
+    await service.updateLocalTransaction(
+      business,
+      'server-transaction',
+      direction: 'expense',
+      accountId: 'account',
+      categoryId: 'category',
+      amount: 11,
+      date: DateTime(2026, 11, 3),
+      receiptExtraction: {...extraction, 'receipt_total': 11},
+    );
+    rows = await db
+        .customSelect(
+          "SELECT entity_id FROM sync_outbox WHERE entity_type = 'financial_receipt_extraction'",
+        )
+        .get();
+    expect(rows, hasLength(1));
+    final detail = await cache.loadTransactionDetail(
+      business,
+      'server-transaction',
+    );
+    expect(detail!['receipt_details']['receipt_total'], 11);
+  });
 
   test('confirmed offline receipt, parts and one original survive database restart', () async {
     final root = await Directory.systemTemp.createTemp('receipt-offline-');
