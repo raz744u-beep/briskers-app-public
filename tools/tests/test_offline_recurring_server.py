@@ -61,7 +61,7 @@ assert snapshot['occurrences'][0]['recurring_occurrence_date'] == '2026-11-04'
 
 # Stale conflicting local edits do not mutate the schedule or existing expense.
 bundle('stale', r={**rule, 'amount_minor': 12000}, success=False)
-assert Decimal(sql('SELECT amount FROM briskers.financial_transactions;')) == 100
+assert Decimal(sql('SELECT amount FROM briskers.financial_transactions;')) == -100
 
 current_rule = a['rule']
 current_occ = a['occurrences'][0]

@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/local/briskers_local_database.dart' show BriskersLocalDatabase;
 import 'package:briskers_app/services/expenses_period_totals.dart';
 import 'package:briskers_app/services/local_financial_cache.dart';
 import 'package:briskers_app/services/local_financial_totals_journal.dart';

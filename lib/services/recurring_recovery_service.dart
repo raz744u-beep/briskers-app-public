@@ -1,4 +1,4 @@
-import '../local/briskers_local_database.dart';
+import '../local/briskers_local_database.dart' show BriskersLocalDatabase;
 import 'local_financial_cache.dart';
 import 'offline_recurring_repository.dart';
 

@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/local/briskers_local_database.dart' show BriskersLocalDatabase;
 import 'package:briskers_app/services/local_financial_cache.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -79,3 +79,4 @@ void main() {
     expect((await cache.loadTransactionDetail('shop', 'server-expense'))?['amount'], 106);
   });
 }
+

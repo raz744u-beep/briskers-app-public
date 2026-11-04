@@ -127,8 +127,10 @@ class _OfflineRecurringScreenState extends State<OfflineRecurringScreen> {
         FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Save'))],
     ));
     controller.dispose();
-    if (text != null) await _run((repo) => repo.correctAmount(
-      row['recurring_rule_id'] as String, row['recurring_occurrence_date'] as String, _minor(text)));
+    if (text != null) {
+      await _run((repo) => repo.correctAmount(
+        row['recurring_rule_id'] as String, row['recurring_occurrence_date'] as String, _minor(text)));
+    }
   }
 
   Future<void> _attach(RecurringRow row) async {
@@ -164,8 +166,10 @@ class _OfflineRecurringScreenState extends State<OfflineRecurringScreen> {
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep local')),
         TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Use server'))],
     ));
-    if (useServer != null) await _run((repo) => repo.resolveConflict(rule: rule,
-      key: row['_key'] as String, revision: row['_revision'] as int, useServer: useServer));
+    if (useServer != null) {
+      await _run((repo) => repo.resolveConflict(rule: rule,
+        key: row['_key'] as String, revision: row['_revision'] as int, useServer: useServer));
+    }
   }
 
   @override
@@ -222,10 +226,10 @@ class _OfflineRecurringScreenState extends State<OfflineRecurringScreen> {
 
 int _minor(String value) {
   final text = value.trim();
-  if (!RegExp(r'^\d+(\.\d{1,2})?$').hasMatch(text)) throw FormatException('Enter a positive amount with at most two decimals.');
+  if (!RegExp(r'^\d+(\.\d{1,2})?$').hasMatch(text)) throw const FormatException('Enter a positive amount with at most two decimals.');
   final parts = text.split('.');
   final result = int.parse(parts[0]) * 100 + (parts.length == 1 ? 0 : int.parse(parts[1].padRight(2, '0')));
-  if (result <= 0) throw FormatException('Amount must be positive.');
+  if (result <= 0) throw const FormatException('Amount must be positive.');
   return result;
 }
 

@@ -1,10 +1,33 @@
 # Independent offline recurrence component
 
-This is an additive integration component, NOT an installed app fix. It makes no
-production database changes, network requests, or changes to the active release
-branch. The UI and transport adapters below must be implemented before enabling
-offline recurrence in the app. Do not advertise this PR as a complete recovery or
-release. It intentionally does not put recurrence writes into `financial_create`.
+This separate branch now includes the engine, management screen, real expense/
+receipt/totals projection, explicit authenticated recovery, recurrence-only sync,
+and proposed server endpoints. It is NOT installed or deployed. The active release
+branch and live shop data are untouched. Recurrence writes never use financial_create.
+
+Implemented connections: Settings routes to OfflineRecurringScreen; Owner Home
+startup/resume generates up to 100 due occurrences using the device's local
+calendar (keep the shop device in its shop timezone); manual catch-up can process
+additional batches with an explicit shop date. Downloads remain read-only even
+in Force Offline. Sync writes require general network permission and an explicit
+recurring-sync action. The screen reuses the existing device Owner grant.
+
+The server SQL files are proposed patches, not deployment/migration records.
+They must be converted into normal migrations and deployed after validation.
+Recovery includes stopped schedules and refuses oversized snapshots rather than
+silently truncating (>2,000 rules or >10,000 occurrences). Original receipt files
+already on the device are preserved; recovery of remote attachment metadata does
+not itself download every remote image. Receipt photos can be attached locally
+from the recurring screen; AI recognition still belongs to the separate receipt
+AI integration. Conflicts require an explicit Owner choice.
+
+Remaining release verification: apply/test patches against a schema-equivalent
+staging database with the real accounting triggers and permissions (the isolated
+CI fixture covers the relevant interface, not every production trigger); verify
+authenticated RPC transport and final APK update/install on a device. A complete
+financial baseline refresh is needed after reconciliation. Test ordinary list
+refreshes that omit occurrence keys before enabling general sync: the recurring
+endpoint preserves keys, but unrelated older list endpoints may not supply them.
 
 ## Files and ownership
 
@@ -15,7 +38,8 @@ release. It intentionally does not put recurrence writes into `financial_create`
 The constructor takes the existing `BriskersLocalDatabase`, business/user scope,
 live authorization callbacks, and a required transactional projection adapter.
 The new `offline_recurring_v1` table is created additively. No generated Drift
-model or shared application file changes are required to cherry-pick this PR.
+model changes are required. The branch now includes explicit UI and receipt-service
+hooks; review those small shared-file diffs when integrating with the release branch.
 All public calls check identity/permissions before and after their transaction.
 Callbacks must validate membership and permissions for this business, not just
 return whether any user is signed in. Generated data is isolated by user; a second
@@ -45,7 +69,7 @@ is inherited, matching the existing server processor; unrelated receipts/invoice
 numbers are never copied. This policy means a schedule's default amount does not
 override an already-corrected latest occurrence.
 
-## Integration sequence
+## Integration contracts (now implemented; verify at release)
 
 1. Provide the projection callback. It runs in the SAME SQLite transaction and
    must use the supplied database. Upsert the expense list/detail and totals

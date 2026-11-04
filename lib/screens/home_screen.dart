@@ -5,6 +5,10 @@ import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/connection_mode.dart';
+import '../core/supabase_config.dart';
+import '../local/local_database_provider.dart';
+import '../services/offline_recurring_repository.dart';
+import '../services/recurring_financial_projection.dart';
 import '../services/briskers_api.dart';
 import '../services/local_job_repository.dart';
 import '../services/local_document_repository.dart';
@@ -59,7 +63,40 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  bool _recurringCatchUpRunning = false;
+
+  Future<void> _catchUpRecurring() async {
+    if (_recurringCatchUpRunning || widget.roleCode != 'owner') return;
+    _recurringCatchUpRunning = true;
+    try {
+      final user = supabase.auth.currentUser?.id;
+      if (user == null) return;
+      final business = widget.businessId;
+      bool allowed() => mounted && widget.businessId == business &&
+          widget.roleCode == 'owner' && supabase.auth.currentUser?.id == user;
+      final repository = OfflineRecurringRepository(database: localDatabase,
+        businessId: business, userId: user,
+        currentUserId: () => supabase.auth.currentUser?.id,
+        canRead: allowed, canWrite: allowed,
+        projectOccurrence: RecurringFinancialProjection(business).call);
+      // Same local calendar convention used by the shop's expense entry screen.
+      // This only processes previously saved rules and never opens the network.
+      final date = OfflineRecurringRepository.dateText(DateTime.now());
+      await repository.generateThrough(date);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content:
+          Text('Recurring expenses need review: $error')));
+      }
+    } finally { _recurringCatchUpRunning = false; }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_catchUpRecurring());
+  }
+
   static const _api = BriskersApi();
   final LocalJobRepository _localJobs = LocalJobRepository();
   final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
@@ -88,6 +125,10 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_catchUpRecurring());
+    });
     _loadAttention();
     _loadWeather();
     BriskersConnectionModeController.instance.addListener(_onConnectionMode);
@@ -99,6 +140,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     BriskersConnectionModeController.instance.removeListener(_onConnectionMode);
     super.dispose();
   }
@@ -106,6 +148,9 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void didUpdateWidget(covariant HomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId || oldWidget.roleCode != widget.roleCode) {
+      unawaited(_catchUpRecurring());
+    }
     if (oldWidget.businessId != widget.businessId ||
         oldWidget.roleCode != widget.roleCode) {
       // Never reuse another shop's or permission group's attention data.
@@ -1754,3 +1799,4 @@ class _ActionDrawer extends StatelessWidget {
     );
   }
 }
+

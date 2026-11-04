@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 
-import '../local/briskers_local_database.dart';
+import '../local/briskers_local_database.dart' show BriskersLocalDatabase;
 import 'local_financial_cache.dart';
 import 'local_financial_totals_journal.dart';
 import 'offline_recurring_repository.dart';
@@ -60,8 +60,8 @@ class RecurringFinancialProjection {
       }
     }
     final detail = <String, dynamic>{
-      if (existing != null) ...existing,
-      if (destination != null) ...destination,
+      ...?existing,
+      ...?destination,
       for (final entry in after.entries)
         if (!entry.key.startsWith('_')) entry.key: entry.value,
       'id': id, 'business_id': businessId,

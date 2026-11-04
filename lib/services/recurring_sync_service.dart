@@ -1,6 +1,6 @@
 import 'dart:math';
 
-import '../local/briskers_local_database.dart';
+import '../local/briskers_local_database.dart' show BriskersLocalDatabase;
 import 'offline_recurring_repository.dart';
 
 typedef RecurringBundleWriter = Future<Map<String, dynamic>> Function(
