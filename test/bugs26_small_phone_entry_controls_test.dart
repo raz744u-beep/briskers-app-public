@@ -62,6 +62,13 @@ void main() {
           200,
           scrollable: find.byType(Scrollable).first,
         );
+        await tester.pumpAndSettle();
+        await Scrollable.ensureVisible(
+          tester.element(find.text('Enter manually')),
+          alignment: 0.2,
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Enter manually').hitTestable(), findsOneWidget);
         await tester.tap(find.text('Enter manually'));
         await tester.pumpAndSettle();
         await tester.enterText(find.byType(TextField), '1HGCM82633A004352');
