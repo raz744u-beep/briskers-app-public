@@ -15,6 +15,15 @@ class LocalFinancialCache {
   static const _serverTransactionProofKey = 'server_transaction_proof_v1';
   static const _proofTtl = Duration(days: 7);
 
+  /// A cache key or route must never lend its identity to another record.
+  /// Older snapshots may omit scope fields; explicit contradictions fail closed.
+  static bool matchesTransaction(
+    Map<String, dynamic> detail, String businessId, String transactionId,
+  ) => businessId.isNotEmpty && transactionId.isNotEmpty &&
+      (detail['id'] == null || detail['id']?.toString() == transactionId) &&
+      (detail['business_id'] == null ||
+       detail['business_id']?.toString() == businessId);
+
   /// A read-only provenance fingerprint for server-returned transaction rows.
   /// An edited local amount/date/direction cannot reuse an old green cloud.
   static String serverTransactionSignature(Map<String, dynamic> row) =>
@@ -294,6 +303,9 @@ class LocalFinancialCache {
     String transactionId,
     Map<String, dynamic> detail,
   ) async {
+    if (!matchesTransaction(detail, businessId, transactionId)) {
+      throw ArgumentError('Expense detail does not match its business and transaction.');
+    }
     await _save(
       businessId,
       'transaction_detail_$transactionId',
@@ -312,9 +324,9 @@ class LocalFinancialCache {
     if (raw == null || raw.isEmpty) return null;
     try {
       final decoded = jsonDecode(raw);
-      return decoded is Map
-          ? Map<String, dynamic>.from(decoded)
-          : null;
+      if (decoded is! Map) return null;
+      final detail = Map<String, dynamic>.from(decoded);
+      return matchesTransaction(detail, businessId, transactionId) ? detail : null;
     } catch (_) {
       return null;
     }

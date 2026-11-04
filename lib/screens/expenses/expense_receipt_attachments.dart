@@ -253,9 +253,7 @@ class _ReceiptPhotoCardState extends State<_ReceiptPhotoCard>
               if (modified != null)
                 tr('receiptPhotoFileDate').replaceAll(
                   '{date}',
-                  DateFormat.yMd(
-                    BriskersLanguageController.instance.code,
-                  ).format(modified),
+                  MaterialLocalizations.of(context).formatCompactDate(modified),
                 ),
               if (previewReady) _fileSize(bytes.lengthInBytes),
             ].join(' • ');

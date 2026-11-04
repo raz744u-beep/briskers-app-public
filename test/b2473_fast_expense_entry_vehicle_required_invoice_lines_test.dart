@@ -69,7 +69,7 @@ void main() {
     expect(source, contains('_loading = _editing || _copying;'));
     expect(source, contains('if (_optionsLoading) ...['));
     expect(source, contains('Loading saved accounts and categories…'));
-    expect(source, contains('_accounts.isEmpty || _categories.isEmpty'));
+    expect(source, matches(RegExp(r'_accounts\.isEmpty\s*\|\|\s*_categories\.isEmpty')));
     expect(source, contains('await _localFinancial.loadOptions('));
   });
 

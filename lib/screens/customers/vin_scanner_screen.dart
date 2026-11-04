@@ -244,6 +244,7 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
   );
 
   Widget _chooseView() => ListView(
+    key: const ValueKey('vin-capture-choices'),
     padding: EdgeInsets.fromLTRB(
       16, 16, 16, 16 + MediaQuery.paddingOf(context).bottom,
     ),
@@ -377,6 +378,7 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
   );
 
   Widget _reviewView() => ListView(
+    key: const ValueKey('vin-confirmation-form'),
     padding: EdgeInsets.fromLTRB(
       16, 16, 16, 16 + MediaQuery.paddingOf(context).bottom,
     ),

@@ -78,6 +78,20 @@ jobs:
         working-directory: generated
         run: flutter analyze
 
+      - name: Verify remaining Bugs 26 regressions
+        timeout-minutes: 4
+        working-directory: generated
+        run: >-
+          flutter test --reporter expanded --timeout 45s
+          test/bugs26_receipt_original_offline_test.dart
+          test/bugs26_receipt_preview_locale_test.dart
+          test/bugs26_expense_identity_guard_test.dart
+          test/bugs26_invoice_link_customer_conflict_test.dart
+          test/bugs26_mileage_restart_and_scope_test.dart
+          test/bugs26_small_phone_entry_controls_test.dart
+          test/expense_detail_preview_hydration_test.dart
+          test/offline_expense_detail_route_test.dart
+
       - name: Run diagnostic and regression tests
         working-directory: generated
         run: flutter test
