@@ -3,24 +3,33 @@ import 'dart:io';
 
 import 'package:image_picker/image_picker.dart';
 
+import '../core/supabase_config.dart';
+
 typedef ReceiptAiTransport = Future<Map<String, dynamic>> Function(
   Uri endpoint,
   String token,
   Map<String, dynamic> body,
 );
 
-/// Receipt recognition has no Supabase dependency. The endpoint is public
-/// configuration; the revocable shop token is supplied from secure storage.
+/// Bounded, receipt-only HTTP transport. The optional independent endpoint
+/// uses a device token. The existing service uses the current app session.
 class IndependentReceiptAiGateway {
   const IndependentReceiptAiGateway({
     this.endpoint = const String.fromEnvironment(
       'BRISKERS_RECEIPT_AI_GATEWAY_URL',
     ),
     ReceiptAiTransport? transport,
-  }) : _transport = transport;
+  }) : _transport = transport, _existingService = false;
+
+  const IndependentReceiptAiGateway.existingService({
+    ReceiptAiTransport? transport,
+  })  : endpoint = '$supabaseUrl/functions/v1/receipt-parse',
+        _transport = transport,
+        _existingService = true;
 
   final String endpoint;
   final ReceiptAiTransport? _transport;
+  final bool _existingService;
   static const maxImageBytes = 20 * 1024 * 1024;
   static const maxResponseBytes = 1024 * 1024;
 
@@ -43,7 +52,9 @@ class IndependentReceiptAiGateway {
       throw StateError('Independent online AI gateway is not configured.');
     }
     if (accessToken.trim().isEmpty || businessId.trim().isEmpty) {
-      throw StateError('Receipt AI device authorization is not configured.');
+      throw StateError(_existingService
+          ? 'Receipt AI needs an active Briskers sign-in.'
+          : 'Receipt AI device authorization is not configured.');
     }
     if (!const {
       'image/jpeg',
@@ -78,12 +89,14 @@ class IndependentReceiptAiGateway {
     }
     return <String, dynamic>{
       ...Map<String, dynamic>.from(result),
-      'extraction_source': 'independent_online_ai',
+      'extraction_source': _existingService
+          ? 'existing_online_receipt_ai'
+          : 'independent_online_ai',
       'review_confirmed': false,
     };
   }
 
-  static Future<Map<String, dynamic>> _send(
+  Future<Map<String, dynamic>> _send(
     Uri endpoint,
     String token,
     Map<String, dynamic> body,
@@ -97,6 +110,9 @@ class IndependentReceiptAiGateway {
         request.followRedirects = false;
         request.headers.contentType = ContentType.json;
         request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        if (_existingService) {
+          request.headers.set('apikey', supabasePublishableKey);
+        }
         request.add(utf8.encode(jsonEncode(body)));
         final response = await request.close();
         if (response.statusCode != HttpStatus.ok) {

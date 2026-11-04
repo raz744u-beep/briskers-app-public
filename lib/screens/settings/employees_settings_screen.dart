@@ -389,7 +389,7 @@ class _EmployeesSettingsScreenState
       appBar: AppBar(
         title: const Text('Employees'),
         actions: [
-          if (widget.isOwner)
+          if (OwnerPayrollScreen.enabled && widget.isOwner)
             IconButton(
               tooltip: 'Owner payroll',
               icon: const Icon(Icons.payments_outlined),

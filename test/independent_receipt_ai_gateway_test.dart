@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:briskers_app/services/independent_receipt_ai_gateway.dart';
+import 'package:briskers_app/core/supabase_config.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -60,6 +61,26 @@ void main() {
       expect(result['extraction_source'], 'independent_online_ai');
     },
   );
+
+  test('existing service sends only photo and shop to the receipt endpoint', () async {
+    final gateway = IndependentReceiptAiGateway.existingService(
+      transport: (uri, token, body) async {
+        expect(uri, Uri.parse('$supabaseUrl/functions/v1/receipt-parse'));
+        expect(token, 'app-session');
+        expect(body.keys, unorderedEquals(['business_id', 'mime_type', 'image_base64']));
+        return {'extraction': {'receipt_total': 105.29}};
+      },
+    );
+    final result = await gateway.enhance(
+      receipt: photo(),
+      businessId: 'shop',
+      accessToken: 'app-session',
+      mimeType: 'image/jpeg',
+    );
+    expect(result['extraction_source'], 'existing_online_receipt_ai');
+    expect(result['review_confirmed'], false);
+    expect(result['receipt_total'], 105.29);
+  });
 
   test('missing authorization and unsupported photos never upload', () async {
     var calls = 0;

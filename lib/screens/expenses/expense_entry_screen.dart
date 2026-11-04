@@ -13,6 +13,7 @@ import 'receipt_review_sheet.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
 import '../../core/briskers_i18n.dart';
+import '../../core/supabase_config.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/offline_financial_write_service.dart';
@@ -464,7 +465,11 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
 
   Future<void> _readReceipt(XFile file) async {
     if (_readingReceipt) return;
-    const gateway = IndependentReceiptAiGateway();
+    const independent = IndependentReceiptAiGateway();
+    final useExisting = independent.endpoint.isEmpty;
+    final gateway = useExisting
+        ? const IndependentReceiptAiGateway.existingService()
+        : independent;
     if (!gateway.configured) {
       setState(() {
         _receiptReadMessage = 'Online receipt AI is not configured. Photo attached; use Quick Transaction or Full Manual.';
@@ -477,7 +482,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       builder: (context) => AlertDialog(
         title: const Text('Read receipt with online AI?'),
         content: const Text(
-          'Send this receipt photo to the independent receipt AI service for recognition. Review the suggestions before saving. Shop synchronization stays unchanged.',
+          'Send this receipt photo to the Briskers receipt AI service for recognition. Review the suggestions before saving. Shop synchronization stays unchanged.',
         ),
         actions: [
           TextButton(
@@ -500,9 +505,11 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
 
     try {
       const storage = FlutterSecureStorage();
-      final token = await storage.read(
-        key: 'receipt_ai_gateway_token:${widget.businessId}',
-      );
+      final token = useExisting
+          ? supabase.auth.currentSession?.accessToken
+          : await storage.read(
+              key: 'receipt_ai_gateway_token:${widget.businessId}',
+            );
       final suggestion = await gateway.enhance(
         receipt: file,
         businessId: widget.businessId,

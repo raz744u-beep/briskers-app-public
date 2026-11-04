@@ -20,6 +20,8 @@ class OwnerPayrollScreen extends StatefulWidget {
     this.invoiceLines = const [],
   });
 
+  static const enabled = bool.fromEnvironment('BRISKERS_ENABLE_OWNER_PAYROLL');
+
   final String businessId;
   final String? jobId;
   final String? invoiceId;

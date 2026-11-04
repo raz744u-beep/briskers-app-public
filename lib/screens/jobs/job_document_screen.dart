@@ -7781,7 +7781,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               if (!_estimate) ...[
                 const Divider(height: 1),
                 const _DocumentActionSectionLabel('Repair'),
-                if (widget.isOwner && _detail?['job_id'] is String)
+                if (OwnerPayrollScreen.enabled && widget.isOwner &&
+                    _detail?['job_id'] is String)
                   ListTile(
                     leading: const Icon(Icons.assignment_outlined),
                     title: const Text('Job labor tasks'),
@@ -7870,7 +7871,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       case 'labor_tasks':
         final detail = _detail;
         final job = detail?['job_id'];
-        if (!widget.isOwner || _estimate || job is! String || job.isEmpty) return;
+        if (!OwnerPayrollScreen.enabled || !widget.isOwner || _estimate ||
+            job is! String || job.isEmpty) return;
         final raw = detail?['lines'] ?? detail?['items'];
         await Navigator.push<void>(
           context,
