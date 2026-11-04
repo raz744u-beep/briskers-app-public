@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -37,9 +38,36 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   String? _employee;
   String? _error;
   bool _busy = false;
+  Timer? _lockCheck;
+
+  @override
+  void initState() {
+    super.initState();
+    _lockCheck = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (_grant == null || _busy) return;
+      try {
+        _assertOwner();
+      } on StateError {
+        setState(() {
+          _grant = null;
+          _employee = null;
+          _employees = [];
+          _work = [];
+          _history = [];
+          _selected.clear();
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _lockCheck?.cancel();
+    super.dispose();
+  }
 
   bool get _jobMode => widget.jobId != null;
-  LocalPayrollRepository get _repository => LocalPayrollRepository(
+  late final _repository = LocalPayrollRepository(
         localDatabase,
         business: widget.businessId,
         owner: true,
@@ -167,6 +195,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         row['state'] == 'Open' ? 'In Progress' : 'Done',
         (input * 100 / 60).round(),
         _date(DateTime.now()),
+        expectedRevision: row['version'] as int,
       );
     });
   }

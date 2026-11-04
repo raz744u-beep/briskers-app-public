@@ -184,8 +184,9 @@ class LocalPayrollRepository {
     String id,
     String state,
     int hours,
-    String date,
-  ) async {
+    String date, {
+    int? expectedRevision,
+  }) async {
     _authorize();
     await prepare();
     _date(date);
@@ -198,6 +199,9 @@ class LocalPayrollRepository {
       );
       if (rows.length != 1 || rows.single['paid_operation_id'] != null)
         { throw StateError('Missing or paid work; add a recheck'); }
+      if (expectedRevision != null && rows.single['revision'] != expectedRevision) {
+        throw StateError('Work changed. Refresh before updating it.');
+      }
       if (state == 'Done' && rows.single['state'] == 'Open')
         { throw StateError('Start work before completion'); }
       await LocalMechanicWorkCreditRepository(database: db).recordWork(
