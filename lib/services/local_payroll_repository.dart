@@ -354,7 +354,10 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     return _read(
-      'SELECT * FROM regular_payroll_payments WHERE business_id=? AND employee_id=? ORDER BY verified_date DESC,operation_id DESC',
+      'SELECT p.*, o.state AS reconciliation_state FROM regular_payroll_payments p '
+      'LEFT JOIN regular_payroll_sync_outbox o ON o.business_id=p.business_id '
+      'AND o.operation_id=p.operation_id WHERE p.business_id=? AND p.employee_id=? '
+      'ORDER BY p.verified_date DESC,p.operation_id DESC',
       [business, employee],
     );
   }

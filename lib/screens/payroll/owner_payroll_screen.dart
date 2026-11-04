@@ -18,10 +18,12 @@ class OwnerPayrollScreen extends StatefulWidget {
     this.jobId,
     this.invoiceId,
     this.invoiceLines = const [],
+    this.reportsOnly = false,
   });
 
   static const enabled = bool.fromEnvironment('BRISKERS_ENABLE_OWNER_PAYROLL');
 
+  final bool reportsOnly;
   final String businessId;
   final String? jobId;
   final String? invoiceId;
@@ -237,7 +239,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text(_jobMode ? 'Job labor tasks' : 'Owner payroll')),
+        appBar: AppBar(title: Text(widget.reportsOnly
+            ? 'Payroll reports'
+            : _jobMode ? 'Job labor tasks' : 'Owner payroll')),
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -290,6 +294,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
               Text('Earned: ${_money(_work.where((row) => row['state'] == 'Done').fold<int>(0, (sum, row) => sum + (row['gross_cents'] as int)))}'),
               Text('Unpaid: ${_money(_payable.fold<int>(0, (sum, row) => sum + (row['gross_cents'] as int)))}'),
               Text('Previously paid: ${_money(_history.fold<int>(0, (sum, row) => sum + (row['net'] as int)))}'),
+              if (!widget.reportsOnly) ...[
               for (final row in _payable)
                 CheckboxListTile(
                   title: Text(row['description'].toString()),
@@ -307,7 +312,6 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                 onPressed: _busy || _selected.isEmpty ? null : _pay,
                 child: const Text('Verify Payment'),
               ),
-              const ListTile(title: Text('Reports · Payment history')),
               OutlinedButton(
                 onPressed: _busy || BriskersConnectionModeController.instance.forceOffline
                     ? null
@@ -319,10 +323,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                         }, verifyPayment: true),
                 child: const Text('Reconcile recorded payments'),
               ),
+              ],
+              const ListTile(title: Text('Payment history')),
               for (final row in _history)
                 ListTile(
                   title: Text(_money(row['net'] as int)),
-                  subtitle: Text('${row['verified_date']} · ${row['method']} · Recorded on this device'),
+                  subtitle: Text('${row['verified_date']} · ${row['method']} · '
+                      '${row['reconciliation_state'] == 'reconciled' ? 'Reconciled' : 'Recorded on this device'}'),
                 ),
             ],
           ],
