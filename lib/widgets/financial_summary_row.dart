@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 /// Compact, informational emphasis for invoice/estimate totals.
 /// This widget never calculates or changes any financial amounts.
-enum FinancialSummaryTone { subtotal, total, balanceDue }
+enum FinancialSummaryTone { subtotal, total, balanceDue, balanceSettled }
 
 class FinancialSummaryRow extends StatelessWidget {
   const FinancialSummaryRow({
@@ -27,12 +27,16 @@ class FinancialSummaryRow extends StatelessWidget {
         foreground = dark ? const Color(0xFFE8F0FA) : const Color(0xFF172A46);
         break;
       case FinancialSummaryTone.total:
-        background = dark ? const Color(0xFF183F2C) : const Color(0xFFE2F6E4);
-        foreground = dark ? const Color(0xFFB2EBC4) : const Color(0xFF086B3E);
+        background = dark ? const Color(0xFF203B62) : const Color(0xFFE1EDFC);
+        foreground = dark ? const Color(0xFFBFDAFF) : const Color(0xFF174D8C);
         break;
       case FinancialSummaryTone.balanceDue:
         background = dark ? const Color(0xFF4D252B) : const Color(0xFFFBE5E5);
         foreground = dark ? const Color(0xFFFFB8B8) : const Color(0xFFAF2027);
+        break;
+      case FinancialSummaryTone.balanceSettled:
+        background = dark ? const Color(0xFF183F2C) : const Color(0xFFE2F6E4);
+        foreground = dark ? const Color(0xFFB2EBC4) : const Color(0xFF086B3E);
         break;
     }
 

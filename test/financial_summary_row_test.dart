@@ -5,8 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   const cases = [
     (FinancialSummaryTone.subtotal, 'Subtotal', Color(0xFFE6EDF5)),
-    (FinancialSummaryTone.total, 'Total', Color(0xFFE2F6E4)),
+    (FinancialSummaryTone.total, 'Total', Color(0xFFE1EDFC)),
     (FinancialSummaryTone.balanceDue, 'Balance Due', Color(0xFFFBE5E5)),
+    (FinancialSummaryTone.balanceSettled, 'Balance Due', Color(0xFFE2F6E4)),
   ];
 
   for (final (tone, label, expectedBackground) in cases) {

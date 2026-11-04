@@ -6196,7 +6196,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   FinancialSummaryRow(
                     label: 'Balance Due',
                     value: _money(balance < 0 ? 0 : balance),
-                    tone: FinancialSummaryTone.balanceDue,
+                    tone: balance > 0
+                        ? FinancialSummaryTone.balanceDue
+                        : FinancialSummaryTone.balanceSettled,
                   ),
                 ],
               ],
