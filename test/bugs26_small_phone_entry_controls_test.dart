@@ -19,7 +19,7 @@ void main() {
               padding: const EdgeInsets.only(bottom: 48),
               viewPadding: const EdgeInsets.only(bottom: 48),
               viewInsets: EdgeInsets.only(bottom: keyboard),
-              textScaler: TextScaler.linear(1.3),
+              textScaler: const TextScaler.linear(1.3),
             ),
             child: child!,
           ),
