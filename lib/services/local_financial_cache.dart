@@ -242,7 +242,7 @@ class LocalFinancialCache {
       };
       await saveTransactionDetail(businessId, id, {
         ...snapshot,
-        if (previous != null) ...previous,
+        ...?previous,
         ...identity,
       });
       await saveTransactions(businessId, [
