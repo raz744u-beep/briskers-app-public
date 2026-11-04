@@ -1594,6 +1594,30 @@ class BriskersApi {
         .toList();
   }
 
+  /// An explicit single-record download, allowed without enabling general
+  /// synchronization. The RPC only reads already-posted expenses.
+  Future<Map<String, dynamic>?> downloadRecurringExpenseOccurrence(
+    String businessId,
+    String ruleId,
+    String dueDate,
+  ) async {
+    final client = supabase;
+    final session = client.auth.currentSession;
+    if (session == null) throw StateError('An active Briskers sign-in is required.');
+    final result = await client.rpc(
+      'briskers_read_recurring_expense_occurrence',
+      params: {
+        'p_business_id': businessId,
+        'p_rule_id': ruleId,
+        'p_due_date': dueDate,
+      },
+    ).timeout(const Duration(seconds: 15));
+    if (client.auth.currentSession?.user.id != session.user.id) {
+      throw StateError('The Briskers account changed during download.');
+    }
+    return result == null ? null : Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> transactionDetail(
     String businessId,
     String transactionId,

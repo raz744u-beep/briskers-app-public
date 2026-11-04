@@ -20,6 +20,7 @@ import '../../services/local_financial_cache.dart';
 import '../../services/expenseiq_local_photo_sync.dart';
 import 'expense_entry_screen.dart';
 import 'transaction_recurring_dialog.dart';
+import '../../core/recurring_schedule_status.dart';
 
 /// Bottom-sheet useSafeArea does not protect Android system navigation.
 @visibleForTesting
@@ -51,6 +52,7 @@ class ExpenseDetailScreen extends StatefulWidget {
     this.financialCache,
     this.localPhotoSync,
     this.receiptReporting,
+    this.localPhotoReader,
     this.onChanged,
   });
 
@@ -64,6 +66,7 @@ class ExpenseDetailScreen extends StatefulWidget {
   final LocalFinancialCache? financialCache;
   final ExpenseIqLocalPhotoSync? localPhotoSync;
   final WarrantyReceiptReporting? receiptReporting;
+  final Future<Uint8List> Function(String uri)? localPhotoReader;
 
   @override
   State<ExpenseDetailScreen> createState() => _ExpenseDetailScreenState();
@@ -94,6 +97,44 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   int _recordGeneration = 0;
   bool _hasAuthoritativeDetail = false;
   String _detailSource = 'preview';
+  final Set<Timer> _readDeadlines = {};
+
+  Future<T> _boundedRead<T>(Future<T> operation) {
+    final result = Completer<T>();
+    late Timer deadline;
+    void finish() {
+      deadline.cancel();
+      _readDeadlines.remove(deadline);
+    }
+    deadline = Timer(const Duration(seconds: 15), () {
+      finish();
+      if (!result.isCompleted) {
+        result.completeError(TimeoutException('Expense read timed out. Saved local records remain available.'));
+      }
+    });
+    _readDeadlines.add(deadline);
+    unawaited(operation.then<void>((value) {
+      finish();
+      if (!result.isCompleted) result.complete(value);
+    }, onError: (Object error, StackTrace stack) {
+      finish();
+      if (!result.isCompleted) result.completeError(error, stack);
+    }));
+    return result.future;
+  }
+
+  void _cancelReadDeadlines() {
+    for (final timer in _readDeadlines) {
+      timer.cancel();
+    }
+    _readDeadlines.clear();
+  }
+
+  @override
+  void dispose() {
+    _cancelReadDeadlines();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -109,12 +150,14 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         oldWidget.api != widget.api ||
         oldWidget.financialCache != widget.financialCache ||
         oldWidget.localPhotoSync != widget.localPhotoSync ||
-        oldWidget.receiptReporting != widget.receiptReporting) {
+        oldWidget.receiptReporting != widget.receiptReporting ||
+        oldWidget.localPhotoReader != widget.localPhotoReader) {
       _initializeRecord();
     }
   }
 
   void _initializeRecord() {
+    _cancelReadDeadlines();
     // Also invalidates every old response when Flutter reuses this State for
     // another transaction or business, including an A -> B -> A navigation.
     _loadGeneration++;
@@ -136,7 +179,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     _error = null;
     final cached = widget.cachedDetail;
     final offline = BriskersConnectionModeController.instance.forceOffline;
-    if (cached != null) {
+    if (cached != null && LocalFinancialCache.matchesTransaction(
+        cached, widget.businessId, widget.transactionId)) {
       _loadCached(cached, offline: offline);
     } else if (offline) {
       unawaited(_loadOffline());
@@ -147,11 +191,17 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
 
   bool _isCurrent(int generation) => mounted && generation == _loadGeneration;
 
-  Map<String, dynamic> _normalizedDetail(Map<String, dynamic> raw) => {
-    ...raw,
-    'date': raw['date'] ?? raw['transaction_date'],
-    'attachments': raw['attachments'] ?? const <dynamic>[],
-  };
+  Map<String, dynamic> _normalizedDetail(Map<String, dynamic> raw) {
+    if (!LocalFinancialCache.matchesTransaction(
+        raw, widget.businessId, widget.transactionId)) {
+      throw StateError('Expense identity differs from the selected record. No changes were made.');
+    }
+    return {
+      ...raw,
+      'date': raw['date'] ?? raw['transaction_date'],
+      'attachments': raw['attachments'] ?? const <dynamic>[],
+    };
+  }
 
   Future<Map<String, dynamic>> _withReceiptReporting(
     Map<String, dynamic> raw, {
@@ -243,6 +293,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       setState(() {
         _detail = detail;
         _detailSource = 'local';
+        _loading = false;
       });
       unawaited(_enrichVisibleExpense(detail, generation));
     } catch (_) {
@@ -277,7 +328,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     });
   }
 
-  Future<void> _load({bool hydrateLocal = false}) async {
+  Future<void> _load({bool hydrateLocal = true}) async {
     if (BriskersConnectionModeController.instance.forceOffline) {
       await _loadOffline();
       return;
@@ -291,7 +342,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     if (hydrateLocal) unawaited(_loadLocalPreview(generation));
     try {
       final rawDetail = Map<String, dynamic>.from(
-        await api.transactionDetail(businessId, transactionId),
+        await _boundedRead(api.transactionDetail(businessId, transactionId)),
       );
       if (!_isCurrent(generation) ||
           BriskersConnectionModeController.instance.forceOffline) {
@@ -389,11 +440,12 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     }
   }
 
-  Future<void> _openLocalExpenseIqPhoto(String uri) async {
+  Future<bool> _openLocalExpenseIqPhoto(String uri, {bool reportError = true}) async {
     final generation = _loadGeneration;
     try {
       final bytes = await _readLocalPhoto(uri);
-      if (!mounted || !_isCurrent(generation)) return;
+      if (!mounted || !_isCurrent(generation)) return false;
+      if (bytes.isEmpty) throw StateError('Original photo is empty.');
       await showDialog<void>(
         context: context,
         builder: (_) => Dialog(
@@ -404,17 +456,38 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
           ),
         ),
       );
+      return true;
     } catch (error) {
-      if (mounted && _isCurrent(generation)) {
+      if (reportError && mounted && _isCurrent(generation)) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Original photo unavailable: $error')),
         );
       }
+      return false;
     }
   }
 
   Future<Uint8List> _readLocalPhoto(String uri) =>
-      _localPhotoBytes.putIfAbsent(uri, () => Saf().readFileBytes(uri));
+      _localPhotoBytes.putIfAbsent(uri,
+        () => (widget.localPhotoReader ?? Saf().readFileBytes)(uri));
+
+  // The original is looked up by this exact business + expense. A filename
+  // alone must never connect images from separate expenses or ambiguous rows.
+  String? _originalPhotoUriFor(Map<String, dynamic> attachment) {
+    final photo = _localExpenseIqPhoto;
+    if (photo == null) return null;
+    final filename = photo['filename']?.toString() ?? '';
+    final uri = photo['source_uri']?.toString() ?? '';
+    if (filename.isEmpty || uri.isEmpty ||
+        attachment['filename']?.toString() != filename ||
+        (attachment['transaction_id'] != null &&
+         attachment['transaction_id']?.toString() != widget.transactionId)) {
+      return null;
+    }
+    final rows = (_detail?['attachments'] as List? ?? const []).whereType<Map>();
+    return rows.where((row) => row['filename']?.toString() == filename).length == 1
+        ? uri : null;
+  }
 
   Widget _localExpenseIqReceiptCard() {
     final photo = _localExpenseIqPhoto!;
@@ -445,7 +518,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         title: Text(photo['filename']?.toString() ?? 'ExpenseIQ photo'),
         subtitle: Text(
           state == 'uploaded'
-              ? 'Synced to cloud'
+              ? 'Uploaded previously · original file location saved'
               : state == 'missing'
               ? 'Original file not found'
               : state == 'failed'
@@ -468,10 +541,10 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     final cacheKey = _attachmentCacheKey(attachment);
     return _attachmentUrls.putIfAbsent(
       cacheKey,
-      () => _api.signedAttachmentUrl(
+      () => _boundedRead(_api.signedAttachmentUrl(
         attachment['bucket']?.toString() ?? 'briskers-private',
         attachment['key']?.toString() ?? '',
-      ),
+      )),
     );
   }
 
@@ -701,6 +774,12 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   Future<void> _openAttachment(Map<String, dynamic> attachment) async {
     final generation = _loadGeneration;
     try {
+      final originalUri = _originalPhotoUriFor(attachment);
+      if (originalUri != null &&
+          await _openLocalExpenseIqPhoto(originalUri, reportError: false)) {
+        return;
+      }
+      if (!_isCurrent(generation)) return;
       final local = await _localAttachment(attachment);
       String? url;
       if (!mounted || !_isCurrent(generation)) return;
@@ -1255,8 +1334,12 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       'yearly' => 'Yearly',
       _ => 'Monthly',
     };
-    final next = rule['next_date']?.toString() ?? '';
-    return next.isEmpty ? label : '$label · next $next';
+    final status = recurringScheduleStatus(
+      rule,
+      today: DateTime.now(),
+      cached: BriskersConnectionModeController.instance.forceOffline,
+    );
+    return '$label · $status';
   }
 
   Future<void> _manageRecurring() async {
@@ -1300,6 +1383,29 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   }
 
   Widget _receiptThumbnail(Map<String, dynamic> attachment) {
+    final uri = _originalPhotoUriFor(attachment);
+    if (uri == null) return _storedReceiptThumbnail(attachment);
+    return FutureBuilder<Uint8List>(
+      key: ValueKey('original-receipt-${widget.businessId}-${widget.transactionId}-$uri'),
+      future: _readLocalPhoto(uri),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const SizedBox(width: 52, height: 52,
+            child: Icon(Icons.image_outlined));
+        }
+        final bytes = snapshot.connectionState == ConnectionState.done
+            ? snapshot.data : null;
+        if (bytes == null || bytes.isEmpty) return _storedReceiptThumbnail(attachment);
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.memory(bytes, width: 52, height: 52, fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => _storedReceiptThumbnail(attachment)),
+        );
+      },
+    );
+  }
+
+  Widget _storedReceiptThumbnail(Map<String, dynamic> attachment) {
     const size = 52.0;
     final localPath = attachment['local_file_path']?.toString() ?? '';
     final bucket = attachment['bucket']?.toString() ?? 'briskers-private';
@@ -1650,11 +1756,10 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                 ),
             ],
           ),
-          // A successful upload is not proof that this phone can still
-          // render the cloud attachment. Preserve the original local-photo
-          // entry whenever it exists, even if an uploaded attachment is also
-          // listed. The user can open either source independently.
-          if (_localExpenseIqPhoto != null)
+          // Keep the local original visible after upload. A cloud row
+          // replaces this card only when it can show the same local file.
+          if (_localExpenseIqPhoto != null &&
+              !attachments.any((row) => _originalPhotoUriFor(row) != null))
             _localExpenseIqReceiptCard(),
           if (attachments.isEmpty && _localExpenseIqPhoto == null)
             Card(

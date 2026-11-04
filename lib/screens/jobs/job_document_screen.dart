@@ -1,3 +1,4 @@
+import '../payroll/owner_payroll_screen.dart';
 import 'owner_local_delete_action.dart';
 import '../../services/device_owner_authorization.dart';
 import '../../services/local_invoice_number_service.dart';
@@ -14,6 +15,7 @@ import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
 import '../../core/module_modal_theme.dart';
 import '../../widgets/estimate_merge_confirmation_dialog.dart';
 import '../../widgets/document_identity_app_bar.dart';
+import '../../widgets/financial_summary_row.dart';
 import '../../widgets/stale_keyboard_inset_guard.dart';
 import '../../services/vehicle_finding_actions_service.dart';
 import '../../services/offline_work_findings_service.dart';
@@ -4377,7 +4379,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _deleteOrVoidInvoice() async {
-    if (!widget.isOwner || _estimate || _detail == null || _busy) return;
+    if (!widget.isOwner || _estimate || _detail == null) return;
+    if (_busy) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Another invoice action is still running. Try Delete again when it finishes.'),
+      ));
+      return;
+    }
 
     final localJob=_detail!['job_id']?.toString() ?? '';
     if(localJob.isNotEmpty) {
@@ -4386,7 +4394,25 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         final deleted=await deleteOwnerLocalJob(context,businessId:widget.businessId,
           jobId:localJob,label:_detail!['job_number']?.toString() ?? 'Job');
         if(deleted && mounted) Navigator.pop(context,true);
-      } catch(error) { if(mounted) setState(()=>_error=error.toString()); }
+      } catch (error) {
+        if (!mounted) return;
+        setState(() => _error = error.toString());
+        // The loaded invoice does not render _error. Keep a failed deletion
+        // visible until acknowledged, including failures before confirmation.
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Invoice was not deleted'),
+            content: SelectableText(error.toString()),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
       finally { if(mounted) setState(()=>_busy=false); }
       return;
     }
@@ -6117,8 +6143,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
             child: Column(
               children: [
-                _AmountRow(
+                FinancialSummaryRow(
                   label: 'Subtotal',
+                  tone: FinancialSummaryTone.subtotal,
                   value: _money(
                     lines
                         .where((line) => line['line_kind'] != 'discount')
@@ -6160,10 +6187,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                       : null,
                 ),
                 const Divider(height: 18),
-                _AmountRow(
-                  label: 'TOTAL',
+                FinancialSummaryRow(
+                  label: 'Total',
                   value: _money(_detail!['total_amount']),
-                  bold: true,
+                  tone: FinancialSummaryTone.total,
                 ),
                 if (_detail?['_local_tax_sync_state'] != null)
                   Padding(
@@ -6191,10 +6218,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                         ? const Color(0xFF0C9A43)
                         : null,
                   ),
-                  _AmountRow(
+                  FinancialSummaryRow(
                     label: 'Balance Due',
                     value: _money(balance < 0 ? 0 : balance),
-                    bold: balance > 0,
+                    tone: balance > 0
+                        ? FinancialSummaryTone.balanceDue
+                        : FinancialSummaryTone.balanceSettled,
                   ),
                 ],
               ],
@@ -7752,6 +7781,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               if (!_estimate) ...[
                 const Divider(height: 1),
                 const _DocumentActionSectionLabel('Repair'),
+                if (OwnerPayrollScreen.enabled && widget.isOwner &&
+                    _detail?['job_id'] is String)
+                  ListTile(
+                    leading: const Icon(Icons.assignment_outlined),
+                    title: const Text('Job labor tasks'),
+                    onTap: () => Navigator.pop(sheetContext, 'labor_tasks'),
+                  ),
                 ListTile(
                   leading: const Icon(Icons.car_repair_outlined),
                   title: Text(tr('vehicleFindings')),
@@ -7832,6 +7868,27 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         await _editDocumentHeader();
       case 'copy':
         await _copyDocument();
+      case 'labor_tasks':
+        final detail = _detail;
+        final job = detail?['job_id'];
+        if (!OwnerPayrollScreen.enabled || !widget.isOwner || _estimate ||
+            job is! String || job.isEmpty) {
+          return;
+        }
+        final raw = detail?['lines'] ?? detail?['items'];
+        await Navigator.push<void>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => OwnerPayrollScreen(
+              businessId: widget.businessId,
+              jobId: job,
+              invoiceId: widget.documentId,
+              invoiceLines: raw is List
+                  ? raw.whereType<Map>().map(Map<String, dynamic>.from).toList()
+                  : const [],
+            ),
+          ),
+        );
       case 'findings':
         await _showInvoiceFindings();
       case 'expenses':

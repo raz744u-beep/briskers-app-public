@@ -15,6 +15,15 @@ class LocalFinancialCache {
   static const _serverTransactionProofKey = 'server_transaction_proof_v1';
   static const _proofTtl = Duration(days: 7);
 
+  /// A cache key or route must never lend its identity to another record.
+  /// Older snapshots may omit scope fields; explicit contradictions fail closed.
+  static bool matchesTransaction(
+    Map<String, dynamic> detail, String businessId, String transactionId,
+  ) => businessId.isNotEmpty && transactionId.isNotEmpty &&
+      (detail['id'] == null || detail['id']?.toString() == transactionId) &&
+      (detail['business_id'] == null ||
+       detail['business_id']?.toString() == businessId);
+
   /// A read-only provenance fingerprint for server-returned transaction rows.
   /// An edited local amount/date/direction cannot reuse an old green cloud.
   static String serverTransactionSignature(Map<String, dynamic> row) =>
@@ -157,18 +166,90 @@ class LocalFinancialCache {
               (row['id']?.toString() ?? '').isNotEmpty)
             row['id'].toString(): row,
       };
+      final downloaded = <String, Map<String, dynamic>>{
+        for (final row in saved)
+          if (row['recurring_verified_download'] == true &&
+              (row['id']?.toString() ?? '').isNotEmpty)
+            row['id'].toString(): row,
+      };
+      Map<String, dynamic> preserveOccurrence(Map<String, dynamic> server) {
+        final cached = downloaded[server['id']?.toString()];
+        if (cached == null) return server;
+        return {
+          ...server,
+          'recurring_verified_download': true,
+          'recurring_rule_id': cached['recurring_rule_id'],
+          'recurring_occurrence_date': cached['recurring_occurrence_date'],
+        };
+      }
+
       final seen = <String>{};
       final merged = <Map<String, dynamic>>[
         for (final row in serverRows)
           if (seen.add(row['id']?.toString() ?? ''))
-            pending[row['id']?.toString()] ?? row,
+            pending[row['id']?.toString()] ?? preserveOccurrence(row),
         for (final entry in pending.entries)
-          if (!seen.contains(entry.key)) entry.value,
+          if (seen.add(entry.key)) entry.value,
+        for (final entry in downloaded.entries)
+          if (seen.add(entry.key)) entry.value,
       ];
       merged.sort((a, b) =>
         (b['transaction_date']?.toString() ?? '').compareTo(
         a['transaction_date']?.toString() ?? ''));
       await saveTransactions(businessId, merged);
+    });
+  }
+
+  /// Add one verified occurrence without replacing the rest of the cache
+  /// or overwriting queued edits. This never creates an outbox operation.
+  Future<void> importRecurringExpenseOccurrence(
+    String businessId,
+    String ruleId,
+    String dueDate,
+    Map<String, dynamic> detail,
+  ) async {
+    final id = detail['id'];
+    if (id is! String || id.isEmpty || ruleId.isEmpty || dueDate.isEmpty ||
+        detail['business_id'] != businessId ||
+        detail['recurring_rule_id'] != ruleId ||
+        detail['recurring_occurrence_date'] != dueDate ||
+        detail['direction'] != 'expense' || detail['status'] != 'posted') {
+      throw StateError('The download did not match the requested occurrence.');
+    }
+    await _database.transaction(() async {
+      final rows = await loadTransactions(businessId);
+      for (final row in rows) {
+        if (row['recurring_rule_id'] == ruleId &&
+            row['recurring_occurrence_date'] == dueDate && row['id'] != id) {
+          throw StateError('A different local transaction already claims this occurrence.');
+        }
+      }
+      final previous = await loadTransactionDetail(businessId, id);
+      if (previous?['sync_state'] == 'pending' || rows.any(
+        (row) => row['id'] == id && row['sync_state'] == 'pending',
+      )) {
+        throw StateError('This expense has pending local changes.');
+      }
+      final snapshot = {
+        ...detail,
+        'transaction_date': detail['date'],
+        'sync_state': 'synced',
+      };
+      final identity = {
+        'recurring_verified_download': true,
+        'recurring_rule_id': ruleId,
+        'recurring_occurrence_date': dueDate,
+      };
+      await saveTransactionDetail(businessId, id, {
+        ...snapshot,
+        ...?previous,
+        ...identity,
+      });
+      await saveTransactions(businessId, [
+        if (!rows.any((row) => row['id'] == id)) {...snapshot, ...identity},
+        for (final row in rows)
+          if (row['id'] == id) {...row, ...identity} else row,
+      ]);
     });
   }
 
@@ -294,6 +375,9 @@ class LocalFinancialCache {
     String transactionId,
     Map<String, dynamic> detail,
   ) async {
+    if (!matchesTransaction(detail, businessId, transactionId)) {
+      throw ArgumentError('Expense detail does not match its business and transaction.');
+    }
     await _save(
       businessId,
       'transaction_detail_$transactionId',
@@ -312,9 +396,9 @@ class LocalFinancialCache {
     if (raw == null || raw.isEmpty) return null;
     try {
       final decoded = jsonDecode(raw);
-      return decoded is Map
-          ? Map<String, dynamic>.from(decoded)
-          : null;
+      if (decoded is! Map) return null;
+      final detail = Map<String, dynamic>.from(decoded);
+      return matchesTransaction(detail, businessId, transactionId) ? detail : null;
     } catch (_) {
       return null;
     }

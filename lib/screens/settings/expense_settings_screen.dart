@@ -7,8 +7,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/module_modal_theme.dart';
 import '../../core/connection_mode.dart';
+import '../../core/recurring_schedule_status.dart';
 import '../../core/supabase_config.dart';
 import '../../services/briskers_api.dart';
+import '../../services/local_financial_cache.dart';
 
 class ExpenseSettingsScreen extends StatelessWidget {
   const ExpenseSettingsScreen({
@@ -1825,6 +1827,50 @@ class _RecurringTransactionsScreenState
     }
   }
 
+  bool _downloadingOccurrence = false;
+
+  Future<void> _downloadOccurrence(Map<String, dynamic> row) async {
+    if (_downloadingOccurrence || row['id'] is! String) return;
+    setState(() => _downloadingOccurrence = true);
+    try {
+      final today = DateTime.now();
+      final next = DateTime.tryParse(row['next_date']?.toString() ?? '');
+      final date = await showDatePicker(
+        context: context,
+        helpText: 'Download one posted expense',
+        initialDate: next != null && !next.isAfter(today) ? next : today,
+        firstDate: DateTime(1900),
+        lastDate: today,
+      );
+      if (date == null || !mounted) return;
+      final dueDate = date.toIso8601String().substring(0, 10);
+      final ruleId = row['id'] as String;
+      final detail = await _api.downloadRecurringExpenseOccurrence(
+        widget.businessId, ruleId, dueDate,
+      );
+      if (!mounted) return;
+      if (detail != null) {
+        await LocalFinancialCache().importRecurringExpenseOccurrence(
+          widget.businessId, ruleId, dueDate, detail,
+        );
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+        detail == null
+            ? 'No posted occurrence was found for that date.'
+            : 'Posted expense saved on this device. Reopen Expenses to view it.',
+      )));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Could not download this occurrence. $error'),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _downloadingOccurrence = false);
+    }
+  }
+
   Future<void> _edit([Map<String, dynamic>? row]) async {
     if (!_canEdit) return;
     final changed = await showDialog<bool>(
@@ -1922,7 +1968,6 @@ class _RecurringTransactionsScreenState
                     )
                   else
                     ...rows!.map((row) {
-                      final paused = row['paused_reason']?.toString() ?? '';
                       return Card(
                         child: ListTile(
                           leading: CircleAvatar(
@@ -1943,8 +1988,11 @@ class _RecurringTransactionsScreenState
                             <String>[
                               row['category']?.toString() ?? '',
                               _frequency(row),
-                              'Next ${row['next_date']}',
-                              if (paused.isNotEmpty) 'Paused: $paused',
+                              recurringScheduleStatus(
+                                row,
+                                today: DateTime.now(),
+                                cached: _showingSavedList,
+                              ),
                             ].where((x) => x.isNotEmpty).join(' • '),
                           ),
                           trailing: Row(
@@ -1956,6 +2004,13 @@ class _RecurringTransactionsScreenState
                                   fontWeight: FontWeight.w800,
                                 ),
                               ),
+                              if (row['direction'] == 'expense')
+                                IconButton(
+                                  tooltip: 'Download a posted occurrence',
+                                  onPressed: _downloadingOccurrence
+                                      ? null : () => _downloadOccurrence(row),
+                                  icon: const Icon(Icons.download_outlined),
+                                ),
                               if (_canEdit)
                                 PopupMenuButton<String>(
                                 onSelected: (value) {

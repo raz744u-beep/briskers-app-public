@@ -381,7 +381,11 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           widget.businessId, invoiceId,
         );
         if (!_currentLoad(epoch)) return;
-        if (cached == null) continue;
+        if (cached == null || cached['id']?.toString() != invoiceId ||
+            (cached['business_id'] != null &&
+             cached['business_id']?.toString() != widget.businessId)) {
+          continue;
+        }
         final projected = await _invoiceMileage.project(
           widget.businessId, invoiceId, cached,
         );
@@ -2078,39 +2082,50 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   /// existing pre-inspection odometer, so staff do not enter it twice.
   Future<void> _editMileageIn() async {
     if (_job == null || _busy || !_canEditInspection) return;
-    final initial = _preInspection?['odometer'] ??
-        _job?['odometer_in'];
+    final businessId = widget.businessId;
+    final jobId = widget.jobId;
+    final vehicleId = _job?['vehicle_id']?.toString();
+    final initial = JobMileageSummary.mileageIn(_job, _preInspection);
     final controller = TextEditingController(
       text: initial?.toString() ?? '',
     );
+    ModalRoute<dynamic>? mileageInDialogRoute;
     final save = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Miles In'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Odometer when vehicle arrived',
-            suffixText: 'mi',
+      builder: (dialogContext) {
+        mileageInDialogRoute ??= ModalRoute.of(dialogContext);
+        return AlertDialog(
+          title: const Text('Miles In'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Odometer when vehicle arrived',
+              suffixText: 'mi',
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
     );
     final raw = controller.text.replaceAll(',', '').trim();
+    await mileageInDialogRoute?.completed;
     controller.dispose();
-    if (save != true || !mounted) return;
+    if (save != true || !mounted || _contentBlocked || !_canEditInspection ||
+        _job == null || widget.businessId != businessId || widget.jobId != jobId ||
+        _job?['vehicle_id']?.toString() != vehicleId) {
+      return;
+    }
     final parsed = num.tryParse(raw);
     if (parsed == null || parsed < 0 || !parsed.isFinite ||
         parsed > 9999999 || parsed != parsed.roundToDouble()) {
@@ -2127,9 +2142,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     });
     try {
       final local = await _offlineInspection.saveLocalInspection(
-        widget.businessId,
-        widget.jobId,
-        vehicleId: _job?['vehicle_id']?.toString(),
+        businessId,
+        jobId,
+        vehicleId: vehicleId,
         notes: existingNotes,
         odometer: parsed,
       );

@@ -1,3 +1,4 @@
+import '../payroll/owner_payroll_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -387,6 +388,19 @@ class _EmployeesSettingsScreenState
     return Scaffold(
       appBar: AppBar(
         title: const Text('Employees'),
+        actions: [
+          if (OwnerPayrollScreen.enabled && widget.isOwner)
+            IconButton(
+              tooltip: 'Owner payroll',
+              icon: const Icon(Icons.payments_outlined),
+              onPressed: () => Navigator.push<void>(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => OwnerPayrollScreen(businessId: widget.businessId),
+                ),
+              ),
+            ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showManageMenu,
