@@ -1,6 +1,5 @@
 // ignore_for_file: prefer_interpolation_to_compose_strings, use_null_aware_elements, curly_braces_in_flow_control_structures
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 /// Explicit operator confirmation before receipt fields alter expense entry.
 /// Keeps the existing expense editor; it does not create any transaction.
@@ -128,10 +127,10 @@ class _ReceiptReviewSheetState extends State<ReceiptReviewSheet> {
       final qtyText = row.quantity.text.trim();
       final unitText = row.unitPrice.text.trim();
       final lineText = row.total.text.trim();
-      final qty = int.tryParse(qtyText);
+      final qty = num.tryParse(qtyText.replaceAll(',', ''));
       final unit = num.tryParse(unitText.replaceAll(',', ''));
       final lineTotal = num.tryParse(lineText.replaceAll(',', ''));
-      if ((qtyText.isNotEmpty && (qty == null || qty <= 0)) ||
+      if ((qtyText.isNotEmpty && (qty == null || !qty.isFinite || qty <= 0)) ||
           (unitText.isNotEmpty &&
               (unit == null || !unit.isFinite || unit < 0)) ||
           (lineText.isNotEmpty &&
@@ -175,11 +174,6 @@ class _ReceiptReviewSheetState extends State<ReceiptReviewSheet> {
               .map((item) => item.toString())
               .toList()
         : <String>[];
-    final metadata = widget.extraction['raw_data'];
-    final rawText = metadata is Map
-        ? metadata['ocr_text']?.toString() ?? ''
-        : '';
-    final rowCount = metadata is Map ? metadata['ocr_line_count'] : null;
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.only(
@@ -195,7 +189,7 @@ class _ReceiptReviewSheetState extends State<ReceiptReviewSheet> {
                   children: [
                     const Expanded(
                       child: Text(
-                        'Review receipt (read on device)',
+                        'Review receipt',
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 18,
@@ -227,52 +221,6 @@ class _ReceiptReviewSheetState extends State<ReceiptReviewSheet> {
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.error,
                         ),
-                      ),
-                    ],
-                    if (rawText.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      ExpansionTile(
-                        key: const ValueKey('local-receipt-ocr-details'),
-                        tilePadding: EdgeInsets.zero,
-                        title: const Text('View text recognized on phone'),
-                        subtitle: Text(
-                          rowCount == null
-                              ? 'Local OCR text — never uploaded automatically'
-                              : 'Local OCR text ($rowCount recognized lines)',
-                        ),
-                        children: [
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton.icon(
-                              key: const ValueKey('copy-local-receipt-ocr'),
-                              icon: const Icon(Icons.copy_outlined),
-                              onPressed: () => Clipboard.setData(
-                                ClipboardData(text: rawText),
-                              ),
-                              label: const Text('Copy recognized text'),
-                            ),
-                          ),
-                          Container(
-                            alignment: Alignment.topLeft,
-                            width: double.infinity,
-                            constraints: const BoxConstraints(maxHeight: 220),
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .outlineVariant,
-                              ),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: SingleChildScrollView(
-                              child: SelectableText(
-                                rawText,
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                            ),
-                          ),
-                        ],
                       ),
                     ],
                     const SizedBox(height: 16),
