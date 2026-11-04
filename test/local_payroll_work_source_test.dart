@@ -92,15 +92,34 @@ void main() {
     await register('employee-b');
     expect(await payroll.tasks(), hasLength(1));
     expect(await payroll.work(), hasLength(2));
-    final portion = (await payroll.work(employee: 'employee-a')).single;
-    final id = portion['id'] as String;
-    await payroll.updateWork(id, 'In Progress', 250, '2026-11-04');
-    await payroll.updateWork(id, 'Done', 250, '2026-11-04');
-    expect((await payroll.work(employee: 'employee-b')).single['state'], 'Open');
+    final mechanic = LocalPayrollRepository(db, business: 'shop-a', owner: false);
+    void assertSession() {}
+    Future<Map<String, dynamic>> ownWork(String employee) async =>
+        (await mechanic.mechanicWork(
+          job: 'job-a', employee: employee, assertSession: assertSession,
+        )).single;
+    Future<void> update(String employee, Map<String, dynamic> work,
+        String state, int minutes) =>
+        mechanic.updateMechanicWork(
+          job: 'job-a',
+          employee: employee,
+          id: work['id'] as String,
+          state: state,
+          minutes: minutes,
+          date: '2026-11-04',
+          expectedRevision: work['revision'] as int,
+          assertSession: assertSession,
+        );
+    final first = await ownWork('employee-a');
+    final second = await ownWork('employee-b');
+    expect(first.containsKey('rate_cents'), isFalse);
+    await expectLater(update('employee-a', second, 'In Progress', 0), throwsStateError);
+    await update('employee-a', first, 'In Progress', 0);
+    await update('employee-a', await ownWork('employee-a'), 'Done', 150);
+    expect((await ownWork('employee-b'))['state'], 'Open');
     expect((await payroll.jobs()).single['done'], 0);
-    final otherId = (await payroll.work(employee: 'employee-b')).single['id'] as String;
-    await payroll.updateWork(otherId, 'In Progress', 100, '2026-11-04');
-    await payroll.updateWork(otherId, 'Done', 100, '2026-11-04');
+    await update('employee-b', second, 'In Progress', 0);
+    await update('employee-b', await ownWork('employee-b'), 'Done', 60);
     final selected = await payroll.work(employee: 'employee-a');
     Future<bool> verify(String operation) => payroll.verify(
           operation: operation,

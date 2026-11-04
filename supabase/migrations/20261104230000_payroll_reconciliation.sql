@@ -105,3 +105,29 @@ end;
 $$;
 revoke all on function public.briskers_reconcile_payroll_payment(uuid, text, jsonb) from public, anon;
 grant execute on function public.briskers_reconcile_payroll_payment(uuid, text, jsonb) to authenticated;
+
+-- Bind the signed-in mechanic to their own active employee/Job assignment.
+-- Return no staff, compensation, or payment details.
+create or replace function public.briskers_my_payroll_assignment(
+  p_business_id uuid, p_job_id uuid
+)
+returns uuid
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case when count(*) = 1 then (array_agg(e.id))[1] end
+  from briskers.employees e
+  join briskers.memberships m
+    on m.business_id = e.business_id and m.user_id = e.user_id
+  where e.business_id = p_business_id and e.user_id = auth.uid()
+    and e.active and m.active and m.role_code = 'mechanic'
+    and exists (
+      select 1 from briskers.job_assignments a
+      where a.business_id = e.business_id and a.employee_id = e.id
+        and a.job_id = p_job_id and a.active
+    );
+$$;
+revoke all on function public.briskers_my_payroll_assignment(uuid, uuid) from public, anon;
+grant execute on function public.briskers_my_payroll_assignment(uuid, uuid) to authenticated;

@@ -19,6 +19,14 @@ Future<T> runAttachmentMutation<T>(
 class BriskersApi {
   const BriskersApi();
 
+  Future<String?> myPayrollAssignment(String businessId, String jobId) async {
+    final result = await networkSupabase.rpc(
+      'briskers_my_payroll_assignment',
+      params: {'p_business_id': businessId, 'p_job_id': jobId},
+    ).timeout(const Duration(seconds: 15));
+    return result as String?;
+  }
+
   Future<Map<String, dynamic>> reconcilePayrollPayment(
     String businessId,
     String operation,

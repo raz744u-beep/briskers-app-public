@@ -178,6 +178,59 @@ class LocalPayrollRepository {
     });
   }
 
+  Future<List<Map<String, dynamic>>> mechanicWork({
+    required String job,
+    required String employee,
+    required void Function() assertSession,
+  }) async {
+    assertSession();
+    await prepare();
+    final rows = await _read(
+      'SELECT c.allocation_id AS id,t.description,p.state,c.actual_minutes,c.revision '
+      'FROM local_mechanic_work_credits_v1 c '
+      'JOIN regular_payroll_portions p ON p.business_id=c.business_id AND p.id=c.allocation_id '
+      'JOIN regular_payroll_tasks t ON t.business_id=p.business_id AND t.id=p.task_id '
+      'WHERE c.business_id=? AND c.job_id=? AND c.employee_id=? '
+      'AND EXISTS (SELECT 1 FROM local_job_assignments a WHERE a.business_id=c.business_id '
+      'AND a.job_id=c.job_id AND a.employee_id=c.employee_id AND a.active=1) '
+      'ORDER BY c.allocation_id',
+      [business, job, employee],
+    );
+    assertSession();
+    return rows;
+  }
+
+  Future<void> updateMechanicWork({
+    required String job,
+    required String employee,
+    required String id,
+    required String state,
+    required int minutes,
+    required String date,
+    required int expectedRevision,
+    required void Function() assertSession,
+  }) async {
+    assertSession();
+    await prepare();
+    await db.transaction(() async {
+      final rows = await mechanicWork(
+        job: job, employee: employee, assertSession: assertSession,
+      );
+      final row = rows.where((row) => row['id'] == id).firstOrNull;
+      final from = row?['state'];
+      if (row == null || from == 'Done' ||
+          (from == 'Open' && state != 'In Progress') ||
+          (from == 'In Progress' && state != 'Done')) {
+        throw StateError('This labor portion is unavailable.');
+      }
+      await _updateWork(
+        id, state, minutes, date,
+        expectedRevision: expectedRevision,
+        authorize: assertSession,
+      );
+    });
+  }
+
   /// Editing or reopening an unpaid portion increments its version. Paid
   /// portions require a new recheck labor line; their original hours stay frozen.
   Future<void> updateWork(
@@ -186,11 +239,27 @@ class LocalPayrollRepository {
     int hours,
     String date, {
     int? expectedRevision,
+  }) {
+    if (hours < 0) throw ArgumentError('Invalid work hours');
+    return _updateWork(
+      id, state, (hours * 60 + 50) ~/ 100, date,
+      expectedRevision: expectedRevision,
+      authorize: _authorize,
+    );
+  }
+
+  Future<void> _updateWork(
+    String id,
+    String state,
+    int minutes,
+    String date, {
+    required int? expectedRevision,
+    required void Function() authorize,
   }) async {
-    _authorize();
+    authorize();
     await prepare();
     _date(date);
-    if (!['Open', 'In Progress', 'Done'].contains(state) || hours < 0)
+    if (!['Open', 'In Progress', 'Done'].contains(state) || minutes < 0)
       { throw ArgumentError('Invalid work'); }
     await db.transaction(() async {
       final rows = await _read(
@@ -207,13 +276,13 @@ class LocalPayrollRepository {
       await LocalMechanicWorkCreditRepository(database: db).recordWork(
         businessId: business, allocationId: id, employeeId: rows.single['employee_id'] as String,
         expectedRevision: rows.single['revision'] as int,
-        actualMinutes: (hours * 60 + 50) ~/ 100, completed: state == 'Done',
+        actualMinutes: minutes, completed: state == 'Done',
       );
       await db.customStatement(
         'UPDATE regular_payroll_portions SET state=?,version=version+1,completed_date=? WHERE business_id=? AND id=?',
         [state, state == 'Done' ? date : null, business, id],
       );
-      _authorize();
+      authorize();
     });
   }
 

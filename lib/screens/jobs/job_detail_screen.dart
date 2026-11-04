@@ -1,3 +1,5 @@
+import '../payroll/mechanic_labor_screen.dart';
+import '../payroll/owner_payroll_screen.dart';
 import '../../services/owner_job_retirement_service.dart';
 import 'owner_local_delete_action.dart';
 import 'dart:async';
@@ -5890,6 +5892,15 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           PopupMenuButton<String>(
             tooltip: 'Job menu',
             onSelected: (value) async {
+              if (value == 'my_labor' && OwnerPayrollScreen.enabled &&
+                  widget.roleCode == 'mechanic' && _canEditWork) {
+                await Navigator.push<void>(
+                  context,
+                  MaterialPageRoute(builder: (_) => MechanicLaborScreen(
+                    businessId: widget.businessId, jobId: widget.jobId,
+                  )),
+                );
+              }
               if (value == 'edit') await _editJob();
               if (value == 'change_customer') await _changeCustomer();
               if (value == 'assignment') await _changeAssignment();
@@ -5897,6 +5908,12 @@ class _JobDetailScreenState extends State<JobDetailScreen>
               if (value == 'delete_unused') await _deleteUnusedJob();
             },
             itemBuilder: (_) => [
+              if (OwnerPayrollScreen.enabled && widget.roleCode == 'mechanic' &&
+                  _canEditWork)
+                const PopupMenuItem(
+                  value: 'my_labor',
+                  child: Text('My labor tasks'),
+                ),
               if (_canQuickAdmin)
                 const PopupMenuItem(
                   value: 'edit',
