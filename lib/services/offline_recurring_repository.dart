@@ -237,7 +237,9 @@ class OfflineRecurringRepository {
           continue;
         }
         if (old != null && (old['row_version'] as int? ?? -1) >
-            (incoming['row_version'] as int)) continue;
+            (incoming['row_version'] as int)) {
+          continue;
+        }
         final merged = {...incoming,
           if (!isRule && old?['attachments'] != null)
             'attachments': old!['attachments'],
@@ -261,7 +263,9 @@ class OfflineRecurringRepository {
     final all = {for (final row in await _rows('occurrence')) row['_key']: row};
     for (final rule in await _rows('rule')) {
       if (rule['_state'] == 'conflict' || rule['is_repeating'] != true ||
-          (rule['paused_reason']?.toString().isNotEmpty ?? false)) continue;
+          (rule['paused_reason']?.toString().isNotEmpty ?? false)) {
+        continue;
+      }
       final latest = all.values.where((r) =>
           r['recurring_rule_id'] == rule['id'] &&
           r['direction'] == rule['direction']).toList()
