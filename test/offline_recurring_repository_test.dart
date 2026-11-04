@@ -165,6 +165,28 @@ void main() {
     expect(await repo.generateThrough('2026-11-11'), 0);
   });
 
+  test('uniqueness acknowledgement cannot overwrite a different local amount', () async {
+    await repo.saveRule(rule());
+    await repo.generateThrough('2026-11-04');
+    await repo.correctAmount('weekly', '2026-11-04', 12000);
+    final sent = (await repo.occurrences()).single;
+    expect(await repo.acknowledge(rule: false, key: sent['_key'] as String,
+      revision: sent['_revision'] as int, canonical: posted()), isFalse);
+    final preserved = (await repo.occurrences()).single;
+    expect(preserved['amount_minor'], 12000);
+    expect(preserved['_state'], 'conflict');
+  });
+
+  test('overlapping catch-up calls commit one occurrence per date', () async {
+    await repo.saveRule(rule());
+    final results = await Future.wait([
+      repo.generateThrough('2026-11-18'),
+      repo.generateThrough('2026-11-18'),
+    ]);
+    expect(results.reduce((a, b) => a + b), 3);
+    expect(await repo.occurrences(), hasLength(3));
+  });
+
   test('malformed or cross-business recovery rolls back whole batch', () async {
     await expectLater(repo.importSnapshot(rules: [rule()], occurrences: [
       posted(), {...posted(date: '2026-11-11'), 'business_id': 'other'},
