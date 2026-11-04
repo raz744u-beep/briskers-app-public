@@ -27,6 +27,7 @@ class _DocumentNumberingSettingsScreenState
   bool _saving = false;
   String? _error;
   final Map<String, Map<String, dynamic>> _counters = {};
+  final Map<String, List<int>> _available = {};
 
   @override
   void initState() {
@@ -39,12 +40,15 @@ class _DocumentNumberingSettingsScreenState
     try {
       final numbers=LocalNumberAllocator(localDatabase);
       final rows=<Map<String,dynamic>>[];
+      final available = <String, List<int>>{};
       for(final kind in const ['invoice','job']) {
+        available[kind] = await numbers.availableNumbers(widget.businessId, kind);
         rows.add({'document_kind':kind,'next_number':await numbers.nextNumber(widget.businessId,kind),
           'prefix':kind=='job' ? 'J-' : ''});
       }
       if (!mounted) return;
       setState(() {
+        _available..clear()..addAll(available);
         _counters.clear();
         for (final raw in rows) {
           final record = Map<String, dynamic>.from(raw as Map);
@@ -177,6 +181,16 @@ class _DocumentNumberingSettingsScreenState
                         : () => _change(kind),
                   ),
                 ),
+              const SizedBox(height: 16),
+              const Text('Available numbers on this device',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+              for (final kind in const ['invoice', 'job'])
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text('${_title(kind)}: '
+                    '${(_available[kind] ?? const <int>[]).isEmpty ? 'None' : _available[kind]!.map((n) => kind == 'job' ? 'J-$n' : '#$n').join(', ')}'),
+                ),
+              const Text('Choose available numbers when starting a new invoice in Force Offline. Only explicitly released, unused numbers appear here.'),
               if (_saving) const LinearProgressIndicator(),
               const SizedBox(height: 12),
               const Text(

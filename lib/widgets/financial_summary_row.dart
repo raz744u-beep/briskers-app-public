@@ -62,7 +62,7 @@ class FinancialSummaryRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          Flexible(
+          Expanded(
             child: Text(
               value,
               maxLines: 2,

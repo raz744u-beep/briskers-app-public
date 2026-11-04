@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'local_number_allocator.dart';
+import 'local_owner_authorization.dart';
+import '../core/connection_mode.dart';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
@@ -97,12 +99,28 @@ class OfflineDocumentDraftService {
     String? vehicleId,
     String? vehicleLabel,
     String? existingJobId,
+    int? reuseInvoiceNumber,
+    int? reuseJobNumber,
+    LocalOwnerGrant? reuseGrant,
     List<Map<String, dynamic>> initialLines = const [],
     String? initialMemo,
   }) async {
     if (customerId.isEmpty) {
       throw StateError('Select a saved customer before creating an invoice.');
     }
+    final reusing = reuseInvoiceNumber != null || reuseJobNumber != null;
+    void checkReuseAuthorization() {
+      if (!reusing) return;
+      if (reuseGrant == null ||
+          !BriskersConnectionModeController.instance.forceOffline) {
+        throw StateError('Owner authorization and Force Offline are required to reuse numbers.');
+      }
+      reuseGrant.assertValid(businessId, reuseGrant.actorId);
+      if (existingJobId != null && reuseJobNumber != null) {
+        throw StateError('An existing job keeps its number.');
+      }
+    }
+    checkReuseAuthorization();
     final operationId = _offlineOperationUuid();
     final id = 'local-invoice-$operationId';
     final provisionalJobId = existingJobId ?? 'local-job-$operationId';
@@ -149,9 +167,17 @@ class OfflineDocumentDraftService {
 
     await _database.transaction(() async {
       final numbers=LocalNumberAllocator(_database);
-      invoiceNumber=(await numbers.allocate(businessId,'invoice',id)).toString();
+      checkReuseAuthorization();
+      for (final choice in {'invoice': reuseInvoiceNumber, 'job': reuseJobNumber}.entries) {
+        if (choice.value != null &&
+            !(await numbers.availableNumbers(businessId, choice.key)).contains(choice.value)) {
+          throw StateError('That ${choice.key} number is no longer available. Choose again.');
+        }
+      }
+      invoiceNumber=(await numbers.allocate(businessId,'invoice',id,
+          requested: reuseInvoiceNumber)).toString();
       if(existingJobId==null) {
-        jobNumber=numbers.display('job',await numbers.allocate(businessId,'job',provisionalJobId));
+        jobNumber=numbers.display('job',await numbers.allocate(businessId,'job',provisionalJobId, requested: reuseJobNumber));
       } else {
         final jobs=await _database.customSelect('SELECT job_number FROM local_jobs WHERE business_id=? AND id=?',
           variables:[Variable<String>(businessId),Variable<String>(existingJobId)]).get();
@@ -217,6 +243,7 @@ class OfflineDocumentDraftService {
       );
       // A sync worker cannot observe the queued copy before its full detail.
       await _cache.save(businessId, id, detail);
+      checkReuseAuthorization();
     });
     return id;
   }
