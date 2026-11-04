@@ -72,74 +72,78 @@ void main() {
       BriskersConnectionMode.auto,
     );
   });
-  testWidgets(
-    'uploaded receipt keeps exact expense original thumbnail and zoom offline',
-    (tester) async {
-      final db = BriskersLocalDatabase(NativeDatabase.memory());
-      addTearDown(db.close);
-      final api = _NoNetwork();
-      final photo = base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGP4z8DwH4QZYAwAR8oH+WdZbrcAAAAASUVORK5CYII=',
-      );
-      var reads = 0;
-      final detail = <String, dynamic>{
-        'id': 'expense-a',
-        'direction': 'expense',
-        'amount': 73.51,
-        'attachments': [
-          {
-            'attachment_id': 'attachment-a',
-            'filename': 'original.jpg',
-            'key': 'shop-a/expense-a/original.jpg',
-          },
-        ],
-      };
-      await tester.pumpWidget(
-        MaterialApp(
-          home: ExpenseDetailScreen(
-            businessId: 'shop-a',
-            transactionId: 'expense-a',
-            cachedDetail: detail,
-            api: api,
-            financialCache: _Cache(db, detail),
-            localPhotoSync: _Original(db),
-            receiptReporting: _Reporting(),
-            localPhotoReader: (uri) async {
-              expect(uri, 'content://synthetic/original');
-              reads++;
-              return Uint8List.fromList(photo);
+  for (final cloudFilename in ['original.jpg', 'cloud-copy.jpg']) {
+    testWidgets(
+      'uploaded receipt keeps exact expense original thumbnail and zoom offline with $cloudFilename',
+      (tester) async {
+        final db = BriskersLocalDatabase(NativeDatabase.memory());
+        addTearDown(db.close);
+        final api = _NoNetwork();
+        final photo = base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGP4z8DwH4QZYAwAR8oH+WdZbrcAAAAASUVORK5CYII=',
+        );
+        var reads = 0;
+        final detail = <String, dynamic>{
+          'id': 'expense-a',
+          'direction': 'expense',
+          'amount': 73.51,
+          'attachments': [
+            {
+              'attachment_id': 'attachment-a',
+              'filename': cloudFilename,
+              'key': 'shop-a/expense-a/$cloudFilename',
             },
+          ],
+        };
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ExpenseDetailScreen(
+              businessId: 'shop-a',
+              transactionId: 'expense-a',
+              cachedDetail: detail,
+              api: api,
+              financialCache: _Cache(db, detail),
+              localPhotoSync: _Original(db),
+              receiptReporting: _Reporting(),
+              localPhotoReader: (uri) async {
+                expect(uri, 'content://synthetic/original');
+                reads++;
+                return Uint8List.fromList(photo);
+              },
+            ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final original = find.byKey(
-        const ValueKey(
-          'original-receipt-shop-a-expense-a-content://synthetic/original',
-        ),
-      );
-      await tester.scrollUntilVisible(original, 150);
-      expect(original, findsOneWidget);
-      expect(
-        find.byType(Image),
-        findsOneWidget,
-        reason: 'One receipt row, not a duplicate source card',
-      );
-      expect(
-        tester.widget<Image>(find.byType(Image)).image,
-        isA<MemoryImage>(),
-      );
-      await tester.tap(find.byTooltip('View receipt'));
-      await tester.pumpAndSettle();
-      expect(find.byType(Dialog), findsOneWidget);
-      expect(
-        reads,
-        1,
-        reason: 'Thumbnail and zoom reuse the same original bytes',
-      );
-      expect(api.calls, 0);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+        );
+        await tester.pumpAndSettle();
+        final original = find.byKey(
+          const ValueKey(
+            'original-receipt-shop-a-expense-a-content://synthetic/original',
+          ),
+        );
+        final matchesCloud = cloudFilename == 'original.jpg';
+        final preview = matchesCloud ? original : find.text('original.jpg');
+        await tester.scrollUntilVisible(preview, 150);
+        expect(preview, findsOneWidget);
+        expect(
+          find.byType(Image),
+          findsOneWidget,
+          reason: 'One receipt row, not a duplicate source card',
+        );
+        expect(
+          tester.widget<Image>(find.byType(Image)).image,
+          isA<MemoryImage>(),
+        );
+        await tester.tap(matchesCloud ? find.byTooltip('View receipt') : preview);
+        await tester.pumpAndSettle();
+        expect(find.byType(Dialog), findsOneWidget);
+        expect(
+          reads,
+          1,
+          reason: 'Thumbnail and zoom reuse the same original bytes',
+        );
+        expect(api.calls, 0);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
 }

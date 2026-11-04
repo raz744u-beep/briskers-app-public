@@ -508,7 +508,11 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                           fit: BoxFit.cover,
                         ),
                       )
-                    : const Icon(Icons.image_outlined),
+                    : Icon(
+                        snapshot.hasError
+                            ? Icons.image_not_supported_outlined
+                            : Icons.image_outlined,
+                      ),
               ),
         title: Text(photo['filename']?.toString() ?? 'ExpenseIQ photo'),
         subtitle: Text(
@@ -1747,6 +1751,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                 ),
             ],
           ),
+          // Keep the local original visible after upload. A cloud row
+          // replaces this card only when it can show the same local file.
           if (_localExpenseIqPhoto != null &&
               !attachments.any((row) => _originalPhotoUriFor(row) != null))
             _localExpenseIqReceiptCard(),
