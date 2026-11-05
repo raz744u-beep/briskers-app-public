@@ -17,6 +17,9 @@ import '../../core/vehicle_invoice_repair_search.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
+import '../../services/completed_task_history.dart';
+import '../../services/employee_nickname_store.dart';
+import '../../widgets/completed_work_section.dart';
 import '../../services/job_summary_visibility.dart';
 import '../../services/customer_document_summary_service.dart';
 import '../../services/historical_photo_matcher.dart';
@@ -62,6 +65,7 @@ class _CustomerServiceHistorySectionState
   List<Map<String, dynamic>> _expenses = const [];
   final Map<String, Future<Map<String, dynamic>>> _documentSummaries = {};
   bool _loading = true;
+  final Map<String,String> _completedSearch={};
   String? _error;
   String get _roleCode => widget.roleCode;
   String? _selectedVehicleId;
@@ -176,6 +180,14 @@ class _CustomerServiceHistorySectionState
     final data = cached is Map ? Map<String, dynamic>.from(cached)
         : <String, dynamic>{};
     final localJobs = await LocalJobRepository().forCustomer(businessId, customerId);
+    final completed=await CompletedTaskHistory(localDatabase).read(businessId,customer:customerId);
+    final nicknames=await EmployeeNicknameStore().all(businessId);
+    _completedSearch.clear();
+    for(final task in completed){
+      final job=task['job_id'] as String;
+      _completedSearch[job]='${_completedSearch[job]??''} ${task['description']} ${task['mechanic']} ${nicknames[task['employee_id']]??''}';
+    }
+
     final localDocuments = await CustomerDocumentSummaryService().forCustomer(
       businessId, customerId, includeClosed: true);
     List<Map<String, dynamic>> merge(Object? raw, List<Map<String, dynamic>> local) {
@@ -493,7 +505,8 @@ class _CustomerServiceHistorySectionState
   }
 
   List<Map<String, dynamic>> get _visibleJobs =>
-      _jobs.where(_matchesVehicle).toList();
+      _jobs.where(_matchesVehicle).where((j)=>_repairQuery.trim().isEmpty ||
+        '${j['job_number']} ${j['title']} ${j['requested_work']} ${j['vehicle_label']} ${_completedSearch[j['id']]??''}'.toLowerCase().contains(_repairQuery.trim().toLowerCase())).toList();
 
   List<Map<String, dynamic>> get _visibleEstimates => _documents
       .where((row) => row['kind']?.toString() == 'estimate')
@@ -844,11 +857,11 @@ class _CustomerServiceHistorySectionState
       child: Column(
         children: jobs
             .map(
-              (job) => JobCompactCard(
+              (job) => Column(children:[JobCompactCard(
                 job: job,
                 statusControl: _statusControl(job),
                 onOpen: () => _openJob(job),
-              ),
+              ),if(_canSeeFinancial)CompletedWorkSection(business:widget.businessId,job:job['id'] as String)]),
             )
             .toList(),
       ),

@@ -7,9 +7,10 @@ import '../../services/local_customer_repository.dart';
 /// Uses its own route and controller so the keyboard cannot collapse a dialog
 /// or leave the Jobs list under a partially dismissed overlay.
 class JobCustomerPickerScreen extends StatefulWidget {
-  const JobCustomerPickerScreen({super.key, required this.businessId});
+  const JobCustomerPickerScreen({super.key, required this.businessId, this.localCustomers});
 
   final String businessId;
+  final LocalCustomerRepository? localCustomers;
 
   @override
   State<JobCustomerPickerScreen> createState() => _JobCustomerPickerScreenState();
@@ -17,7 +18,7 @@ class JobCustomerPickerScreen extends StatefulWidget {
 
 class _JobCustomerPickerScreenState extends State<JobCustomerPickerScreen> {
   final _search = TextEditingController();
-  final _customers = LocalCustomerRepository();
+  late final _customers = widget.localCustomers ?? LocalCustomerRepository();
   List<Map<String, dynamic>> _rows = const [];
   bool _loading = true;
   bool _searching = false;

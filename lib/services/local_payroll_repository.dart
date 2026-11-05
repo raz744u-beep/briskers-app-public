@@ -4,6 +4,8 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import 'local_mechanic_work_credit_repository.dart';
 import 'local_payroll_work_source.dart';
+import 'local_task_assignment_store.dart';
+import 'offline_job_admin_service.dart';
 import 'payroll_lan_peer.dart';
 import 'local_invoice_task_store.dart';
 import 'local_document_detail_cache.dart';
@@ -56,6 +58,7 @@ class LocalPayrollRepository {
           .toList();
   Future<void> prepare() => _prepared ??= _prepare();
   Future<void> _prepare() async {
+    await LocalTaskAssignmentStore(db).prepare();
     await LocalMechanicWorkCreditRepository(database: db).prepare();
     await LocalInvoiceTaskStore(db).prepare();
     for (final sql in [
@@ -171,11 +174,11 @@ class LocalPayrollRepository {
   Future<void> createRecheck({
     required String operation, required String job, required String description,
     required String employee, required String name, required int rate,
-    required int estimatedMinutes, Future<void> Function()? queueChange,
+    required int estimatedMinutes, String kind = 'recheck', Future<void> Function()? queueChange,
   }) async {
     _authorize();
     if ([operation, job, employee, name, description].any((value) => value.trim().isEmpty) ||
-        rate <= 0 || estimatedMinutes < 0) {
+        rate < 0 || estimatedMinutes < 0 || !['job','recheck'].contains(kind)) {
       throw ArgumentError('Invalid recheck.');
     }
     await prepare();
@@ -187,8 +190,8 @@ class LocalPayrollRepository {
         [business, job, employee],
       );
       if (source.isEmpty) throw StateError('Save the job and mechanic assignment first.');
-      final task = jsonEncode([job, 'recheck', operation]);
-      final labor = jsonEncode(['recheck', operation]);
+      final task = jsonEncode([job, kind, operation]);
+      final labor = jsonEncode([kind, operation]);
       final prior = await _read(
         'SELECT description,planned FROM regular_payroll_tasks WHERE business_id=? AND id=?',
         [business, task],
@@ -217,7 +220,7 @@ class LocalPayrollRepository {
         [business, task, job, labor, description.trim(), (estimatedMinutes * 100 + 30) ~/ 60],
       );
       await db.customStatement(
-        "INSERT INTO regular_payroll_task_sources VALUES(?,?,NULL,NULL,'recheck',1)", [business, task],
+        "INSERT INTO regular_payroll_task_sources VALUES(?,?,NULL,NULL,?,1)", [business, task, kind],
       );
       await _assign(task, employee);
       await queueChange?.call();
@@ -240,6 +243,43 @@ class LocalPayrollRepository {
         'ON CONFLICT(business_id,task_id,employee_id) DO UPDATE SET minutes=excluded.minutes',
         [business, task, employee, minutes],
       );
+      _authorize();
+    });
+  }
+
+  Future<void> setMainMechanic(String job, String? employee, String? name) async {
+    _authorize(); await prepare();
+    await db.transaction(() async {
+      _authorize();
+      await OfflineJobAdminService(database: db).queueMainMechanic(business, job,
+        employeeId: employee, employeeName: name);
+      if (employee != null) await LocalTaskAssignmentStore(db).inherit(business, job);
+      _authorize();
+    });
+  }
+
+  Future<void> assignTask(String task, String employee, String name, {int rate=0}) async {
+    _authorize(); await prepare();
+    await db.transaction(() async {
+      _authorize();
+      final staff=await _read('SELECT id FROM regular_payroll_employees WHERE business_id=? AND id=?',[business,employee]);
+      if(staff.isEmpty) await saveEmployeeCompensation(employee:employee,name:name,rate:rate,weeklyBase:false);
+      final assignments=LocalTaskAssignmentStore(db);
+      await assignments.retireInherited(business,task,except:employee);
+      await assignments.allocate(business,task,employee,inherited:false);
+      _authorize();
+    });
+  }
+
+  Future<void> recordAllocatedTime(String id, String state, int actualMinutes, int creditedMinutes, String date) async {
+    _authorize(); await prepare();
+    if(actualMinutes<0||creditedMinutes<0)throw ArgumentError('Hours must be positive.');
+    await db.transaction(() async {
+      final covered=await _read('SELECT credit_id FROM regular_payroll_work_coverage WHERE business_id=? AND credit_id=?',[business,id]);
+      if(covered.isNotEmpty)throw StateError('Paid time is immutable. Create a separate recheck.');
+      await _updateWork(id,state,creditedMinutes,date,expectedRevision:null,authorize:_authorize);
+      await db.customStatement('INSERT INTO regular_payroll_actual_time VALUES(?,?,?) '
+        'ON CONFLICT(business_id,credit_id) DO UPDATE SET minutes=excluded.minutes',[business,id,actualMinutes]);
       _authorize();
     });
   }
@@ -278,7 +318,7 @@ class LocalPayrollRepository {
     Future<void> Function()? queueChange,
   }) async {
     _authorize();
-    if (employeeName.trim().isEmpty || rateCents <= 0) {
+    if (employeeName.trim().isEmpty || rateCents < 0) {
       throw ArgumentError('A saved employee name and hourly rate are required');
     }
     await prepare();
@@ -377,19 +417,20 @@ class LocalPayrollRepository {
       'SELECT c.allocation_id AS credit,t.job_id AS job,c.rate_cents AS rate,'
       'c.task_id,c.job_id AS credit_job,c.labor_line_id AS credit_labor,'
       't.description,t.planned,s.invoice_id AS invoice,s.line_id AS line,'
-      's.source_kind AS kind,s.active,e.minutes AS estimated_minutes '
+      's.source_kind AS kind,CASE WHEN m.active=0 THEN 0 ELSE s.active END AS active,e.minutes AS estimated_minutes '
       'FROM local_mechanic_work_credits_v1 c '
       'JOIN regular_payroll_tasks t ON t.business_id=c.business_id AND t.id=c.task_id '
       'JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id '
       'LEFT JOIN regular_payroll_estimates e ON e.business_id=c.business_id '
       'AND e.task_id=c.task_id AND e.employee_id=c.employee_id '
+      'LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=c.business_id AND m.task_id=c.task_id AND m.employee_id=c.employee_id '
       'WHERE c.business_id=? AND c.employee_id=? ORDER BY c.allocation_id',
       [business, employee],
     );
     return rows.map((row) {
       final task = jsonDecode(jsonDecode(row['credit'] as String)[0] as String) as List;
       return {...row, 'employee': employee,
-        if (row['kind'] == 'recheck') 'operation': task[2]};
+        if (['recheck','job'].contains(row['kind'])) 'operation': task[2]};
     }).toList();
   }
 
@@ -518,7 +559,7 @@ class LocalPayrollRepository {
         if (owner || pairedEmployee != employee || job == null) {
           throw StateError('Labor assignment is unavailable to this device.');
         }
-        final isRecheck = payload['kind'] == 'recheck';
+        final isRecheck = ['recheck','job'].contains(payload['kind']);
         final invoice = isRecheck ? 'recheck' : payload['invoice'] as String;
         final line = isRecheck ? payload['operation'] as String : payload['line'] as String;
         final labor = payload['credit_labor'] as String? ?? jsonEncode([invoice, line]);
@@ -708,6 +749,9 @@ class LocalPayrollRepository {
         'SELECT c.*,p.state FROM local_mechanic_work_credits_v1 c JOIN regular_payroll_portions p ON p.business_id=c.business_id AND p.id=c.allocation_id WHERE c.business_id=? AND c.allocation_id=?',
         [business, id],
       );
+      final retired = await _read('SELECT active FROM regular_payroll_assignment_meta WHERE business_id=? AND task_id=? AND employee_id=?',
+        [business, rows.firstOrNull?['task_id']?.toString() ?? '', rows.firstOrNull?['employee_id']?.toString() ?? '']);
+      if (retired.firstOrNull?['active'] == 0) throw StateError('This inherited assignment changed. Refresh tasks.');
       if (rows.length != 1 || rows.single['paid_operation_id'] != null)
         { throw StateError('Missing or paid work; add a recheck'); }
       if (rows.single['state'] == 'Open') {
@@ -730,6 +774,8 @@ class LocalPayrollRepository {
         expectedRevision: rows.single['revision'] as int,
         actualMinutes: minutes, completed: state == 'Done',
       );
+      await db.customStatement('INSERT INTO regular_payroll_actual_time VALUES(?,?,?) '
+        'ON CONFLICT(business_id,credit_id) DO UPDATE SET minutes=excluded.minutes',[business,id,minutes]);
       await db.customStatement(
         'UPDATE regular_payroll_portions SET state=?,version=version+1,completed_date=? WHERE business_id=? AND id=?',
         [state, state == 'Done' ? date : null, business, id],
@@ -768,9 +814,9 @@ class LocalPayrollRepository {
       "SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,"
       "p.state,p.completed_date,c.revision AS version,t.description,t.job_id,"
       "j.job_number,j.customer_name,j.vehicle_label,c.completed AS credit_completed,"
-      "s.source_kind,s.active AS source_active,s.invoice_id,s.line_id AS source_line_id,"
+      "s.source_kind,CASE WHEN m.active=0 THEN 0 ELSE s.active END AS source_active,s.invoice_id,s.line_id AS source_line_id,"
       "COALESCE(est.minutes,0) AS estimated_minutes,"
-      "c.actual_minutes,c.rate_cents,"
+      "c.actual_minutes,c.rate_cents,COALESCE(at.minutes,c.actual_minutes) AS recorded_actual_minutes,"
       "COALESCE((SELECT SUM(x.minutes) FROM regular_payroll_work_coverage x "
       "WHERE x.business_id=c.business_id AND x.credit_id=c.allocation_id),"
       "CASE WHEN c.paid_operation_id IS NOT NULL THEN c.actual_minutes ELSE 0 END) AS paid_minutes,"
@@ -781,11 +827,13 @@ class LocalPayrollRepository {
       "JOIN regular_payroll_tasks t ON t.business_id=p.business_id AND t.id=p.task_id "
       "JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id "
       "JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id "
+      "LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id "
+      "LEFT JOIN regular_payroll_actual_time at ON at.business_id=p.business_id AND at.credit_id=p.id "
       "LEFT JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id "
       "LEFT JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id "
       "LEFT JOIN regular_payroll_estimates est ON est.business_id=p.business_id "
       "AND est.task_id=p.task_id AND est.employee_id=p.employee_id "
-      "WHERE p.business_id=? ${employee == null ? '' : 'AND p.employee_id=?'} "
+      "WHERE (COALESCE(m.active,1)=1 OR p.state<>'Open' OR c.actual_minutes>0 OR c.paid_operation_id IS NOT NULL) AND p.business_id=? ${employee == null ? '' : 'AND p.employee_id=?'} "
       "${job == null ? '' : 'AND t.job_id=?'} ORDER BY p.id",
       [business, ?employee, ?job],
     );

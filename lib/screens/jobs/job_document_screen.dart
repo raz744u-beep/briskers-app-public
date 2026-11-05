@@ -1,4 +1,5 @@
 import '../payroll/owner_payroll_screen.dart';
+import '../payroll/job_tasks_access.dart';
 import 'owner_local_delete_action.dart';
 import '../../services/device_owner_authorization.dart';
 import '../../services/local_invoice_number_service.dart';
@@ -6014,6 +6015,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ],
             ),
           ),
+          if (OwnerPayrollScreen.enabled && widget.isOwner && !_estimate && _detail?['job_id'] is String)
+            Padding(padding:const EdgeInsets.all(12),child:JobTasksAccess(
+              business:widget.businessId,job:_detail!['job_id'] as String,invoice:widget.documentId)),
           if (lines.isEmpty)
             const Padding(
               padding: EdgeInsets.all(22),
@@ -6065,6 +6069,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                                 color: Color(0xFF0D1528),
                               ),
                             ),
+                            if (OwnerPayrollScreen.enabled && widget.isOwner && !_estimate &&
+                                isInvoiceLaborLine(line) && line['id'] is String && _detail?['job_id'] is String)
+                              JobTasksAccess(business:widget.businessId,job:_detail!['job_id'] as String,
+                                invoice:widget.documentId,line:line['id'] as String),
                             if (description.isNotEmpty) ...[
                               const SizedBox(height: 3),
                               Text(

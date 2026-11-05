@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:drift/drift.dart' show Variable;
+import '../../services/local_customer_repository.dart';
+import '../jobs/job_customer_picker_screen.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
@@ -14,6 +17,7 @@ import '../../services/device_owner_authorization.dart';
 import '../../services/invoice_labor_work_summary.dart';
 import '../../services/local_owner_authorization.dart';
 import '../../services/local_payroll_repository.dart';
+import '../../services/local_task_assignment_store.dart';
 import '../../services/payroll_period_totals.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../services/payroll_lan_enrollment.dart';
@@ -37,6 +41,7 @@ class OwnerPayrollScreen extends StatefulWidget {
     required this.businessId,
     this.jobId,
     this.invoiceId,
+    this.focusLineId,
     this.invoiceLines = const [],
     this.jobInvoiceLabor = const {},
     this.reportsOnly = false,
@@ -75,6 +80,7 @@ class OwnerPayrollScreen extends StatefulWidget {
   final String businessId;
   final String? jobId;
   final String? invoiceId;
+  final String? focusLineId;
   final List<Map<String, dynamic>> invoiceLines;
   final Map<String, List<Map<String, dynamic>>> jobInvoiceLabor;
 
@@ -82,7 +88,7 @@ class OwnerPayrollScreen extends StatefulWidget {
   State<OwnerPayrollScreen> createState() => _OwnerPayrollScreenState();
 }
 
-class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
+class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBindingObserver {
   BriskersLocalDatabase get _db => widget.database ?? localDatabase;
   LocalOwnerGrant? _grant;
   List<Map<String, dynamic>> _employees = [];
@@ -92,6 +98,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   List<Map<String, dynamic>> _overviewPayments = [];
   List<Map<String, dynamic>> _pendingPayments = [];
   bool _refreshingOwnerState = false;
+  bool _loadingLocal = false;
+  bool _hasLocalData = false;
+  bool _authorizing = false;
+  int _loadGeneration = 0;
+  String _loadStage = 'saved payroll';
+  Future<void>? _localRead;
+
   String? _employee;
   DateTime _week = DateTime.now();
   int? _advanceBalance;
@@ -126,6 +139,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _week = widget.initialWeek ?? DateTime.now();
     _lockCheck = Timer.periodic(const Duration(seconds: 5), (_) {
       if (_grant == null || _busy) return;
@@ -134,6 +148,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       } on StateError {
         _historyUnlocked.value = false;
         setState(() {
+          _loadGeneration++;
+          _hasLocalData = false;
           _grant = null;
           _employee = null;
           _employees = [];
@@ -160,6 +176,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _loadGeneration++;
     _lockCheck?.cancel();
     _historyUnlocked.dispose();
     _opening.dispose();
@@ -186,6 +204,16 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     grant.assertValid(widget.businessId, grant.actorId);
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _grant != null) {
+      try { _assertOwner(); } on StateError {
+        _historyUnlocked.value = false;
+        setState(() { _grant = null; _hasLocalData = false; _loadGeneration++; });
+      }
+    }
+  }
+
   Future<void> _run(
     Future<void> Function() action, {
     bool verifyPayment = false,
@@ -195,38 +223,78 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       if (rethrowError) throw StateError('Payroll is busy. Try again.');
       return;
     }
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
+    setState(() { _busy = true; _error = null; });
     var actionCompleted = false;
     try {
       var needsUnlock = verifyPayment;
-      try {
-        _assertOwner();
-      } on StateError {
-        needsUnlock = true;
-      }
+      try { _assertOwner(); } on StateError { needsUnlock = true; }
       if (needsUnlock) {
-        _grant = await (widget.unlockOwner?.call(widget.businessId) ??
-            DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId));
+        setState(() => _authorizing = true);
+        final grant = await (widget.unlockOwner?.call(widget.businessId) ??
+            DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId))
+            .timeout(const Duration(seconds: 45), onTimeout: () =>
+              throw StateError('Owner unlock did not finish. Cancel the device prompt and retry.'));
+        if (!mounted) return;
+        grant.assertValid(widget.businessId, grant.actorId);
+        setState(() { _grant = grant; _authorizing = false; });
       }
-      if (!mounted) {
-        if (rethrowError) throw StateError('Payroll screen closed.');
-        return;
-      }
+      if (!mounted) return;
       await action();
       actionCompleted = true;
-      if (mounted) await _load();
+      if (mounted) {
+        unawaited(_load());
+        unawaited(_refreshLan());
+      }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
       if (rethrowError && !actionCompleted) rethrow;
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() { _busy = false; _authorizing = false; });
     }
   }
 
+  Future<void> _refreshLan() async {
+    if (_refreshingOwnerState || _grant == null) return;
+    _refreshingOwnerState = true;
+    final grant = _grant!;
+    try {
+      final connection = widget.ownerConnection ??
+          await OwnerPayrollConnections.open(context, widget.businessId, grant)
+              .timeout(const Duration(seconds: 8));
+      await connection.refresh(grant).timeout(const Duration(seconds: 8));
+      if (mounted && identical(grant, _grant) && !_loadingLocal) await _load();
+    } catch (_) {
+      // Optional LAN refresh never blocks reading the saved local ledger.
+    } finally { _refreshingOwnerState = false; }
+  }
+
   Future<void> _load() async {
+    if (_localRead != null) return;
+    final generation = ++_loadGeneration;
+    setState(() { _loadingLocal = true; _loadStage = 'saved payroll'; });
+    final timer = Stopwatch()..start();
+    final read = _readLocal(generation);
+    _localRead = read;
+    // Keep a stalled read single-flight even after the UI timeout.
+    unawaited(read.then<void>((_) {}, onError: (Object _, StackTrace _) {})
+      .whenComplete(() { if (identical(_localRead, read)) _localRead = null; }));
+    try {
+      await read.timeout(const Duration(seconds: 8));
+    } catch (error) {
+      if (mounted && generation == _loadGeneration) {
+        _loadGeneration++;
+        setState(() => _error = error is TimeoutException
+          ? 'Saved payroll is taking longer to load ($_loadStage). Navigation is available. Retry when the local database is ready.'
+          : 'Could not load $_loadStage: $error');
+      }
+    } finally {
+      debugPrint('PAYROLL_LOCAL stage=$_loadStage elapsed_ms=${timer.elapsedMilliseconds}');
+      if (mounted) setState(() => _loadingLocal = false);
+    }
+  }
+
+  Future<void> _readLocal(int generation) async {
+
     final repository = _repository;
     if (widget.employeeId != null && widget.employeeName != null &&
         widget.employeeHourlyCents != null) {
@@ -236,16 +304,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         weeklyBase: ['fixed_weekly', 'flexible_weekly'].contains(widget.employeePayType),
       );
     }
-    if (!mounted) return;
-    final ownerConnection = widget.ownerConnection ?? await OwnerPayrollConnections.open(context, widget.businessId, _grant!);
-    if (!_refreshingOwnerState) {
-      _refreshingOwnerState = true;
-      unawaited(ownerConnection.refresh(_grant!).then((_) async {
-        if (mounted) await _load();
-      }).catchError((Object _) {}).whenComplete(() => _refreshingOwnerState = false));
-    }
+    if (!mounted || generation != _loadGeneration) return;
+    _loadStage = 'pending requests';
     final pendingPayments = await PayrollOwnerLedger(_db, widget.businessId).pending();
-    await repository.refreshInvoiceTasks();
+    _loadStage = 'tasks'; // Invoice saves maintain task identities incrementally.
     final sources = await repository.tasks();
     final job = widget.jobId;
     final persistedEmployees = job == null
@@ -265,6 +327,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     final employee = widget.globalTasks || overview ? null :
         widget.employeeId ?? _employee ?? (employees.firstOrNull?['id'] as String?);
     final work = await repository.work(employee: _jobMode ? null : employee, job: job);
+    _loadStage = 'payment history';
     final history = employee == null || _jobMode
         ? <Map<String, dynamic>>[] : await repository.historyWithWork(employee);
     final allPayments = <Map<String, dynamic>>[];
@@ -286,9 +349,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         : employee == null || widget.employeeId == null || widget.reportsOnly
             ? <Map<String, dynamic>>[] : await repository.shopTasks(employee);
     _assertOwner();
-    if (!mounted) return;
+    if (!mounted || generation != _loadGeneration) return;
     _historyUnlocked.value = true;
     setState(() {
+      _hasLocalData = true;
       _employees = employees;
       _overviewPayments = allPayments;
       _pendingPayments = employee == null ? pendingPayments :
@@ -369,7 +433,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     final job = jobId ?? widget.jobId;
     if (job == null) return;
     var candidates = <Map<String, dynamic>>[];
-    await _run(() async { candidates = await _repository.assignedEmployees(job); });
+    await _run(() async {
+      final roster=await OfflineJobAdminService(database:_db).cachedEmployees(widget.businessId);
+      final known=await _repository.employees();
+      candidates={for(final r in roster) r['id']:{...r,'employee_id':r['id']},
+        for(final r in known) r['id']:{...r,'employee_id':r['id']}}.values.toList();
+    });
     if (!mounted || _error != null) return;
     if (candidates.isEmpty) {
       setState(() => _error = 'Assign mechanics to this Job first.');
@@ -383,7 +452,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
           for (final employee in candidates)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, employee),
-              child: Text((employee['employee_name'] ?? employee['employee_id']).toString()),
+              child: Text((employee['nickname'] ?? employee['name'] ?? employee['employee_name'] ?? employee['employee_id']).toString()),
             ),
         ],
       ),
@@ -396,7 +465,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       final input = await payrollLanInput(context, 'Set hourly labor rate', 'Dollars per hour');
       if (input == null || !mounted) return;
       final amount = double.tryParse(input);
-      if (amount == null || !amount.isFinite || amount <= 0 || amount > 100000) {
+      if (amount == null || !amount.isFinite || amount < 0 || amount > 100000) {
         setState(() => _error = 'Enter a valid hourly labor rate.');
         return;
       }
@@ -404,6 +473,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     }
     final rate = cents;
     await _run(() async {
+      final assignments=LocalTaskAssignmentStore(_db);
+      await assignments.linkEmployee(widget.businessId,job,employeeId,name);
+      final source=(await _repository.tasks()).where((r)=>r['invoice_id']==invoiceId && r['source_line_id']==line['id']).firstOrNull;
+      if(source!=null) await assignments.retireInherited(widget.businessId,source['id'] as String,except:employeeId);
       final identity = await PayrollLanIdentity.load();
       final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, employeeId);
       if (peer == null) {
@@ -419,6 +492,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
           employeeName: name, rate: rate,
         );
       }
+      final task=(await _repository.tasks()).where((r)=>r['invoice_id']==invoiceId && r['source_line_id']==line['id']).single;
+      await assignments.allocate(widget.businessId,task['id'] as String,employeeId,inherited:false);
     });
   }
 
@@ -436,10 +511,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       }
       minutes = (hours * 60).round();
     }
-    await _run(() => _repository.updateWork(
-      row['id'] as String, next, (minutes * 100 + 30) ~/ 60, _date(DateTime.now()),
-      expectedRevision: row['version'] as int,
-    ));
+    var credited=minutes;
+    if(next=='Done') {
+      final value=await payrollLanInput(context,'Credited mechanic labor','Credited hours (actual: ${minutes/60})');
+      if(value==null||!mounted)return;
+      final h=double.tryParse(value);
+      if(h==null||!h.isFinite||h<0||h>10000)return;
+      credited=(h*60).round();
+    }
+    await _run(() => _repository.recordAllocatedTime(row['id'] as String,next,minutes,credited,_date(DateTime.now())));
   }
 
   Future<void> _editEstimated(Map<String, dynamic> row) async {
@@ -465,7 +545,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
           jobId: row['job_id'] as String) : null,
     title: Text(row['description'] as String),
     subtitle: Text('${row['employee_name']} · ${row['state']} · '
-      '${row['actual_minutes']} actual min · ${row['estimated_minutes'] ?? 0} estimated min · '
+      '${row['recorded_actual_minutes'] ?? row['actual_minutes']} actual min · ${row['actual_minutes']} credited min · ${row['estimated_minutes'] ?? 0} estimated min · '
       '${row['pay_status'] ?? (row['paid'] == 1 ? 'Paid' : 'Unpaid')}'
       '${row['source_active'] == 0 ? ' · Removed from invoice' : ''}'),
     trailing: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -1195,6 +1275,71 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     ));
   }
 
+  Future<void> _newServiceTask() async {
+    await _run(() async {});
+    if(!mounted||_grant==null)return;
+    final roster=await OfflineJobAdminService(database:_db).cachedEmployees(widget.businessId);
+    final known=await _repository.employees();
+    final staff={for(final r in roster) r['id']:r,for(final r in known) r['id']:r};
+    String? employee=widget.employeeId;
+    employee??=await showDialog<String>(context:context,builder:(c)=>SimpleDialog(title:const Text('Assign task'),children:[
+      for(final e in staff.entries)SimpleDialogOption(onPressed:()=>Navigator.pop(c,e.key),child:Text((e.value['nickname']??e.value['name']??e.key).toString()))]));
+    if(employee==null||!mounted)return;
+    final description=await payrollLanInput(context,'New Service Task','Task description');
+    if(description==null||description.trim().isEmpty||!mounted)return;
+    final estimated=await payrollLanInput(context,'Mechanic estimated hours','Estimated hours');
+    final hours=double.tryParse(estimated??'');
+    if(hours==null||!hours.isFinite||hours<0||hours>10000||!mounted)return;
+    final jobs=(await _db.customSelect("SELECT * FROM local_jobs WHERE business_id=? AND status NOT IN ('completed','closed','cancelled','deleted') ORDER BY created_at DESC",
+      variables:[Variable<String>(widget.businessId)]).get()).map((r)=>r.data).toList();
+    Future<String?> chooseJob(List<Map<String,dynamic>> rows)=>showDialog<String>(context:context,builder:(c)=>SimpleDialog(
+      title:const Text('Choose an open Job or create a new Job'),children:[
+        for(final j in rows)SimpleDialogOption(onPressed:()=>Navigator.pop(c,j['id']),child:Text('${j['job_number']??'Job'} · ${j['title']??''}')),
+        SimpleDialogOption(onPressed:()=>Navigator.pop(c,'new'),child:const Text('Choose customer / create new Job'))]));
+    var job=widget.jobId??await chooseJob(jobs);
+    Map<String,dynamic>? customer,vehicle;
+    if(job=='new'){
+      if(!mounted)return;
+      customer=await Navigator.push<Map<String,dynamic>>(context,MaterialPageRoute(builder:(_)=>JobCustomerPickerScreen(
+        businessId:widget.businessId,localCustomers:LocalCustomerRepository(database:_db))));
+      if(customer==null||!mounted)return;
+      final details=await LocalCustomerRepository(database:_db).customerDetail(widget.businessId,customer['id'] as String);
+      final vehicles=(details?['vehicles'] as List? ?? []).whereType<Map>().map(Map<String,dynamic>.from).toList();
+      if(vehicles.isNotEmpty){
+        vehicle=await showDialog<Map<String,dynamic>>(context:context,builder:(c)=>SimpleDialog(title:const Text('Vehicle (optional)'),children:[
+          SimpleDialogOption(onPressed:()=>Navigator.pop(c,<String,dynamic>{}),child:const Text('No vehicle')),
+          for(final v in vehicles)SimpleDialogOption(onPressed:()=>Navigator.pop(c,v),child:Text('${v['year']??''} ${v['make']??''} ${v['model']??''}'))]));
+        if(vehicle==null||!mounted)return;
+      }
+      final matching=jobs.where((j)=>j['customer_id']==customer!['id'] && (vehicle?['id']==null||j['vehicle_id']==vehicle?['id'])).toList();
+      job=await showDialog<String>(context:context,builder:(c)=>SimpleDialog(title:const Text('Use existing Job or explicitly create new'),children:[
+        for(final j in matching)SimpleDialogOption(onPressed:()=>Navigator.pop(c,j['id']),child:Text('${j['job_number']} · ${j['title']}')),
+        SimpleDialogOption(onPressed:()=>Navigator.pop(c,'create'),child:const Text('Create new Job (no invoice charge)'))]));
+    }
+    if(job==null||!mounted)return;
+    final id=employee,selected=job,person=staff[employee];
+    final name=(person?['name']??widget.employeeName??id).toString();
+    var rate=person?['rate'] as int? ?? 0;
+    if(rate==0){
+      final value=await payrollLanInput(context,'Task pay basis','Hourly rate (0 for weekly/base review)');
+      final amount=double.tryParse(value??'');
+      if(amount==null||!amount.isFinite||amount<0||amount>100000||!mounted)return;
+      rate=(amount*100).round();
+    }
+    final operation=_operationId();
+    await _run(() async {
+      await _db.transaction(() async {
+        var jobId=selected;
+        if(selected=='create')jobId=await OfflineJobAdminService(database:_db).queueJobCreate(widget.businessId,
+          customerId:customer!['id'] as String,customerName:(customer['display_name']??customer['name']??'Customer').toString(),
+          vehicleId:vehicle?['id'] as String?,vehicleLabel:vehicle==null?null:'${vehicle!['year']??''} ${vehicle['make']??''} ${vehicle['model']??''}',title:description);
+        await LocalTaskAssignmentStore(_db).linkEmployee(widget.businessId,jobId,id,name);
+        await _repository.createRecheck(operation:operation,job:jobId,description:description,employee:id,name:name,
+          rate:rate,estimatedMinutes:(hours*60).round(),kind:'job');
+      });
+    });
+  }
+
   Future<void> _createEmployeeGeneralTask() async {
     final employee = widget.employeeId ?? await showDialog<String>(
       context: context,
@@ -1297,6 +1442,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                     const Color(0xFF334155)))))),
       ]),
     ),
+    if(!_showGeneralTasks)Row(children:[
+      const Expanded(child:Text('Service Tasks',style:TextStyle(fontWeight:FontWeight.w700))),
+      TextButton.icon(onPressed:_newServiceTask,icon:const Icon(Icons.add),label:const Text('New Task'))]),
+    if(!_showGeneralTasks && _work.any((r)=>r['state']!='Done'))
+      ExpansionTile(key:PageStorageKey('employee-current-jobs-${widget.employeeId}'),
+        title:const Text('Current assigned Jobs'),children:[SizedBox(height:160,child:ListView(children:[
+          for(final row in _work.where((r)=>r['state']!='Done'))Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+            Text('${row['job_number']??'Job'} · ${row['vehicle_label']??''}'),_taskCard(row)])]))]),
     Expanded(child:_showGeneralTasks
       ? Builder(builder:(context) {
         final rows = _generalTasks;
@@ -1399,6 +1552,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                           {'id': row['source_line_id'], 'description': row['description']},
                           jobId: row['job_id'] as String) : null,
                   ),
+            onAddService: _newServiceTask,
             onAddGeneral: _createEmployeeGeneralTask,
             onGeneralStatus: (id, status) async {
               final row = _generalTasks.where((row) => row['id'] == id).firstOrNull;
@@ -1427,9 +1581,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         const Material(
           color: Colors.white,
           child: TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            labelPadding: EdgeInsets.symmetric(horizontal: 20),
+            isScrollable: false,
+            labelPadding: EdgeInsets.symmetric(horizontal: 2),
+            labelStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             tabs: [
               Tab(text: 'Tasks'),
               Tab(text: 'Payroll'),
@@ -1438,23 +1592,31 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
             ],
           ),
         ),
-        if (_grant == null || _error != null)
+        if (_grant == null)
           FilledButton(
-            onPressed: _busy ? null : () => _run(() async {}),
-            child: const Text('Unlock Owner payroll'),
+            onPressed: _authorizing ? null : () => _run(() async {}),
+            child: Text(_authorizing ? 'Unlocking Owner payroll…' : 'Unlock Owner payroll'),
           ),
-        if (_busy) const LinearProgressIndicator(),
-        if (_error != null) Text(_error!),
-        if (_grant != null)
-          Expanded(child: TabBarView(children: [
-            _tasksTab(),
-            _payrollTab(),
-            _reportsPanel(),
-            _taxesTab(),
-          ])),
+        if (_authorizing || _loadingLocal) const LinearProgressIndicator(),
+        if (_error != null)
+          ListTile(dense: true, title: Text(_error!), trailing: TextButton(
+            onPressed: _authorizing ? null : () => _run(() async {}), child: const Text('Retry'))),
+        Expanded(child: TabBarView(children: [
+          _safeTab(_tasksTab, 'Tasks'),
+          _safeTab(_payrollTab, 'Payroll'),
+          _safeTab(_reportsPanel, 'Reports'),
+          _taxesTab(),
+        ])),
       ]),
     ),
   );
+
+  Widget _safeTab(Widget Function() content, String name) {
+    if (_grant != null && _hasLocalData) return content();
+    return Center(child: Padding(padding: const EdgeInsets.all(20), child: Text(
+      _grant == null ? '$name is locked. Unlock Owner payroll above to read saved records.'
+        : _loadingLocal ? 'Loading saved $name…' : 'Saved $name has not loaded. Use Retry above.')));
+  }
 
   Widget _reportsPanel() => Column(children: [
     if (_pendingPayments.isNotEmpty)
@@ -1548,6 +1710,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                         child: const Text('Assign'),
                       ),
                     ),
+              for(final source in _taskSources.where((r)=>r['job_id']==widget.jobId &&
+                  r['invoice_id']!=null && (widget.focusLineId==null || r['source_line_id']==widget.focusLineId)))
+                ListTile(title:Text(source['description'].toString()),
+                  subtitle:const Text('Invoice labor · mechanic allocations'),
+                  trailing:TextButton(onPressed:()=>_assign(source['invoice_id'] as String,
+                    {'id':source['source_line_id'],'description':source['description']}),child:const Text('Assign / split'))),
               if (_employees.isEmpty) const Text('No active assignment is saved for this job.'),
               ListTile(
                 title: const Text('Additional job work / Rechecks'),
@@ -1556,7 +1724,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                   icon: const Icon(Icons.add), label: const Text('Add Recheck'),
                 ),
               ),
-              for (final row in _work) _taskCard(row),
+              for (final row in _work.where((r)=>widget.focusLineId==null || r['source_line_id']==widget.focusLineId)) _taskCard(row),
             ],
             if (_grant != null && !_jobMode) ...[
               if (_employees.isEmpty) const Text('No employee work has been recorded yet.'),

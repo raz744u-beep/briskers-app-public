@@ -393,6 +393,23 @@ class OfflineJobAdminService {
     ));
   }
 
+  /// Main-mechanic changes preserve every separate task mechanic assignment.
+  Future<void> queueMainMechanic(String businessId, String jobId, {
+    required String? employeeId, String? employeeName,
+  }) async {
+    await _database.transaction(() async {
+      await _database.customStatement('UPDATE local_jobs SET assigned_employee_id=?,assigned_employee_name=?,'
+        'is_unassigned=?,sync_state=? WHERE business_id=? AND id=?',
+        [employeeId,employeeName,employeeId==null?1:0,'pending',businessId,jobId]);
+      if(employeeId!=null) {
+        await _database.customStatement('INSERT OR IGNORE INTO local_job_assignments '
+          '(assignment_id,business_id,job_id,employee_id,employee_name,active,source) VALUES(?,?,?,?,?,1,?)',
+          ['payroll-main-$jobId-$employeeId',businessId,jobId,employeeId,employeeName,'payroll_main']);
+      }
+      await _mergeOutbox(businessId,jobId,{'assignment_changed':true,'employee_id':employeeId,'employee_name':employeeName});
+    });
+  }
+
   Future<void> queueAssignment(
     String businessId,
     String jobId, {

@@ -26,6 +26,8 @@ class LocalNumberAllocator {
     var value = raw?.toString().trim() ?? '';
     if (kind == 'job') {
       value = value.toUpperCase().replaceFirst(RegExp(r'^J-?'), '');
+    } else if (kind == 'invoice') {
+      value = value.toUpperCase().replaceFirst(RegExp(r'^(?:I-|MB-)'), '');
     }
     return RegExp(r'^\d+$').hasMatch(value) ? int.tryParse(value) : null;
   }
@@ -52,6 +54,24 @@ class LocalNumberAllocator {
     await db.customStatement('INSERT INTO local_number_counters VALUES (?,?,?)',[business,kind,next]);
     return next;
   }
+  /// Only explicit releases are offered; a gap alone is never evidence.
+  Future<List<int>> availableNumbers(String business, String kind) async {
+    await ensureSchema();
+    final used = await _used(business, kind);
+    final rows = await db.customSelect(
+      'SELECT number FROM local_number_reservations '
+      'WHERE business_id=? AND kind=? AND active=0 ORDER BY number',
+      variables: [Variable<String>(business), Variable<String>(kind)],
+    ).get();
+    return [
+      for (final row in rows)
+        if (row.read<int>('number') > 0 &&
+            row.read<int>('number') <= 999999999 &&
+            !used.containsKey(row.read<int>('number')))
+          row.read<int>('number'),
+    ];
+  }
+
   Future<int> nextNumber(String business,String kind) async => db.transaction(() async {
     await ensureSchema();
     var value=await _next(business,kind);

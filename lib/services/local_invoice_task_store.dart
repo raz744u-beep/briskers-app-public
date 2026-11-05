@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import 'invoice_labor_work_summary.dart';
+import 'local_task_assignment_store.dart';
 
 /// Derived task identities follow saved invoice identities. This store never
 /// changes an invoice, a document number, or a mechanic's earned work.
@@ -85,6 +86,7 @@ class LocalInvoiceTaskStore {
           [business, task, document, id],
         );
       }
+      await LocalTaskAssignmentStore(db).inherit(business, job);
     });
   }
 

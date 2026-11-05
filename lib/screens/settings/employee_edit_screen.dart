@@ -1,4 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../services/secure_employee_details_cache.dart';
+import '../../services/device_owner_authorization.dart';
+import '../../services/local_owner_authorization.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/formatters.dart';
@@ -51,6 +55,10 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   bool _userLinked = false;
   bool _appLoginBusy = false;
   bool _loading = true;
+  bool _secureOffline = false;
+  LocalOwnerGrant? _detailsGrant;
+  Timer? _privacyTimer;
+  OwnerSessionIdentity? _loadedIdentity;
   bool _detailLoaded = false;
   bool _saving = false;
   bool _savingNickname = false;
@@ -102,11 +110,27 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadedIdentity=DeviceOwnerAuthorization.instance.currentIdentity();
+    _name.text=widget.rosterName??'';
+    _loading=!_editing;
+    unawaited(_hydrateNickname());
+    unawaited(_load());
+    _privacyTimer=Timer.periodic(const Duration(seconds:2),(_){
+      final changed=_loadedIdentity!=null && !_loadedIdentity!.matches(DeviceOwnerAuthorization.instance.currentIdentity());
+      if(changed){
+        if(mounted)setState((){_detailLoaded=false;_secureOffline=false;_detailsGrant=null;_phone.clear();_email.clear();_address.clear();_rate.clear();_ssn.clear();_revealedSsn=null;_ssnLast4=null;});
+        return;
+      }
+      if(_detailsGrant==null)return;
+      try{_detailsGrant!.assertValid(widget.businessId,_detailsGrant!.actorId);}catch(_){
+        if(mounted)setState((){_detailsGrant=null;_secureOffline=false;_phone.clear();_email.clear();_address.clear();_rate.clear();_ssn.clear();_revealedSsn=null;_ssnLast4=null;});
+      }
+    });
   }
 
   @override
   void dispose() {
+    _privacyTimer?.cancel();
     _name.dispose();
     _nickname.dispose();
     _phone.dispose();
@@ -119,12 +143,6 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
 
   Future<void> _load() async {
     try {
-      if (_editing) {
-        _name.text = widget.rosterName ?? '';
-        _nickname.text = await _nicknameStore.get(
-              widget.businessId, widget.employeeId!,
-            ) ?? '';
-      }
       if (BriskersConnectionModeController.instance.forceOffline) {
         if (!mounted) return;
         setState(() {
@@ -136,13 +154,13 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
         });
         return;
       }
-      final positions = await _api.employeePositions(widget.businessId);
+      final positions = await _api.employeePositions(widget.businessId).timeout(const Duration(seconds:8));
       Map<String, dynamic>? employee;
       if (_editing) {
         employee = await _api.employeeSettingsDetail(
           widget.businessId,
           widget.employeeId!,
-        );
+        ).timeout(const Duration(seconds:8));
       }
 
       if (!mounted) return;
@@ -186,6 +204,41 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
         _error = error.toString();
       });
     }
+  }
+
+  Future<void> _hydrateNickname() async {
+    if(!_editing)return;
+    try {
+      final value=await _nicknameStore.get(widget.businessId,widget.employeeId!).timeout(const Duration(seconds:3));
+      if(mounted && _nickname.text.isEmpty)setState(()=>_nickname.text=value??'');
+    } catch(_){if(mounted)setState(()=>_error='Nickname is not available yet. Known employee details are retained. Retry.');}
+  }
+
+  Future<void> _unlockOffline() async {
+    if(!widget.isOwner||!_editing)return;
+    try{
+      final grant=await DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId);
+      final snapshot=await const SecureEmployeeDetailsCache().read(widget.businessId,widget.employeeId!,grant);
+      if(!mounted)return;
+      if(snapshot==null){setState(()=>_error='No verified secure offline snapshot is saved for this employee. This does not mean the record is missing.');return;}
+      final d=snapshot['details'] as Map;
+      setState((){_detailsGrant=grant;_secureOffline=true;
+        _phone.text=d['phone']?.toString()??'';_email.text=d['email']?.toString()??'';
+        _address.text=d['address']?.toString()??'';_rate.text=(d['hourly_rate']??d['weekly_rate'])?.toString()??'';
+        _ssnLast4=d['ssn_last4']?.toString();_error='Verified snapshot: ${snapshot['verified_at']}. Offline copy; current server changes are not known.';});
+    }catch(e){if(mounted)setState(()=>_error='$e');}
+  }
+
+  Future<void> _saveSecureSnapshot() async {
+    if(!widget.isOwner||!_detailLoaded||!_editing)return;
+    try{
+      final grant=await DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId);
+      await const SecureEmployeeDetailsCache().save(widget.businessId,widget.employeeId!,{
+        'id':widget.employeeId,'name':_name.text,'phone':_phone.text,'email':_email.text,'address':_address.text,
+        'position_id':_positionId,'payment_type':_paymentType,'hourly_rate':_paymentType=='hourly'?_rate.text:null,
+        'weekly_rate':_paymentType!='hourly'?_rate.text:null,'ssn_last4':_ssnLast4,'active':_active},grant);
+      if(mounted)setState(()=>_error='Verified encrypted offline copy saved. Full SSN was not cached.');
+    }catch(e){if(mounted)setState(()=>_error='$e');}
   }
 
   Future<void> _saveNicknameLocally() async {
@@ -472,6 +525,14 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
         child: Text('Contact, tax, and compensation details are unavailable '
           'until the employee record can be loaded securely.'),
       ),
+      if(widget.isOwner)OutlinedButton(onPressed:_unlockOffline,child:const Text('Unlock verified offline details')),
+      if(_secureOffline && _detailsGrant!=null)...[
+        ListTile(title:const Text('Phone'),subtitle:Text(_phone.text)),
+        ListTile(title:const Text('Email'),subtitle:Text(_email.text)),
+        ListTile(title:const Text('Address'),subtitle:Text(_address.text)),
+        ListTile(title:const Text('Compensation'),subtitle:Text(_rate.text)),
+        if(_ssnLast4!=null)ListTile(title:const Text('SSN ending'),subtitle:Text(_ssnLast4!)),
+      ],
       if (widget.isOwner) ...[
         TextFormField(
           controller: _nickname,
@@ -486,6 +547,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
         ),
       ],
       if (_error != null) Text(_error!),
+      TextButton(onPressed:()=>unawaited(_hydrateNickname()),child:const Text('Retry nickname')),
     ],
   );
 
@@ -495,6 +557,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
       appBar: AppBar(
         title: Text(_editing ? 'Employee Details' : 'Add employee'),
         actions: [
+          if(widget.isOwner && _editing && _detailLoaded)IconButton(tooltip:'Save verified offline copy',onPressed:_saveSecureSnapshot,icon:const Icon(Icons.enhanced_encryption_outlined)),
           if (_editing && widget.isOwner && OwnerPayrollScreen.enabled)
             IconButton(
               tooltip: 'Payroll History',

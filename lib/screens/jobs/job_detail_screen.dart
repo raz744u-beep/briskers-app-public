@@ -1,5 +1,7 @@
 import '../payroll/mechanic_labor_screen.dart';
 import '../payroll/owner_payroll_screen.dart';
+import '../payroll/job_tasks_access.dart';
+import '../../widgets/completed_work_section.dart';
 import '../../services/owner_job_retirement_service.dart';
 import 'owner_local_delete_action.dart';
 import 'dart:async';
@@ -6019,6 +6021,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
             jobTitle: jobTitle,
             assignment: assignment,
           ),
+          if (_canSeeFinancial)
+            CompletedWorkSection(business:widget.businessId,job:widget.jobId),
+          if (OwnerPayrollScreen.enabled && _owner)
+            Padding(padding:const EdgeInsets.all(8),child:JobTasksAccess(business:widget.businessId,job:widget.jobId)),
           if (_canSeeFinancial &&
               _job?['status']?.toString() == 'completed') ...[
             const SizedBox(height: 8),

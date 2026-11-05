@@ -20,6 +20,7 @@ class TasksWorkspace extends StatefulWidget {
     required this.onOpenJob,
     required this.onEmployeeTap,
     this.initialGeneral = false,
+    this.onAddService,
   });
 
   final List<Map<String, dynamic>> serviceTasks;
@@ -29,6 +30,7 @@ class TasksWorkspace extends StatefulWidget {
   final List<String> employeeIds;
   final Widget Function(Map<String,dynamic>) serviceTaskCard;
   final VoidCallback onAddGeneral;
+  final VoidCallback? onAddService;
   final Future<void> Function(int taskId, String status) onGeneralStatus;
   final ValueChanged<String> onOpenJob;
   final ValueChanged<String> onEmployeeTap;
@@ -308,8 +310,9 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
       key:const Key('service-tasks-list'),
       padding:const EdgeInsets.fromLTRB(12,8,12,28),
       children:[
-        Text('Jobs with Tasks · '+entries.length.toString(),
-          style:const TextStyle(fontWeight:FontWeight.w800,fontSize:15)),
+        Row(children:[Expanded(child:Text('Jobs with Tasks · '+entries.length.toString(),
+          style:const TextStyle(fontWeight:FontWeight.w800,fontSize:15))),
+          if(widget.onAddService!=null)TextButton.icon(onPressed:widget.onAddService,icon:const Icon(Icons.add),label:const Text('New Task'))]),
         const SizedBox(height:9),
         if(entries.isEmpty)
           const Padding(padding:EdgeInsets.all(15),
