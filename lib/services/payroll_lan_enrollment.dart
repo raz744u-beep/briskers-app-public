@@ -28,7 +28,7 @@ class PayrollLanEnrollment {
 
   Future<T> _serialize<T>(Future<T> Function() action) {
     final result = _writes.then((_) => action());
-    _writes = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    _writes = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return result;
   }
 
