@@ -2,6 +2,10 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+
+import '../../core/briskers_colors.dart';
+import '../../core/employee_role_style.dart';
 
 import '../../local/local_database_provider.dart';
 import '../../services/device_owner_authorization.dart';
@@ -15,6 +19,7 @@ import '../jobs/job_detail_screen.dart';
 import '../jobs/job_document_screen.dart';
 import 'payroll_history_panel.dart';
 import 'payroll_lan_controls.dart';
+import 'weekly_labor_review_screen.dart';
 
 class OwnerPayrollScreen extends StatefulWidget {
   const OwnerPayrollScreen({
@@ -26,6 +31,9 @@ class OwnerPayrollScreen extends StatefulWidget {
     this.reportsOnly = false,
     this.employeeId,
     this.employeeName,
+    this.employeeRole,
+    this.employeeActive = true,
+    this.openEmployeeDetails,
   });
 
   static const enabled = bool.fromEnvironment('BRISKERS_ENABLE_OWNER_PAYROLL');
@@ -33,6 +41,9 @@ class OwnerPayrollScreen extends StatefulWidget {
   final bool reportsOnly;
   final String? employeeId;
   final String? employeeName;
+  final String? employeeRole;
+  final bool employeeActive;
+  final VoidCallback? openEmployeeDetails;
   final String businessId;
   final String? jobId;
   final String? invoiceId;
@@ -47,8 +58,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   List<Map<String, dynamic>> _employees = [];
   List<Map<String, dynamic>> _work = [];
   List<Map<String, dynamic>> _history = [];
-  final _selected = <String>{};
   String? _employee;
+  DateTime _week = DateTime.now();
+  int? _advanceBalance;
+  String _payrollPeriod = 'This Week';
+  DateTimeRange? _customPeriod;
+  static final _currency = NumberFormat.simpleCurrency(locale: 'en_US');
+  String _money(int cents) => _currency.format(cents / 100);
+  String _moneyNullable(int? cents) => cents == null ? '—' : _money(cents);
   String? _error;
   bool _busy = false;
   Timer? _lockCheck;
@@ -69,7 +86,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
           _employees = [];
           _work = [];
           _history = [];
-          _selected.clear();
+          _advanceBalance = null;
         });
       }
     });
@@ -99,8 +116,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   Future<void> _run(
     Future<void> Function() action, {
     bool verifyPayment = false,
+    bool rethrowError = false,
   }) async {
-    if (_busy) return;
+    if (_busy) {
+      if (rethrowError) throw StateError('Payroll is busy. Try again.');
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -121,6 +142,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       if (mounted) await _load();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
+      if (rethrowError) rethrow;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -136,9 +158,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     final work = await repository.work(employee: _jobMode ? null : employee, job: job);
     final history = employee == null || _jobMode
         ? <Map<String, dynamic>>[]
-        : widget.reportsOnly
-            ? await repository.historyWithWork(employee)
-            : await repository.history(employee);
+        : await repository.historyWithWork(employee);
+    final advance = employee == null || _jobMode ? null : await repository.advance(employee);
     _assertOwner();
     if (!mounted) return;
     _historyUnlocked.value = true;
@@ -147,16 +168,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       _employee = employee;
       _work = work;
       _history = history;
-      _selected.retainAll(_payable.map((row) => row['id'] as String));
+      _advanceBalance = advance;
     });
   }
 
   String _date(DateTime value) => value.toIso8601String().substring(0, 10);
-  String _money(int value) => '\$${(value / 100).toStringAsFixed(2)}';
-
-  Iterable<Map<String, dynamic>> get _payable =>
-      _work.where((row) => row['state'] == 'Done' && row['paid'] == 0);
-
   Future<PayrollLanWorkflow> _workflow(String employee) async {
     final identity = await PayrollLanIdentity.load();
     final enrollment = PayrollLanEnrollment(identity);
@@ -266,21 +282,18 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     });
   }
 
-  Future<void> _pay() async {
+  Future<void> _recordWeekly(
+    DateTime week, DateTime date, String method,
+    List<Map<String, dynamic>> selected, int adjustment, int repayment,
+    int net, String reason,
+  ) async {
     final employee = _employee;
-    final selected = _payable.where((row) => _selected.contains(row['id'])).toList();
-    if (employee == null || selected.isEmpty) return;
-    final gross = selected.fold<int>(0, (sum, row) => sum + (row['gross_cents'] as int));
-    final result = await showDialog<(DateTime, String, String)>(
-      context: context,
-      builder: (_) => _PaymentDialog(amount: _money(gross)),
-    );
-    if (result == null || !mounted) return;
-    final (date, method, reason) = result;
+    if (employee == null || selected.isEmpty) {
+      throw StateError('Select payable work for this employee.');
+    }
     final random = Random.secure();
     final operation = List.generate(16, (_) => random.nextInt(256)
         .toRadixString(16).padLeft(2, '0')).join();
-    final monday = DateTime(date.year, date.month, date.day - date.weekday + 1);
     await _run(() async {
       final workflow = await _workflow(employee);
       final enrollment = PayrollLanEnrollment(await PayrollLanIdentity.load());
@@ -291,15 +304,16 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       );
       await workflow.pay(
         operation: operation,
-        week: _date(monday),
+        week: _date(week),
         date: _date(date),
         method: method,
         selected: selected,
         reason: reason,
-        net: gross,
+        net: net,
+        adjustment: adjustment,
+        repayment: repayment,
       );
-      _selected.clear();
-    }, verifyPayment: true);
+    }, verifyPayment: true, rethrowError: true);
   }
 
   void _openRecordedWork(String id, {required bool invoice}) {
@@ -357,8 +371,312 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     ]),
   );
 
+  Widget _financeMetric(String label, String value, {Color? color}) =>
+    Expanded(child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(
+          fontSize: 10.5, color: Color(0xFF64748B))),
+        const SizedBox(height: 4),
+        FittedBox(fit: BoxFit.scaleDown, child: Text(value,
+          style: TextStyle(
+            fontSize: 15, fontWeight: FontWeight.w800,
+            color: color ?? const Color(0xFF17212B)))),
+      ],
+    ));
+
+  // ignore: unused_element
+  Widget _panel(Widget child) => Card(
+    margin: const EdgeInsets.symmetric(vertical: 6),
+    child: Padding(
+      padding: const EdgeInsets.all(14),
+      child: child,
+    ),
+  );
+
+  Widget _header() => Row(children: [
+    CircleAvatar(
+      radius: 25,
+      backgroundColor: const Color(0xFFDDECFD),
+      child: Icon(employeeRoleStyle(widget.employeeRole).icon, size: 25, color: BriskersColors.jobs),
+    ),
+    const SizedBox(width: 10),
+    Expanded(child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(widget.employeeName ?? 'Employee', maxLines: 1, overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+        Text('${widget.employeeRole ?? 'Employee'} · ${widget.employeeActive ? 'Active' : 'Inactive'}',
+          style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+      ],
+    )),
+    OutlinedButton.icon(
+      onPressed: widget.openEmployeeDetails,
+      icon: const Icon(Icons.person_outline, size: 17),
+      label: const Text('Details'),
+    ),
+  ]);
+
+  ({DateTime from, DateTime until}) _periodBounds() {
+    final today = DateTime.now();
+    final midnight = DateTime(today.year, today.month, today.day);
+    final monday = midnight.subtract(Duration(days: today.weekday - 1));
+    final tomorrow = midnight.add(const Duration(days: 1));
+    switch (_payrollPeriod) {
+      case 'This Week':
+        return (from:monday,until:monday.add(const Duration(days: 7)));
+      case 'Last Week':
+        return (from:monday.subtract(const Duration(days: 7)),until:monday);
+      case 'Last 30 Days':
+        return (from:midnight.subtract(const Duration(days: 29)),until:tomorrow);
+      case 'Last 3 Months':
+        return (from:DateTime(today.year,today.month-2),until:tomorrow);
+      case 'Last 6 Months':
+        return (from:DateTime(today.year,today.month-5),until:tomorrow);
+      case 'Year to Date':
+        return (from:DateTime(today.year),until:tomorrow);
+      case 'All Time':
+        return (from:DateTime(2000),until:DateTime(2100));
+      case 'Custom':
+        if (_customPeriod != null) {
+          return (from:DateTime(_customPeriod!.start.year,
+            _customPeriod!.start.month,_customPeriod!.start.day),
+            until:DateTime(_customPeriod!.end.year,
+              _customPeriod!.end.month,_customPeriod!.end.day)
+              .add(const Duration(days: 1)));
+        }
+        return (from:monday,until:monday.add(const Duration(days: 7)));
+      default:
+        return (from:monday,until:monday.add(const Duration(days: 7)));
+    }
+  }
+
+  Future<void> _setPayrollPeriod(String? next) async {
+    if (next == null) return;
+    if (next == 'Custom') {
+      final chosen = await showDateRangePicker(
+        context: context,
+        firstDate: DateTime(2020),
+        lastDate: DateTime(2100),
+        initialDateRange: _customPeriod,
+      );
+      if (chosen != null && mounted) {
+        setState(() { _customPeriod = chosen; _payrollPeriod = next; });
+      }
+      return;
+    }
+    setState(() => _payrollPeriod = next);
+  }
+
+  ({double? hours, int? grossCents, int paidCents, int? balanceCents})
+      _projectPeriod(DateTime from, DateTime until) {
+    if (_grant == null) {
+      return (hours: null, grossCents: null, paidCents: 0, balanceCents: null);
+    }
+    bool within(Object? raw) {
+      final date = DateTime.tryParse(raw?.toString() ?? '');
+      return date != null && !date.isBefore(from) && date.isBefore(until);
+    }
+
+    final earned = _work.where((task) =>
+        task['state'] == 'Done' && task['paid'] != 1 &&
+        within(task['completed_date']));
+    final payments = _history.where((payment) => within(payment['week']));
+    final unpaid = earned.fold<int>(0, (sum, task) => sum + (task['gross_cents'] as int));
+    final paidGross = payments.fold<int>(0, (sum, row) => sum + (row['gross'] as int));
+    final net = payments.fold<int>(0, (sum, row) => sum + (row['net'] as int));
+    final unpaidMinutes = earned.fold<int>(0, (sum, task) => sum + (task['actual_minutes'] as int));
+    final paidMinutes = payments.expand((payment) => payment['work'] as List<Map<String, dynamic>>)
+        .fold<int>(0, (sum, task) => sum + (task['actual_minutes'] as int? ?? 0));
+    return (
+      hours: (unpaidMinutes + paidMinutes) / 60,
+      grossCents: unpaid + paidGross,
+      paidCents: net,
+      balanceCents: unpaid,
+    );
+  }
+
+  Widget _payrollTab() {
+    final period = _periodBounds();
+    final current = _projectPeriod(period.from, period.until);
+    final overall = _projectPeriod(DateTime(2000), DateTime(2100));
+    final previous = overall.balanceCents == null || current.balanceCents == null
+      ? null : (overall.balanceCents! - current.balanceCents!)
+        .clamp(0, 1000000000).toInt();
+    final outsideLabel = _payrollPeriod == 'This Week'
+      ? 'Previous weeks' : 'Outside period';
+    const options = [
+      'This Week', 'Last Week', 'Last 30 Days', 'Last 3 Months',
+      'Last 6 Months', 'Year to Date', 'All Time', 'Custom',
+    ];
+    return ListView(
+      padding: const EdgeInsets.all(11),
+      children: [
+        _panel(Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(children: [
+              const Expanded(child: Text('Payroll summary',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800))),
+              SizedBox(width: 166, child: DropdownButtonFormField<String>(
+                key: ValueKey('employee-payroll-period-dropdown-$_payrollPeriod'),
+                initialValue: _payrollPeriod,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 8,
+                    vertical: 9),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(14)))),
+                items: options.map((label) => DropdownMenuItem(
+                  value: label, child: Text(label,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12)))).toList(),
+                onChanged: _setPayrollPeriod,
+              )),
+            ]),
+            const SizedBox(height: 12),
+            Row(children: [
+              _financeMetric('Hours',
+                current.hours?.toStringAsFixed(1) ?? '—'),
+              _financeMetric('Gross', _moneyNullable(current.grossCents)),
+              _financeMetric('Transferred', _money(current.paidCents)),
+              _financeMetric('Balance', _moneyNullable(current.balanceCents),
+                color: const Color(0xFFCC6222)),
+            ]),
+            const SizedBox(height: 12),
+            Builder(builder: (tabContext) => SizedBox(
+              height: 41,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF007E78)),
+                onPressed: () =>
+                  DefaultTabController.of(tabContext).animateTo(0),
+                icon: const Icon(Icons.assignment_outlined),
+                label: const Text('Review Weekly Labor'),
+              ),
+            )),
+          ],
+        )),
+        // No large empty balance panel when nothing positive is owed.
+        if ((overall.balanceCents ?? 0) > 0)
+          _panel(Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Outstanding balance (all weeks)',
+              style: TextStyle(
+                fontSize: 15, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 9),
+            Row(children: [
+              _financeMetric(outsideLabel,
+                previous == null ? '—' : _money(previous),
+                color: const Color(0xFFCC6222)),
+              const SizedBox(width: 8),
+              _financeMetric('Selected period',
+                current.balanceCents == null
+                  ? '—' : _money(current.balanceCents!),
+                color: const Color(0xFFCC6222)),
+            ]),
+            const Divider(height: 20),
+            const Text('Total amount owed',
+              style: TextStyle(fontSize: 12,
+                fontWeight: FontWeight.w700)),
+            Text(overall.balanceCents == null
+                ? '—' : _money(overall.balanceCents!),
+              style: const TextStyle(
+                fontSize: 25, fontWeight: FontWeight.w800,
+                color: Color(0xFFC76023))),
+          ],
+        )),
+        _panel(ExpansionTile(
+          title: const Text('Advances & Repayments'),
+          subtitle: Text(_advanceBalance == null
+              ? 'Unlock to view balance' : 'Remaining owed · ${_money(_advanceBalance!)}'),
+          children: [
+            ListTile(
+              title: const Text('Outstanding balance'),
+              trailing: Text(_moneyNullable(_advanceBalance)),
+            ),
+          ],
+        )),
+      ],
+    );
+  }
+
+  Widget _taxesTab() => ListView(
+    padding: const EdgeInsets.all(12),
+    children: [
+      _panel(const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Taxes & 1099', style: TextStyle(
+            fontSize: 18, fontWeight: FontWeight.w800)),
+          SizedBox(height: 10),
+          Text('Your own earnings, federal / self-employment / '
+            'Louisiana estimated taxes, suggested reserve and 1099-NEC.'),
+          SizedBox(height: 10),
+          Text('Tax calculations and 1099s are intentionally disabled '
+            'until actual posted pay, classification, W-9 permissions '
+            'and tax-year rules are verified.',
+            style: TextStyle(color: Color(0xFF64748B))),
+        ],
+      )),
+    ],
+  );
+
+  Widget _profile() => DefaultTabController(
+    length: 4,
+    child: Scaffold(
+      appBar: AppBar(title: const Text('Employee Profile')),
+      body: Column(children: [
+        Padding(padding: const EdgeInsets.fromLTRB(12, 8, 12, 10), child: _header()),
+        const Material(
+          color: Colors.white,
+          child: TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            labelPadding: EdgeInsets.symmetric(horizontal: 20),
+            tabs: [
+              Tab(text: 'Tasks'),
+              Tab(text: 'Payroll'),
+              Tab(text: 'Reports'),
+              Tab(text: 'Taxes'),
+            ],
+          ),
+        ),
+        if (_grant == null || _error != null)
+          FilledButton(
+            onPressed: _busy ? null : () => _run(() async {}),
+            child: const Text('Unlock Owner payroll'),
+          ),
+        if (_busy) const LinearProgressIndicator(),
+        if (_error != null) Text(_error!),
+        if (_grant != null)
+          Expanded(child: TabBarView(children: [
+            WeeklyLaborReview(
+              employeeId: widget.employeeId!,
+              employeeName: widget.employeeName ?? 'Employee',
+              tasks: _work, week: _week, embedded: true,
+              advanceBalance: () => _repository.advance(widget.employeeId!),
+              recordPayment: _recordWeekly,
+              onWeekChanged: (week) => _week = week,
+              onCancel: () => Navigator.of(context).pop(),
+            ),
+            _payrollTab(),
+            PayrollHistoryPanel(
+              payments: _history,
+              unlocked: _historyUnlocked,
+              onOpenJob: (id) => _openRecordedWork(id, invoice: false),
+              onOpenInvoice: (id) => _openRecordedWork(id, invoice: true),
+            ),
+            _taxesTab(),
+          ])),
+      ]),
+    ),
+  );
+
   @override
-  Widget build(BuildContext context) => widget.reportsOnly ? _reports() : Scaffold(
+  Widget build(BuildContext context) => widget.reportsOnly ? _reports() : widget.employeeId != null ? _profile() : Scaffold(
         appBar: AppBar(title: Text(widget.reportsOnly
             ? 'Payroll reports'
             : _jobMode ? 'Job labor tasks' : 'Owner payroll')),
@@ -411,103 +729,31 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                       _employee = value;
                       _work = [];
                       _history = [];
-                      _selected.clear();
-                    });
+                                });
                     _run(() async {});
                   },
                 ),
-              Text('Earned: ${_money(_work.where((row) => row['state'] == 'Done').fold<int>(0, (sum, row) => sum + (row['gross_cents'] as int)))}'),
-              Text('Unpaid: ${_money(_payable.fold<int>(0, (sum, row) => sum + (row['gross_cents'] as int)))}'),
-              Text('Previously paid: ${_money(_history.fold<int>(0, (sum, row) => sum + (row['net'] as int)))}'),
-              if (!widget.reportsOnly) ...[
-              for (final row in _payable)
-                CheckboxListTile(
-                  title: Text(row['description'].toString()),
-                  subtitle: Text('${row['completed_date']} · ${_money(row['gross_cents'] as int)}'),
-                  value: _selected.contains(row['id']),
-                  onChanged: _busy ? null : (checked) => setState(() {
-                    if (checked == true) {
-                      _selected.add(row['id'] as String);
-                    } else {
-                      _selected.remove(row['id']);
-                    }
-                  }),
-                ),
-              FilledButton(
-                onPressed: _busy || _selected.isEmpty ? null : _pay,
-                child: const Text('Verify Payment'),
-              ),
-              ],
-              const ListTile(title: Text('Payment history')),
-              for (final row in _history)
-                ListTile(
-                  title: Text(_money(row['net'] as int)),
-                  subtitle: Text('${row['verified_date']} · ${row['method']} · '
-                      '${row['reconciliation_state'] == 'reconciled' ? 'Reconciled' : 'Recorded on this device'}'),
+              if (_employee != null)
+                FilledButton.icon(
+                  onPressed: _busy ? null : () {
+                    final employee = _employee!;
+                    Navigator.of(context).push<bool>(MaterialPageRoute(
+                      builder: (_) => WeeklyLaborReview(
+                        employeeId: employee,
+                        employeeName: _employees.where((row) => row['id'] == employee)
+                            .firstOrNull?['name']?.toString() ?? 'Weekly payroll',
+                        tasks: _work,
+                        week: DateTime.now(),
+                        advanceBalance: () => _repository.advance(employee),
+                        recordPayment: _recordWeekly,
+                      ),
+                    ));
+                  },
+                  icon: const Icon(Icons.assignment_outlined),
+                  label: const Text('Review Weekly Labor'),
                 ),
             ],
           ],
         ),
-      );
-}
-
-class _PaymentDialog extends StatefulWidget {
-  const _PaymentDialog({required this.amount});
-
-  final String amount;
-
-  @override
-  State<_PaymentDialog> createState() => _PaymentDialogState();
-}
-
-class _PaymentDialogState extends State<_PaymentDialog> {
-  DateTime _date = DateTime.now();
-  String _method = 'Cash';
-  String _reason = '';
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Record completed payment'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('${widget.amount} will be recorded on this device. No money is sent.'),
-              TextButton(
-                onPressed: () async {
-                  final value = await showDatePicker(
-                    context: context,
-                    initialDate: _date,
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime.now(),
-                  );
-                  if (value != null && mounted) setState(() => _date = value);
-                },
-                child: Text(MaterialLocalizations.of(context).formatMediumDate(_date)),
-              ),
-              DropdownButton<String>(
-                value: _method,
-                items: [
-                  for (final method in ['Cash', 'Zelle', 'Check', 'Card', 'Other'])
-                    DropdownMenuItem(value: method, child: Text(method)),
-                ],
-                onChanged: (value) {
-                  if (value != null) setState(() => _method = value);
-                },
-              ),
-              TextField(
-                decoration: const InputDecoration(labelText: 'Reason for work outside this week'),
-                onChanged: (value) => _reason = value.trim(),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, (_date, _method, _reason)),
-            child: const Text('Confirm recorded payment'),
-          ),
-        ],
       );
 }

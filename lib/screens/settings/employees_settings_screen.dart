@@ -90,20 +90,38 @@ class _EmployeesSettingsScreenState
         : '$money / hr';
   }
 
-  Future<void> _open([Map<String, dynamic>? employee]) async {
+  Future<void> _open([Map<String, dynamic>? employee, bool detailsOnly = false]) async {
+    final employeeId = employee?['id']?.toString();
+    final name = employee?['name']?.toString();
+    final position = (employee?['position_name'] ?? employee?['position'])?.toString();
+    if (!detailsOnly && widget.isOwner && OwnerPayrollScreen.enabled &&
+        employeeId != null && employeeId.isNotEmpty) {
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(builder: (_) => OwnerPayrollScreen(
+          businessId: widget.businessId,
+          employeeId: employeeId,
+          employeeName: employee?['nickname']?.toString() ?? name,
+          employeeRole: position,
+          employeeActive: employee?['active'] != false,
+          openEmployeeDetails: () => _open(employee, true),
+        )),
+      );
+      return;
+    }
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => EmployeeEditScreen(
           businessId: widget.businessId,
-          employeeId: employee?['id']?.toString(),
-          rosterName: employee?['name']?.toString(),
-          rosterPosition: (employee?['position_name'] ?? employee?['position'])?.toString(),
+          employeeId: employeeId,
+          rosterName: name,
+          rosterPosition: position,
           isOwner: widget.isOwner,
         ),
       ),
     );
-    if (changed == true) await _load();
+    if (changed == true && mounted) await _load();
   }
 
   Future<void> _positions() async {
@@ -315,7 +333,7 @@ class _EmployeesSettingsScreenState
       ),
     );
     if (!mounted) return;
-    if (action == 'edit') await _open(employee);
+    if (action == 'edit') await _open(employee, true);
     if (action == 'delete') await _deleteEmployee(employee);
   }
 

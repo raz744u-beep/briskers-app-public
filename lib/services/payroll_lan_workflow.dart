@@ -121,17 +121,19 @@ class PayrollLanWorkflow {
     required List<Map<String, dynamic>> selected,
     required int net,
     required String reason,
+    int adjustment = 0,
+    int repayment = 0,
   }) async {
     if (!isOwner) throw StateError('Only the Owner can record payment.');
     await delivery.prepare();
     return repository.verify(
       operation: operation, employee: peer.employee, week: week, date: date,
-      method: method, selected: selected, base: 0, hourlyAdjustment: 0,
-      adjustmentReason: reason, repayment: 0, confirmedNet: net,
+      method: method, selected: selected, base: 0, hourlyAdjustment: adjustment,
+      adjustmentReason: reason, repayment: repayment, confirmedNet: net,
       beforeCommit: () => delivery.enqueue(
         operationId: operation, kind: PayrollLanOperation.payment,
         payload: {'operation': operation, 'employee': peer.employee, 'week': week,
-          'date': date, 'method': method, 'gross': net, 'repayment': 0, 'net': net,
+          'date': date, 'method': method, 'gross': net + repayment, 'repayment': repayment, 'net': net,
           'work': selected.map((row) => row['id'] as String).toList()},
       ),
     );

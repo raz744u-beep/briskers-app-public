@@ -444,7 +444,7 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     return _read(
-      '''SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,p.state,p.completed_date,c.revision AS version,t.description,t.job_id,c.completed AS credit_completed,c.actual_minutes,(c.actual_minutes*100+30)/60 AS hours_hundredths,c.rate_cents,(c.actual_minutes*c.rate_cents+30)/60 AS gross_cents,CASE WHEN c.paid_operation_id IS NULL THEN 0 ELSE 1 END AS paid FROM regular_payroll_portions p JOIN regular_payroll_tasks t ON t.business_id=p.business_id AND t.id=p.task_id JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id WHERE p.business_id=? ${employee == null ? '' : 'AND p.employee_id=?'} ${job == null ? '' : 'AND t.job_id=?'} ORDER BY p.id''',
+      '''SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,p.state,p.completed_date,c.revision AS version,t.description,t.job_id,j.job_number,c.completed AS credit_completed,c.actual_minutes,(c.actual_minutes*100+30)/60 AS hours_hundredths,c.rate_cents,(c.actual_minutes*c.rate_cents+30)/60 AS gross_cents,CASE WHEN c.paid_operation_id IS NULL THEN 0 ELSE 1 END AS paid FROM regular_payroll_portions p JOIN regular_payroll_tasks t ON t.business_id=p.business_id AND t.id=p.task_id JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id LEFT JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id WHERE p.business_id=? ${employee == null ? '' : 'AND p.employee_id=?'} ${job == null ? '' : 'AND t.job_id=?'} ORDER BY p.id''',
       [business, ?employee, ?job],
     );
   }
@@ -456,7 +456,7 @@ class LocalPayrollRepository {
       'SELECT balance FROM regular_payroll_advances WHERE business_id=? AND employee_id=?',
       [business, employee],
     );
-    return r.single['balance'] as int;
+    return r.firstOrNull?['balance'] as int? ?? 0;
   }
 
   Future<void> addAdvance(String employee, int amount) async {
