@@ -106,6 +106,23 @@ void main() {
       final port = await mechanicLinks[i].listen(loopback);
       expect(await ownerLinks[i].delivery.deliver(loopback, port), 1);
       await mechanicLinks[i].delivery.close();
+      if (i == 0) {
+        await LocalDocumentDetailCache(database: owner).save('shop', 'invoice', {
+          'id': 'invoice', 'kind': 'invoice', 'job_id': 'job',
+          'lines': [
+            {'id': 'labor', 'line_kind': 'labor', 'quantity': 2,
+              'description': 'Revised repair'},
+          ],
+        });
+        await ownerLinks[i].synchronizeAssignments();
+        await ownerLinks[i].synchronizeAssignments(); // unchanged snapshot is not requeued
+        final revisedPort = await mechanicLinks[i].listen(loopback);
+        expect(await ownerLinks[i].delivery.deliver(loopback, revisedPort), 1);
+        await mechanicLinks[i].delivery.close();
+        final revised = await mechanicLinks[i].mechanicWork('job');
+        expect(revised.single['description'], 'Revised repair');
+        expect(revised.single['actual_minutes'], 0);
+      }
       for (final state in ['In Progress', 'Done']) {
         final work = (await mechanicLinks[i].repository.mechanicWork(
           job: 'job', employee: employees[i], assertSession: authorize,

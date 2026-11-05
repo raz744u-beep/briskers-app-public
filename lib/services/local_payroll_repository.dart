@@ -344,6 +344,28 @@ class LocalPayrollRepository {
     });
   }
 
+  Future<List<Map<String, dynamic>>> assignmentSnapshots(String employee) async {
+    _authorize();
+    await prepare();
+    final rows = await _read(
+      'SELECT c.allocation_id AS credit,c.job_id AS job,c.rate_cents AS rate,'
+      't.description,t.planned,s.invoice_id AS invoice,s.line_id AS line,'
+      's.source_kind AS kind,s.active,e.minutes AS estimated_minutes '
+      'FROM local_mechanic_work_credits_v1 c '
+      'JOIN regular_payroll_tasks t ON t.business_id=c.business_id AND t.id=c.task_id '
+      'JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id '
+      'LEFT JOIN regular_payroll_estimates e ON e.business_id=c.business_id '
+      'AND e.task_id=c.task_id AND e.employee_id=c.employee_id '
+      'WHERE c.business_id=? AND c.employee_id=? ORDER BY c.allocation_id',
+      [business, employee],
+    );
+    return rows.map((row) {
+      final task = jsonDecode(jsonDecode(row['credit'] as String)[0] as String) as List;
+      return {...row, 'employee': employee,
+        if (row['kind'] == 'recheck') 'operation': task[2]};
+    }).toList();
+  }
+
   Future<List<Map<String, dynamic>>> mechanicWork({
     required String? job,
     required String employee,
@@ -360,6 +382,8 @@ class LocalPayrollRepository {
       'JOIN regular_payroll_portions p ON p.business_id=c.business_id AND p.id=c.allocation_id '
       'JOIN regular_payroll_tasks t ON t.business_id=p.business_id AND t.id=p.task_id '
       "WHERE c.business_id=? AND (?='' OR c.job_id=?) AND c.employee_id=? "
+      "AND (p.state='Done' OR NOT EXISTS(SELECT 1 FROM regular_payroll_task_sources s "
+      'WHERE s.business_id=t.business_id AND s.task_id=t.id AND s.active=0)) '
       'AND (?=1 OR EXISTS (SELECT 1 FROM local_job_assignments a WHERE a.business_id=c.business_id '
       'AND a.job_id=c.job_id AND a.employee_id=c.employee_id AND a.active=1)) '
       'ORDER BY c.allocation_id',
@@ -462,18 +486,33 @@ class LocalPayrollRepository {
         final task = jsonEncode([job, invoice, line]);
         final id = jsonEncode([task, employee]);
         final rate = payload['rate'] as int;
+        final incomingRevision = payload['assignment_revision'] as int? ?? 0;
+        await db.customStatement(
+          'CREATE TABLE IF NOT EXISTS regular_payroll_assignment_incoming '
+          '(business_id TEXT NOT NULL,credit TEXT NOT NULL,revision INTEGER NOT NULL,'
+          'PRIMARY KEY(business_id,credit))');
+        final previousRevision = await _read(
+          'SELECT revision FROM regular_payroll_assignment_incoming '
+          'WHERE business_id=? AND credit=?', [business, id]);
+        if (previousRevision.isNotEmpty &&
+            (previousRevision.single['revision'] as int) >= incomingRevision) return;
+        await db.customStatement('INSERT INTO regular_payroll_assignment_incoming VALUES(?,?,?) '
+          'ON CONFLICT(business_id,credit) DO UPDATE SET revision=excluded.revision',
+          [business, id, incomingRevision]);
         await db.customStatement(
           'INSERT OR IGNORE INTO regular_payroll_jobs VALUES(?,?,?)',
           [business, job, job],
         );
         await db.customStatement(
-          'INSERT OR IGNORE INTO regular_payroll_tasks VALUES(?,?,?,?,?,0)',
-          [business, task, job, labor, payload['description'] as String],
+          'INSERT INTO regular_payroll_tasks VALUES(?,?,?,?,?,?) '
+          'ON CONFLICT(business_id,id) DO UPDATE SET description=excluded.description,planned=excluded.planned',
+          [business, task, job, labor, payload['description'] as String, payload['planned'] as int? ?? 0],
         );
         await db.customStatement(
-          'INSERT OR IGNORE INTO regular_payroll_task_sources VALUES(?,?,?,?,?,1)',
+          'INSERT INTO regular_payroll_task_sources VALUES(?,?,?,?,?,?) '
+          'ON CONFLICT(business_id,task_id) DO UPDATE SET active=excluded.active',
           [business, task, isRecheck ? null : invoice, isRecheck ? null : line,
-            isRecheck ? 'recheck' : 'invoice'],
+            isRecheck ? 'recheck' : 'invoice', payload['active'] as int? ?? 1],
         );
         await db.customStatement(
           'INSERT OR IGNORE INTO regular_payroll_estimates VALUES(?,?,?,?)',

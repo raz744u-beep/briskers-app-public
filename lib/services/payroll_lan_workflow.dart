@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import 'local_payroll_repository.dart';
@@ -18,7 +19,7 @@ class PayrollLanWorkflow {
     required void Function() assertLink,
     void Function()? assertOwner,
     Future<void> Function()? assertWriter,
-  }) : isOwner = identity.deviceId == peer.ownerDevice {
+  }) : _database = database, isOwner = identity.deviceId == peer.ownerDevice {
     if (isOwner && (assertOwner == null || assertWriter == null)) {
       throw ArgumentError('Owner payroll authorization is required.');
     }
@@ -45,6 +46,7 @@ class PayrollLanWorkflow {
     _assertLink = assertLink;
   }
 
+  final BriskersLocalDatabase _database;
   final PayrollLanPeer peer;
   final bool isOwner;
   late final LocalPayrollRepository repository;
@@ -61,6 +63,7 @@ class PayrollLanWorkflow {
 
   Future<int> listen(InternetAddress address, {int port = 0}) async {
     await repository.prepare();
+    await synchronizeAssignments();
     return delivery.listen(address, port: port);
   }
 
@@ -76,17 +79,49 @@ class PayrollLanWorkflow {
     required int rate,
   }) async {
     await delivery.prepare();
-    final operation = await _operationId(['assign', job, invoice, line]);
     await repository.registerAssignedLabor(
       jobId: job, invoiceId: invoice, lineId: line, employeeId: peer.employee,
       employeeName: employeeName, rateCents: rate,
-      queueChange: () => delivery.enqueue(
-        operationId: operation,
-        kind: PayrollLanOperation.assignment,
-        payload: {'job': job, 'invoice': invoice, 'line': line,
-          'employee': peer.employee, 'description': description, 'rate': rate},
-      ),
+      queueChange: synchronizeAssignments,
     );
+  }
+
+  /// Persist changed assignment snapshots before opening the shop LAN session.
+  /// A separate sequence per credit prevents stale packets from reverting edits.
+  Future<void> synchronizeAssignments() async {
+    if (!isOwner) return;
+    await delivery.prepare();
+    await repository.prepare();
+    await _database.customStatement(
+      'CREATE TABLE IF NOT EXISTS regular_payroll_assignment_outgoing '
+      '(business_id TEXT NOT NULL,peer TEXT NOT NULL,credit TEXT NOT NULL,'
+      'revision INTEGER NOT NULL,body TEXT NOT NULL,'
+      'PRIMARY KEY(business_id,peer,credit))');
+    for (final payload in await repository.assignmentSnapshots(peer.employee)) {
+      await _database.transaction(() async {
+        final credit = payload['credit'] as String;
+        final rows = await _database.customSelect(
+          'SELECT revision,body FROM regular_payroll_assignment_outgoing '
+          'WHERE business_id=? AND peer=? AND credit=?',
+          variables: [peer.business, peer.mechanicDevice, credit]
+            .map(Variable<String>.new).toList(),
+        ).get();
+        final body = jsonEncode(payload);
+        if (rows.isNotEmpty && rows.single.data['body'] == body) return;
+        final revision = rows.isEmpty ? 1 : (rows.single.data['revision'] as int) + 1;
+        await delivery.enqueue(
+          operationId: await _operationId(['assignment', credit, revision]),
+          kind: PayrollLanOperation.assignment,
+          payload: {...payload, 'assignment_revision': revision},
+        );
+        await _database.customStatement(
+          'INSERT INTO regular_payroll_assignment_outgoing VALUES(?,?,?,?,?) '
+          'ON CONFLICT(business_id,peer,credit) DO UPDATE SET '
+          'revision=excluded.revision,body=excluded.body',
+          [peer.business, peer.mechanicDevice, credit, revision, body],
+        );
+      });
+    }
   }
 
   Future<void> assignRecheck({
