@@ -335,13 +335,22 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     }, verifyPayment: pair);
   }
 
-  Future<void> _assign(String invoiceId, Map<String, dynamic> line) async {
+  Future<void> _assign(String invoiceId, Map<String, dynamic> line, {String? jobId}) async {
+    final job = jobId ?? widget.jobId;
+    if (job == null) return;
+    var candidates = <Map<String, dynamic>>[];
+    await _run(() async { candidates = await _repository.assignedEmployees(job); });
+    if (!mounted || _error != null) return;
+    if (candidates.isEmpty) {
+      setState(() => _error = 'Assign mechanics to this Job first.');
+      return;
+    }
     final employee = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => SimpleDialog(
         title: const Text('Assign invoice labor'),
         children: [
-          for (final employee in _employees)
+          for (final employee in candidates)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, employee),
               child: Text((employee['employee_name'] ?? employee['employee_id']).toString()),
@@ -369,13 +378,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, employeeId);
       if (peer == null) {
         await _repository.registerAssignedLabor(
-          jobId: widget.jobId!, invoiceId: invoiceId, lineId: line['id'] as String,
+          jobId: job, invoiceId: invoiceId, lineId: line['id'] as String,
           employeeId: employeeId, employeeName: name, rateCents: rate,
         );
       } else {
         final workflow = await _workflow(employeeId);
         await workflow.assign(
-          job: widget.jobId!, invoice: invoiceId, line: line['id'] as String,
+          job: job, invoice: invoiceId, line: line['id'] as String,
           description: (line['description'] ?? line['name'] ?? 'Invoice labor').toString(),
           employeeName: name, rate: rate,
         );
@@ -419,6 +428,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   }
 
   Widget _taskCard(Map<String, dynamic> row) => ListTile(
+    onLongPress: row['source_kind'] == 'invoice' && row['source_active'] != 0 &&
+        row['invoice_id'] is String && row['source_line_id'] is String
+      ? () => _assign(row['invoice_id'] as String,
+          {'id': row['source_line_id'], 'description': row['description']},
+          jobId: row['job_id'] as String) : null,
     title: Text(row['description'] as String),
     subtitle: Text('${row['employee_name']} · ${row['state']} · '
       '${row['actual_minutes']} actual min · ${row['estimated_minutes'] ?? 0} estimated min · '
@@ -1364,6 +1378,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                 : ListTile(
                     title: Text(row['description'] as String),
                     subtitle: const Text('Unassigned · Planned'),
+                    trailing: const Icon(Icons.person_add_alt_1_outlined),
+                    onTap: row['invoice_id'] is String && row['source_line_id'] is String
+                      ? () => _assign(row['invoice_id'] as String,
+                          {'id': row['source_line_id'], 'description': row['description']},
+                          jobId: row['job_id'] as String) : null,
                   ),
             onAddGeneral: _createEmployeeGeneralTask,
             onGeneralStatus: (id, status) async {

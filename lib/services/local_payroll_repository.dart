@@ -722,7 +722,7 @@ class LocalPayrollRepository {
     await prepare();
     return _read(
       'SELECT t.*,j.job_number,j.customer_name,j.vehicle_label,s.source_kind,s.active AS source_active,'
-      's.invoice_id FROM regular_payroll_tasks t '
+      's.invoice_id,s.line_id AS source_line_id FROM regular_payroll_tasks t '
       'LEFT JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id '
       'LEFT JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id '
       'WHERE t.business_id=? ORDER BY t.id', [business],
@@ -736,7 +736,7 @@ class LocalPayrollRepository {
       "SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,"
       "p.state,p.completed_date,c.revision AS version,t.description,t.job_id,"
       "j.job_number,j.customer_name,j.vehicle_label,c.completed AS credit_completed,"
-      "s.source_kind,s.active AS source_active,s.invoice_id,"
+      "s.source_kind,s.active AS source_active,s.invoice_id,s.line_id AS source_line_id,"
       "COALESCE(est.minutes,0) AS estimated_minutes,"
       "c.actual_minutes,c.rate_cents,"
       "COALESCE((SELECT SUM(x.minutes) FROM regular_payroll_work_coverage x "
