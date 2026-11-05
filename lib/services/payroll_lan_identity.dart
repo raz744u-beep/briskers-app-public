@@ -17,7 +17,11 @@ class PayrollLanIdentity {
   String get deviceId => base64UrlEncode(publicKey.bytes);
 
   static Future<PayrollLanIdentity> load() =>
-      _installation ??= _load(const FlutterSecureStorage());
+      _installation ??= _load(const FlutterSecureStorage(
+        iOptions: IOSOptions(
+          accessibility: KeychainAccessibility.unlocked_this_device,
+        ),
+      ));
 
   static Future<PayrollLanIdentity> _load(FlutterSecureStorage storage) async {
     final saved = await storage.read(key: _seedKey);

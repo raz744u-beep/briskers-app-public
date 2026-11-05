@@ -8,6 +8,10 @@ import '../../services/device_owner_authorization.dart';
 import '../../services/invoice_labor_work_summary.dart';
 import '../../services/local_owner_authorization.dart';
 import '../../services/local_payroll_repository.dart';
+import '../../services/payroll_lan_enrollment.dart';
+import '../../services/payroll_lan_identity.dart';
+import '../../services/payroll_lan_workflow.dart';
+import 'payroll_lan_controls.dart';
 
 class OwnerPayrollScreen extends StatefulWidget {
   const OwnerPayrollScreen({
@@ -140,6 +144,76 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   Iterable<Map<String, dynamic>> get _payable =>
       _work.where((row) => row['state'] == 'Done' && row['paid'] == 0);
 
+  Future<PayrollLanWorkflow> _workflow(String employee) async {
+    final identity = await PayrollLanIdentity.load();
+    final enrollment = PayrollLanEnrollment(identity);
+    final peer = await enrollment.ownerPeer(widget.businessId, employee);
+    if (peer == null) throw StateError('Pair this employee device first.');
+    _assertOwner();
+    return PayrollLanWorkflow(
+      database: localDatabase, identity: identity, peer: peer,
+      assertLink: _assertOwner, assertOwner: _assertOwner,
+      assertWriter: () => enrollment.assertWriter(widget.businessId, _grant!),
+    );
+  }
+
+  Future<void> _designate() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Designate this Owner phone?'),
+        content: const Text('Do this once per shop, on the phone that will '
+            'record all payroll payments. Keep using the same phone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true),
+            child: const Text('Designate')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _run(() async {
+      final enrollment = PayrollLanEnrollment(await PayrollLanIdentity.load());
+      await enrollment.designate(widget.businessId, _grant!);
+      if (!mounted) return;
+      await showPayrollLanCode(context, 'Owner device ID', enrollment.identity.deviceId);
+    }, verifyPayment: true);
+  }
+
+  Future<void> _managePeer({required bool pair}) async {
+    final employee = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text(pair ? 'Pair employee device' : 'Sync with employee'),
+        children: [
+          for (final row in _employees)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, row[_jobMode ? 'employee_id' : 'id']),
+              child: Text((row['employee_name'] ?? row['name'] ?? row['id']).toString()),
+            ),
+        ],
+      ),
+    );
+    if (employee == null || !mounted) return;
+    await _run(() async {
+      if (!pair) {
+        final workflow = await _workflow(employee);
+        if (mounted) await showPayrollLanSync(context, workflow);
+        return;
+      }
+      final device = await payrollLanInput(context, 'Pair employee device', 'Mechanic device ID');
+      if (device == null || !mounted) return;
+      final enrollment = PayrollLanEnrollment(await PayrollLanIdentity.load());
+      final code = await enrollment.invite(
+        business: widget.businessId, employee: employee,
+        mechanicDevice: device, grant: _grant!,
+      );
+      if (!mounted) return;
+      await showPayrollLanCode(context, 'Private pairing code', code);
+    }, verifyPayment: pair);
+  }
+
   Future<void> _assign(Map<String, dynamic> line) async {
     final employee = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -155,37 +229,26 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       ),
     );
     if (employee == null || !mounted) return;
-    await _run(() async {
-      final employeeId = employee['employee_id'] as String;
-      final name = employee['name']?.toString();
-      final cents = employee['rate'] as int?;
-      if (name == null || cents == null || cents <= 0) {
-        throw StateError('No verified hourly rate is saved on this device for this employee.');
+    final employeeId = employee['employee_id'] as String;
+    final name = (employee['name'] ?? employee['employee_name'] ?? employeeId).toString();
+    var cents = employee['rate'] as int?;
+    if (cents == null || cents <= 0) {
+      final input = await payrollLanInput(context, 'Set hourly labor rate', 'Dollars per hour');
+      if (input == null || !mounted) return;
+      final amount = double.tryParse(input);
+      if (amount == null || !amount.isFinite || amount <= 0 || amount > 100000) {
+        setState(() => _error = 'Enter a valid hourly labor rate.');
+        return;
       }
-      await _repository.registerAssignedLabor(
-        jobId: widget.jobId!,
-        invoiceId: widget.invoiceId!,
-        lineId: line['id'] as String,
-        employeeId: employeeId,
-        employeeName: name,
-        rateCents: cents,
-      );
-    });
-  }
-
-  Future<void> _editWork(Map<String, dynamic> row) async {
-    final input = await showDialog<int>(
-      context: context,
-      builder: (_) => const _WorkMinutesDialog(),
-    );
-    if (input == null || !mounted) return;
+      cents = (amount * 100).round();
+    }
+    final rate = cents;
     await _run(() async {
-      await _repository.updateWork(
-        row['id'] as String,
-        row['state'] == 'Open' ? 'In Progress' : 'Done',
-        (input * 100 / 60).round(),
-        _date(DateTime.now()),
-        expectedRevision: row['version'] as int,
+      final workflow = await _workflow(employeeId);
+      await workflow.assign(
+        job: widget.jobId!, invoice: widget.invoiceId!, line: line['id'] as String,
+        description: (line['description'] ?? line['name'] ?? 'Invoice labor').toString(),
+        employeeName: name, rate: rate,
       );
     });
   }
@@ -206,18 +269,21 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         .toRadixString(16).padLeft(2, '0')).join();
     final monday = DateTime(date.year, date.month, date.day - date.weekday + 1);
     await _run(() async {
-      await _repository.verify(
+      final workflow = await _workflow(employee);
+      final enrollment = PayrollLanEnrollment(await PayrollLanIdentity.load());
+      await enrollment.assertWriter(widget.businessId, _grant!);
+      await workflow.repository.bindPaymentAuthority(
+        writerDeviceId: enrollment.identity.deviceId,
+        assertVerifiedPairing: _assertOwner,
+      );
+      await workflow.pay(
         operation: operation,
-        employee: employee,
         week: _date(monday),
         date: _date(date),
         method: method,
         selected: selected,
-        base: 0,
-        hourlyAdjustment: 0,
-        adjustmentReason: reason,
-        repayment: 0,
-        confirmedNet: gross,
+        reason: reason,
+        net: gross,
       );
       _selected.clear();
     }, verifyPayment: true);
@@ -237,6 +303,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
             ),
             if (_busy) const LinearProgressIndicator(),
             if (_error != null) Text(_error!),
+            if (_grant != null && !widget.reportsOnly) ...[
+              TextButton(onPressed: _busy ? null : _designate,
+                child: const Text('Designate Owner payment device')),
+              TextButton(onPressed: _busy || _employees.isEmpty ? null : () => _managePeer(pair: true),
+                child: const Text('Pair employee device')),
+              TextButton(onPressed: _busy || _employees.isEmpty ? null : () => _managePeer(pair: false),
+                child: const Text('Sync payroll over shop Wi-Fi')),
+            ],
             if (_grant != null && _jobMode) ...[
               for (final line in widget.invoiceLines.where(isInvoiceLaborLine))
                 if (line['id'] is String)
@@ -252,10 +326,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                 ListTile(
                   title: Text(row['description'].toString()),
                   subtitle: Text('${row['employee_name']} · ${row['state']} · ${row['actual_minutes']} min'),
-                  trailing: row['state'] == 'Done' ? null : TextButton(
-                    onPressed: _busy ? null : () => _editWork(row),
-                    child: Text(row['state'] == 'Open' ? 'Start' : 'Complete'),
-                  ),
+
                 ),
             ],
             if (_grant != null && !_jobMode) ...[
@@ -309,34 +380,6 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
             ],
           ],
         ),
-      );
-}
-
-class _WorkMinutesDialog extends StatefulWidget {
-  const _WorkMinutesDialog();
-
-  @override
-  State<_WorkMinutesDialog> createState() => _WorkMinutesDialogState();
-}
-
-class _WorkMinutesDialogState extends State<_WorkMinutesDialog> {
-  int? _minutes;
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Record work time'),
-        content: TextField(
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'Actual minutes'),
-          onChanged: (value) => setState(() => _minutes = int.tryParse(value)),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: (_minutes ?? -1) < 0 ? null : () => Navigator.pop(context, _minutes),
-            child: const Text('Save'),
-          ),
-        ],
       );
 }
 

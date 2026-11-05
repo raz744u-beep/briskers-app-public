@@ -30,6 +30,14 @@ class PayrollLanWorkflow {
     delivery = PayrollLanDelivery(
       database: database, identity: identity, peer: peer,
       assertEnrollment: assertLink,
+      onAcknowledged: (kind, id) async {
+        if (!isOwner || kind != PayrollLanOperation.payment) return;
+        await database.customStatement(
+          "UPDATE regular_payroll_sync_outbox SET state='reconciled' "
+          'WHERE business_id=? AND operation_id=?',
+          [peer.business, id],
+        );
+      },
       apply: (kind, payload) => repository.applyLanChange(
         kind, payload, employee: peer.employee, assertLink: assertLink,
       ),
@@ -42,6 +50,14 @@ class PayrollLanWorkflow {
   late final LocalPayrollRepository repository;
   late final PayrollLanDelivery delivery;
   late final void Function() _assertLink;
+
+  Future<List<Map<String, dynamic>>> mechanicWork(String job) =>
+      repository.mechanicWork(
+        job: job, employee: peer.employee, assertSession: _assertLink,
+      );
+
+  Future<({int unpaid, List<Map<String, dynamic>> receipts})> mechanicReport() =>
+      repository.mechanicReport(peer.employee, _assertLink);
 
   Future<int> listen(InternetAddress address, {int port = 0}) async {
     await repository.prepare();

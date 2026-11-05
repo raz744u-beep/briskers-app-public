@@ -70,6 +70,11 @@ class PayrollLanEnrollment {
         base64Url.decode(mechanicDevice).length != 32) {
       throw ArgumentError('Select an employee and a valid mechanic device.');
     }
+    final deviceKey = _key(business, 'device:$mechanicDevice');
+    final boundEmployee = await _storage.read(key: deviceKey);
+    if (boundEmployee != null && boundEmployee != employee) {
+      throw StateError('This mechanic device is already paired to another employee.');
+    }
     final key = _key(business, 'peer:$employee');
     final existing = await _storage.read(key: key);
     if (existing != null) {
@@ -87,6 +92,7 @@ class PayrollLanEnrollment {
     ]);
     final code = jsonEncode([body, await identity.sign(body)]);
     await assertWriter(business, grant);
+    await _storage.write(key: deviceKey, value: employee);
     await _storage.write(key: key, value: code);
     return code;
   });
@@ -95,6 +101,7 @@ class PayrollLanEnrollment {
     required String code,
     required String business,
     required String verifiedOwnerDevice,
+    required String actor,
   }) => _serialize(() async {
     final peer = await _decode(code);
     if (peer.business != business ||
@@ -102,24 +109,33 @@ class PayrollLanEnrollment {
         peer.mechanicDevice != identity.deviceId) {
       throw StateError('The pairing code belongs to a different shop or device.');
     }
+    if (actor.isEmpty) throw StateError('Open your saved mechanic account first.');
     final key = _key(business, 'mechanic');
+    final entry = jsonEncode([actor, code]);
     final existing = await _storage.read(key: key);
-    if (existing != null && existing != code) {
+    if (existing != null && existing != entry) {
       throw StateError('This device already has a payroll assignment.');
     }
     await _pin(business, peer.ownerDevice);
-    await _storage.write(key: key, value: code);
+    await _storage.write(key: key, value: entry);
     return peer;
   });
 
-  Future<PayrollLanPeer?> mechanicPeer(String business) =>
-      _readPeer(business, 'mechanic');
+  Future<PayrollLanPeer?> mechanicPeer(String business, String actor) async {
+    final raw = await _storage.read(key: _key(business, 'mechanic'));
+    if (raw == null) return null;
+    final entry = jsonDecode(raw) as List<dynamic>;
+    if (entry.first != actor) {
+      throw StateError('This payroll link belongs to another mechanic account.');
+    }
+    return _readPeer(business, 'mechanic', code: entry[1] as String);
+  }
 
   Future<PayrollLanPeer?> ownerPeer(String business, String employee) =>
       _readPeer(business, 'peer:$employee');
 
-  Future<PayrollLanPeer?> _readPeer(String business, String key) async {
-    final code = await _storage.read(key: _key(business, key));
+  Future<PayrollLanPeer?> _readPeer(String business, String key, {String? code}) async {
+    code ??= await _storage.read(key: _key(business, key));
     if (code == null) return null;
     final peer = await _decode(code);
     final localDevice = key == 'mechanic'

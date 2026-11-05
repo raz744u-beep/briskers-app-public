@@ -19,6 +19,7 @@ class PayrollLanDelivery {
     required this.peer,
     required this.apply,
     required this.assertEnrollment,
+    this.onAcknowledged,
   }) {
     if (identity.deviceId != peer.ownerDevice &&
         identity.deviceId != peer.mechanicDevice) {
@@ -31,6 +32,7 @@ class PayrollLanDelivery {
   final PayrollLanPeer peer;
   final Future<void> Function(PayrollLanOperation, Map<String, dynamic>) apply;
   final void Function() assertEnrollment;
+  final Future<void> Function(PayrollLanOperation, String)? onAcknowledged;
   Future<void>? _ready;
   HttpServer? _listener;
   String get _remote =>
@@ -201,11 +203,18 @@ class PayrollLanDelivery {
           throw StateError('Payroll acknowledgment does not match the change.');
         }
         assertEnrollment();
-        await database.customStatement(
-          'UPDATE payroll_lan_delivery_v1 SET acknowledged=1 '
-          'WHERE business=? AND local_device=? AND peer_device=? AND direction=? AND operation=? AND digest=?',
-          [..._scope('out', id), digest],
-        );
+        await database.transaction(() async {
+          assertEnrollment();
+          await database.customStatement(
+            'UPDATE payroll_lan_delivery_v1 SET acknowledged=1 '
+            'WHERE business=? AND local_device=? AND peer_device=? AND direction=? AND operation=? AND digest=?',
+            [..._scope('out', id), digest],
+          );
+          final body = jsonDecode(row.read<String>('body')) as Map<String, dynamic>;
+          final kind = PayrollLanOperation.values.byName(body['kind'] as String);
+          await onAcknowledged?.call(kind, id);
+          assertEnrollment();
+        });
       }
       return pending.length;
     } finally {
