@@ -382,7 +382,7 @@ class LocalPayrollRepository {
       'JOIN regular_payroll_portions p ON p.business_id=c.business_id AND p.id=c.allocation_id '
       'JOIN regular_payroll_tasks t ON t.business_id=p.business_id AND t.id=p.task_id '
       "WHERE c.business_id=? AND (?='' OR c.job_id=?) AND c.employee_id=? "
-      "AND (p.state='Done' OR NOT EXISTS(SELECT 1 FROM regular_payroll_task_sources s "
+      "AND (p.state!='Open' OR NOT EXISTS(SELECT 1 FROM regular_payroll_task_sources s "
       'WHERE s.business_id=t.business_id AND s.task_id=t.id AND s.active=0)) '
       'AND (?=1 OR EXISTS (SELECT 1 FROM local_job_assignments a WHERE a.business_id=c.business_id '
       'AND a.job_id=c.job_id AND a.employee_id=c.employee_id AND a.active=1)) '
@@ -671,6 +671,16 @@ class LocalPayrollRepository {
       );
       if (rows.length != 1 || rows.single['paid_operation_id'] != null)
         { throw StateError('Missing or paid work; add a recheck'); }
+      if (rows.single['state'] == 'Open') {
+        final removed = await _read(
+          'SELECT task_id FROM regular_payroll_task_sources '
+          'WHERE business_id=? AND task_id=? AND active=0',
+          [business, rows.single['task_id'] as String],
+        );
+        if (removed.isNotEmpty) {
+          throw StateError('This invoice labor was removed. Add a separate task for new work.');
+        }
+      }
       if (expectedRevision != null && rows.single['revision'] != expectedRevision) {
         throw StateError('Work changed. Refresh before updating it.');
       }

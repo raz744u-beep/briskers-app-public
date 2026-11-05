@@ -422,14 +422,16 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     title: Text(row['description'] as String),
     subtitle: Text('${row['employee_name']} · ${row['state']} · '
       '${row['actual_minutes']} actual min · ${row['estimated_minutes'] ?? 0} estimated min · '
-      '${row['pay_status'] ?? (row['paid'] == 1 ? 'Paid' : 'Unpaid')}'),
+      '${row['pay_status'] ?? (row['paid'] == 1 ? 'Paid' : 'Unpaid')}'
+      '${row['source_active'] == 0 ? ' · Removed from invoice' : ''}'),
     trailing: Row(mainAxisSize: MainAxisSize.min, children: [
       IconButton(
         tooltip: 'Edit mechanic estimated hours',
         icon: const Icon(Icons.edit_outlined, size: 19),
         onPressed: _busy ? null : () => _editEstimated(row),
       ),
-      if (row['state'] != 'Done' && (row['paid_minutes'] as int? ?? 0) == 0)
+      if (row['state'] != 'Done' && (row['paid_minutes'] as int? ?? 0) == 0 &&
+          (row['source_active'] != 0 || row['state'] != 'Open'))
         TextButton(
           onPressed: _busy ? null : () => _recordTaskProgress(row),
           child: Text(row['state'] == 'Open' ? 'Start' : 'Complete'),

@@ -54,6 +54,15 @@ void main() {
     final assignment = (await ledger.work()).single;
     expect(assignment['actual_minutes'], 0);
     expect(assignment['estimated_minutes'], 120);
+    await LocalDocumentDetailCache(database: db).save('shop', 'invoice', {
+      'id': 'invoice', 'job_id': 'job', 'kind': 'invoice', 'lines': <dynamic>[],
+    });
+    await ledger.refreshInvoiceTasks();
+    await expectLater(ledger.updateWork(
+      assignment['id'] as String, 'In Progress', 0, '2026-11-04',
+    ), throwsStateError);
+    await LocalDocumentDetailCache(database: db).save('shop', 'invoice', invoice('Repair', 2));
+
     await ledger.setEstimatedMinutes(assignment['task_id'] as String, 'mechanic', 90);
     await LocalDocumentDetailCache(database: db).save('shop', 'invoice', invoice('Repair updated', 3));
     await ledger.refreshInvoiceTasks();
