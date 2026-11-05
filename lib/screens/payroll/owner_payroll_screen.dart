@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -282,7 +281,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     setState(() {
       _employees = employees;
       _overviewPayments = allPayments;
-      _pendingPayments = pendingPayments;
+      _pendingPayments = employee == null ? pendingPayments :
+          pendingPayments.where((row) => row['employee_id'] == employee).toList();
       _employee = employee;
       _work = work;
       _taskSources = sources;
@@ -536,7 +536,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       'method': method, 'selected': selected, 'adjustment': adjustment,
       'repayment': repayment, 'net': net, 'reason': reason, 'base': base};
     // Stable intent identity survives a lost UI/transport response and restart.
-    final operation = await PayrollOwnerLease.digest(jsonEncode(request));
+    final operation = await PayrollOwnerLedger.operationFor(request);
     await _run(() async {
       await pending.intent(request);
       final ledger = await _localPaymentLedger(operation: operation);
@@ -550,14 +550,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
           operation: operation, employee: employee, week: _date(week), date: _date(date),
           method: method, selected: selected, base: base, hourlyAdjustment: adjustment,
           adjustmentReason: reason, repayment: repayment, confirmedNet: net,
+          beforeCommit: () => pending.resolve(operation),
         );
       } else {
         final workflow = await _workflow(employee, ownerProof: ledger.ownerProof);
         await workflow.pay(operation: operation, week: _date(week), date: _date(date), method: method,
           selected: selected, reason: reason, net: net, base: base,
-          adjustment: adjustment, repayment: repayment);
+          adjustment: adjustment, repayment: repayment, onRecorded: () => pending.resolve(operation));
       }
-      await pending.resolve(operation);
     }, verifyPayment: true, rethrowError: true);
   }
 

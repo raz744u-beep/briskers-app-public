@@ -36,7 +36,9 @@ class OwnerPayrollConnections {
         }
       },
       approve: approve);
-    await instance.listen(InternetAddress.anyIPv4);
+    try { await instance.listen(InternetAddress.anyIPv4); } on SocketException {
+      // The current lease holder can continue offline without LAN permission.
+    }
     _instances[business] = instance;
     return instance;
   }

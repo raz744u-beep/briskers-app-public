@@ -39,6 +39,11 @@ class _MechanicLaborScreenState extends State<MechanicLaborScreen> {
     assertLink();
     return PayrollLanWorkflow(
       database: localDatabase, identity: identity, peer: peer, assertLink: assertLink,
+      onOwnerCertificate: (certificate) async {
+        assertLink();
+        await PayrollLanEnrollment(identity).acceptOwnerRoute(widget.businessId, actor, certificate);
+        assertLink();
+      },
     );
   }
 

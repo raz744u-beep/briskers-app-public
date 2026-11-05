@@ -20,6 +20,7 @@ class PayrollLanDelivery {
     required this.apply,
     required this.assertEnrollment,
     this.onAcknowledged,
+    this.onOwnerCertificate,
   }) {
     if (identity.deviceId != peer.ownerDevice &&
         identity.deviceId != peer.mechanicDevice) {
@@ -33,6 +34,7 @@ class PayrollLanDelivery {
   final Future<void> Function(PayrollLanOperation, Map<String, dynamic>) apply;
   final void Function() assertEnrollment;
   final Future<void> Function(PayrollLanOperation, String)? onAcknowledged;
+  final Future<void> Function(Map<String, dynamic>)? onOwnerCertificate;
   Future<void>? _ready;
   HttpServer? _listener;
   String get _remote =>
@@ -50,6 +52,16 @@ class PayrollLanDelivery {
         PRIMARY KEY(business, local_device, peer_device, direction, operation)
       )
     ''');
+    if (identity.deviceId == peer.mechanicDevice) {
+      final pending = await database.customSelect("SELECT * FROM payroll_lan_delivery_v1 WHERE business=? AND local_device=? AND direction='out' AND acknowledged=0 AND peer_device<>?",
+        variables: [peer.business, identity.deviceId, _remote].map(Variable<String>.new).toList()).get();
+      for (final row in pending) {
+        final change = jsonDecode(row.read<String>('body')) as Map;
+        if (change['kind'] != 'progress' || (change['payload'] as Map)['employee'] != peer.employee) continue;
+        await database.customStatement('INSERT OR IGNORE INTO payroll_lan_delivery_v1 VALUES(?,?,?,?,?,?,?,0)',
+          [peer.business, identity.deviceId, _remote, row.data['operation'], 'out', row.data['body'], row.data['digest']]);
+      }
+    }
   });
 
   List<String> _scope(String direction, String operation) =>
@@ -133,8 +145,18 @@ class PayrollLanDelivery {
         return;
       }
       assertEnrollment();
-      final opened = await peer.open(sender: _remote, recipient: identity,
-        envelope: await _read(request).timeout(_timeout));
+      var effective = peer;
+      var remote = _remote;
+      final header = request.headers.value('x-briskers-owner-certificate');
+      if (header != null && identity.deviceId == peer.mechanicDevice) {
+        if (header.length > 32000) throw const FormatException('Owner certificate too large.');
+        effective = await peer.delegatedOwner(Map<String, dynamic>.from(jsonDecode(utf8.decode(base64Url.decode(header))) as Map));
+        remote = effective.ownerDevice;
+      }
+      final envelope = await _read(request).timeout(_timeout);
+      final opened = identity.deviceId == peer.ownerDevice
+          ? await peer.openMechanic(recipient: identity, envelope: envelope)
+          : await effective.open(sender: remote, recipient: identity, envelope: envelope);
       final body = opened['change'];
       if (body is! String) throw const FormatException('Payroll change missing.');
       final change = Map<String, dynamic>.from(jsonDecode(body) as Map);
@@ -142,7 +164,7 @@ class PayrollLanDelivery {
       if (id.isEmpty || id.length > 128) throw const FormatException('Bad payroll ID.');
       final kind = PayrollLanOperation.values.byName(change['kind'] as String);
       final payload = Map<String, dynamic>.from(change['payload'] as Map);
-      peer.authorize(sender: _remote, recipient: identity.deviceId,
+      effective.authorize(sender: remote, recipient: identity.deviceId,
         operation: kind, employee: payload['employee'] as String);
       final digest = await _digest(body);
       await database.transaction(() async {
@@ -159,11 +181,17 @@ class PayrollLanDelivery {
         }
         assertEnrollment();
       });
-      response.write(await peer.seal(identity, _remote, {'ack': id, 'digest': digest}));
+      if (identity.deviceId == peer.mechanicDevice && effective.ownerCertificate != null) {
+        await onOwnerCertificate?.call(effective.ownerCertificate!);
+      }
+      if (identity.deviceId == peer.ownerDevice && peer.ownerCertificate != null) {
+        response.headers.set('x-briskers-owner-certificate', base64UrlEncode(utf8.encode(jsonEncode(peer.ownerCertificate))));
+      }
+      response.write(await effective.seal(identity, remote, {'ack': id, 'digest': digest}));
     } catch (_) {
       response.statusCode = HttpStatus.conflict;
     } finally {
-      await response.close();
+      try { await response.close(); } catch (_) { /* Persisted receipts survive lost replies. */ }
     }
   }
 
@@ -177,6 +205,11 @@ class PayrollLanDelivery {
       throw ArgumentError('Payroll delivery requires a private shop LAN address.');
     }
     await prepare();
+    if (identity.deviceId == peer.ownerDevice && peer.ownerCertificate != null) {
+      await enqueue(operationId: 'owner-route-${await _digest(jsonEncode(peer.ownerCertificate))}',
+        kind: PayrollLanOperation.ownerRoute,
+        payload: {'employee': peer.employee, 'owner': peer.ownerDevice});
+    }
     final pending = await database.customSelect(
       "SELECT * FROM payroll_lan_delivery_v1 WHERE business=? AND local_device=? "
       "AND peer_device=? AND direction='out' AND acknowledged=0 ORDER BY rowid LIMIT 50",
@@ -192,17 +225,30 @@ class PayrollLanDelivery {
           scheme: 'http', host: address.address, port: port, path: _path,
         )).timeout(_timeout);
         request.followRedirects = false;
+        if (identity.deviceId == peer.ownerDevice && peer.ownerCertificate != null) {
+          request.headers.set('x-briskers-owner-certificate', base64UrlEncode(utf8.encode(jsonEncode(peer.ownerCertificate))));
+        }
         request.write(await peer.seal(identity, _remote, {'change': row.read<String>('body')}));
         final response = await request.close().timeout(_timeout);
         if (response.statusCode != HttpStatus.ok) {
           throw StateError('Payroll peer did not acknowledge the change.');
         }
-        final ack = await peer.open(sender: _remote, recipient: identity,
-          envelope: await _read(response).timeout(_timeout));
+        var acknowledgmentPeer = peer;
+        final header = response.headers.value('x-briskers-owner-certificate');
+        if (header != null && identity.deviceId == peer.mechanicDevice) {
+          if (header.length > 32000) throw const FormatException('Owner certificate too large.');
+          acknowledgmentPeer = await peer.delegatedOwner(Map<String, dynamic>.from(jsonDecode(utf8.decode(base64Url.decode(header))) as Map));
+        }
+        final ack = await acknowledgmentPeer.open(
+          sender: identity.deviceId == peer.mechanicDevice ? acknowledgmentPeer.ownerDevice : _remote,
+          recipient: identity, envelope: await _read(response).timeout(_timeout));
         if (ack['ack'] != id || ack['digest'] != digest) {
           throw StateError('Payroll acknowledgment does not match the change.');
         }
         assertEnrollment();
+        if (identity.deviceId == peer.mechanicDevice && acknowledgmentPeer.ownerCertificate != null) {
+          await onOwnerCertificate?.call(acknowledgmentPeer.ownerCertificate!);
+        }
         await database.transaction(() async {
           assertEnrollment();
           await database.customStatement(
@@ -212,6 +258,10 @@ class PayrollLanDelivery {
           );
           final body = jsonDecode(row.read<String>('body')) as Map<String, dynamic>;
           final kind = PayrollLanOperation.values.byName(body['kind'] as String);
+          if (identity.deviceId == peer.mechanicDevice && kind == PayrollLanOperation.progress) {
+            await database.customStatement("UPDATE payroll_lan_delivery_v1 SET acknowledged=1 WHERE business=? AND local_device=? AND direction='out' AND operation=? AND digest=?",
+              [peer.business, identity.deviceId, id, digest]);
+          }
           await onAcknowledged?.call(kind, id);
           assertEnrollment();
         });

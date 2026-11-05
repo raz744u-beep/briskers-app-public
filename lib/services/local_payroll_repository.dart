@@ -59,6 +59,7 @@ class LocalPayrollRepository {
     await LocalMechanicWorkCreditRepository(database: db).prepare();
     await LocalInvoiceTaskStore(db).prepare();
     for (final sql in [
+      '''CREATE TABLE IF NOT EXISTS regular_payroll_progress_claims (business_id TEXT NOT NULL,employee_id TEXT NOT NULL,event_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(business_id,employee_id,event_id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_payment_authority (business_id TEXT PRIMARY KEY, device_id TEXT NOT NULL)''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_weekly_defaults (business_id TEXT NOT NULL, employee_id TEXT NOT NULL, base_cents INTEGER NOT NULL, hourly_cents INTEGER NOT NULL, adjustment_cents INTEGER NOT NULL, add_labor INTEGER NOT NULL, PRIMARY KEY(business_id,employee_id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_shop_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, business_id TEXT NOT NULL, employee_id TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, due_at INTEGER, status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','in_progress','done')))''',
@@ -81,6 +82,17 @@ class LocalPayrollRepository {
     ]) {
       await db.customStatement(sql);
     }
+    final oldTransport = await db.customSelect("SELECT name FROM sqlite_master WHERE type='table' AND name='payroll_lan_delivery_v1'").get();
+    if (oldTransport.isNotEmpty) {
+      final receipts = await _read("SELECT body FROM payroll_lan_delivery_v1 WHERE business=? AND direction='in' AND acknowledged=1", [business]);
+      for (final receipt in receipts) {
+        final change = jsonDecode(receipt['body'] as String) as Map;
+        if (change['kind'] != 'progress') continue;
+        final payload = change['payload'] as Map;
+        await db.customStatement('INSERT OR IGNORE INTO regular_payroll_progress_claims VALUES(?,?,?,?)',
+          [business, payload['employee'], jsonEncode([payload['id'], payload['revision']]), _progressBody(payload)]);
+      }
+    }
     // Retain settled coverage from earlier app versions without rewriting it.
     await db.customStatement(
       'INSERT OR IGNORE INTO regular_payroll_work_coverage '
@@ -92,6 +104,11 @@ class LocalPayrollRepository {
       'WHERE c.actual_minutes>0',
     );
   }
+
+  static String _progressBody(Map payload) => jsonEncode([
+    payload['job'], payload['id'], payload['employee'], payload['state'],
+    payload['minutes'], payload['date'], payload['revision'],
+  ]);
 
   Future<void> refreshInvoiceTasks() async {
     _authorize();
@@ -477,14 +494,26 @@ class LocalPayrollRepository {
     await prepare();
     final job = payload['job'] as String?;
     switch (operation) {
+      case PayrollLanOperation.ownerRoute:
+        if (owner || pairedEmployee != employee) throw StateError('Only the paired mechanic receives Owner routes.');
+        return;
       case PayrollLanOperation.progress:
         if (!owner) throw StateError('Only the Owner receives mechanic progress.');
+        final event = jsonEncode([payload['id'], payload['revision']]);
+        final body = _progressBody(payload);
+        final prior = await _read('SELECT body FROM regular_payroll_progress_claims WHERE business_id=? AND employee_id=? AND event_id=?',
+          [business, employee, event]);
+        if (prior.isNotEmpty) {
+          if (prior.single['body'] != body) throw StateError('Conflicting mechanic progress replay.');
+          return;
+        }
         await updateMechanicWork(
           job: job!, employee: employee, id: payload['id'] as String,
           state: payload['state'] as String, minutes: payload['minutes'] as int,
           date: payload['date'] as String,
           expectedRevision: payload['revision'] as int, assertSession: assertLink,
         );
+        await db.customStatement('INSERT INTO regular_payroll_progress_claims VALUES(?,?,?,?)', [business, employee, event, body]);
       case PayrollLanOperation.assignment:
         if (owner || pairedEmployee != employee || job == null) {
           throw StateError('Labor assignment is unavailable to this device.');

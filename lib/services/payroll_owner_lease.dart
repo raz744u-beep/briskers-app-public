@@ -56,8 +56,9 @@ class PayrollOwnerLease {
   }
 
   Future<T> serial<T>(Future<T> Function() action) {
-    final next = (_locks[key] ?? Future<void>.value()).then((_) => action());
-    _locks[key] = next.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    final lockKey = '$key:${identity.deviceId}';
+    final next = (_locks[lockKey] ?? Future<void>.value()).then((_) => action());
+    _locks[lockKey] = next.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return next;
   }
 
@@ -80,6 +81,9 @@ class PayrollOwnerLease {
   Future<void> migrate(LocalOwnerGrant grant) => serial(() async {
     grant.assertValid(business, grant.actorId);
     if (await state() != null) return;
+    if (await read('$key:epoch') != null) {
+      throw const PayrollPending('Payment pending: recover current payroll state from a trusted Owner device.');
+    }
     final legacy = 'briskers_payroll_lan_v1:${jsonEncode([business, 'writer'])}';
     if (anchor.isEmpty || identity.deviceId != anchor || ((await read(legacy)) != null && await read(legacy) != anchor)) {
       throw const PayrollPending('Payment pending: connect to the shop payroll ledger over Wi-Fi.');
@@ -91,6 +95,7 @@ class PayrollOwnerLease {
       'holder': identity.deviceId, 'actor': grant.actorId, 'operation': 'migration',
       'issuer': identity.deviceId, 'previous': null, 'snapshot': null});
     grant.assertValid(business, grant.actorId);
+    await write('$key:epoch', '0');
     await _save({'certificate': certificate, 'lease': lease, 'status': 'active'});
   });
 
@@ -190,7 +195,8 @@ class PayrollOwnerLease {
       }
       final lease = await verifyLease(Map<String, dynamic>.from(current['lease'] as Map));
       final certificate = await verifyCertificate(Map<String, dynamic>.from(current['certificate'] as Map));
-      if (lease['holder'] != identity.deviceId || lease['actor'] != grant.actorId ||
+      final highWater = int.tryParse(await read('$key:epoch') ?? '-1') ?? -1;
+      if ((lease['epoch'] as int) < highWater || lease['holder'] != identity.deviceId || lease['actor'] != grant.actorId ||
           certificate['device'] != identity.deviceId || certificate['actor'] != grant.actorId) {
         throw const PayrollPending('Payment pending: reconnect to the current payroll ledger.');
       }
@@ -210,7 +216,7 @@ class PayrollOwnerLease {
       throw const PayrollPending('This device has no current payroll state to transfer.');
     }
     final priorOffer = current['offer'];
-    if (priorOffer != null && current['operation'] == operation) {
+    if (priorOffer != null && current['operation'] == operation && current['status'] == 'offered') {
       final prior = Map<String, dynamic>.from(priorOffer as Map);
       if (prior['recipient'] != peer['device']) throw StateError('Conflicting lease retry.');
       final snapshot = await _snapshot(operation);
@@ -226,6 +232,7 @@ class PayrollOwnerLease {
         prior['holder'] != identity.deviceId || current['status'] != 'active') {
       throw const PayrollPending('Payment pending: another Owner device holds the current ledger.');
     }
+    await write('$key:epoch', '${(prior['epoch'] as int) + 1}');
     // No clock timeout or disconnected re-election can undo this fence.
     // Fence the legacy release as well if the same installation is restored.
     await write('briskers_payroll_lan_v1:${jsonEncode([business, 'writer'])}', peer['device'] as String);
@@ -282,6 +289,8 @@ class PayrollOwnerLease {
         await digest(offer['snapshot'] as String) != incoming['snapshot']) {
       throw StateError('Payroll transfer identity or snapshot differs.');
     }
+    final highWater = int.tryParse(await read('$key:epoch') ?? '-1') ?? -1;
+    if ((incoming['epoch'] as int) < highWater) throw StateError('Superseded payroll lease.');
     final priorRaw = current?['lease'];
     if (priorRaw != null) {
       final prior = await verifyLease(Map<String, dynamic>.from(priorRaw as Map));
@@ -292,6 +301,7 @@ class PayrollOwnerLease {
     }
     await applySnapshot(offer['snapshot'] as String);
     grant.assertValid(business, grant.actorId);
+    await write('$key:epoch', '${incoming['epoch']}');
     await _save({...current!, 'lease': lease, 'status': 'active'});
   });
 }

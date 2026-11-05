@@ -8,6 +8,7 @@ import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_payroll_repository.dart';
 import 'package:briskers_app/services/local_owner_authorization.dart';
 import 'package:briskers_app/services/payroll_lan_identity.dart';
+import 'package:briskers_app/services/payroll_lan_enrollment.dart';
 import 'package:briskers_app/services/payroll_owner_lease.dart';
 import 'package:briskers_app/services/payroll_owner_ledger.dart';
 import 'package:briskers_app/services/payroll_owner_lan.dart';
@@ -16,6 +17,12 @@ class _Unused implements OwnerEnrollmentStore {
   @override Future<String?> read() async => null;
   @override Future<void> write(String value) async {}
   @override Future<void> clear() async {}
+}
+class _PairStore implements PayrollEnrollmentStore {
+  _PairStore(this.values);
+  final Map<String, String> values;
+  @override Future<String?> read({required String key}) async => values[key];
+  @override Future<void> write({required String key, required String value}) async { values[key] = value; }
 }
 Future<LocalOwnerGrant> _owner(String session, {String business = 'shop'}) async {
   final identity = OwnerSessionIdentity('raz', session);
@@ -47,11 +54,11 @@ void main() {
       var la = lease(0), lb = lease(1);
       await la.migrate(ga);
       var dropReply = lostReply;
-      var na = PayrollOwnerLan(lease: la, database: a, actor: 'raz', approve: (_) async => ga,
+      var na = PayrollOwnerLan(lease: la, database: a, actor: 'raz', enrollment: PayrollLanEnrollment(identities[0], store: _PairStore(secure[0])), approve: (_) async => ga,
         onResponse: (command) async {
           if (command == 'take' && dropReply) { dropReply = false; throw StateError('Lost reply'); }
         });
-      var nb = PayrollOwnerLan(lease: lb, database: b, actor: 'raz', approve: (_) async => gb);
+      var nb = PayrollOwnerLan(lease: lb, database: b, actor: 'raz', enrollment: PayrollLanEnrollment(identities[1], store: _PairStore(secure[1])), approve: (_) async => gb);
       addTearDown(() async {
         await na.close(); await nb.close(); await a.close(); await b.close();
         LocalDocumentDetailCache.sqliteWritesEnabled = false;
@@ -109,8 +116,8 @@ void main() {
           a = BriskersLocalDatabase(NativeDatabase(File('${folder.path}/a.sqlite')));
           b = BriskersLocalDatabase(NativeDatabase(File('${folder.path}/b.sqlite')));
           la = lease(0); lb = lease(1);
-          na = PayrollOwnerLan(lease: la, database: a, actor: 'raz', approve: (_) async => ga);
-          nb = PayrollOwnerLan(lease: lb, database: b, actor: 'raz', approve: (_) async => gb);
+          na = PayrollOwnerLan(lease: la, database: a, actor: 'raz', enrollment: PayrollLanEnrollment(identities[0], store: _PairStore(secure[0])), approve: (_) async => ga);
+          nb = PayrollOwnerLan(lease: lb, database: b, actor: 'raz', enrollment: PayrollLanEnrollment(identities[1], store: _PairStore(secure[1])), approve: (_) async => gb);
           await na.listen(InternetAddress.loopbackIPv4, port: pa);
           await nb.listen(InternetAddress.loopbackIPv4, port: pb);
         }
@@ -118,6 +125,11 @@ void main() {
         // The authenticated Android Owner can take the ledger back, but cannot
         // pay an already covered credit under a different payment identity.
         await expectLater(pay(na, ga, 'duplicate-android', a), throwsA(anything));
+        await expectLater(la.offer(operation: 'iphone-payment',
+          recipient: Map<String, dynamic>.from((await lb.state())!['certificate'] as Map),
+          export: na.ledger.export), throwsA(anything));
+        await la.proof(ga);
+
       }
       if ((await la.state())?['status'] == 'active') {
         await nb.refresh(gb);
@@ -137,12 +149,20 @@ void main() {
       a = BriskersLocalDatabase(NativeDatabase(File('${folder.path}/a.sqlite')));
       b = BriskersLocalDatabase(NativeDatabase(File('${folder.path}/b.sqlite')));
       la = lease(0); lb = lease(1);
-      na = PayrollOwnerLan(lease: la, database: a, actor: 'raz', approve: (_) async => ga);
-      nb = PayrollOwnerLan(lease: lb, database: b, actor: 'raz', approve: (_) async => gb);
+      na = PayrollOwnerLan(lease: la, database: a, actor: 'raz', enrollment: PayrollLanEnrollment(identities[0], store: _PairStore(secure[0])), approve: (_) async => ga);
+      nb = PayrollOwnerLan(lease: lb, database: b, actor: 'raz', enrollment: PayrollLanEnrollment(identities[1], store: _PairStore(secure[1])), approve: (_) async => gb);
       await na.listen(InternetAddress.loopbackIPv4, port: pa);
       await nb.listen(InternetAddress.loopbackIPv4, port: pb);
       await expectLater(pay(nb, gb, 'retry-after-restart', b), throwsA(anything));
       final finalRepo = LocalPayrollRepository(b, business: 'shop', owner: true);
+      final copiedId = LocalPayrollRepository(b, business: 'shop', owner: true,
+        deviceId: 'copied-public-id', assertLanWriter: () async {});
+      await copiedId.bindPaymentAuthority(writerDeviceId: 'copied-public-id', assertVerifiedPairing: () {});
+      await expectLater(copiedId.verify(operation: 'copied-database-attempt', employee: 'mechanic-b',
+        week: '2026-11-02', date: '2026-11-04', method: 'Cash', selected: await finalRepo.work(employee: 'mechanic-b'),
+        base: 0, hourlyAdjustment: 0, adjustmentReason: '', repayment: 0, confirmedNet: 4000),
+        throwsA(isA<PayrollPending>()));
+
       expect(await finalRepo.history('mechanic-a'), hasLength(1));
       expect(await finalRepo.history('mechanic-b'), isEmpty);
       expect((await finalRepo.work(employee: 'mechanic-b')).single['remaining_cents'], 4000);

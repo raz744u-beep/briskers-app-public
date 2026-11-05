@@ -21,6 +21,7 @@ class PayrollLanWorkflow {
     void Function()? assertOwner,
     Future<void> Function()? assertWriter,
     PayrollOwnerProof? ownerProof,
+    Future<void> Function(Map<String, dynamic>)? onOwnerCertificate,
   }) : _database = database, isOwner = identity.deviceId == peer.ownerDevice {
     if (isOwner && (assertOwner == null || assertWriter == null)) {
       throw ArgumentError('Owner payroll authorization is required.');
@@ -33,6 +34,7 @@ class PayrollLanWorkflow {
     delivery = PayrollLanDelivery(
       database: database, identity: identity, peer: peer,
       assertEnrollment: assertLink,
+      onOwnerCertificate: onOwnerCertificate,
       onAcknowledged: (kind, id) async {
         if (!isOwner || kind != PayrollLanOperation.payment) return;
         await database.customStatement(
@@ -200,6 +202,7 @@ class PayrollLanWorkflow {
     int base = 0,
     int adjustment = 0,
     int repayment = 0,
+    Future<void> Function()? onRecorded,
   }) async {
     if (!isOwner) throw StateError('Only the Owner can record payment.');
     await delivery.prepare();
@@ -207,13 +210,16 @@ class PayrollLanWorkflow {
       operation: operation, employee: peer.employee, week: week, date: date,
       method: method, selected: selected, base: base, hourlyAdjustment: adjustment,
       adjustmentReason: reason, repayment: repayment, confirmedNet: net,
-      beforeCommit: () async => delivery.enqueue(
+      beforeCommit: () async {
+        await delivery.enqueue(
         operationId: operation, kind: PayrollLanOperation.payment,
         payload: {'operation': operation, 'employee': peer.employee, 'week': week,
           'date': date, 'method': method, 'gross': net + repayment, 'repayment': repayment, 'net': net,
           'work': selected.map((row) => row['id'] as String).toList(),
           'coverage': await repository.recordedCoverage(peer.employee, operation)},
-      ),
+        );
+        await onRecorded?.call();
+      },
     );
   }
 }

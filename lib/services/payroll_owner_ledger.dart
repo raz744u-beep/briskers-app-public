@@ -15,7 +15,7 @@ class PayrollOwnerLedger {
   static const tables = [
     'regular_payroll_jobs', 'regular_payroll_employees', 'regular_payroll_tasks',
     'regular_payroll_task_sources', 'regular_payroll_estimates',
-    'regular_payroll_portions', 'local_mechanic_work_credits_v1',
+    'regular_payroll_portions', 'local_mechanic_work_credits_v1', 'regular_payroll_progress_claims', 'regular_payroll_assignment_outgoing',
     'regular_payroll_advances', 'regular_payroll_payments',
     'regular_payroll_paid_work', 'regular_payroll_paid_base',
     'regular_payroll_work_coverage', 'regular_payroll_weekly_defaults',
@@ -28,6 +28,9 @@ class PayrollOwnerLedger {
   Future<void> prepare() async {
     await LocalPayrollRepository(db, business: business, owner: true).prepare();
     await LocalDocumentSqlStore.ensure(db);
+    await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_assignment_outgoing '
+      '(business_id TEXT NOT NULL,peer TEXT NOT NULL,credit TEXT NOT NULL,revision INTEGER NOT NULL,body TEXT NOT NULL,'
+      'PRIMARY KEY(business_id,peer,credit))');
     await db.customStatement('CREATE TABLE IF NOT EXISTS payroll_owner_pending_v2 '
       '(business_id TEXT NOT NULL,operation TEXT NOT NULL,request TEXT NOT NULL,'
       "state TEXT NOT NULL DEFAULT 'pending',reason TEXT NOT NULL,"
@@ -63,7 +66,11 @@ class PayrollOwnerLedger {
       final detail = await LocalDocumentSqlStore.read(db, key);
       if (detail != null) details.add({'cache_key': key, 'payload_json': detail});
     }
+    final assignments = await db.customSelect('SELECT a.* FROM local_job_assignments a WHERE a.business_id=? AND EXISTS '
+      '(SELECT 1 FROM regular_payroll_tasks t WHERE t.business_id=a.business_id AND t.job_id=a.job_id)',
+      variables: [Variable(business)]).get();
     return {'local_jobs': jobs.map((r) => r.data).toList(),
+      'local_job_assignments': assignments.map((r) => r.data).toList(),
       'local_documents': documents.map((r) => r.data).toList(), 'details': details};
   }
 
@@ -83,7 +90,7 @@ class PayrollOwnerLedger {
     await db.transaction(() async {
       final references = bundle['references'];
       if (references is Map) {
-        for (final table in ['local_jobs', 'local_documents']) {
+        for (final table in ['local_jobs', 'local_documents', 'local_job_assignments']) {
           final info = await db.customSelect('PRAGMA table_info($table)').get();
           final columns = info.map((r) => r.read<String>('name')).toSet();
           for (final raw in references[table] as List? ?? []) {
@@ -146,7 +153,7 @@ class PayrollOwnerLedger {
       for (final table in tables) {
         if (!canonical && (immutable.contains(table) ||
             ['regular_payroll_advances', 'regular_payroll_audit',
-             'regular_payroll_weekly_defaults', 'regular_payroll_sync_outbox'].contains(table))) { continue; }
+             'regular_payroll_weekly_defaults', 'regular_payroll_sync_outbox', 'regular_payroll_assignment_outgoing'].contains(table))) { continue; }
         final info = await db.customSelect('PRAGMA table_info($table)').get();
         final columns = info.map((r) => r.read<String>('name')).toList();
         final primary = info.where((r) => r.read<int>('pk') > 0)
@@ -173,9 +180,9 @@ class PayrollOwnerLedger {
           if (existing.isEmpty) {
             await _insert(table, row);
           } else if (!_same(existing.single.data, row)) {
-            if (immutable.contains(table)) throw StateError('Conflicting immutable payroll record.');
+            if (immutable.contains(table) || table == 'regular_payroll_progress_claims') throw StateError('Conflicting immutable payroll record.');
             final prior = existing.single.data;
-            if (table == 'local_mechanic_work_credits_v1' || table == 'regular_payroll_portions') {
+            if (table == 'local_mechanic_work_credits_v1' || table == 'regular_payroll_portions' || table == 'regular_payroll_assignment_outgoing') {
               final field = table == 'regular_payroll_portions' ? 'version' : 'revision';
               final previous = prior[field] as int;
               final next = row[field] as int;
@@ -204,6 +211,18 @@ class PayrollOwnerLedger {
           }
         }
       }
+      final invalid = await db.customSelect(
+        'SELECT 1 FROM regular_payroll_payments WHERE business_id=? '
+        'AND (gross<0 OR repayment<0 OR net<0 OR net<>gross-repayment) '
+        'UNION ALL SELECT 1 FROM regular_payroll_work_coverage w '
+        'LEFT JOIN local_mechanic_work_credits_v1 c ON c.business_id=w.business_id AND c.allocation_id=w.credit_id '
+        'LEFT JOIN regular_payroll_payments p ON p.business_id=w.business_id AND p.operation_id=w.operation_id '
+        'WHERE w.business_id=? AND (c.allocation_id IS NULL OR p.operation_id IS NULL OR c.employee_id<>p.employee_id) '
+        'UNION ALL SELECT 1 FROM local_mechanic_work_credits_v1 c WHERE c.business_id=? '
+        'AND COALESCE((SELECT SUM(minutes) FROM regular_payroll_work_coverage w '
+        'WHERE w.business_id=c.business_id AND w.credit_id=c.allocation_id),0)>c.actual_minutes LIMIT 1',
+        variables: [business, business, business].map(Variable<String>.new).toList()).get();
+      if (invalid.isNotEmpty) throw StateError('Payroll integrity verification failed; existing records were preserved.');
       await db.customStatement("UPDATE payroll_owner_pending_v2 SET state='resolved',reason='' "
         'WHERE business_id=? AND operation IN (SELECT operation_id FROM regular_payroll_payments WHERE business_id=?)',
         [business, business]);
@@ -213,10 +232,20 @@ class PayrollOwnerLedger {
   Future<void> _insert(String table, Map<String, dynamic> row) => db.customStatement(
     'INSERT INTO $table(${row.keys.join(',')}) VALUES(${row.keys.map((_) => '?').join(',')})', row.values.toList());
 
+  static Future<String> operationFor(Map<String, dynamic> request) {
+    final selected = [
+      for (final raw in request['selected'] as List? ?? [])
+        {for (final key in ['id', 'version', 'hours_hundredths', 'actual_minutes',
+            'rate_cents', 'paid_minutes', 'pay_minutes', 'payment_rate_cents'])
+          if ((raw as Map).containsKey(key)) key: raw[key]},
+    ]..sort((a, b) => (a['id'] as String).compareTo(b['id'] as String));
+    return PayrollOwnerLease.digest(jsonEncode({...request, 'selected': selected}));
+  }
+
   Future<String> intent(Map<String, dynamic> request) async {
     await prepare();
     final raw = jsonEncode(request);
-    final operation = await PayrollOwnerLease.digest(raw);
+    final operation = await operationFor(request);
     await db.customStatement('INSERT OR IGNORE INTO payroll_owner_pending_v2 VALUES(?,?,?,\'pending\',\'Awaiting current payroll state\')',
       [business, operation, raw]);
     return operation;
@@ -225,7 +254,7 @@ class PayrollOwnerLedger {
     "UPDATE payroll_owner_pending_v2 SET state='resolved',reason='' WHERE business_id=? AND operation=?", [business, operation]);
   Future<List<Map<String, dynamic>>> pending() async {
     await prepare();
-    return (await db.customSelect("SELECT * FROM payroll_owner_pending_v2 WHERE business_id=? AND state='pending'",
+    return (await db.customSelect("SELECT *,json_extract(request,'\$.employee') AS employee_id FROM payroll_owner_pending_v2 WHERE business_id=? AND state='pending'",
       variables: [Variable(business)]).get()).map((r) => r.data).toList();
   }
 }
