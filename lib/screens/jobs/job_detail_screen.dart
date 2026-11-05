@@ -5781,6 +5781,33 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     if (mounted) await _load();
   }
 
+  Future<void> _openJobLaborTasks() async {
+    if (!_owner || !OwnerPayrollScreen.enabled) return;
+    try {
+      final documents = await _localDocuments.listByJob(widget.businessId, widget.jobId);
+      final labor = <String, List<Map<String, dynamic>>>{};
+      for (final document in documents) {
+        final id = document['id'];
+        if (document['kind'] != 'invoice' || id is! String) continue;
+        final detail = await _documentDetailCache.load(widget.businessId, id);
+        final lines = detail?['lines'] ?? detail?['items'];
+        if (lines is List) {
+          labor[id] = lines.whereType<Map>().map(Map<String, dynamic>.from).toList();
+        }
+      }
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => OwnerPayrollScreen(
+          businessId: widget.businessId, jobId: widget.jobId, jobInvoiceLabor: labor,
+        ),
+      ));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) => JobQuarantineViewGuard(
     businessId: widget.businessId,
@@ -5901,6 +5928,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   )),
                 );
               }
+              if (value == 'job_tasks') await _openJobLaborTasks();
               if (value == 'edit') await _editJob();
               if (value == 'change_customer') await _changeCustomer();
               if (value == 'assignment') await _changeAssignment();
@@ -5908,6 +5936,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
               if (value == 'delete_unused') await _deleteUnusedJob();
             },
             itemBuilder: (_) => [
+              if (OwnerPayrollScreen.enabled && _owner)
+                const PopupMenuItem(value: 'job_tasks', child: Text('Tasks')),
               if (OwnerPayrollScreen.enabled && widget.roleCode == 'mechanic' &&
                   _canEditWork)
                 const PopupMenuItem(

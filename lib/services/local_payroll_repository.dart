@@ -54,6 +54,7 @@ class LocalPayrollRepository {
     await LocalMechanicWorkCreditRepository(database: db).prepare();
     for (final sql in [
       '''CREATE TABLE IF NOT EXISTS regular_payroll_payment_authority (business_id TEXT PRIMARY KEY, device_id TEXT NOT NULL)''',
+      '''CREATE TABLE IF NOT EXISTS regular_payroll_shop_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, business_id TEXT NOT NULL, employee_id TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','in_progress','done')))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_jobs (business_id TEXT NOT NULL, id TEXT NOT NULL, label TEXT NOT NULL, PRIMARY KEY(business_id,id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_tasks (business_id TEXT NOT NULL, id TEXT NOT NULL, job_id TEXT NOT NULL, labor_id TEXT NOT NULL, description TEXT NOT NULL, planned INTEGER NOT NULL CHECK(planned>=0), PRIMARY KEY(business_id,id), UNIQUE(business_id,job_id,labor_id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_portions (business_id TEXT NOT NULL, id TEXT NOT NULL, task_id TEXT NOT NULL, employee_id TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('Open','In Progress','Done')), version INTEGER NOT NULL DEFAULT 0, completed_date TEXT, PRIMARY KEY(business_id,id), UNIQUE(business_id,task_id,employee_id))''',
@@ -449,6 +450,49 @@ class LocalPayrollRepository {
     );
   }
 
+  Future<List<Map<String, dynamic>>> shopTasks(String employee) async {
+    _authorize();
+    await prepare();
+    final rows = await _read(
+      'SELECT id, description, category, status FROM regular_payroll_shop_tasks '
+      'WHERE business_id=? AND employee_id=? ORDER BY id DESC', [business, employee],
+    );
+    _authorize();
+    return rows;
+  }
+
+  Future<void> addShopTask(String employee, String description, String category) async {
+    _authorize();
+    if (employee.isEmpty || description.trim().isEmpty) {
+      throw ArgumentError('Employee and task description are required.');
+    }
+    await prepare();
+    await db.transaction(() async {
+      _authorize();
+      await db.customStatement(
+        'INSERT INTO regular_payroll_shop_tasks (business_id,employee_id,description,category) '
+        'VALUES (?,?,?,?)', [business, employee, description.trim(), category],
+      );
+      _authorize();
+    });
+  }
+
+  Future<void> setShopTaskStatus(String employee, int id, String status) async {
+    _authorize();
+    if (!['planned', 'in_progress', 'done'].contains(status)) {
+      throw ArgumentError('Unknown task status.');
+    }
+    await prepare();
+    await db.transaction(() async {
+      _authorize();
+      await db.customStatement(
+        'UPDATE regular_payroll_shop_tasks SET status=? WHERE business_id=? AND employee_id=? AND id=?',
+        [status, business, employee, id],
+      );
+      _authorize();
+    });
+  }
+
   Future<int> advance(String employee) async {
     _authorize();
     await prepare();
@@ -483,6 +527,70 @@ class LocalPayrollRepository {
         ],
       );
     });
+  }
+
+  Future<void> recordRepayment({
+    required String employee,
+    required String operation,
+    required int amount,
+    required String date,
+    required String method,
+    required String note,
+  }) async {
+    _authorize();
+    _date(date);
+    if (operation.isEmpty || amount <= 0 ||
+        !['Cash', 'Zelle', 'Check', 'ACH'].contains(method)) {
+      throw ArgumentError('Enter a positive repayment and a valid payment method.');
+    }
+    await prepare();
+    await db.transaction(() async {
+      await _assertPaymentAuthority();
+      final prior = await _read(
+        "SELECT payload FROM regular_payroll_audit WHERE business_id=? "
+        "AND operation_id=? AND event='standalone_repayment'",
+        [business, operation],
+      );
+      final fields = {
+        'employee': employee, 'cents': amount, 'date': date,
+        'method': method, 'note': note,
+      };
+      if (prior.isNotEmpty) {
+        final recorded = jsonDecode(prior.single['payload'] as String) as Map;
+        if (fields.entries.any((entry) => recorded[entry.key] != entry.value)) {
+          throw StateError('Conflicting repayment retry.');
+        }
+        return;
+      }
+      final balance = await advance(employee);
+      if (amount > balance) throw StateError('Repayment exceeds the balance.');
+      final remaining = balance - amount;
+      await db.customStatement(
+        'UPDATE regular_payroll_advances SET balance=? WHERE business_id=? AND employee_id=?',
+        [remaining, business, employee],
+      );
+      await db.customStatement(
+        "INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) "
+        "VALUES(?,?,'standalone_repayment',?)",
+        [business, operation, jsonEncode({...fields, 'remaining_after_cents': remaining})],
+      );
+      _authorize();
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> repaymentHistory(String employee) async {
+    _authorize();
+    await prepare();
+    final rows = await _read(
+      "SELECT payload FROM regular_payroll_audit WHERE business_id=? "
+      "AND event='standalone_repayment' AND json_extract(payload,'\$.employee')=? ORDER BY id DESC",
+      [business, employee],
+    );
+    _authorize();
+    return [
+      for (final row in rows)
+        Map<String, dynamic>.from(jsonDecode(row['payload'] as String) as Map),
+    ];
   }
 
   Future<List<Map<String, dynamic>>> history(String employee) async {

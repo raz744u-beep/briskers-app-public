@@ -10,14 +10,14 @@ Flexible payroll sources include `41644787` for the weekly settlement and `fa676
 
 | Surface | Approved source or contract | b2567 | Restoration status |
 | --- | --- | --- | --- |
-| Employee Details | Employee profile header and Details action, #427 | Edit form shows blank sensitive fields in Force Offline | Known roster name and position visible. Unavailable private details are explicitly labeled. Full profile header still missing. |
-| Employee Tasks | Original employee profile, #345 | Mechanic labor screen and invoice action | Approved tabs, work cards, and employee task navigation still missing. |
-| Global and Job Tasks | Original Tasks workspace, #305 and #345 | Manual invoice action | Jobs and Shop Tasks split, invoice-first creation, separate rechecks, and per-mechanic progress still missing. |
-| Weekly Labor Review | Original weekly review, #89, #335, #342 | Basic completed-work checklist | Weekly selection, carry-forward, independent paid status, and original confirmation still missing. |
-| Payroll and Advances | Original employee profile, #341, #343, #399 | Basic totals and verified payment | Approved cards, weekly base and optional hours, and repayment forms still missing. |
+| Employee Details | Employee profile header and Details action, #427 | Edit form shows blank sensitive fields in Force Offline | Known roster name and position visible. Unavailable private details are explicitly labeled. Recovered profile header and Details action now open from the owner roster. |
+| Employee Tasks | Original employee profile, #345 | Mechanic labor screen and invoice action | Recovered Service Tasks and General Tasks controls use employee-scoped records. General tasks persist locally. |
+| Global and Job Tasks | Original Tasks workspace, #305 and #345 | Manual invoice action | Job menu opens Tasks and reads invoice labor using its actual invoice IDs. Global workspace, automatic invoice-first creation, and separate rechecks still missing. |
+| Weekly Labor Review | Original weekly review, #89, #335, #342 | Basic completed-work checklist | Recovered weekly review, carry-forward selection, fixed footer, and payment confirmation are bound to real completed credits. Partial payment within a single credit and assigned-hours editing still missing. |
+| Payroll and Advances | Original employee profile, #341, #343, #399 | Basic totals and verified payment | Recovered summary cards, period filters, optional payment deductions, and standalone repayment form. Weekly base, flexible pay and the opening-balance editor still missing. |
 | Reports and week details | History panel and #371 | Flat payment history | Recovered period filters, weekly cards, full-screen details, frozen paid work and separate scoped Job and Invoice links. |
-| Taxes & 1099 | Original employee profile | Employee details form | Approved section still missing. |
-| Owner payment authorization | #427 | One pinned payment phone | Cross-platform authenticated settlement authority and a safe offline coordination boundary still missing. |
+| Taxes & 1099 | Original employee profile | Employee details form | Recovered Taxes tab and Taxes & 1099 card. The original test kept tax calculations and filing disabled. |
+| Owner payment authorization | #427 | One pinned payment phone | Outside the current UI restoration pass. |
 
 ## Reconciliation
 

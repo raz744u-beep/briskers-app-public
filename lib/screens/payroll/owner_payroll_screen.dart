@@ -28,6 +28,7 @@ class OwnerPayrollScreen extends StatefulWidget {
     this.jobId,
     this.invoiceId,
     this.invoiceLines = const [],
+    this.jobInvoiceLabor = const {},
     this.reportsOnly = false,
     this.employeeId,
     this.employeeName,
@@ -48,6 +49,7 @@ class OwnerPayrollScreen extends StatefulWidget {
   final String? jobId;
   final String? invoiceId;
   final List<Map<String, dynamic>> invoiceLines;
+  final Map<String, List<Map<String, dynamic>>> jobInvoiceLabor;
 
   @override
   State<OwnerPayrollScreen> createState() => _OwnerPayrollScreenState();
@@ -61,6 +63,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   String? _employee;
   DateTime _week = DateTime.now();
   int? _advanceBalance;
+  List<Map<String, dynamic>> _repayments = [];
+  List<Map<String, dynamic>> _generalTasks = [];
+  bool _showGeneralTasks = false;
+  bool _advanceExpanded = false;
+  final _repayment = TextEditingController();
+  final _repaymentNote = TextEditingController();
+  DateTime _repaymentDate = DateTime.now();
+  String _repaymentMethod = 'Cash';
   String _payrollPeriod = 'This Week';
   DateTimeRange? _customPeriod;
   static final _currency = NumberFormat.simpleCurrency(locale: 'en_US');
@@ -87,6 +97,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
           _work = [];
           _history = [];
           _advanceBalance = null;
+          _repayments = [];
+          _generalTasks = [];
         });
       }
     });
@@ -96,6 +108,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   void dispose() {
     _lockCheck?.cancel();
     _historyUnlocked.dispose();
+    _repayment.dispose();
+    _repaymentNote.dispose();
     super.dispose();
   }
 
@@ -126,6 +140,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       _busy = true;
       _error = null;
     });
+    var actionCompleted = false;
     try {
       var needsUnlock = verifyPayment;
       try {
@@ -137,12 +152,16 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         _grant = await DeviceOwnerAuthorization.instance.authority
             .authorizeLocal(widget.businessId);
       }
-      if (!mounted) return;
+      if (!mounted) {
+        if (rethrowError) throw StateError('Payroll screen closed.');
+        return;
+      }
       await action();
+      actionCompleted = true;
       if (mounted) await _load();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
-      if (rethrowError) rethrow;
+      if (rethrowError && !actionCompleted) rethrow;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -160,6 +179,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         ? <Map<String, dynamic>>[]
         : await repository.historyWithWork(employee);
     final advance = employee == null || _jobMode ? null : await repository.advance(employee);
+    final repayments = employee == null || widget.employeeId == null || widget.reportsOnly
+        ? <Map<String, dynamic>>[] : await repository.repaymentHistory(employee);
+    final generalTasks = employee == null || widget.employeeId == null || widget.reportsOnly
+        ? <Map<String, dynamic>>[] : await repository.shopTasks(employee);
     _assertOwner();
     if (!mounted) return;
     _historyUnlocked.value = true;
@@ -169,6 +192,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       _work = work;
       _history = history;
       _advanceBalance = advance;
+      _repayments = repayments;
+      _generalTasks = generalTasks;
     });
   }
 
@@ -243,7 +268,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     }, verifyPayment: pair);
   }
 
-  Future<void> _assign(Map<String, dynamic> line) async {
+  Future<void> _assign(String invoiceId, Map<String, dynamic> line) async {
     final employee = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => SimpleDialog(
@@ -275,7 +300,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     await _run(() async {
       final workflow = await _workflow(employeeId);
       await workflow.assign(
-        job: widget.jobId!, invoice: widget.invoiceId!, line: line['id'] as String,
+        job: widget.jobId!, invoice: invoiceId, line: line['id'] as String,
         description: (line['description'] ?? line['name'] ?? 'Invoice labor').toString(),
         employeeName: name, rate: rate,
       );
@@ -291,17 +316,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     if (employee == null || selected.isEmpty) {
       throw StateError('Select payable work for this employee.');
     }
-    final random = Random.secure();
-    final operation = List.generate(16, (_) => random.nextInt(256)
-        .toRadixString(16).padLeft(2, '0')).join();
+    final operation = _operationId();
     await _run(() async {
-      final workflow = await _workflow(employee);
-      final enrollment = PayrollLanEnrollment(await PayrollLanIdentity.load());
-      await enrollment.assertWriter(widget.businessId, _grant!);
-      await workflow.repository.bindPaymentAuthority(
-        writerDeviceId: enrollment.identity.deviceId,
-        assertVerifiedPairing: _assertOwner,
-      );
+      final workflow = await _paymentWorkflow(employee);
       await workflow.pay(
         operation: operation,
         week: _date(week),
@@ -314,6 +331,48 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         repayment: repayment,
       );
     }, verifyPayment: true, rethrowError: true);
+  }
+
+  String _operationId() {
+    final random = Random.secure();
+    return List.generate(16, (_) => random.nextInt(256)
+        .toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  Future<PayrollLanWorkflow> _paymentWorkflow(String employee) async {
+    final workflow = await _workflow(employee);
+    final enrollment = PayrollLanEnrollment(await PayrollLanIdentity.load());
+    await enrollment.assertWriter(widget.businessId, _grant!);
+    await workflow.repository.bindPaymentAuthority(
+      writerDeviceId: enrollment.identity.deviceId,
+      assertVerifiedPairing: _assertOwner,
+    );
+    return workflow;
+  }
+
+  int? get _repaymentCents {
+    final value = double.tryParse(_repayment.text.trim());
+    if (value == null || !value.isFinite || value <= 0 || value > 1000000) return null;
+    final cents = (value * 100).round();
+    return cents > 0 && cents <= (_advanceBalance ?? 0) ? cents : null;
+  }
+
+  Future<void> _saveRepayment() async {
+    final amount = _repaymentCents;
+    final employee = _employee;
+    if (amount == null || employee == null) return;
+    await _run(() async {
+      final workflow = await _paymentWorkflow(employee);
+      await workflow.repository.recordRepayment(
+        employee: employee, operation: _operationId(), amount: amount,
+        date: _date(_repaymentDate), method: _repaymentMethod,
+        note: _repaymentNote.text.trim(),
+      );
+      if (mounted) {
+        _repayment.clear();
+        _repaymentNote.clear();
+      }
+    }, verifyPayment: true);
   }
 
   void _openRecordedWork(String id, {required bool invoice}) {
@@ -550,8 +609,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
               child: FilledButton.icon(
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF007E78)),
-                onPressed: () =>
-                  DefaultTabController.of(tabContext).animateTo(0),
+                onPressed: () {
+                  setState(() => _showGeneralTasks = false);
+                  DefaultTabController.of(tabContext).animateTo(0);
+                },
                 icon: const Icon(Icons.assignment_outlined),
                 label: const Text('Review Weekly Labor'),
               ),
@@ -588,17 +649,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                 color: Color(0xFFC76023))),
           ],
         )),
-        _panel(ExpansionTile(
-          title: const Text('Advances & Repayments'),
-          subtitle: Text(_advanceBalance == null
-              ? 'Unlock to view balance' : 'Remaining owed · ${_money(_advanceBalance!)}'),
-          children: [
-            ListTile(
-              title: const Text('Outstanding balance'),
-              trailing: Text(_moneyNullable(_advanceBalance)),
-            ),
-          ],
-        )),
+        _advancePanel(),
       ],
     );
   }
@@ -623,6 +674,220 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       )),
     ],
   );
+
+  Widget _advancePanel() {
+
+    return _panel(Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.handshake_outlined,
+            color: BriskersColors.jobs),
+          title: const Text('Advances & Repayments',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: Text('Balance: '
+            '${_moneyNullable(_advanceBalance)}'),
+          trailing: Icon(_advanceExpanded
+            ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
+          onTap: () => setState(() =>
+            _advanceExpanded = !_advanceExpanded),
+        ),
+        if (_advanceExpanded) ...[
+          const Divider(),
+          Text('Remaining balance: '
+            '${_moneyNullable(_advanceBalance)}',
+            style: const TextStyle(
+              fontWeight: FontWeight.w800, fontSize: 18)),
+          const SizedBox(height: 14),
+          const Text('Add Repayment', style: TextStyle(
+            fontWeight: FontWeight.w700)),
+          const SizedBox(height: 9),
+          TextField(
+            controller: _repayment,
+            onTapAlwaysCalled: true,
+            onTap: () => _repayment.selection = TextSelection(
+              baseOffset: 0, extentOffset: _repayment.text.length,
+            ),
+            onChanged: (_) => setState(() {}),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Amount', prefixText: r'$ ',
+              border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 9),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final date = await showDatePicker(
+                context: context, initialDate: _repaymentDate,
+                firstDate: DateTime(2000), lastDate: DateTime(2100));
+              if (date != null && mounted) {
+                setState(() => _repaymentDate = date);
+              }
+            },
+            icon: const Icon(Icons.calendar_month),
+            label: Text('Date: ${DateFormat.yMMMd().format(_repaymentDate)}'),
+          ),
+          const SizedBox(height: 9),
+          DropdownButtonFormField<String>(
+            initialValue: _repaymentMethod,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Repayment method', border: OutlineInputBorder()),
+            items: const [
+              DropdownMenuItem(value: 'Cash', child: Text('Cash')),
+              DropdownMenuItem(value: 'Zelle', child: Text('Zelle')),
+              DropdownMenuItem(value: 'Check', child: Text('Check')),
+              DropdownMenuItem(value: 'ACH', child: Text('ACH')),
+            ],
+            onChanged: (value) => setState(() =>
+              _repaymentMethod = value ?? 'Cash'),
+          ),
+          const SizedBox(height: 9),
+          TextField(controller: _repaymentNote, decoration:
+            const InputDecoration(labelText: 'Notes (optional)',
+              border: OutlineInputBorder())),
+          const SizedBox(height: 10),
+          FilledButton(
+            onPressed: !_busy && _repaymentCents != null ? _saveRepayment : null,
+            child: const Text('Save Repayment'),
+          ),
+          const SizedBox(height: 8),
+          const Text('Payroll deductions are optional during Verify Payment. '
+            'Record separate cash, Zelle, check or ACH repayments here.',
+            style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+          const Divider(height: 25),
+          const Text('Repayment History',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+          if (_repayments.isEmpty)
+            const Padding(padding: EdgeInsets.all(8),
+              child: Text('No repayments recorded')),
+          for (final item in _repayments)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: Text('${_money(item['cents'] as int)} · '
+                "${item['method']}"),
+              subtitle: Text(item['date'] as String),
+              trailing: Text(_money(item['remaining_after_cents'] as int)),
+            ),
+        ],
+      ],
+    ));
+  }
+
+  Future<void> _createEmployeeGeneralTask() async {
+    final description = TextEditingController();
+    String category = 'General';
+    final created = await showModalBottomSheet<bool>(
+      context:context,useSafeArea:true,isScrollControlled:true,
+      showDragHandle:true,
+      builder:(sheet)=>StatefulBuilder(builder:(sheet, update)=>Padding(
+        padding:EdgeInsets.fromLTRB(16,10,16,
+          MediaQuery.viewInsetsOf(sheet).bottom+20),
+        child:SingleChildScrollView(child:Column(
+          mainAxisSize:MainAxisSize.min,
+          crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+          Text('New General Task · '+(widget.employeeName ?? 'Employee'),
+            style:const TextStyle(fontSize:19,fontWeight:FontWeight.w800)),
+          const SizedBox(height:12),
+          TextField(controller:description,minLines:1,maxLines:3,
+            decoration:const InputDecoration(labelText:'Task description',
+              border:OutlineInputBorder())),
+          const SizedBox(height:10),
+          DropdownButtonFormField<String>(
+            initialValue:category,
+            decoration:const InputDecoration(labelText:'Category',
+              border:OutlineInputBorder()),
+            items:[
+              for(final value in ['General','Cleaning','Inventory',
+                'Office','Maintenance','Yard','Errands'])
+                DropdownMenuItem(value:value,child:Text(value)),
+            ],
+            onChanged:(v)=>update(()=>category=v??'General')),
+          const SizedBox(height:12),
+          FilledButton(onPressed:() async {
+            if (description.text.trim().isEmpty) return;
+            try {
+              await _repository.addShopTask(
+                widget.employeeId!, description.text, category,
+              );
+              if (sheet.mounted) Navigator.pop(sheet,true);
+            } catch(error) {
+              if (sheet.mounted) {
+                ScaffoldMessenger.of(sheet).showSnackBar(SnackBar(content: Text('$error')));
+              }
+            }
+          },child:const Text('Save General Task')),
+        ])),
+      )),
+    );
+    description.dispose();
+    if (created == true && mounted) await _run(() async {});
+  }
+
+  Future<void> _updateEmployeeGeneralTask(int id, String status) =>
+      _run(() => _repository.setShopTaskStatus(widget.employeeId!, id, status));
+
+  Widget _tasksTab() => Column(children:[
+    Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),
+      child:Row(children:[
+        for(final general in [false,true])
+          Expanded(child:InkWell(
+            onTap:()=>setState(()=>_showGeneralTasks=general),
+            child:Container(
+              padding:const EdgeInsets.symmetric(vertical:9),
+              decoration:BoxDecoration(
+                color:_showGeneralTasks==general
+                  ? const Color(0xFF007E78) : const Color(0xFFF2F6F7),
+                borderRadius:BorderRadius.circular(16)),
+              child:Text(general?'General Tasks':'Service Tasks',
+                textAlign:TextAlign.center,
+                style:TextStyle(fontWeight:FontWeight.w800,
+                  color:_showGeneralTasks==general ? Colors.white :
+                    const Color(0xFF334155)))))),
+      ]),
+    ),
+    Expanded(child:_showGeneralTasks
+      ? Builder(builder:(context) {
+        final rows = _generalTasks;
+        return ListView(padding:const EdgeInsets.all(12),children:[
+          Row(children:[
+            Expanded(child:Text('Assigned General Tasks · '+rows.length.toString(),
+              style:const TextStyle(fontWeight:FontWeight.w700))),
+            TextButton.icon(onPressed:_createEmployeeGeneralTask,
+              icon:const Icon(Icons.add),label:const Text('New Task')),
+          ]),
+          if(rows.isEmpty) const ListTile(
+            title:Text('No general tasks assigned')),
+          for(final task in rows)
+            Card(child:ListTile(
+              title:Text(task['description']?.toString()??'',
+                style:const TextStyle(fontWeight:FontWeight.w700)),
+              subtitle:Text((task['category']?.toString()??'General')+
+                ' · '+(task['status']=='done'?'Done':
+                  task['status']=='in_progress'?'In Progress':'Not Started')),
+              trailing:PopupMenuButton<String>(
+                tooltip:'Update task progress',
+                onSelected:(status)=>_updateEmployeeGeneralTask(
+                  task['id'] as int,status),
+                itemBuilder:(_)=>const [
+                  PopupMenuItem(value:'planned',child:Text('Not Started')),
+                  PopupMenuItem(value:'in_progress',child:Text('In Progress')),
+                  PopupMenuItem(value:'done',child:Text('Done')),
+                ]))),
+        ]);
+      })
+      : WeeklyLaborReview(
+        employeeId: widget.employeeId!,
+        employeeName: widget.employeeName ?? 'Employee',
+        tasks: _work, week: _week, embedded: true,
+        advanceBalance: () => _repository.advance(widget.employeeId!),
+        recordPayment: _recordWeekly,
+        onWeekChanged: (week) => _week = week,
+        onCancel: () => Navigator.of(context).pop(),
+      )),
+  ]);
 
   Widget _profile() => DefaultTabController(
     length: 4,
@@ -653,15 +918,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         if (_error != null) Text(_error!),
         if (_grant != null)
           Expanded(child: TabBarView(children: [
-            WeeklyLaborReview(
-              employeeId: widget.employeeId!,
-              employeeName: widget.employeeName ?? 'Employee',
-              tasks: _work, week: _week, embedded: true,
-              advanceBalance: () => _repository.advance(widget.employeeId!),
-              recordPayment: _recordWeekly,
-              onWeekChanged: (week) => _week = week,
-              onCancel: () => Navigator.of(context).pop(),
-            ),
+            _tasksTab(),
             _payrollTab(),
             PayrollHistoryPanel(
               payments: _history,
@@ -698,15 +955,21 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                 child: const Text('Sync payroll over shop Wi-Fi')),
             ],
             if (_grant != null && _jobMode) ...[
-              for (final line in widget.invoiceLines.where(isInvoiceLaborLine))
-                if (line['id'] is String)
-                  ListTile(
-                    title: Text((line['description'] ?? line['name'] ?? 'Invoice labor').toString()),
-                    trailing: TextButton(
-                      onPressed: _busy || _employees.isEmpty ? null : () => _assign(line),
-                      child: const Text('Assign'),
+              const ListTile(title: Text('Invoice labor')),
+              for (final invoice in <String, List<Map<String, dynamic>>>{
+                if (widget.invoiceId != null) widget.invoiceId!: widget.invoiceLines,
+                ...widget.jobInvoiceLabor,
+              }.entries)
+                for (final line in invoice.value.where(isInvoiceLaborLine))
+                  if (line['id'] is String)
+                    ListTile(
+                      title: Text((line['description'] ?? line['name'] ?? 'Invoice labor').toString()),
+                      trailing: TextButton(
+                        onPressed: _busy || _employees.isEmpty
+                            ? null : () => _assign(invoice.key, line),
+                        child: const Text('Assign'),
+                      ),
                     ),
-                  ),
               if (_employees.isEmpty) const Text('No active assignment is saved for this job.'),
               for (final row in _work)
                 ListTile(

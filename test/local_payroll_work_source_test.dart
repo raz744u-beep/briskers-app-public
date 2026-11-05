@@ -247,6 +247,27 @@ void main() {
     final otherShop = LocalPayrollRepository(db, business: 'shop-b', owner: true);
     expect(await otherShop.history('employee-a'), isEmpty);
 
+    await payroll.addShopTask('employee-a', 'Organize stock', 'Inventory');
+    final shopTask = (await payroll.shopTasks('employee-a')).single;
+    expect(await payroll.shopTasks('employee-b'), isEmpty);
+    expect(await otherShop.shopTasks('employee-a'), isEmpty);
+    await payroll.setShopTaskStatus('employee-a', shopTask['id'] as int, 'done');
+    await payroll.addAdvance('employee-a', 3000);
+    Future<void> repay(int amount) => payroll.recordRepayment(
+      employee: 'employee-a', operation: 'repayment-a', amount: amount,
+      date: '2026-11-04', method: 'Cash', note: 'Test repayment',
+    );
+    await repay(1200);
+    await db.close();
+    db = BriskersLocalDatabase(NativeDatabase(file));
+    payroll = LocalPayrollRepository(db, business: 'shop-a', owner: true, deviceId: 'owner-device');
+    source = LocalPayrollWorkSource(db);
+    await repay(1200);
+    await expectLater(repay(1000), throwsStateError);
+    expect(await payroll.advance('employee-a'), 1800);
+    expect(await payroll.repaymentHistory('employee-a'), hasLength(1));
+    expect((await payroll.shopTasks('employee-a')).single['status'], 'done');
+
     await db.customStatement(
       "UPDATE local_job_assignments SET active = 0 "
       "WHERE assignment_id = 'assignment-a'",
