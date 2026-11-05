@@ -43,7 +43,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
           'WHERE p.business_id=? AND c.job_id=? AND (COALESCE(m.active,1)=1 OR c.actual_minutes>0)',
           variables:[Variable(widget.business),Variable(widget.job)]).getSingle();
         estimated=totals.read<int>('estimated');actual=totals.read<int>('actual');
-        if(mounted)widget.onHours?.call(estimated!,actual!);
+        if(mounted){widget.onHours?.call(estimated!,actual!);}
       }
       if(mounted)setState((){staff=roster;main=row?.data['assigned_employee_id'] as String?;
         if(main!=null && !staff.any((r)=>r['id']==main)){staff=[...staff,{'id':main,'name':row?.data['assigned_employee_name']??'Saved mechanic'}];}

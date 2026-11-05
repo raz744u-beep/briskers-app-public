@@ -1,3 +1,4 @@
+import 'local_task_assignment_store.dart';
 import 'dart:convert';
 import 'local_number_allocator.dart';
 import 'job_status_local_events.dart';
@@ -417,6 +418,22 @@ class OfflineJobAdminService {
     String? employeeName,
     String? position,
   }) async {
+    final payroll=await _database.customSelect("SELECT name FROM sqlite_master WHERE type='table' AND name='regular_payroll_job_lead'").get();
+    if(payroll.isNotEmpty){
+      await _database.transaction(()async{
+        await queueMainMechanic(businessId,jobId,employeeId:employeeId,employeeName:employeeName);
+        await _database.customStatement('INSERT INTO regular_payroll_job_lead(business_id,job_id,employee_id,employee_name) VALUES(?,?,?,?) '
+          'ON CONFLICT(business_id,job_id) DO UPDATE SET employee_id=excluded.employee_id,employee_name=excluded.employee_name,revision=revision+1 '
+          'WHERE employee_id IS NOT excluded.employee_id OR employee_name IS NOT excluded.employee_name',[businessId,jobId,employeeId,employeeName]);
+        final assignments=LocalTaskAssignmentStore(_database);
+        if(employeeId!=null){await assignments.inherit(businessId,jobId);}
+        else{
+          final tasks=await _database.customSelect('SELECT id FROM regular_payroll_tasks WHERE business_id=? AND job_id=?',variables:[Variable(businessId),Variable(jobId)]).get();
+          for(final task in tasks){await assignments.retireInherited(businessId,task.read<String>('id'));}
+        }
+      });
+      return;
+    }
     await _database.transaction(() async {
       await _database.customStatement(
         '''

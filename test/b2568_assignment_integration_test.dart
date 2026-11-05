@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Variable;
 import 'dart:io';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -93,5 +94,27 @@ void main(){
     await repo.addShopTask('a','Clean desk','General');
     expect(await CompletedTaskHistory(db).read('shop',job:'job'),hasLength(1));
     await expectLater(LocalPayrollRepository(db,business:'shop',owner:false).setMainMechanic('job','b','B'),throwsStateError);
+    // A disconnected mechanic's original inherited allocation must not vanish
+    // when its main mechanic changes before their progress is delivered.
+    final old=(await db.customSelect("SELECT allocation_id,revision FROM local_mechanic_work_credits_v1 WHERE business_id='shop' AND employee_id='a' AND task_id=?",
+      variables:[Variable(task('inherited'))]).getSingle()).data;
+    for(final state in ['In Progress','Done']){
+      final row=(await db.customSelect('SELECT revision FROM local_mechanic_work_credits_v1 WHERE allocation_id=?',variables:[Variable(old['allocation_id'] as String)]).getSingle()).data;
+      await repo.updateMechanicWork(job:'job',employee:'a',id:old['allocation_id'] as String,state:state,minutes:60,date:'2026-11-05',
+        expectedRevision:row['revision'] as int,assertSession:()=>grant.assertValid('shop','owner'));
+    }
+    final changed=(await repo.work(employee:'a')).singleWhere((r)=>r['id']==old['allocation_id']);
+    expect(changed['state'],'Done');expect(changed['assignment_conflict'],1);
+    await expectLater(payer.verify(operation:'conflict',employee:'a',week:'2026-11-02',date:'2026-11-05',method:'Cash',selected:[changed],
+      base:0,hourlyAdjustment:0,adjustmentReason:'',repayment:0,confirmedNet:4000),throwsStateError);
+    expect((await CompletedTaskHistory(db).read('shop',job:'job')).where((r)=>r['employee_id']=='a'),isEmpty);
+    await repo.acceptChangedAssignment(old['allocation_id'] as String);
+    expect((await repo.work(employee:'a')).singleWhere((r)=>r['id']==old['allocation_id'])['assignment_conflict'],0);
+    expect((await CompletedTaskHistory(db).read('shop',job:'job')).where((r)=>r['employee_id']=='a'),hasLength(1));
+    expect(await payer.verify(operation:'second',employee:'b',week:'2026-11-02',date:'2026-11-05',method:'Cash',selected:[remaining],
+      base:0,hourlyAdjustment:0,adjustmentReason:'',repayment:0,confirmedNet:8000),isTrue);
+    final fullyPaid=(await repo.work(employee:'b')).singleWhere((r)=>r['id']==turbo['id']);
+    expect(fullyPaid['paid'],1);expect(fullyPaid['remaining_minutes'],0);expect(await repo.history('b'),hasLength(2));
+
   });
 }
