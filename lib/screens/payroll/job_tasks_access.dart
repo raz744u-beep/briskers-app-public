@@ -45,9 +45,9 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
         estimated=totals.read<int>('estimated');actual=totals.read<int>('actual');
         if(mounted){widget.onHours?.call(estimated!,actual!);}
       }
-      if(mounted)setState((){staff=roster;main=row?.data['assigned_employee_id'] as String?;
+      if(mounted){setState((){staff=roster;main=row?.data['assigned_employee_id'] as String?;
         if(main!=null && !staff.any((r)=>r['id']==main)){staff=[...staff,{'id':main,'name':row?.data['assigned_employee_name']??'Saved mechanic'}];}
-        warning=null;});
+        warning=null;});}
     }catch(_){if(mounted)setState(()=>warning='Saved mechanic list is not available yet. Retry.');}
   }
   Future<LocalPayrollRepository> unlock()async{

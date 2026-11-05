@@ -1471,7 +1471,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           ),
         ]),
       ),
-      Expanded(child: FutureBuilder<List<Map<String, dynamic>>>(
+      // Start only when the tab is mounted. TabBarView constructs offstage
+      // children before their FutureBuilder can subscribe to failures.
+      Expanded(child: Builder(builder: (_) => FutureBuilder<List<Map<String, dynamic>>>(
         future: _invoiceExpensesTabFuture ??= _invoiceTabExpenses(),
         builder: (context, snapshot) {
           if (!snapshot.hasData && !snapshot.hasError) {
@@ -1557,7 +1559,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             },
           );
         },
-      )),
+      ))),
     ]);
   }
 
