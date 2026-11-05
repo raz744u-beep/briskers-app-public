@@ -11,6 +11,7 @@ import '../../services/payroll_lan_identity.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../core/connection_mode.dart';
 import 'employee_edit_screen.dart';
+import '../payroll/owner_payroll_connection.dart';
 import 'employee_positions_screen.dart';
 
 class EmployeesSettingsScreen extends StatefulWidget {
@@ -432,6 +433,9 @@ class _EmployeesSettingsScreenState
       appBar: AppBar(
         title: const Text('Employees'),
         actions: [
+          if (widget.isOwner && OwnerPayrollScreen.enabled)
+            IconButton(tooltip: 'Shop payroll Wi-Fi', icon: const Icon(Icons.wifi),
+              onPressed: () => showOwnerPayrollConnection(context, widget.businessId)),
           if (widget.isOwner)
             IconButton(
               tooltip: 'Public payroll device ID',

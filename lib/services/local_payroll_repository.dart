@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'payroll_owner_lease.dart';
 import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import 'local_mechanic_work_credit_repository.dart';
@@ -18,6 +19,7 @@ class LocalPayrollRepository {
     this.deviceId,
     this.assertLanWriter,
     this.pairedEmployee,
+    this.ownerProof,
   });
   final BriskersLocalDatabase db;
   final String business;
@@ -26,6 +28,7 @@ class LocalPayrollRepository {
   final String? deviceId;
   final Future<void> Function()? assertLanWriter;
   final String? pairedEmployee;
+  final PayrollOwnerProof? ownerProof;
   Future<void>? _prepared;
   void _authorize() {
     if (!owner || business.trim().isEmpty)
@@ -890,6 +893,7 @@ class LocalPayrollRepository {
     await prepare();
     if (amount <= 0) { throw ArgumentError('Positive advance required'); }
     await db.transaction(() async {
+      await _assertPaymentAuthority();
       if ((await _read(
         'SELECT id FROM regular_payroll_employees WHERE business_id=? AND id=?',
         [business, employee],
@@ -908,6 +912,7 @@ class LocalPayrollRepository {
           jsonEncode({'employee': employee, 'amount': amount}),
         ],
       );
+      await _assertPaymentAuthority();
     });
   }
 
@@ -934,6 +939,7 @@ class LocalPayrollRepository {
           jsonEncode({'employee': employee, 'cents': cents})],
       );
       _authorize();
+      await _assertPaymentAuthority();
     });
   }
 
@@ -997,6 +1003,7 @@ class LocalPayrollRepository {
         [business, operation, jsonEncode({...fields, 'remaining_after_cents': remaining})],
       );
       _authorize();
+      await _assertPaymentAuthority();
     });
   }
 
@@ -1150,6 +1157,10 @@ class LocalPayrollRepository {
   }
 
   Future<void> _assertPaymentAuthority() async {
+    if (ownerProof != null) {
+      await ownerProof!.validate(business, deviceId);
+      return;
+    }
     await assertLanWriter?.call();
     final saved = await _read(
       'SELECT device_id FROM regular_payroll_payment_authority WHERE business_id=?',

@@ -9,6 +9,7 @@ import 'local_payroll_repository.dart';
 import 'payroll_lan_delivery.dart';
 import 'payroll_lan_identity.dart';
 import 'payroll_lan_peer.dart';
+import 'payroll_owner_lease.dart';
 
 /// A single signed link between the payment device and one mechanic.
 class PayrollLanWorkflow {
@@ -19,6 +20,7 @@ class PayrollLanWorkflow {
     required void Function() assertLink,
     void Function()? assertOwner,
     Future<void> Function()? assertWriter,
+    PayrollOwnerProof? ownerProof,
   }) : _database = database, isOwner = identity.deviceId == peer.ownerDevice {
     if (isOwner && (assertOwner == null || assertWriter == null)) {
       throw ArgumentError('Owner payroll authorization is required.');
@@ -26,7 +28,7 @@ class PayrollLanWorkflow {
     repository = LocalPayrollRepository(
       database, business: peer.business, owner: isOwner,
       deviceId: identity.deviceId, assertOwnerGrant: assertOwner,
-      assertLanWriter: assertWriter, pairedEmployee: isOwner ? null : peer.employee,
+      assertLanWriter: assertWriter, ownerProof: ownerProof, pairedEmployee: isOwner ? null : peer.employee,
     );
     delivery = PayrollLanDelivery(
       database: database, identity: identity, peer: peer,
@@ -167,6 +169,24 @@ class PayrollLanWorkflow {
           'state': state, 'minutes': minutes, 'date': date, 'revision': revision},
       ),
     );
+  }
+
+  /// A trusted Owner relay can forward already recorded receipts after a
+  /// portable-ledger reconciliation; it cannot invent or finalize payments.
+  Future<void> queueRecordedPayments() async {
+    if (!isOwner) throw StateError('Only an Owner can forward payment receipts.');
+    await delivery.prepare();
+    for (final payment in await repository.history(peer.employee)) {
+      final operation = payment['operation_id'] as String;
+      final coverage = await repository.recordedCoverage(peer.employee, operation);
+      await delivery.enqueue(operationId: operation, kind: PayrollLanOperation.payment,
+        payload: {'operation': operation, 'employee': peer.employee,
+          'week': payment['week'], 'date': payment['verified_date'],
+          'method': payment['method'], 'gross': payment['gross'],
+          'repayment': payment['repayment'], 'net': payment['net'],
+          'work': coverage.map((row) => row['credit_id'] as String).toList(),
+          'coverage': coverage});
+    }
   }
 
   Future<bool> pay({

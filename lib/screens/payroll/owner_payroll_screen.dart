@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -16,6 +17,9 @@ import '../../services/payroll_period_totals.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../services/payroll_lan_enrollment.dart';
 import '../../services/payroll_lan_identity.dart';
+import '../../services/payroll_owner_lease.dart';
+import '../../services/payroll_owner_ledger.dart';
+import 'owner_payroll_connection.dart';
 import '../../services/payroll_lan_workflow.dart';
 import '../jobs/job_detail_screen.dart';
 import '../settings/employee_edit_screen.dart';
@@ -77,6 +81,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   List<Map<String, dynamic>> _taskSources = [];
   List<Map<String, dynamic>> _history = [];
   List<Map<String, dynamic>> _overviewPayments = [];
+  List<Map<String, dynamic>> _pendingPayments = [];
+  bool _refreshingOwnerState = false;
   String? _employee;
   DateTime _week = DateTime.now();
   int? _advanceBalance;
@@ -126,6 +132,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
           _taskSources = [];
           _history = [];
           _overviewPayments = [];
+          _pendingPayments = [];
           _advanceBalance = null;
           _repayments = [];
           _openingAdvance = null;
@@ -220,6 +227,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         weeklyBase: ['fixed_weekly', 'flexible_weekly'].contains(widget.employeePayType),
       );
     }
+    final ownerConnection = await OwnerPayrollConnections.open(context, widget.businessId, _grant!);
+    if (!_refreshingOwnerState) {
+      _refreshingOwnerState = true;
+      unawaited(ownerConnection.refresh(_grant!).then((_) async {
+        if (mounted) await _load();
+      }).catchError((Object _) {}).whenComplete(() => _refreshingOwnerState = false));
+    }
+    final pendingPayments = await PayrollOwnerLedger(localDatabase, widget.businessId).pending();
     await repository.refreshInvoiceTasks();
     final sources = await repository.tasks();
     final job = widget.jobId;
@@ -266,6 +281,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     setState(() {
       _employees = employees;
       _overviewPayments = allPayments;
+      _pendingPayments = pendingPayments;
       _employee = employee;
       _work = work;
       _taskSources = sources;
@@ -289,17 +305,20 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   }
 
   String _date(DateTime value) => value.toIso8601String().substring(0, 10);
-  Future<PayrollLanWorkflow> _workflow(String employee) async {
+  Future<PayrollLanWorkflow> _workflow(String employee, {PayrollOwnerProof? ownerProof}) async {
     final identity = await PayrollLanIdentity.load();
     final enrollment = PayrollLanEnrollment(identity);
     final peer = await enrollment.ownerPeer(widget.businessId, employee);
     if (peer == null) throw StateError('Pair this employee device first.');
     _assertOwner();
-    return PayrollLanWorkflow(
+    final workflow = PayrollLanWorkflow(
       database: localDatabase, identity: identity, peer: peer,
       assertLink: _assertOwner, assertOwner: _assertOwner,
       assertWriter: () => enrollment.assertWriter(widget.businessId, _grant!),
+      ownerProof: ownerProof,
     );
+    await workflow.queueRecordedPayments();
+    return workflow;
   }
 
   Future<void> _managePeer({required bool pair}) async {
@@ -511,9 +530,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     if (employee == null || (selected.isEmpty && base <= 0)) {
       throw StateError('Select payable work for this employee.');
     }
-    final operation = _operationId();
+    final pending = PayrollOwnerLedger(localDatabase, widget.businessId);
+    final request = {'employee': employee, 'week': _date(week), 'date': _date(date),
+      'method': method, 'selected': selected, 'adjustment': adjustment,
+      'repayment': repayment, 'net': net, 'reason': reason, 'base': base};
+    // Stable intent identity survives a lost UI/transport response and restart.
+    final operation = await PayrollOwnerLease.digest(jsonEncode(request));
     await _run(() async {
-      final ledger = await _localPaymentLedger();
+      await pending.intent(request);
+      final ledger = await _localPaymentLedger(operation: operation);
       if (base > 0) {
         await ledger.enableWeeklyBase(employee, widget.employeeName ?? _employeeLabel(employee));
       }
@@ -526,13 +551,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
           adjustmentReason: reason, repayment: repayment, confirmedNet: net,
         );
       } else {
-        final workflow = await _workflow(employee);
-        await workflow.pay(
-          operation: operation, week: _date(week), date: _date(date), method: method,
+        final workflow = await _workflow(employee, ownerProof: ledger.ownerProof);
+        await workflow.pay(operation: operation, week: _date(week), date: _date(date), method: method,
           selected: selected, reason: reason, net: net, base: base,
-          adjustment: adjustment, repayment: repayment,
-        );
+          adjustment: adjustment, repayment: repayment);
       }
+      await pending.resolve(operation);
     }, verifyPayment: true, rethrowError: true);
   }
 
@@ -542,31 +566,20 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         .toRadixString(16).padLeft(2, '0')).join();
   }
 
-  Future<LocalPayrollRepository> _localPaymentLedger() async {
-    final identity = await PayrollLanIdentity.load();
-    final enrollment = PayrollLanEnrollment(identity);
-    Future<void> assertWriter() => enrollment.assertWriter(widget.businessId, _grant!);
-    await assertWriter();
-    final ledger = LocalPayrollRepository(
+  Future<LocalPayrollRepository> _localPaymentLedger({String? operation}) async {
+    _assertOwner();
+    final connection = await OwnerPayrollConnections.open(context, widget.businessId, _grant!);
+    final proof = await connection.acquire(_grant!, operation ?? _operationId());
+    return LocalPayrollRepository(
       localDatabase, business: widget.businessId, owner: true,
-      deviceId: identity.deviceId, assertOwnerGrant: _assertOwner,
-      assertLanWriter: assertWriter,
+      deviceId: connection.lease.identity.deviceId, assertOwnerGrant: _assertOwner,
+      ownerProof: proof,
     );
-    await ledger.bindPaymentAuthority(
-      writerDeviceId: identity.deviceId, assertVerifiedPairing: _assertOwner,
-    );
-    return ledger;
   }
 
   Future<PayrollLanWorkflow> _paymentWorkflow(String employee) async {
-    final workflow = await _workflow(employee);
-    final enrollment = PayrollLanEnrollment(await PayrollLanIdentity.load());
-    await enrollment.assertWriter(widget.businessId, _grant!);
-    await workflow.repository.bindPaymentAuthority(
-      writerDeviceId: enrollment.identity.deviceId,
-      assertVerifiedPairing: _assertOwner,
-    );
-    return workflow;
+    final ledger = await _localPaymentLedger();
+    return _workflow(employee, ownerProof: ledger.ownerProof);
   }
 
   Future<void> _saveOpening() async {
@@ -654,13 +667,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
           },
         ),
       if (_grant != null)
-        Expanded(child: PayrollHistoryPanel(
-          key: ValueKey(_employee),
-          payments: _history,
-          unlocked: _historyUnlocked,
-          onOpenJob: (id) => _openRecordedWork(id, invoice: false),
-          onOpenInvoice: (id) => _openRecordedWork(id, invoice: true),
-        )),
+        Expanded(child: _reportsPanel()),
     ]),
   );
 
@@ -780,7 +787,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       setState(() => _error = 'Enter valid weekly amounts and rates.');
       return;
     }
-    await _run(() => _repository.saveWeeklyDefaults(
+    await _run(() async => (await _localPaymentLedger()).saveWeeklyDefaults(
       employee, (base * 100).round(), (hourly * 100).round(),
       (adjustment * 100).round(), _laborAdditionalToBase,
     ));
@@ -1434,17 +1441,27 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
           Expanded(child: TabBarView(children: [
             _tasksTab(),
             _payrollTab(),
-            PayrollHistoryPanel(
-              payments: _history,
-              unlocked: _historyUnlocked,
-              onOpenJob: (id) => _openRecordedWork(id, invoice: false),
-              onOpenInvoice: (id) => _openRecordedWork(id, invoice: true),
-            ),
+            _reportsPanel(),
             _taxesTab(),
           ])),
       ]),
     ),
   );
+
+  Widget _reportsPanel() => Column(children: [
+    if (_pendingPayments.isNotEmpty)
+      MaterialBanner(content: Text(
+        "${_pendingPayments.length} payment request(s) pending — not recorded as paid. "
+        "Reconnect over shop Wi-Fi, refresh and review unpaid work before retrying."),
+        actions: [TextButton(onPressed: () => showOwnerPayrollConnection(context, widget.businessId),
+          child: const Text("Connect"))]),
+    Expanded(child: PayrollHistoryPanel(
+              payments: _history,
+              unlocked: _historyUnlocked,
+              onOpenJob: (id) => _openRecordedWork(id, invoice: false),
+              onOpenInvoice: (id) => _openRecordedWork(id, invoice: true),
+            )),
+  ]);
 
   Future<void> _openEmployeeProfile(String id, DateTime week, int tab) async {
     final row = _employees.where((row) => row['id'] == id).firstOrNull;

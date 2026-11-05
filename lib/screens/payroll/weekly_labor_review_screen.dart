@@ -1,3 +1,4 @@
+import '../../services/payroll_owner_lease.dart';
 // ignore_for_file: prefer_interpolation_to_compose_strings
 import 'dart:async';
 
@@ -474,6 +475,8 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
             }
           }
         }
+      } on PayrollPending catch (error) {
+        if (mounted) setState(() => _error = error.message);
       } catch(error) {
         if(mounted) {setState(()=>
           _error='Payment not saved: '+error.toString());}

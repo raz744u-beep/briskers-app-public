@@ -41,7 +41,7 @@ class DeviceOwnerAuthorization with WidgetsBindingObserver {
         throw StateError('Set a screen lock or fingerprint on this Owner device first.');
       }
       return _deviceAuth.authenticate(
-        localizedReason: 'Unlock Owner access to delete Briskers records',
+        localizedReason: 'Unlock Owner access in Briskers',
         biometricOnly: false,
         persistAcrossBackgrounding: false,
       );

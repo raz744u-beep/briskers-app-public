@@ -7,8 +7,8 @@ import 'local_owner_authorization.dart';
 import 'payroll_lan_identity.dart';
 import 'payroll_lan_peer.dart';
 
-/// The signed distribution pins the shop's authorized writer. Local Owner
-/// approval activates that device, and pairing persists the same pin.
+/// Owner authentication approves mechanic links. Payment authority is supplied
+/// separately by the portable, securely fenced payroll ledger lease.
 class PayrollLanEnrollment {
   PayrollLanEnrollment(
     this.identity, {
@@ -20,17 +20,12 @@ class PayrollLanEnrollment {
         accessibility: KeychainAccessibility.unlocked_this_device,
       ),
     ),
-  }) : _storage = storage, _approvedWriter = approvedWriter;
+  }) : _storage = storage;
 
   final PayrollLanIdentity identity;
   final FlutterSecureStorage _storage;
-  final String _approvedWriter;
 
-  void _assertApproved(String writer) {
-    if (_approvedWriter.isEmpty || writer != _approvedWriter) {
-      throw StateError('This shop has no matching approved payroll writer.');
-    }
-  }
+
   static Future<void> _writes = Future<void>.value();
 
   String _key(String business, String entry) =>
@@ -42,30 +37,11 @@ class PayrollLanEnrollment {
     return result;
   }
 
-  Future<void> _pin(String business, String owner) async {
-    _assertApproved(owner);
-    final key = _key(business, 'writer');
-    final current = await _storage.read(key: key);
-    if (current != null && current != owner) {
-      throw StateError('This shop already has a different payroll device.');
-    }
-    if (current == null) await _storage.write(key: key, value: owner);
-  }
-
+  /// Kept for old callers; no device is designated and no phone is pinned.
   Future<void> designate(String business, LocalOwnerGrant grant) =>
-      _serialize(() async {
-        grant.assertValid(business, grant.actorId);
-        await _pin(business, identity.deviceId);
-        grant.assertValid(business, grant.actorId);
-      });
+      assertWriter(business, grant);
 
   Future<void> assertWriter(String business, LocalOwnerGrant grant) async {
-    _assertApproved(identity.deviceId);
-    grant.assertValid(business, grant.actorId);
-    if (await _storage.read(key: _key(business, 'writer')) !=
-        identity.deviceId) {
-      throw StateError('Only the designated Owner device can record payroll.');
-    }
     grant.assertValid(business, grant.actorId);
   }
 
@@ -128,7 +104,7 @@ class PayrollLanEnrollment {
     if (existing != null && existing != entry) {
       throw StateError('This device already has a payroll assignment.');
     }
-    await _pin(business, peer.ownerDevice);
+
     await _storage.write(key: key, value: entry);
     return peer;
   });
@@ -150,11 +126,10 @@ class PayrollLanEnrollment {
     code ??= await _storage.read(key: _key(business, key));
     if (code == null) return null;
     final peer = await _decode(code);
-    _assertApproved(peer.ownerDevice);
+
     final localDevice = key == 'mechanic'
         ? peer.mechanicDevice : peer.ownerDevice;
-    if (peer.business != business || localDevice != identity.deviceId ||
-        peer.ownerDevice != await _storage.read(key: _key(business, 'writer'))) {
+    if (peer.business != business || localDevice != identity.deviceId) {
       throw StateError('Payroll pairing does not match this installation.');
     }
     return peer;

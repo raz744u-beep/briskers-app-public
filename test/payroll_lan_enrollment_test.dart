@@ -16,7 +16,7 @@ class _UnusedEnrollmentStore implements OwnerEnrollmentStore {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('pairing pins the signed Owner and local mechanic account across reopen',
+  test('Owner authentication is device independent; mechanic links remain account scoped',
       () async {
     FlutterSecureStorage.setMockInitialValues({});
     const storage = FlutterSecureStorage();
@@ -35,7 +35,7 @@ void main() {
     PayrollLanEnrollment installation(PayrollLanIdentity identity) =>
         PayrollLanEnrollment(identity, storage: storage, approvedWriter: owner.deviceId);
     final enroll = installation(owner);
-    await expectLater(enroll.assertWriter('shop', grant), throwsStateError);
+    await enroll.assertWriter('shop', grant);
     await enroll.designate('shop', grant);
     final invitation = await enroll.invite(
       business: 'shop', employee: 'a', mechanicDevice: mechanic.deviceId,
@@ -49,13 +49,11 @@ void main() {
     await restored.assertWriter('shop', grant);
     expect((await restored.ownerPeer('shop', 'a'))?.mechanicDevice,
         mechanic.deviceId);
-    await expectLater(installation(stranger)
-        .designate('shop', grant), throwsStateError);
+    await installation(stranger).assertWriter('shop', grant);
 
     // Simulate a separate installation's initially empty secure store.
     FlutterSecureStorage.setMockInitialValues({});
-    await expectLater(installation(stranger).designate('shop', grant),
-        throwsStateError);
+    await installation(stranger).assertWriter('shop', grant);
     await expectLater(installation(stranger).accept(
       code: invitation, business: 'shop', verifiedOwnerDevice: owner.deviceId,
       actor: 'mechanic',
@@ -76,6 +74,8 @@ void main() {
     final reopened = installation(mechanic);
     expect((await reopened.mechanicPeer('shop', 'mechanic'))?.employee, 'a');
     await expectLater(reopened.mechanicPeer('shop', 'another'), throwsStateError);
-    await expectLater(reopened.designate('shop', grant), throwsStateError);
+    await expectLater(reopened.assertWriter('other-shop', grant), throwsStateError);
+    auth.lock();
+    await expectLater(reopened.assertWriter('shop', grant), throwsStateError);
   });
 }
