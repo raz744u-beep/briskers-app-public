@@ -11,6 +11,7 @@ trap 'rm -rf "$tmp"' EXIT
 case "$(basename "$baseline")" in
   Briskers-v0.10.9-b2565.apk) expected=d23e5d325db3e0470a07ea6b1d43973ea592c5f77246960da4d74d1d6d496342 ;;
   Briskers-v0.10.9-b2566.apk) expected=62cb4723999c8767a9af128828837d297d0add476c899f7505ebbdde58c174d9 ;;
+  Briskers-v0.10.9-b2567.apk) expected=e92e6d3884aac51d579550acbd0cd13713aa9d17381e5b327be6d7cb1eeee952 ;;
   *) echo "Unknown signed upgrade baseline" >&2; exit 1 ;;
 esac
 printf '%s  %s\n' "$expected" "$baseline" | sha256sum -c
