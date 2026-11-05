@@ -8,6 +8,7 @@ import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_document_repository.dart';
 import 'package:briskers_app/services/local_job_repository.dart';
 import 'package:briskers_app/services/local_payroll_repository.dart';
+import 'package:briskers_app/services/local_invoice_task_store.dart';
 import 'package:briskers_app/services/offline_document_draft_service.dart';
 import 'package:briskers_app/services/offline_invoice_payment_ledger.dart';
 
@@ -87,6 +88,12 @@ void main() {
         adjustmentReason: '', repayment: 0, confirmedNet: 4000,
       );
 
+      final remoteProof = await _ConvertedInvoiceApi().documentDetail('shop', 'server-invoice');
+      await expectLater(LocalInvoiceTaskStore(db).remapDraft('shop', invoiceId, initial, {
+        ...remoteProof, 'lines': [{..._line, 'description': 'Unverified replacement'}],
+      }), throwsStateError);
+      expect((await payroll.tasks()).single['invoice_id'], invoiceId);
+      expect((await payroll.work()).single['pay_status'], 'Paid');
       await drafts.flush('shop');
 
       await payroll.refreshInvoiceTasks();

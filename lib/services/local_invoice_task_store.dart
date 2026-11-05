@@ -100,10 +100,18 @@ class LocalInvoiceTaskStore {
       variables: [Variable(business), Variable(localId)],
     ).get();
     if (sources.isEmpty) { return; }
+    final replay = await db.customSelect(
+      "SELECT payload_json FROM sync_outbox WHERE business_id=? AND entity_id=? "
+      "AND entity_type='document_draft_create' AND state IN ('pending','inflight')",
+      variables: [Variable(business), Variable(localId)],
+    ).get();
+    if (!localId.startsWith('local-invoice-') || replay.length != 1) {
+      throw StateError('Payroll identity replacement requires the pending invoice draft replay.');
+    }
     final invoice = remote['id'];
     final job = remote['job_id'];
     if (local['id'] != localId || local['kind'] != 'invoice' ||
-        remote['kind'] != 'invoice' || invoice is! String || invoice.isEmpty ||
+        remote['kind'] != 'invoice' || invoice is! String || invoice.isEmpty || invoice.startsWith('local-') ||
         job is! String || job.isEmpty ||
         (remote['business_id'] != null && remote['business_id'] != business)) {
       throw StateError('Payroll draft replay has no verified invoice identity.');
