@@ -1,12 +1,11 @@
 import 'dart:io';
 
+import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/services/payroll_lan_delivery.dart';
+import 'package:briskers_app/services/payroll_lan_identity.dart';
+import 'package:briskers_app/services/payroll_lan_peer.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import '../lib/local/briskers_local_database.dart';
-import '../lib/services/payroll_lan_delivery.dart';
-import '../lib/services/payroll_lan_identity.dart';
-import '../lib/services/payroll_lan_peer.dart';
 
 void main() {
   test('LAN delivery survives receiver commit, lost ack and both restarts',
