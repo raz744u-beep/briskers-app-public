@@ -247,6 +247,11 @@ void main() {
     final otherShop = LocalPayrollRepository(db, business: 'shop-b', owner: true);
     expect(await otherShop.history('employee-a'), isEmpty);
 
+    await payroll.recordOpeningAdvance('employee-b', 2500);
+    expect(await payroll.openingAdvance('employee-b'), 2500);
+    await expectLater(payroll.recordOpeningAdvance('employee-b', 2600), throwsStateError);
+    await payroll.saveWeeklyDefaults('employee-b', 80000, 1500, 0, true);
+
     await payroll.addShopTask('employee-a', 'Organize stock', 'Inventory');
     final shopTask = (await payroll.shopTasks('employee-a')).single;
     expect(await payroll.shopTasks('employee-b'), isEmpty);
@@ -265,6 +270,8 @@ void main() {
     await repay(1200);
     await expectLater(repay(1000), throwsStateError);
     expect(await payroll.advance('employee-a'), 1800);
+    expect(await payroll.advance('employee-b'), 2500);
+    expect((await payroll.weeklyDefaults('employee-b'))?['base_cents'], 80000);
     expect(await payroll.repaymentHistory('employee-a'), hasLength(1));
     expect((await payroll.shopTasks('employee-a')).single['status'], 'done');
 

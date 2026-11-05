@@ -67,6 +67,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   List<Map<String, dynamic>> _generalTasks = [];
   bool _showGeneralTasks = false;
   bool _advanceExpanded = false;
+  bool _editingOpening = false;
+  int? _openingAdvance;
+  final _opening = TextEditingController();
+  final _weeklyBasePreview = TextEditingController(text: '0.00');
+  final _hourlySupplementPreview = TextEditingController(text: '0.00');
+  final _approvedSupplementHours = TextEditingController(text: '0.00');
+  final _weeklyAdjustmentPreview = TextEditingController(text: '0.00');
+  bool _laborAdditionalToBase = false;
+  bool _weeklyDefaultsLoaded = false;
   final _repayment = TextEditingController();
   final _repaymentNote = TextEditingController();
   DateTime _repaymentDate = DateTime.now();
@@ -98,6 +107,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
           _history = [];
           _advanceBalance = null;
           _repayments = [];
+          _openingAdvance = null;
+          _editingOpening = false;
+          _weeklyDefaultsLoaded = false;
+          _weeklyBasePreview.clear();
+          _hourlySupplementPreview.clear();
+          _approvedSupplementHours.clear();
+          _weeklyAdjustmentPreview.clear();
+          _laborAdditionalToBase = false;
           _generalTasks = [];
         });
       }
@@ -108,6 +125,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   void dispose() {
     _lockCheck?.cancel();
     _historyUnlocked.dispose();
+    _opening.dispose();
+    _weeklyBasePreview.dispose();
+    _hourlySupplementPreview.dispose();
+    _approvedSupplementHours.dispose();
+    _weeklyAdjustmentPreview.dispose();
     _repayment.dispose();
     _repaymentNote.dispose();
     super.dispose();
@@ -181,6 +203,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     final advance = employee == null || _jobMode ? null : await repository.advance(employee);
     final repayments = employee == null || widget.employeeId == null || widget.reportsOnly
         ? <Map<String, dynamic>>[] : await repository.repaymentHistory(employee);
+    final opening = employee == null || widget.employeeId == null || widget.reportsOnly
+        ? null : await repository.openingAdvance(employee);
+    final weeklyDefaults = employee == null || widget.employeeId == null ||
+        widget.reportsOnly || _weeklyDefaultsLoaded
+        ? null : await repository.weeklyDefaults(employee);
     final generalTasks = employee == null || widget.employeeId == null || widget.reportsOnly
         ? <Map<String, dynamic>>[] : await repository.shopTasks(employee);
     _assertOwner();
@@ -193,7 +220,19 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       _history = history;
       _advanceBalance = advance;
       _repayments = repayments;
+      _openingAdvance = opening;
+      if (!_editingOpening) _opening.text = opening == null ? '' : (opening / 100).toStringAsFixed(2);
       _generalTasks = generalTasks;
+      if (!_weeklyDefaultsLoaded) {
+        _weeklyDefaultsLoaded = true;
+        String amount(String key) =>
+            ((weeklyDefaults?[key] as int? ?? 0) / 100).toStringAsFixed(2);
+        _weeklyBasePreview.text = amount('base_cents');
+        _hourlySupplementPreview.text = amount('hourly_cents');
+        _approvedSupplementHours.text = '0.00';
+        _weeklyAdjustmentPreview.text = amount('adjustment_cents');
+        _laborAdditionalToBase = weeklyDefaults?['add_labor'] == 1;
+      }
     });
   }
 
@@ -348,6 +387,21 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       assertVerifiedPairing: _assertOwner,
     );
     return workflow;
+  }
+
+  Future<void> _saveOpening() async {
+    final employee = _employee;
+    final amount = double.tryParse(_opening.text.trim());
+    if (employee == null || amount == null || !amount.isFinite ||
+        amount <= 0 || amount > 1000000) {
+      setState(() => _error = 'Enter a positive opening amount.');
+      return;
+    }
+    await _run(() async {
+      final workflow = await _paymentWorkflow(employee);
+      await workflow.repository.recordOpeningAdvance(employee, (amount * 100).round());
+      if (mounted) setState(() => _editingOpening = false);
+    }, verifyPayment: true);
   }
 
   int? get _repaymentCents {
@@ -555,6 +609,121 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     );
   }
 
+  void _selectAmount(TextEditingController controller) {
+    controller.selection = TextSelection(baseOffset: 0, extentOffset: controller.text.length);
+  }
+
+  Future<void> _saveFlexiblePaySettings() async {
+    final employee = _employee;
+    final base = double.tryParse(_weeklyBasePreview.text.trim());
+    final hourly = double.tryParse(_hourlySupplementPreview.text.trim());
+    final adjustment = double.tryParse(_weeklyAdjustmentPreview.text.trim());
+    if (employee == null || base == null || hourly == null || adjustment == null ||
+        !base.isFinite || !hourly.isFinite || !adjustment.isFinite ||
+        base < 0 || base > 1000000 || hourly < 0 || hourly > 100000 ||
+        adjustment.abs() > 1000000) {
+      setState(() => _error = 'Enter valid weekly amounts and rates.');
+      return;
+    }
+    await _run(() => _repository.saveWeeklyDefaults(
+      employee, (base * 100).round(), (hourly * 100).round(),
+      (adjustment * 100).round(), _laborAdditionalToBase,
+    ));
+  }
+
+  Widget _flexibleWeeklyPreview(double trackedHours) {
+    double value(TextEditingController input) =>
+      double.tryParse(input.text.trim()) ?? 0;
+    final base = value(_weeklyBasePreview);
+    final rate = value(_hourlySupplementPreview);
+    final adjustment = value(_weeklyAdjustmentPreview);
+    final approvedHours = double.tryParse(
+      _approvedSupplementHours.text.trim());
+    // Never automatically add historical or previously paid hours.
+    // A preview is invalid until the Owner enters safe supplemental hours.
+    final validHours = approvedHours != null &&
+      approvedHours.isFinite && approvedHours >= 0 &&
+      approvedHours <= 168;
+    final validMoney = [base, rate, adjustment].every((n) => n.isFinite) &&
+      base >= 0 && rate >= 0 &&
+      base <= 1000000 && rate <= 100000 &&
+      adjustment.abs() <= 1000000;
+    final supplement = _laborAdditionalToBase && validHours
+      ? approvedHours * rate : 0.0;
+    final total = base + supplement + adjustment;
+    final validPreview = validHours && validMoney &&
+      total.isFinite && total >= 0;
+    Widget field(String label, TextEditingController controller) =>
+      TextField(
+        controller: controller,
+        keyboardType: const TextInputType.numberWithOptions(
+          signed: true, decimal: true),
+        onTap: () => _selectAmount(controller),
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(labelText: label,
+          prefixText: r'$ ', isDense: true,
+          border: const OutlineInputBorder()),
+      );
+    return _panel(Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('Flexible weekly pay',
+          style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 5),
+        const Text('Owner-adjustable estimate only. No payment is created.',
+          style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+        const SizedBox(height: 10),
+        field('Weekly base', _weeklyBasePreview),
+        const SizedBox(height: 8),
+        field('Hourly supplement rate', _hourlySupplementPreview),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _approvedSupplementHours,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          onTap: () => _selectAmount(_approvedSupplementHours),
+          onChanged: (_) => setState(() {}),
+          decoration: const InputDecoration(
+            labelText: 'Approved supplemental hours this week',
+            isDense: true, border: OutlineInputBorder()),
+        ),
+        const SizedBox(height: 8),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Add tracked labor to base'),
+          subtitle: Text(_laborAdditionalToBase
+            ? '${validHours ? approvedHours.toStringAsFixed(2) : 'Invalid'} approved hours × rate'
+            : 'Labor included in base · no double counting'),
+          value: _laborAdditionalToBase,
+          onChanged: (v) => setState(() => _laborAdditionalToBase = v),
+        ),
+        Text('Tracked task allocations (all weeks): '
+          '${trackedHours.toStringAsFixed(2)} hrs · Reference only. '
+          'Previously paid hours must not be paid again.',
+          style: const TextStyle(fontSize: 11,
+            color: Color(0xFF64748B))),
+        const SizedBox(height: 8),
+        field('Other weekly adjustment (+/-)', _weeklyAdjustmentPreview),
+        const SizedBox(height: 10),
+        Text(validPreview
+            ? 'Preview gross: ${_currency.format(total)}'
+            : 'Preview unavailable · check amounts and hours',
+          style: const TextStyle(fontWeight: FontWeight.w800,
+            fontSize: 16)),
+        const SizedBox(height: 10),
+        FilledButton(
+          onPressed: _busy || !validPreview ? null : _saveFlexiblePaySettings,
+          child: const Text('Save weekly defaults')),
+        const Text('Approved hours are a temporary preview and are not '
+          'saved as payable coverage. Review actual unpaid labor before '
+          'verifying any payment.',
+          style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+        const SizedBox(height: 8),
+        const Text('Weekly settlement is unavailable in this restoration draft.',
+          style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+      ],
+    ));
+  }
+
   Widget _payrollTab() {
     final period = _periodBounds();
     final current = _projectPeriod(period.from, period.until);
@@ -649,6 +818,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                 color: Color(0xFFC76023))),
           ],
         )),
+        if (_work.every((row) => (row['rate_cents'] as int) <= 0))
+          _flexibleWeeklyPreview(_work.fold<double>(
+            0, (sum, row) => sum + (row['actual_minutes'] as int) / 60,
+          )),
         _advancePanel(),
       ],
     );
@@ -695,6 +868,34 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         ),
         if (_advanceExpanded) ...[
           const Divider(),
+          Row(children: [
+            Expanded(child: TextField(
+              controller: _opening,
+              onTapAlwaysCalled: true,
+              onTap: () => _opening.selection = TextSelection(
+                baseOffset: 0, extentOffset: _opening.text.length,
+              ),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              readOnly: !_editingOpening,
+              decoration: const InputDecoration(
+                labelText: 'Original amount owed',
+                prefixText: r'$ ', border: OutlineInputBorder()),
+            )),
+            const SizedBox(width: 8),
+            if (_editingOpening)
+              IconButton(
+                tooltip: 'Save opening balance',
+                onPressed: _busy ? null : _saveOpening,
+                icon: const Icon(Icons.save_outlined))
+            else
+              IconButton(
+                tooltip: 'Edit opening balance',
+                onPressed: _busy || _openingAdvance != null || _history.isNotEmpty ||
+                    _repayments.isNotEmpty || (_advanceBalance ?? 0) != 0
+                  ? null : () => setState(() => _editingOpening = true),
+                icon: const Icon(Icons.edit_outlined)),
+          ]),
+          const SizedBox(height: 10),
           Text('Remaining balance: '
             '${_moneyNullable(_advanceBalance)}',
             style: const TextStyle(
@@ -788,7 +989,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         child:SingleChildScrollView(child:Column(
           mainAxisSize:MainAxisSize.min,
           crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-          Text('New General Task · '+(widget.employeeName ?? 'Employee'),
+          Text('New General Task · ${widget.employeeName ?? 'Employee'}',
             style:const TextStyle(fontSize:19,fontWeight:FontWeight.w800)),
           const SizedBox(height:12),
           TextField(controller:description,minLines:1,maxLines:3,
@@ -853,7 +1054,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         final rows = _generalTasks;
         return ListView(padding:const EdgeInsets.all(12),children:[
           Row(children:[
-            Expanded(child:Text('Assigned General Tasks · '+rows.length.toString(),
+            Expanded(child:Text('Assigned General Tasks · ${rows.length}',
               style:const TextStyle(fontWeight:FontWeight.w700))),
             TextButton.icon(onPressed:_createEmployeeGeneralTask,
               icon:const Icon(Icons.add),label:const Text('New Task')),
@@ -864,9 +1065,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
             Card(child:ListTile(
               title:Text(task['description']?.toString()??'',
                 style:const TextStyle(fontWeight:FontWeight.w700)),
-              subtitle:Text((task['category']?.toString()??'General')+
-                ' · '+(task['status']=='done'?'Done':
-                  task['status']=='in_progress'?'In Progress':'Not Started')),
+              subtitle: Text('${task['category'] ?? 'General'} · ${switch (task['status']) {
+                'done' => 'Completed',
+                'in_progress' => 'In Progress',
+                _ => 'Planned',
+              }}'),
               trailing:PopupMenuButton<String>(
                 tooltip:'Update task progress',
                 onSelected:(status)=>_updateEmployeeGeneralTask(
@@ -974,7 +1177,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
               for (final row in _work)
                 ListTile(
                   title: Text(row['description'].toString()),
-                  subtitle: Text('${row['employee_name']} · ${row['state']} · ${row['actual_minutes']} min'),
+                  subtitle: Text('${row['employee_name']} · ${row['state']} · '
+                    '${row['actual_minutes']} min · ${row['paid'] == 1 ? 'Paid' : 'Unpaid'}'),
 
                 ),
             ],

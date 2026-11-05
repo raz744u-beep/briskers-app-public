@@ -120,7 +120,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   }
 
   static double _available(Map<String, dynamic> task) =>
-      task['paid'] == 1 ? 0 : _assigned(task);
+      task['paid'] == 1 || task['state'] != 'Done' ? 0 : _assigned(task);
 
   double get _totalHours {
     final ids = _eligible.map(_id).toSet();
@@ -486,6 +486,9 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   @override
   Widget build(BuildContext context) {
     final tasks = _eligible.where((task) => _available(task) > 0.00001).toList();
+    final pending = _current
+        ? widget.tasks.where((task) => task['state'] != 'Done').toList()
+        : const <Map<String, dynamic>>[];
     // A zero-hour or unassigned task is not proof of a payment.
     final paidTaskCount = _eligible.where((task) =>
       _available(task) <= 0.00001 && _paidHours(task) > 0
@@ -577,7 +580,12 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                         'See Reports → Payroll History.'
                       : 'No unpaid labor for this week.',
                     style: const TextStyle(color: Color(0xFF64748B)))),
-              for(final task in tasks)
+              if (pending.isNotEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Text('Assigned work', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              for (final task in [...pending, ...tasks])
                 Card(
                   key:ValueKey('payroll-task-'+_id(task)),
                   color:const Color(0xFFF0F6F5),
@@ -610,7 +618,9 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                                   ? TextOverflow.visible:TextOverflow.ellipsis,
                                 style:const TextStyle(fontWeight:FontWeight.w700)),
                               Text((task['job_number']?.toString() ?? 'Job')+' · '+_statusLabel(task)+' · '+
-                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                (task['state'] == 'Done'
+                                  ? _available(task).toStringAsFixed(2) + ' unpaid hrs'
+                                  : _assigned(task).toStringAsFixed(2) + ' actual hrs'),
                                 style:const TextStyle(fontSize:11,
                                   color:Color(0xFF64748B))),
                               if (_paidHours(task) > 0)
@@ -633,7 +643,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                           ),
                         ),
                       )),
-                      Text((_selected[_id(task)]??_available(task))
+                      Text((_selected[_id(task)] ?? _assigned(task))
                         .toStringAsFixed(2)+'h',
                         style:const TextStyle(fontWeight:FontWeight.bold)),
                       const SizedBox(width:6),
@@ -703,7 +713,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
             const SizedBox(height: 9),
             Row(children: [
               Expanded(child: OutlinedButton(
-                onPressed: () => widget.onCancel == null
+                onPressed: _saving ? null : () => widget.onCancel == null
                   ? Navigator.pop(context, false)
                   : widget.onCancel!(),
                 child: const Text('Cancel'))),

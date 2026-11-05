@@ -54,6 +54,7 @@ class LocalPayrollRepository {
     await LocalMechanicWorkCreditRepository(database: db).prepare();
     for (final sql in [
       '''CREATE TABLE IF NOT EXISTS regular_payroll_payment_authority (business_id TEXT PRIMARY KEY, device_id TEXT NOT NULL)''',
+      '''CREATE TABLE IF NOT EXISTS regular_payroll_weekly_defaults (business_id TEXT NOT NULL, employee_id TEXT NOT NULL, base_cents INTEGER NOT NULL, hourly_cents INTEGER NOT NULL, adjustment_cents INTEGER NOT NULL, add_labor INTEGER NOT NULL, PRIMARY KEY(business_id,employee_id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_shop_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, business_id TEXT NOT NULL, employee_id TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','in_progress','done')))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_jobs (business_id TEXT NOT NULL, id TEXT NOT NULL, label TEXT NOT NULL, PRIMARY KEY(business_id,id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_tasks (business_id TEXT NOT NULL, id TEXT NOT NULL, job_id TEXT NOT NULL, labor_id TEXT NOT NULL, description TEXT NOT NULL, planned INTEGER NOT NULL CHECK(planned>=0), PRIMARY KEY(business_id,id), UNIQUE(business_id,job_id,labor_id))''',
@@ -450,6 +451,39 @@ class LocalPayrollRepository {
     );
   }
 
+  Future<Map<String, dynamic>?> weeklyDefaults(String employee) async {
+    _authorize();
+    await prepare();
+    final rows = await _read(
+      'SELECT base_cents,hourly_cents,adjustment_cents,add_labor '
+      'FROM regular_payroll_weekly_defaults WHERE business_id=? AND employee_id=?',
+      [business, employee],
+    );
+    _authorize();
+    return rows.firstOrNull;
+  }
+
+  Future<void> saveWeeklyDefaults(
+    String employee, int base, int hourly, int adjustment, bool addLabor,
+  ) async {
+    _authorize();
+    if (employee.isEmpty || base < 0 || hourly < 0) {
+      throw ArgumentError('Enter valid weekly amounts.');
+    }
+    await prepare();
+    await db.transaction(() async {
+      _authorize();
+      await db.customStatement(
+        'INSERT INTO regular_payroll_weekly_defaults VALUES(?,?,?,?,?,?) '
+        'ON CONFLICT(business_id,employee_id) DO UPDATE SET '
+        'base_cents=excluded.base_cents,hourly_cents=excluded.hourly_cents,'
+        'adjustment_cents=excluded.adjustment_cents,add_labor=excluded.add_labor',
+        [business, employee, base, hourly, adjustment, addLabor ? 1 : 0],
+      );
+      _authorize();
+    });
+  }
+
   Future<List<Map<String, dynamic>>> shopTasks(String employee) async {
     _authorize();
     await prepare();
@@ -527,6 +561,46 @@ class LocalPayrollRepository {
         ],
       );
     });
+  }
+
+  Future<void> recordOpeningAdvance(String employee, int cents) async {
+    _authorize();
+    if (cents <= 0) throw ArgumentError('Enter a positive opening amount.');
+    await prepare();
+    await db.transaction(() async {
+      await _assertPaymentAuthority();
+      if (await advance(employee) != 0 ||
+          (await history(employee)).isNotEmpty ||
+          (await repaymentHistory(employee)).isNotEmpty) {
+        throw StateError('An opening amount cannot replace existing payroll history.');
+      }
+      await db.customStatement(
+        'INSERT INTO regular_payroll_advances VALUES(?,?,?) '
+        'ON CONFLICT(business_id,employee_id) DO UPDATE SET balance=excluded.balance',
+        [business, employee, cents],
+      );
+      await db.customStatement(
+        "INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) "
+        "VALUES(?,?,'opening_advance',?)",
+        [business, 'opening-advance-$employee',
+          jsonEncode({'employee': employee, 'cents': cents})],
+      );
+      _authorize();
+    });
+  }
+
+  Future<int?> openingAdvance(String employee) async {
+    _authorize();
+    await prepare();
+    final rows = await _read(
+      "SELECT payload FROM regular_payroll_audit WHERE business_id=? "
+      "AND event='opening_advance' AND operation_id=?",
+      [business, 'opening-advance-$employee'],
+    );
+    _authorize();
+    final row = rows.firstOrNull;
+    return row == null ? null :
+        (jsonDecode(row['payload'] as String) as Map)['cents'] as int;
   }
 
   Future<void> recordRepayment({
