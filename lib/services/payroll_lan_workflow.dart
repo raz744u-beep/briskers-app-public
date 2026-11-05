@@ -121,6 +121,7 @@ class PayrollLanWorkflow {
     required List<Map<String, dynamic>> selected,
     required int net,
     required String reason,
+    int base = 0,
     int adjustment = 0,
     int repayment = 0,
   }) async {
@@ -128,7 +129,7 @@ class PayrollLanWorkflow {
     await delivery.prepare();
     return repository.verify(
       operation: operation, employee: peer.employee, week: week, date: date,
-      method: method, selected: selected, base: 0, hourlyAdjustment: adjustment,
+      method: method, selected: selected, base: base, hourlyAdjustment: adjustment,
       adjustmentReason: reason, repayment: repayment, confirmedNet: net,
       beforeCommit: () => delivery.enqueue(
         operationId: operation, kind: PayrollLanOperation.payment,

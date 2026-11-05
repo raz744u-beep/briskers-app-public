@@ -103,6 +103,7 @@ class _EmployeesSettingsScreenState
           employeeId: employeeId,
           employeeName: employee?['nickname']?.toString() ?? name,
           employeeRole: position,
+          employeePayType: employee?['payment_type']?.toString(),
           employeeActive: employee?['active'] != false,
           openEmployeeDetails: () => _open(employee, true),
         )),

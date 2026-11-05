@@ -451,6 +451,27 @@ class LocalPayrollRepository {
     );
   }
 
+  Future<void> enableWeeklyBase(String employee, String name) async {
+    _authorize();
+    if (employee.isEmpty || name.trim().isEmpty) {
+      throw ArgumentError('Employee identity is required.');
+    }
+    await prepare();
+    await db.transaction(() async {
+      await _assertPaymentAuthority();
+      await db.customStatement(
+        'INSERT INTO regular_payroll_employees VALUES(?,?,?,0,1) '
+        'ON CONFLICT(business_id,id) DO UPDATE SET base_enabled=1',
+        [business, employee, name],
+      );
+      await db.customStatement(
+        'INSERT OR IGNORE INTO regular_payroll_advances VALUES(?,?,0)',
+        [business, employee],
+      );
+      _authorize();
+    });
+  }
+
   Future<Map<String, dynamic>?> weeklyDefaults(String employee) async {
     _authorize();
     await prepare();
@@ -897,6 +918,19 @@ class LocalPayrollRepository {
           { throw StateError('Conflicting replay'); }
         return false;
       }
+      final weeklyPayments = await _read(
+        'SELECT operation_id FROM regular_payroll_payments '
+        'WHERE business_id=? AND employee_id=? AND week=?',
+        [business, employee, week],
+      );
+      final recordedBase = await _read(
+        'SELECT operation_id FROM regular_payroll_paid_base '
+        'WHERE business_id=? AND employee_id=? AND week=?',
+        [business, employee, week],
+      );
+      if (recordedBase.isNotEmpty || (base > 0 && weeklyPayments.isNotEmpty)) {
+        throw StateError('This employee already has a settlement for that week.');
+      }
       final staff = await _read(
         'SELECT * FROM regular_payroll_employees WHERE business_id=? AND id=?',
         [business, employee],
@@ -904,6 +938,16 @@ class LocalPayrollRepository {
       if (staff.length != 1 || (base > 0 && staff.single['base_enabled'] != 1))
         { throw StateError('Base not allowed for employee'); }
       final current = await work(employee: employee);
+      if (base > 0 && selected.isEmpty) {
+        final nextWeek = DateTime.parse(week).add(const Duration(days: 7));
+        final unpaidWork = current.any((row) {
+          final date = DateTime.tryParse(row['completed_date']?.toString() ?? '');
+          return row['paid'] != 1 && (date == null || date.isBefore(nextWeek));
+        });
+        if (unpaidWork) {
+          throw StateError('Link this employee’s outstanding labor credits before recording weekly pay.');
+        }
+      }
       var gross = base + hourlyAdjustment;
       final snapshots = <String>[];
       for (final p in picked) {

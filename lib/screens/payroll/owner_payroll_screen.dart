@@ -35,6 +35,7 @@ class OwnerPayrollScreen extends StatefulWidget {
     this.employeeId,
     this.employeeName,
     this.employeeRole,
+    this.employeePayType,
     this.employeeActive = true,
     this.openEmployeeDetails,
     this.globalTasks = false,
@@ -46,6 +47,7 @@ class OwnerPayrollScreen extends StatefulWidget {
   final String? employeeId;
   final String? employeeName;
   final String? employeeRole;
+  final String? employeePayType;
   final bool employeeActive;
   final VoidCallback? openEmployeeDetails;
   final bool globalTasks;
@@ -80,6 +82,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   final _weeklyAdjustmentPreview = TextEditingController(text: '0.00');
   bool _laborAdditionalToBase = false;
   bool _weeklyDefaultsLoaded = false;
+  bool _settlingWeekly = false;
   final _repayment = TextEditingController();
   final _repaymentNote = TextEditingController();
   DateTime _repaymentDate = DateTime.now();
@@ -644,6 +647,146 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     ));
   }
 
+  Future<void> _finalizeFlexibleWeekly() async {
+    final employee = _employee;
+    if (_settlingWeekly || employee == null) return;
+    setState(() => _settlingWeekly = true);
+    try {
+      await _confirmFlexibleWeekly(employee);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _settlingWeekly = false);
+    }
+  }
+
+  Future<void> _confirmFlexibleWeekly(String employee) async {
+    final base = double.tryParse(_weeklyBasePreview.text.trim());
+    final rate = double.tryParse(_hourlySupplementPreview.text.trim());
+    final adjustment = double.tryParse(_weeklyAdjustmentPreview.text.trim());
+    final hours = double.tryParse(_approvedSupplementHours.text.trim());
+    if (base == null || rate == null || adjustment == null ||
+        hours == null || ![base, rate, adjustment, hours]
+          .every((v) => v.isFinite) ||
+        base <= 0 || rate < 0 || hours < 0 || hours > 168 ||
+        base > 1000000 || rate > 100000 ||
+        adjustment.abs() > 1000000) {
+      throw ArgumentError('Enter valid weekly pay and approved hours.');
+    }
+    final addLabor = _laborAdditionalToBase;
+    final gross = base + adjustment + (addLabor ? hours * rate : 0);
+    if (!gross.isFinite || gross <= 0 || gross > 1000000) {
+      throw ArgumentError('Weekly gross must be greater than zero.');
+    }
+    // Use the selected payroll week; never silently pay every tracked hour.
+    final paymentWeek = _week;
+    final monday = DateTime(paymentWeek.year, paymentWeek.month,
+      paymentWeek.day - paymentWeek.weekday + 1);
+    final weekKey = _date(monday);
+    if (monday.isAfter(DateTime.now())) {
+      throw StateError('Choose a current or past payroll week.');
+    }
+    final method = await showDialog<String>(
+      context: context, builder: (dialogContext) => SimpleDialog(
+        title: const Text('Payment method'),
+        children: [
+          for (final choice in const ['Zelle', 'Cash', 'Check', 'Other'])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialogContext, choice),
+              child: Text(choice.toUpperCase()),
+            ),
+        ],
+      ));
+    if (!mounted || method == null) return;
+    // Week identity is frozen before any confirmation dialog appears.
+    final grossCents = (gross * 100).round();
+    final advance = await _repository.advance(employee);
+    if (!mounted) return;
+    final deductionInput = TextEditingController(text: '0.00');
+    final deduction = await showDialog<int>(
+      context: context, builder: (dialogContext) => AlertDialog(
+        title: const Text('Advance deduction'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Remaining advance: ${_money(advance)}'),
+          const SizedBox(height: 10),
+          TextField(
+            controller: deductionInput,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Deduct from this payment',
+              prefixText: r'$ ', border: OutlineInputBorder()),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel')),
+          FilledButton(onPressed: () {
+            final amount = double.tryParse(deductionInput.text.trim());
+            if (amount == null || !amount.isFinite || amount < 0 ||
+                (amount * 100).round() > advance ||
+                (amount * 100).round() > grossCents) {
+              ScaffoldMessenger.of(dialogContext).showSnackBar(
+                const SnackBar(content: Text('Invalid advance deduction')));
+              return;
+            }
+            Navigator.pop(dialogContext, (amount * 100).round());
+          }, child: const Text('Continue')),
+        ],
+      ));
+    deductionInput.dispose();
+    if (!mounted || deduction == null) return;
+    final paymentDate = await showDatePicker(
+      context: context, initialDate: DateTime.now(),
+      firstDate: DateTime(2020), lastDate: DateTime.now(),
+    );
+    if (paymentDate == null || !mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context, builder: (dialogContext) => AlertDialog(
+        title: const Text('Finalize weekly pay'),
+        content: Text('Employee: ${widget.employeeName ?? 'Employee'}\n'
+          'Week: $weekKey\n'
+          'Gross: ${_currency.format(gross)}\n'
+          'Approved supplemental hours: ${hours.toStringAsFixed(2)}\n'
+          'Method: $method · ${_date(paymentDate)}\n'
+          'Advance deduction: ${_money(deduction)}\n'
+          'Net payment: ${_money(grossCents - deduction)}\n\n'
+          'This records the confirmed weekly amount and advance deduction.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Confirm Payment')),
+        ],
+      ));
+    if (!mounted || confirmed != true) return;
+    final name = widget.employeeName ?? 'Employee';
+    final baseCents = (base * 100).round();
+    await _run(() async {
+      final identity = await PayrollLanIdentity.load();
+      final enrollment = PayrollLanEnrollment(identity);
+      Future<void> assertWriter() => enrollment.assertWriter(widget.businessId, _grant!);
+      await assertWriter();
+      final ledger = LocalPayrollRepository(
+        localDatabase, business: widget.businessId, owner: true,
+        deviceId: identity.deviceId, assertOwnerGrant: _assertOwner,
+        assertLanWriter: assertWriter,
+      );
+      await ledger.bindPaymentAuthority(
+        writerDeviceId: identity.deviceId, assertVerifiedPairing: _assertOwner,
+      );
+      await ledger.enableWeeklyBase(employee, name);
+      await ledger.verify(
+        operation: _operationId(), employee: employee, week: weekKey,
+        date: _date(paymentDate), method: method, selected: const [],
+        base: baseCents, hourlyAdjustment: grossCents - baseCents,
+        adjustmentReason: 'Weekly base. Supplemental hours: ${hours.toStringAsFixed(2)}. '
+            'Rate: ${_currency.format(rate)}. Added to base: $addLabor. '
+            'Other adjustment: ${_currency.format(adjustment)}.',
+        repayment: deduction, confirmedNet: grossCents - deduction,
+      );
+    }, verifyPayment: true);
+  }
+
   Widget _flexibleWeeklyPreview(double trackedHours) {
     double value(TextEditingController input) =>
       double.tryParse(input.text.trim()) ?? 0;
@@ -731,8 +874,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
           'verifying any payment.',
           style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
         const SizedBox(height: 8),
-        const Text('Weekly settlement is unavailable in this restoration draft.',
-          style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+        OutlinedButton.icon(
+          onPressed: _busy || _settlingWeekly || !validPreview || base <= 0 || total <= 0
+            ? null : _finalizeFlexibleWeekly,
+          icon: const Icon(Icons.verified_outlined),
+          label: const Text('Verify Weekly Payment'),
+        ),
       ],
     ));
   }
@@ -831,7 +978,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                 color: Color(0xFFC76023))),
           ],
         )),
-        if (_work.every((row) => (row['rate_cents'] as int) <= 0))
+        if (['fixed_weekly', 'flexible_weekly'].contains(widget.employeePayType) ||
+            _work.every((row) => (row['rate_cents'] as int) <= 0))
           _flexibleWeeklyPreview(_work.fold<double>(
             0, (sum, row) => sum + (row['actual_minutes'] as int) / 60,
           )),

@@ -247,6 +247,19 @@ void main() {
     final otherShop = LocalPayrollRepository(db, business: 'shop-b', owner: true);
     expect(await otherShop.history('employee-a'), isEmpty);
 
+    await payroll.enableWeeklyBase('weekly-employee', 'Weekly employee');
+    Future<bool> payWeekly(String operation, String employee) => payroll.verify(
+      operation: operation, employee: employee, week: '2026-11-02',
+      date: '2026-11-04', method: 'Cash', selected: const [], base: 80000,
+      hourlyAdjustment: 1500, adjustmentReason: 'Approved weekly supplement',
+      repayment: 0, confirmedNet: 81500,
+    );
+    expect(await payWeekly('weekly-payment', 'weekly-employee'), isTrue);
+    expect(await payWeekly('weekly-payment', 'weekly-employee'), isFalse);
+    await expectLater(payWeekly('another-weekly-payment', 'weekly-employee'),
+        throwsStateError);
+    expect((await payroll.history('weekly-employee')).single['gross'], 81500);
+
     await payroll.recordOpeningAdvance('employee-b', 2500);
     expect(await payroll.openingAdvance('employee-b'), 2500);
     await expectLater(payroll.recordOpeningAdvance('employee-b', 2600), throwsStateError);
