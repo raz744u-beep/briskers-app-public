@@ -82,3 +82,20 @@ must be reported separately from passing tests.
   Android compilation, iOS compilation, permanent certificate/package checks and
   b2568 install-over retention. The Owner's existing device is never modified
   by automated acceptance.
+
+## Signed release retention evidence
+
+The previous marker-only install-over check is insufficient for the final
+release. Packaging now generates a representative database using production
+APIs compiled from exact b2568 source 51d214a1593c7a73c9091cf930fa920a928b7c69.
+It includes customer/vehicle/Job/invoice records, cached expense transactions,
+completed labor and a verified synthetic payroll receipt, General Tasks,
+pending and conflicting outbox operations, and Force Offline preferences.
+The rootable Android emulator launches trusted b2568 with that fixture, updates
+with `adb install -r`, then launches and restarts the actual signed candidate.
+SQLite integrity and every original table/row and fixture preference are checked
+after each phase, including any SQLite WAL. A separate evidence artifact contains
+retention summaries, app identity, install output, screenshots and emulator logs.
+Production Employee/Tasks/Payroll screen flows are covered by the enabled widget
+navigation tests; the emulator uses no real Owner session or payroll credentials.
+These checks do not establish physical S26 data preservation or phone acceptance.

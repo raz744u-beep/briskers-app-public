@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'lib/**'
+      - 'test/release_upgrade_fixture_test.dart'
+      - '.github/workflows/android-debug.yml'
       - 'test/services/local_owner_invoice_numbering_test.dart'
       - 'test/services/local_numbered_document_overlay_test.dart'
       - '.github/workflows/offline-recovery-android-check.yml'
@@ -17,6 +19,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: subosito/flutter-action@v2
         with:
           channel: stable

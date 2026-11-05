@@ -793,6 +793,19 @@ jobs:
             printf '%s\n' "$BADGING" | head -1
           } > "${APK%.apk}.verification.txt"
 
+      - name: Generate representative records with exact signed b2568 source
+        if: github.ref_name == 'candidate/payroll-enabled'
+        run: |
+          git fetch --depth=1 origin 51d214a1593c7a73c9091cf930fa920a928b7c69
+          mkdir upgrade-source
+          git archive 51d214a1593c7a73c9091cf930fa920a928b7c69 lib assets pubspec.yaml pubspec.lock analysis_options.yaml | tar -x -C upgrade-source
+          cd upgrade-source
+          mkdir test
+          cp ../test/release_upgrade_fixture_test.dart test/
+          flutter pub get
+          dart run build_runner build --delete-conflicting-outputs
+          BRISKERS_UPGRADE_FIXTURE="$GITHUB_WORKSPACE/upgrade-fixture/shop.sqlite" flutter test test/release_upgrade_fixture_test.dart --reporter expanded
+
       - name: Download signed upgrade baseline
         if: github.ref_name == 'candidate/payroll-bootstrap' || github.ref_name == 'candidate/payroll-enabled'
         uses: actions/download-artifact@v4
@@ -817,9 +830,19 @@ jobs:
           arch: x86_64
           target: google_apis
           script: >-
+            BRISKERS_UPGRADE_FIXTURE="$GITHUB_WORKSPACE/upgrade-fixture/shop.sqlite"
             bash tools/verify_payroll_bootstrap_install.sh
             "$(find upgrade-baseline -name 'Briskers-v*.apk' -print -quit)"
             "$(find generated/build/app/outputs/flutter-apk -name 'Briskers-v*.apk' -print -quit)"
+
+      - name: Upload install-over evidence
+        if: always() && github.ref_name == 'candidate/payroll-enabled'
+        uses: actions/upload-artifact@v4
+        with:
+          name: briskers-b2568-upgrade-evidence
+          path: generated/build/app/outputs/flutter-apk/upgrade-evidence/
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
