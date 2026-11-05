@@ -13,7 +13,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('separate LAN ledgers preserve one payment after lost reply and restart',
+  for (final paidMinutes in [30, 60]) {
+  test('separate LAN ledgers preserve one $paidMinutes minute payment after lost reply and restart',
       () async {
     // The widget binding normally mocks HTTP. This test uses real loopback.
     final previousOverride = HttpOverrides.current;
@@ -169,9 +170,9 @@ void main() {
     expect(await ownerLinks[0].pay(
       operation: 'receipt-a', week: '2026-11-02', date: '2026-11-04',
       method: 'Cash', selected: [
-        for (final row in await ledger.work(employee: 'a')) {...row, 'pay_minutes': 30},
+        for (final row in await ledger.work(employee: 'a')) {...row, 'pay_minutes': paidMinutes},
       ],
-      net: 2000, reason: '',
+      net: paidMinutes * 4000 ~/ 60, reason: '',
     ), isTrue);
     expect((await owner.customSelect("SELECT status FROM local_jobs WHERE id='job'")
         .getSingle()).data['status'], 'open');
@@ -220,9 +221,13 @@ void main() {
     expect(await ownerLinks[1].repository.history('b'), isEmpty);
     final first = await mechanicLinks[0].repository.mechanicReport('a', authorize);
     final second = await mechanicLinks[1].repository.mechanicReport('b', authorize);
-    expect(first.receipts.single['net'], 2000);
-    expect(first.unpaid, 2000);
+    expect(first.receipts.single['net'], paidMinutes * 4000 ~/ 60);
+    expect(first.unpaid, (60 - paidMinutes) * 4000 ~/ 60);
+    final ownerBalance = (await ownerLinks[0].repository.work(employee: 'a')).single;
+    expect(ownerBalance['remaining_cents'], first.unpaid);
+    expect(ownerBalance['paid'], paidMinutes == 60 ? 1 : 0);
     expect(second.receipts, isEmpty);
     expect(second.unpaid, 4000);
   });
+  }
 }
