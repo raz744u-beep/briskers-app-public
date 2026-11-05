@@ -18,7 +18,7 @@ void main() {
       employeeId: 'mechanic', employeeName: 'Mechanic', week: monday,
       tasks: [task('Carried labor', prior, 0), task('Settled labor', monday, 1)],
       advanceBalance: () async => 0,
-      recordPayment: (_, _, _, _, _, _, _, _) async {
+      recordPayment: (_, _, _, _, _, _, _, _, _) async {
         fail('Selection must not record a payment.');
       },
     )));

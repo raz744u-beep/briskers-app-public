@@ -91,12 +91,59 @@ void main() {
       0, (sum, row) => sum + (row['gross'] as int),
     ), 1001);
 
+    await db.customStatement(
+      "INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id,employee_name) "
+      "VALUES('weekly-assignment','shop','job','weekly','Weekly mechanic')",
+    );
+    await ledger.createRecheck(
+      operation: 'weekly-recheck', job: 'job', description: 'Weekly work',
+      employee: 'weekly', name: 'Weekly mechanic', rate: 2000, estimatedMinutes: 60,
+    );
+    await ledger.enableWeeklyBase('weekly', 'Weekly mechanic');
+    await ledger.recordOpeningAdvance('weekly', 2000);
+    final weeklyWork = (await ledger.work(employee: 'weekly')).single;
+    await ledger.updateWork(weeklyWork['id'] as String, 'In Progress', 0, '2026-11-04');
+    await ledger.updateWork(weeklyWork['id'] as String, 'Done', 100, '2026-11-04');
+    final eligible = (await ledger.work(employee: 'weekly')).single;
+    expect(await ledger.verify(
+      operation: 'weekly-settlement', employee: 'weekly', week: '2026-11-02',
+      date: '2026-11-04', method: 'Zelle',
+      selected: [{...eligible, 'pay_minutes': 60, 'payment_rate_cents': 1000}],
+      base: 80000, hourlyAdjustment: 0,
+      adjustmentReason: 'Approved base plus supplemental labor',
+      repayment: 2000, confirmedNet: 79000,
+    ), isTrue);
+    final weeklyPayment = (await ledger.historyWithWork('weekly')).single;
+    expect(weeklyPayment['gross'], 81000);
+    expect(weeklyPayment['repayment'], 2000);
+    expect(weeklyPayment['net'], 79000);
+    expect((weeklyPayment['work'] as List).single['gross_cents'], 1000);
+    expect((await ledger.work(employee: 'weekly')).single['pay_status'], 'Paid');
+    expect(await ledger.advance('weekly'), 0);
+    await ledger.createRecheck(
+      operation: 'included-recheck', job: 'job', description: 'Included weekly work',
+      employee: 'weekly', name: 'Weekly mechanic', rate: 2000, estimatedMinutes: 30,
+    );
+    final included = (await ledger.work(employee: 'weekly')).where((row) => row['state'] == 'Open').single;
+    await ledger.updateWork(included['id'] as String, 'In Progress', 0, '2026-11-09');
+    await ledger.updateWork(included['id'] as String, 'Done', 50, '2026-11-09');
+    final includedCredit = (await ledger.work(employee: 'weekly')).where((row) => row['id'] == included['id']).single;
+    expect(await ledger.verify(
+      operation: 'base-inclusive', employee: 'weekly', week: '2026-11-09',
+      date: '2026-11-09', method: 'Cash',
+      selected: [{...includedCredit, 'pay_minutes': 30, 'payment_rate_cents': 0}],
+      base: 80000, hourlyAdjustment: 0, adjustmentReason: 'Labor included in weekly base',
+      repayment: 0, confirmedNet: 80000,
+    ), isTrue);
+    expect((await ledger.work(employee: 'weekly')).where((row) => row['id'] == included['id'])
+        .single['remaining_minutes'], 0);
+
     await LocalDocumentDetailCache(database: db).save('shop', 'invoice', {
       'id': 'invoice', 'job_id': 'job', 'kind': 'invoice', 'lines': <dynamic>[],
     });
     await ledger.refreshInvoiceTasks();
-    expect((await ledger.tasks()).single['source_active'], 0);
-    expect((await ledger.work()).single['pay_status'], 'Paid');
+    expect((await ledger.tasks()).where((row) => row['source_kind'] == 'invoice').single['source_active'], 0);
+    expect((await ledger.work(employee: 'mechanic')).single['pay_status'], 'Paid');
     await ledger.createRecheck(
       operation: 'recheck', job: 'job', description: 'Reinspect', employee: 'mechanic',
       name: 'Mechanic', rate: 1001, estimatedMinutes: 30,
@@ -105,8 +152,8 @@ void main() {
       operation: 'recheck', job: 'job', description: 'Reinspect', employee: 'mechanic',
       name: 'Mechanic', rate: 1001, estimatedMinutes: 30,
     );
-    expect(await ledger.tasks(), hasLength(2));
-    final additional = (await ledger.work()).where((row) => row['source_kind'] == 'recheck').single;
+    expect(await ledger.tasks(), hasLength(4));
+    final additional = (await ledger.work(employee: 'mechanic')).where((row) => row['source_kind'] == 'recheck').single;
     expect(additional['pay_status'], 'Unpaid');
     expect((await ledger.work()).where((row) => row['id'] == revised['id']).single['pay_status'], 'Paid');
   });

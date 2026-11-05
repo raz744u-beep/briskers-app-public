@@ -7,7 +7,7 @@ import 'package:intl/intl.dart';
 typedef RecordWeeklyPayroll = Future<void> Function(
   DateTime week, DateTime date, String method,
   List<Map<String, dynamic>> selected, int adjustment, int repayment,
-  int net, String reason,
+  int net, String reason, int base,
 );
 
 class WeeklyLaborReview extends StatefulWidget {
@@ -23,6 +23,12 @@ class WeeklyLaborReview extends StatefulWidget {
     this.onCancel,
     this.onPaymentSaved,
     this.onWeekChanged,
+    this.weeklyBaseCents = 0,
+    this.weeklyAdjustmentCents = 0,
+    this.settlementRateCents,
+    this.requiredSupplementMinutes,
+    this.settlementReason = '',
+
   });
 
   final String employeeId;
@@ -35,6 +41,11 @@ class WeeklyLaborReview extends StatefulWidget {
   final VoidCallback? onCancel;
   final Future<void> Function()? onPaymentSaved;
   final ValueChanged<DateTime>? onWeekChanged;
+  final int weeklyBaseCents;
+  final int weeklyAdjustmentCents;
+  final int? settlementRateCents;
+  final int? requiredSupplementMinutes;
+  final String settlementReason;
 
   @override
   State<WeeklyLaborReview> createState() => _WeeklyLaborReviewState();
@@ -212,7 +223,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   }
 
   Future<void> _verifyPayment() async {
-    if (_saving || _future || _totalHours <= 0) return;
+    if (_saving || _future || (_totalHours <= 0 && widget.weeklyBaseCents <= 0)) return;
     setState(() { _saving = true; _error = null; });
     late final int debt;
     try {
@@ -226,19 +237,30 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     final selected = [
       for (final task in _eligible)
         if (_selected.containsKey(_id(task)) && _available(task) > 0)
-          {...task, 'pay_minutes': (_selected[_id(task)]! * 60).round()},
+          {...task, 'pay_minutes': (_selected[_id(task)]! * 60).round(),
+            if (widget.settlementRateCents != null) 'payment_rate_cents': widget.settlementRateCents},
+
     ];
     final laborCents = selected.fold<int>(0, (sum, task) {
       final paid = task['paid_minutes'] as int? ?? 0;
       final minutes = task['pay_minutes'] as int;
-      final rate = task['rate_cents'] as int? ?? 0;
+      final rate = widget.settlementRateCents ?? task['rate_cents'] as int? ?? 0;
       // Older widget fixtures provide a total but real records carry the rate.
       if (!task.containsKey('rate_cents')) return sum + (task['gross_cents'] as int);
-      return sum + (((paid + minutes) * rate + 30) ~/ 60) - (task['paid_cents'] as int? ?? 0);
+      return sum + (((paid + minutes) * rate + 30) ~/ 60) - ((paid * rate + 30) ~/ 60);
     });
     final hours = selected.fold<int>(0, (sum, task) => sum + (task['pay_minutes'] as int)) / 60;
+    final totalMinutes = selected.fold<int>(0, (sum, task) => sum + (task['pay_minutes'] as int));
+    if (widget.requiredSupplementMinutes != null && totalMinutes != widget.requiredSupplementMinutes) {
+      setState(() {
+        _saving = false;
+        _error = 'Select exactly ${(widget.requiredSupplementMinutes! / 60).toStringAsFixed(2)} approved supplemental hours.';
+      });
+      return;
+    }
+    final calculatedGross = laborCents + widget.weeklyBaseCents + widget.weeklyAdjustmentCents;
     final amount=TextEditingController(
-      text:(laborCents/100).toStringAsFixed(2));
+      text:(calculatedGross/100).toStringAsFixed(2));
     final debtInput=TextEditingController();
     final note=TextEditingController();
     var method='Zelle';
@@ -260,7 +282,11 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
               Text(selected.length.toString()+' tasks · '+
                 hours.toStringAsFixed(2)+' hours'),
               const SizedBox(height:10),
+              if (widget.weeklyBaseCents > 0)
+                Text('Weekly base: ${(widget.weeklyBaseCents / 100).toStringAsFixed(2)}'),
               Text(r'Calculated labor: $'+(laborCents/100).toStringAsFixed(2)),
+              if (widget.weeklyAdjustmentCents != 0)
+                Text('Weekly adjustment: ${(widget.weeklyAdjustmentCents / 100).toStringAsFixed(2)}'),
               const SizedBox(height:9),
               TextField(
                 controller:amount,
@@ -353,8 +379,8 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   (double.tryParse(debtInput.text.trim())??0):0.0;
                 return Column(
                   crossAxisAlignment:CrossAxisAlignment.start,children:[
-                    Text('Adjustment: '+(gross-laborCents/100>=0?'+':'')+
-                      (gross-laborCents/100).toStringAsFixed(2)),
+                    Text('Adjustment: '+(gross-calculatedGross/100>=0?'+':'')+
+                      (gross-calculatedGross/100).toStringAsFixed(2)),
                     Text(r'Send employee: $'+
                       (gross-repayment).toStringAsFixed(2),
                       style:const TextStyle(fontWeight:FontWeight.w800)),
@@ -382,7 +408,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                 repayment<0||(deduct&&repayment<=0)||
                 repayment>gross||
                 (repayment*100).round()>debt) {return;}
-              if ((gross * 100).round() != laborCents && note.text.trim().isEmpty) {
+              if ((gross * 100).round() != calculatedGross && note.text.trim().isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                   content: Text('Enter a reason for the gross adjustment.'),
                 ));
@@ -404,11 +430,12 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
           DateTime.parse(task['completed_date'] as String).isBefore(week));
         final reason = [
           if (carryForward) 'Prior unpaid work carried forward.',
+          if (widget.settlementReason.isNotEmpty) widget.settlementReason,
           if (note.text.trim().isNotEmpty) note.text.trim(),
         ].join(' ');
         await widget.recordPayment(
-          week, paidDate, method, selected, grossCents - laborCents,
-          debtCents, grossCents - debtCents, reason,
+          week, paidDate, method, selected, grossCents - laborCents - widget.weeklyBaseCents,
+          debtCents, grossCents - debtCents, reason, widget.weeklyBaseCents,
         );
         if(mounted) {
           await showDialog<void>(
@@ -779,7 +806,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                 child: const Text('Cancel'))),
               const SizedBox(width: 10),
               Expanded(child: FilledButton(
-                onPressed: _saving || _future || _totalHours <= 0 ? null : _verifyPayment,
+                onPressed: _saving || _future || (_totalHours <= 0 && widget.weeklyBaseCents <= 0) ? null : _verifyPayment,
                 child: const Text('Verify Payment'))),
             ]),
           ]),

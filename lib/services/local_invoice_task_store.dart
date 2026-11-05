@@ -29,7 +29,9 @@ class LocalInvoiceTaskStore {
 
   Future<void> save(String business, String document, Map<String, dynamic> detail) async {
     if (detail['id'] != document ||
-        (detail['business_id'] != null && detail['business_id'] != business)) return;
+        (detail['business_id'] != null && detail['business_id'] != business)) {
+      return;
+    }
     final job = detail['job_id'];
     if (job is! String || job.isEmpty) return;
     final source = await db.customSelect(
@@ -44,7 +46,9 @@ class LocalInvoiceTaskStore {
     final rows = raw.whereType<Map>().map(Map<String, dynamic>.from).toList();
     final ids = rows.map((row) => row['id']).whereType<String>().toList();
     if (ids.length != rows.length || ids.any((id) => id.isEmpty) ||
-        ids.toSet().length != ids.length) return;
+        ids.toSet().length != ids.length) {
+      return;
+    }
     await prepare();
     await db.transaction(() async {
       await db.customStatement(

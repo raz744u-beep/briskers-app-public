@@ -447,37 +447,57 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       return;
     }
     final operation = _operationId();
-    await _run(() => _repository.createRecheck(
-      operation: operation, job: job, description: description,
-      employee: employee['employee_id'] as String,
-      name: (employee['name'] ?? employee['employee_name']).toString(),
-      rate: rate, estimatedMinutes: (hours * 60).round(),
-    ));
+    await _run(() async {
+      final id = employee['employee_id'] as String;
+      final name = (employee['name'] ?? employee['employee_name']).toString();
+      final identity = await PayrollLanIdentity.load();
+      final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, id);
+      if (peer == null) {
+        await _repository.createRecheck(
+          operation: operation, job: job, description: description,
+          employee: id, name: name, rate: rate, estimatedMinutes: (hours * 60).round(),
+        );
+      } else {
+        final workflow = await _workflow(id);
+        await workflow.assignRecheck(
+          operation: operation, job: job, description: description, employeeName: name,
+          rate: rate, estimatedMinutes: (hours * 60).round(),
+        );
+      }
+    });
   }
 
   Future<void> _recordWeekly(
     DateTime week, DateTime date, String method,
     List<Map<String, dynamic>> selected, int adjustment, int repayment,
-    int net, String reason,
+    int net, String reason, int base,
   ) async {
     final employee = _employee;
-    if (employee == null || selected.isEmpty) {
+    if (employee == null || (selected.isEmpty && base <= 0)) {
       throw StateError('Select payable work for this employee.');
     }
     final operation = _operationId();
     await _run(() async {
-      final workflow = await _paymentWorkflow(employee);
-      await workflow.pay(
-        operation: operation,
-        week: _date(week),
-        date: _date(date),
-        method: method,
-        selected: selected,
-        reason: reason,
-        net: net,
-        adjustment: adjustment,
-        repayment: repayment,
-      );
+      final ledger = await _localPaymentLedger();
+      if (base > 0) {
+        await ledger.enableWeeklyBase(employee, widget.employeeName ?? _employeeLabel(employee));
+      }
+      final identity = await PayrollLanIdentity.load();
+      final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, employee);
+      if (peer == null) {
+        await ledger.verify(
+          operation: operation, employee: employee, week: _date(week), date: _date(date),
+          method: method, selected: selected, base: base, hourlyAdjustment: adjustment,
+          adjustmentReason: reason, repayment: repayment, confirmedNet: net,
+        );
+      } else {
+        final workflow = await _workflow(employee);
+        await workflow.pay(
+          operation: operation, week: _date(week), date: _date(date), method: method,
+          selected: selected, reason: reason, net: net, base: base,
+          adjustment: adjustment, repayment: repayment,
+        );
+      }
     }, verifyPayment: true, rethrowError: true);
   }
 
@@ -485,6 +505,22 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     final random = Random.secure();
     return List.generate(16, (_) => random.nextInt(256)
         .toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  Future<LocalPayrollRepository> _localPaymentLedger() async {
+    final identity = await PayrollLanIdentity.load();
+    final enrollment = PayrollLanEnrollment(identity);
+    Future<void> assertWriter() => enrollment.assertWriter(widget.businessId, _grant!);
+    await assertWriter();
+    final ledger = LocalPayrollRepository(
+      localDatabase, business: widget.businessId, owner: true,
+      deviceId: identity.deviceId, assertOwnerGrant: _assertOwner,
+      assertLanWriter: assertWriter,
+    );
+    await ledger.bindPaymentAuthority(
+      writerDeviceId: identity.deviceId, assertVerifiedPairing: _assertOwner,
+    );
+    return ledger;
   }
 
   Future<PayrollLanWorkflow> _paymentWorkflow(String employee) async {
@@ -758,126 +794,29 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     final rate = double.tryParse(_hourlySupplementPreview.text.trim());
     final adjustment = double.tryParse(_weeklyAdjustmentPreview.text.trim());
     final hours = double.tryParse(_approvedSupplementHours.text.trim());
-    if (base == null || rate == null || adjustment == null ||
-        hours == null || ![base, rate, adjustment, hours]
-          .every((v) => v.isFinite) ||
+    if (base == null || rate == null || adjustment == null || hours == null ||
+        ![base, rate, adjustment, hours].every((value) => value.isFinite) ||
         base <= 0 || rate < 0 || hours < 0 || hours > 168 ||
-        base > 1000000 || rate > 100000 ||
-        adjustment.abs() > 1000000) {
-      throw ArgumentError('Enter valid weekly pay and approved hours.');
+        base > 1000000 || rate > 100000 || adjustment.abs() > 1000000) {
+      throw ArgumentError('Enter valid weekly amounts and approved hours.');
     }
-    final addLabor = _laborAdditionalToBase;
-    final gross = base + adjustment + (addLabor ? hours * rate : 0);
-    if (!gross.isFinite || gross <= 0 || gross > 1000000) {
-      throw ArgumentError('Weekly gross must be greater than zero.');
-    }
-    // Use the selected payroll week; never silently pay every tracked hour.
-    final paymentWeek = _week;
-    final monday = DateTime(paymentWeek.year, paymentWeek.month,
-      paymentWeek.day - paymentWeek.weekday + 1);
-    final weekKey = _date(monday);
-    if (monday.isAfter(DateTime.now())) {
-      throw StateError('Choose a current or past payroll week.');
-    }
-    final method = await showDialog<String>(
-      context: context, builder: (dialogContext) => SimpleDialog(
-        title: const Text('Payment method'),
-        children: [
-          for (final choice in const ['Zelle', 'Cash', 'Check', 'Other'])
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(dialogContext, choice),
-              child: Text(choice.toUpperCase()),
-            ),
-        ],
-      ));
-    if (!mounted || method == null) return;
-    // Week identity is frozen before any confirmation dialog appears.
-    final grossCents = (gross * 100).round();
-    final advance = await _repository.advance(employee);
-    if (!mounted) return;
-    final deductionInput = TextEditingController(text: '0.00');
-    final deduction = await showDialog<int>(
-      context: context, builder: (dialogContext) => AlertDialog(
-        title: const Text('Advance deduction'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text('Remaining advance: ${_money(advance)}'),
-          const SizedBox(height: 10),
-          TextField(
-            controller: deductionInput,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Deduct from this payment',
-              prefixText: r'$ ', border: OutlineInputBorder()),
-          ),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel')),
-          FilledButton(onPressed: () {
-            final amount = double.tryParse(deductionInput.text.trim());
-            if (amount == null || !amount.isFinite || amount < 0 ||
-                (amount * 100).round() > advance ||
-                (amount * 100).round() > grossCents) {
-              ScaffoldMessenger.of(dialogContext).showSnackBar(
-                const SnackBar(content: Text('Invalid advance deduction')));
-              return;
-            }
-            Navigator.pop(dialogContext, (amount * 100).round());
-          }, child: const Text('Continue')),
-        ],
-      ));
-    deductionInput.dispose();
-    if (!mounted || deduction == null) return;
-    final paymentDate = await showDatePicker(
-      context: context, initialDate: DateTime.now(),
-      firstDate: DateTime(2020), lastDate: DateTime.now(),
-    );
-    if (paymentDate == null || !mounted) return;
-    final confirmed = await showDialog<bool>(
-      context: context, builder: (dialogContext) => AlertDialog(
-        title: const Text('Finalize weekly pay'),
-        content: Text('Employee: ${widget.employeeName ?? 'Employee'}\n'
-          'Week: $weekKey\n'
-          'Gross: ${_currency.format(gross)}\n'
-          'Approved supplemental hours: ${hours.toStringAsFixed(2)}\n'
-          'Method: $method · ${_date(paymentDate)}\n'
-          'Advance deduction: ${_money(deduction)}\n'
-          'Net payment: ${_money(grossCents - deduction)}\n\n'
-          'This records the confirmed weekly amount and advance deduction.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Confirm Payment')),
-        ],
-      ));
-    if (!mounted || confirmed != true) return;
-    final name = widget.employeeName ?? 'Employee';
-    final baseCents = (base * 100).round();
-    await _run(() async {
-      final identity = await PayrollLanIdentity.load();
-      final enrollment = PayrollLanEnrollment(identity);
-      Future<void> assertWriter() => enrollment.assertWriter(widget.businessId, _grant!);
-      await assertWriter();
-      final ledger = LocalPayrollRepository(
-        localDatabase, business: widget.businessId, owner: true,
-        deviceId: identity.deviceId, assertOwnerGrant: _assertOwner,
-        assertLanWriter: assertWriter,
-      );
-      await ledger.bindPaymentAuthority(
-        writerDeviceId: identity.deviceId, assertVerifiedPairing: _assertOwner,
-      );
-      await ledger.enableWeeklyBase(employee, name);
-      await ledger.verify(
-        operation: _operationId(), employee: employee, week: weekKey,
-        date: _date(paymentDate), method: method, selected: const [],
-        base: baseCents, hourlyAdjustment: grossCents - baseCents,
-        adjustmentReason: 'Weekly base. Supplemental hours: ${hours.toStringAsFixed(2)}. '
-            'Rate: ${_currency.format(rate)}. Added to base: $addLabor. '
-            'Other adjustment: ${_currency.format(adjustment)}.',
-        repayment: deduction, confirmedNet: grossCents - deduction,
-      );
-    }, verifyPayment: true);
+    final additional = _laborAdditionalToBase;
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => WeeklyLaborReview(
+        employeeId: employee, employeeName: widget.employeeName ?? _employeeLabel(employee),
+        tasks: _work, week: _week,
+        weeklyBaseCents: (base * 100).round(),
+        weeklyAdjustmentCents: (adjustment * 100).round(),
+        settlementRateCents: additional ? (rate * 100).round() : 0,
+        requiredSupplementMinutes: additional ? (hours * 60).round() : null,
+        settlementReason: additional
+            ? 'Owner-approved weekly base and supplemental labor at ${_currency.format(rate)} per hour.'
+            : 'Labor included in the weekly base. Selected credits receive coverage without an added hourly component.',
+        advanceBalance: () => _repository.advance(employee),
+        recordPayment: _recordWeekly,
+      ),
+    ));
+    if (mounted) await _run(() async {});
   }
 
   Widget _flexibleWeeklyPreview(double trackedHours) {

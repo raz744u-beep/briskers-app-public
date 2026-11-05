@@ -89,6 +89,27 @@ class PayrollLanWorkflow {
     );
   }
 
+  Future<void> assignRecheck({
+    required String operation, required String job, required String description,
+    required String employeeName, required int rate, required int estimatedMinutes,
+  }) async {
+    if (!isOwner) throw StateError('Only the Owner assigns rechecks.');
+    await delivery.prepare();
+    await repository.createRecheck(
+      operation: operation, job: job, description: description,
+      employee: peer.employee, name: employeeName, rate: rate,
+      estimatedMinutes: estimatedMinutes,
+      queueChange: () => delivery.enqueue(
+        operationId: operation, kind: PayrollLanOperation.assignment,
+        payload: {
+          'kind': 'recheck', 'operation': operation, 'job': job,
+          'description': description, 'employee': peer.employee, 'rate': rate,
+          'estimated_minutes': estimatedMinutes,
+        },
+      ),
+    );
+  }
+
   Future<void> progress({
     required String job,
     required String id,

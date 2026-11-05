@@ -155,7 +155,9 @@ class LocalPayrollRepository {
   }) async {
     _authorize();
     if ([operation, job, employee, name, description].any((value) => value.trim().isEmpty) ||
-        rate <= 0 || estimatedMinutes < 0) throw ArgumentError('Invalid recheck.');
+        rate <= 0 || estimatedMinutes < 0) {
+      throw ArgumentError('Invalid recheck.');
+    }
     await prepare();
     await db.transaction(() async {
       final source = await _read(
@@ -410,9 +412,9 @@ class LocalPayrollRepository {
     await prepare();
     final rows = await _read(
       'SELECT COALESCE(SUM((actual_minutes * rate_cents + 30)/60 - '
-      'COALESCE((SELECT SUM(x.amount) FROM regular_payroll_work_coverage x '
+      '((COALESCE((SELECT SUM(x.minutes) FROM regular_payroll_work_coverage x '
       'WHERE x.business_id=local_mechanic_work_credits_v1.business_id '
-      'AND x.credit_id=local_mechanic_work_credits_v1.allocation_id),0)),0) AS unpaid '
+      'AND x.credit_id=local_mechanic_work_credits_v1.allocation_id),0) * rate_cents + 30)/60)),0) AS unpaid '
       'FROM local_mechanic_work_credits_v1 WHERE business_id=? AND employee_id=? '
       'AND completed=1 AND paid_operation_id IS NULL',
       [business, employee],
@@ -453,8 +455,9 @@ class LocalPayrollRepository {
         if (owner || pairedEmployee != employee || job == null) {
           throw StateError('Labor assignment is unavailable to this device.');
         }
-        final invoice = payload['invoice'] as String;
-        final line = payload['line'] as String;
+        final isRecheck = payload['kind'] == 'recheck';
+        final invoice = isRecheck ? 'recheck' : payload['invoice'] as String;
+        final line = isRecheck ? payload['operation'] as String : payload['line'] as String;
         final labor = jsonEncode([invoice, line]);
         final task = jsonEncode([job, invoice, line]);
         final id = jsonEncode([task, employee]);
@@ -466,6 +469,15 @@ class LocalPayrollRepository {
         await db.customStatement(
           'INSERT OR IGNORE INTO regular_payroll_tasks VALUES(?,?,?,?,?,0)',
           [business, task, job, labor, payload['description'] as String],
+        );
+        await db.customStatement(
+          'INSERT OR IGNORE INTO regular_payroll_task_sources VALUES(?,?,?,?,?,1)',
+          [business, task, isRecheck ? null : invoice, isRecheck ? null : line,
+            isRecheck ? 'recheck' : 'invoice'],
+        );
+        await db.customStatement(
+          'INSERT OR IGNORE INTO regular_payroll_estimates VALUES(?,?,?,?)',
+          [business, task, employee, payload['estimated_minutes'] as int? ?? 0],
         );
         final existing = await _read(
           'SELECT id FROM regular_payroll_portions WHERE business_id=? AND id=?',
@@ -534,8 +546,13 @@ class LocalPayrollRepository {
           if (minutes is! int || minutes <= 0 || minutes + priorMinutes > total) {
             throw StateError('Receipt exceeds remaining work.');
           }
-          final amount = (((priorMinutes + minutes) * (credit['rate_cents'] as int) + 30) ~/ 60) -
-              (paid['amount'] as int);
+          final snapshot = entry['snapshot'] as Map<String, dynamic>?;
+          final paymentRate = snapshot?['payment_rate_cents'] ?? credit['rate_cents'];
+          if (paymentRate is! int || paymentRate < 0 || paymentRate > 10000000) {
+            throw StateError('Invalid receipt labor rate.');
+          }
+          final amount = (((priorMinutes + minutes) * paymentRate + 30) ~/ 60) -
+              ((priorMinutes * paymentRate + 30) ~/ 60);
           if (entry['amount'] != null && entry['amount'] != amount) {
             throw StateError('Receipt work amount conflicts with this ledger.');
           }
@@ -545,7 +562,7 @@ class LocalPayrollRepository {
             'snapshot': jsonEncode({
               ...credit, 'id': id, 'description': 'Paid labor',
               'actual_minutes': minutes, 'gross_cents': amount,
-              ...?entry['snapshot'] as Map<String, dynamic>?,
+              ...?snapshot,
             }),
           });
         }
@@ -694,7 +711,7 @@ class LocalPayrollRepository {
       return {
         ...row, 'hours_hundredths': (total * 100 + 30) ~/ 60,
         'remaining_minutes': remaining,
-        'remaining_cents': ((total * rate + 30) ~/ 60) - (row['paid_cents'] as int),
+        'remaining_cents': ((total * rate + 30) ~/ 60) - ((paid * rate + 30) ~/ 60),
         'gross_cents': (total * rate + 30) ~/ 60,
         'paid': total > 0 && remaining == 0 ? 1 : 0,
         'pay_status': paid == 0 ? 'Unpaid' : remaining == 0 ? 'Paid' : 'Partially Paid',
@@ -1022,7 +1039,9 @@ class LocalPayrollRepository {
       'SELECT operation_id FROM regular_payroll_payments '
       'WHERE business_id=? AND operation_id=? AND employee_id=?',
       [business, operation, employee],
-    )).length != 1) throw StateError('Payment receipt is missing.');
+    )).length != 1) {
+      throw StateError('Payment receipt is missing.');
+    }
     final rows = await _read(
       'SELECT credit_id,minutes,amount,snapshot FROM regular_payroll_work_coverage '
       'WHERE business_id=? AND operation_id=? ORDER BY credit_id',
@@ -1164,6 +1183,7 @@ class LocalPayrollRepository {
                 'rate': w['rate_cents'],
                 if (w.containsKey('pay_minutes')) 'pay_minutes': w['pay_minutes'],
                 if (w.containsKey('paid_minutes')) 'paid_minutes': w['paid_minutes'],
+                if (w.containsKey('payment_rate_cents')) 'payment_rate_cents': w['payment_rate_cents'],
               },
             )
             .toList()
@@ -1203,7 +1223,7 @@ class LocalPayrollRepository {
         'WHERE business_id=? AND employee_id=? AND week=?',
         [business, employee, week],
       );
-      if (recordedBase.isNotEmpty || (base > 0 && weeklyPayments.isNotEmpty)) {
+      if (base > 0 && (recordedBase.isNotEmpty || weeklyPayments.isNotEmpty)) {
         throw StateError('This employee already has a settlement for that week.');
       }
       final staff = await _read(
@@ -1254,13 +1274,18 @@ class LocalPayrollRepository {
         final previouslyPaid = w['paid_minutes'] as int;
         // Cumulative rounding ensures several partial payments equal one
         // full payment, including credits with fractional cents per minute.
-        final amount = (((previouslyPaid + minutes) * (p['rate'] as int) + 30) ~/ 60) -
-            (w['paid_cents'] as int);
+        final paymentRate = p['payment_rate_cents'] ?? p['rate'];
+        if (paymentRate is! int || paymentRate < 0 || paymentRate > 10000000 ||
+            (paymentRate != p['rate'] && adjustmentReason.trim().isEmpty)) {
+          throw StateError('An adjusted labor rate requires an Owner reason.');
+        }
+        final amount = (((previouslyPaid + minutes) * paymentRate + 30) ~/ 60) -
+            ((previouslyPaid * paymentRate + 30) ~/ 60);
         gross += amount;
         snapshots.add(jsonEncode({
           ...w, 'employee_name': staff.single['name'],
           'actual_minutes': minutes, 'hours_hundredths': (minutes * 100 + 30) ~/ 60,
-          'gross_cents': amount,
+          'gross_cents': amount, 'payment_rate_cents': paymentRate,
         }));
       }
       if (gross < 0 ||
