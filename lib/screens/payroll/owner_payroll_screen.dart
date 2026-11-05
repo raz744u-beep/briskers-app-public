@@ -952,7 +952,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
             const SizedBox(height: 12),
             Row(children: [
               _financeMetric('Hours',
-                current.hours?.toStringAsFixed(1) ?? '—'),
+                current.hasRecords ? current.hours.toStringAsFixed(1) : '—'),
               _financeMetric('Gross', _moneyNullable(current.grossCents)),
               _financeMetric('Transferred', _money(current.paidCents)),
               _financeMetric('Balance', _moneyNullable(current.balanceCents),
