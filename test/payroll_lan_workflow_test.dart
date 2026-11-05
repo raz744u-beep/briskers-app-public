@@ -122,6 +122,16 @@ void main() {
         final revised = await mechanicLinks[i].mechanicWork('job');
         expect(revised.single['description'], 'Revised repair');
         expect(revised.single['actual_minutes'], 0);
+        await mechanicLinks[i].repository.applyLanChange(
+          PayrollLanOperation.assignment,
+          {'job': 'job', 'invoice': 'invoice', 'line': 'labor',
+            'description': 'Stale repair', 'employee': 'a', 'rate': 4000,
+            'assignment_revision': 1},
+          employee: 'a', assertLink: authorize,
+        );
+        expect((await mechanicLinks[i].mechanicWork('job')).single['description'],
+          'Revised repair');
+
       }
       for (final state in ['In Progress', 'Done']) {
         final work = (await mechanicLinks[i].repository.mechanicWork(
