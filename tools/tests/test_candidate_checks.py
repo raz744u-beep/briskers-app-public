@@ -45,6 +45,22 @@ def run_fixture(filename, *, run_id=None, number=1, attempt=1,
     return run
 
 
+class PayrollReleaseGates(unittest.TestCase):
+    def test_payroll_requires_all_four_verification_workflows(self):
+        workflows = gate.workflows_for_branch(gate.PAYROLL_CANDIDATE)
+        self.assertEqual(set(workflows), {"diagnostics.yml", "ios-compile.yml",
+            "offline-recovery-android-check.yml", "gloria-exact-total-regression.yml"})
+
+    def test_payroll_checks_use_the_same_verified_source_commit(self):
+        context = gate.Context("owner/repo", 123, gate.PAYROLL_CANDIDATE, SHA,
+                               gate.PAYROLL_VERIFICATION_BRANCH)
+        run = run_fixture("diagnostics.yml", head_branch=gate.PAYROLL_VERIFICATION_BRANCH)
+        self.assertTrue(gate.validate_run(run, context, "diagnostics.yml", "Briskers Diagnostics", 10))
+        for changes in ({"head_sha": OTHER_SHA}, {"head_branch": "another-branch"}):
+            with self.assertRaises(gate.GateError):
+                gate.validate_run({**run, **changes}, context, "diagnostics.yml", "Briskers Diagnostics", 10)
+
+
 class FakeClock:
     def __init__(self):
         self.now = 0

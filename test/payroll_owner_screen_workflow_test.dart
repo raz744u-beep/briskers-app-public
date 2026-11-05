@@ -37,7 +37,7 @@ void main() {
       final values = <String, String>{};
       final root = await PayrollLanIdentity.fromSeed(List.filled(32, 1));
       final identity = currentHolder ? root : await PayrollLanIdentity.fromSeed(List.filled(32, 2));
-      final who = OwnerSessionIdentity('owner', 'regular-app-session');
+      const who = OwnerSessionIdentity('owner', 'regular-app-session');
       final auth = LocalOwnerAuthorization(store: _Unused(), currentIdentity: () => who,
         verifyOwner: (_) async => throw StateError('No Supabase required'), authenticateDevice: () async => true,
         verifyLocalOwner: (shop) async => VerifiedOwnerEnrollment(who, shop));
@@ -78,7 +78,7 @@ void main() {
           await tester.pump(const Duration(milliseconds: 20));
           if (finder.evaluate().isNotEmpty) return;
         }
-        expect(finder, findsWidgets);
+        expect(finder, findsWidgets, reason: tester.allWidgets.whereType<Text>().map((w) => w.data).join(' | '));
       }
       Widget screen({int tab = 0}) => MaterialApp(home: OwnerPayrollScreen(
         businessId: 'shop', employeeId: 'a', employeeName: 'Alice', employeeRole: 'mechanic',

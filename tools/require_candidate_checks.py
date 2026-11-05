@@ -21,6 +21,9 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 CANDIDATE_BRANCH = "release/offline-first-stability-post-b2373-20261021"
 CANDIDATE_BRANCHES = {CANDIDATE_BRANCH, "fix/post-b2382-ux-polish-20261021", "fix/b2423-first-open-local-cache-313", "fix/b2425-detail-firstpaint-regression-20261024", "fix/b2426-auto-stability-batch-20261025", "fix/b2428-findings-warranty-ui-20261025", "fix/b2436-jobs-redundant-offline-banner-20261026", "fix/b2443-job-detail-financial-status-stable-20261026", "fix/b2448-job-first-frame-compact-financial-20261026", "fix/b2448-jobs-list-first-paint-sql-priority-20261026", "fix/b2448-invoice-mileage-warranty-checkbox-20261026", "fix/b2448-job-detail-intake-departure-mileage-20261026", "fix/b2456-job-status-offline-first-frame-20261026", "fix/b2456-invoice-closed-list-immediate-20261026", "fix/b2464-local-financial-running-totals-20261026", "fix/b2467-invoices-local-first-cold-open-20261026", "fix/b2468-rolling-daily-local-totals-20261027", "fix/b2470-invoice-first-frame-refresh-race-20261027", "fix/b2471-new-invoice-customer-search-warranty-details-20261027", "fix/b2473-expense-editor-vehicle-required-fast-lines-20261027", "fix/b2476-job-mechanic-time-instant-local-20261027", "fix/b2478-crossmodule-local-first-regression-audit-20261027", "fix/b2480-paid-invoice-leaves-open-immediately-20261027", "fix/b2481-first-frame-loading-regression-20261027", "fix/b2487-dock-scroll-stability-20261028", "release/b2489-all-oct28-stable-fixes-20261028", "fix/b2489-appointment-date-selection-20261029", "release/bugs23-consolidated-20261029", "release/b2497-repair-history-searchbar-20261029", "release/gloria-sync-recovery-20261029", "release/focused-gloria-recovery-20261030", "release/oct30-vin-checksum-local-first-candidate", "fix/gloria-rounding-preflight-20261030", "fix/offline-recovery-proof-generic-20261031"}
+PAYROLL_CANDIDATE = "candidate/payroll-enabled"
+PAYROLL_VERIFICATION_BRANCH = "integration/tasks-payroll-restoration-427"
+CANDIDATE_BRANCHES.add(PAYROLL_CANDIDATE)
 BUILD_WORKFLOW = ".github/workflows/android-debug.yml"
 REQUIRED_WORKFLOWS = {
     "diagnostics.yml": "Briskers Diagnostics",
@@ -33,6 +36,10 @@ GLORIA_RECOVERY_WORKFLOW = ("gloria-exact-total-regression.yml",
 
 def workflows_for_branch(branch):
     workflows = dict(REQUIRED_WORKFLOWS)
+    if branch == PAYROLL_CANDIDATE:
+        workflows["offline-recovery-android-check.yml"] = "Offline recovery Android debug verification"
+        filename, name = GLORIA_RECOVERY_WORKFLOW
+        workflows[filename] = name
     if branch == GLORIA_RECOVERY_BRANCH:
         filename, name = GLORIA_RECOVERY_WORKFLOW
         workflows[filename] = name
@@ -55,6 +62,7 @@ class Context:
     repository_id: int
     branch: str
     sha: str
+    verification_branch: str | None = None
 
 
 def positive_integer(value, label):
@@ -85,7 +93,8 @@ def context_from_environment(env, checkout_sha):
     except ValueError as error:
         raise GateError("Invalid GitHub repository ID") from error
     positive_integer(repository_id, "repository ID")
-    return Context(repository, repository_id, branch, sha)
+    return Context(repository, repository_id, branch, sha,
+                   PAYROLL_VERIFICATION_BRANCH if branch == PAYROLL_CANDIDATE else None)
 
 
 class NoRedirects(HTTPRedirectHandler):
@@ -151,6 +160,14 @@ def require_current_head(api, context):
             or target.get("sha") != context.sha):
         raise GateError("Candidate branch head changed or is invalid; refusing stale build")
 
+    if context.verification_branch is not None:
+        source = api.get(f"/repos/{context.repository}/git/ref/heads/{quote(context.verification_branch, safe='')}")
+        target = source.get("object")
+        if (source.get("ref") != f"refs/heads/{context.verification_branch}"
+                or not isinstance(target, dict) or target.get("type") != "commit"
+                or target.get("sha") != context.sha):
+            raise GateError("Payroll verification source no longer matches this candidate commit")
+
 
 def workflow_identity(api, context, filename, name):
     workflow = api.get(f"/repos/{context.repository}/actions/workflows/{filename}")
@@ -178,7 +195,7 @@ def validate_run(run, context, filename, name, workflow_id):
         allowed_events = ALLOWED_EVENTS | {"push"}
     if (run.get("workflow_id") != workflow_id or run.get("name") != name
             or run.get("head_sha") != context.sha
-            or run.get("head_branch") != context.branch
+            or run.get("head_branch") != (context.verification_branch or context.branch)
             or run.get("event") not in allowed_events):
         raise GateError(f"Wrong workflow, commit, branch or event for {filename}")
     for field in ("repository", "head_repository"):
@@ -202,7 +219,7 @@ def validate_run(run, context, filename, name, workflow_id):
 def latest_run(api, context, filename, name, workflow_id):
     result = api.get(
         f"/repos/{context.repository}/actions/workflows/{workflow_id}/runs",
-        {"branch": context.branch, "head_sha": context.sha, "per_page": 100},
+        {"branch": context.verification_branch or context.branch, "head_sha": context.sha, "per_page": 100},
     )
     runs = result.get("workflow_runs")
     count = result.get("total_count")
