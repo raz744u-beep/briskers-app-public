@@ -7,6 +7,7 @@ import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_document_repository.dart';
 import 'package:briskers_app/services/local_job_repository.dart';
+import 'package:briskers_app/services/local_payroll_repository.dart';
 import 'package:briskers_app/services/offline_document_draft_service.dart';
 import 'package:briskers_app/services/offline_invoice_payment_ledger.dart';
 
@@ -68,8 +69,40 @@ void main() {
         methodId: 'card', methodName: 'Card',
       );
 
+      final payroll = LocalPayrollRepository(db, business: 'shop', owner: true, deviceId: 'owner');
+      await payroll.bindPaymentAuthority(writerDeviceId: 'owner', assertVerifiedPairing: () {});
+      await payroll.saveEmployeeCompensation(employee: 'mechanic', name: 'Mechanic', rate: 4000, weeklyBase: false);
+      await db.customStatement(
+        'INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id) '
+        'VALUES(?,?,?,?)', ['assignment', 'shop', initial!['job_id'], 'mechanic']);
+      await payroll.refreshInvoiceTasks();
+      final originalTask = (await payroll.tasks()).single['id'];
+      final allocation = (await payroll.work()).single['id'] as String;
+      await payroll.updateWork(allocation, 'In Progress', 0, '2026-11-04');
+      await payroll.updateWork(allocation, 'Done', 100, '2026-11-04');
+      await payroll.verify(
+        operation: 'payroll-paid-before-conversion-sync', employee: 'mechanic',
+        week: '2026-11-02', date: '2026-11-04', method: 'Cash',
+        selected: await payroll.work(), base: 0, hourlyAdjustment: 0,
+        adjustmentReason: '', repayment: 0, confirmedNet: 4000,
+      );
+
       await drafts.flush('shop');
 
+      await payroll.refreshInvoiceTasks();
+      expect(await payroll.tasks(), hasLength(1));
+      expect((await payroll.tasks()).single['id'], originalTask);
+      expect((await payroll.work()).single['id'], allocation);
+      expect((await payroll.work()).single['pay_status'], 'Paid');
+      expect((await payroll.work()).single['remaining_cents'], 0);
+      final payrollHistory = await payroll.historyWithWork('mechanic');
+      final paidWork = (payrollHistory.single['work'] as List).single;
+      expect(paidWork['invoice_id'], 'server-invoice');
+      expect(paidWork['job_id'], 'server-job');
+      await payroll.registerAssignedLabor(
+        jobId: 'server-job', invoiceId: 'server-invoice', lineId: 'line',
+        employeeId: 'mechanic', employeeName: 'Mechanic', rateCents: 4000);
+      expect(await payroll.work(), hasLength(1));
       final result = await cache.load('shop', invoiceId);
       expect(result?['_server_document_id'], 'server-invoice');
       expect(result?['job_number'], 'J-501');

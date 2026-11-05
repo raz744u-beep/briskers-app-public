@@ -278,7 +278,13 @@ class LocalPayrollRepository {
         [business, jobId],
       )).single;
       final laborId = jsonEncode([invoiceId, lineId]);
-      final task = jsonEncode([jobId, invoiceId, lineId]);
+      final sources = await _read(
+        'SELECT task_id FROM regular_payroll_task_sources '
+        'WHERE business_id=? AND invoice_id=? AND line_id=?',
+        [business, invoiceId, lineId]);
+      if (sources.length > 1) throw StateError('Conflicting invoice task identity.');
+      final task = sources.isEmpty ? jsonEncode([jobId, invoiceId, lineId])
+          : sources.single['task_id'] as String;
       final description = line['description']?.toString().trim() ?? '';
       await db.customStatement(
         'INSERT OR IGNORE INTO regular_payroll_jobs VALUES(?,?,?)',
@@ -348,7 +354,8 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     final rows = await _read(
-      'SELECT c.allocation_id AS credit,c.job_id AS job,c.rate_cents AS rate,'
+      'SELECT c.allocation_id AS credit,t.job_id AS job,c.rate_cents AS rate,'
+      'c.task_id,c.job_id AS credit_job,c.labor_line_id AS credit_labor,'
       't.description,t.planned,s.invoice_id AS invoice,s.line_id AS line,'
       's.source_kind AS kind,s.active,e.minutes AS estimated_minutes '
       'FROM local_mechanic_work_credits_v1 c '
@@ -377,15 +384,15 @@ class LocalPayrollRepository {
     }
     await prepare();
     final rows = await _read(
-      'SELECT c.allocation_id AS id,c.job_id,t.description,p.state,c.actual_minutes,c.revision '
+      'SELECT c.allocation_id AS id,t.job_id,t.description,p.state,c.actual_minutes,c.revision '
       'FROM local_mechanic_work_credits_v1 c '
       'JOIN regular_payroll_portions p ON p.business_id=c.business_id AND p.id=c.allocation_id '
       'JOIN regular_payroll_tasks t ON t.business_id=p.business_id AND t.id=p.task_id '
-      "WHERE c.business_id=? AND (?='' OR c.job_id=?) AND c.employee_id=? "
+      "WHERE c.business_id=? AND (?='' OR t.job_id=?) AND c.employee_id=? "
       "AND (p.state!='Open' OR NOT EXISTS(SELECT 1 FROM regular_payroll_task_sources s "
       'WHERE s.business_id=t.business_id AND s.task_id=t.id AND s.active=0)) '
       'AND (?=1 OR EXISTS (SELECT 1 FROM local_job_assignments a WHERE a.business_id=c.business_id '
-      'AND a.job_id=c.job_id AND a.employee_id=c.employee_id AND a.active=1)) '
+      'AND a.job_id=t.job_id AND a.employee_id=c.employee_id AND a.active=1)) '
       'ORDER BY c.allocation_id',
       [business, job ?? '', job ?? '', employee, pairedEmployee == employee ? 1 : 0],
     );
@@ -482,8 +489,8 @@ class LocalPayrollRepository {
         final isRecheck = payload['kind'] == 'recheck';
         final invoice = isRecheck ? 'recheck' : payload['invoice'] as String;
         final line = isRecheck ? payload['operation'] as String : payload['line'] as String;
-        final labor = jsonEncode([invoice, line]);
-        final task = jsonEncode([job, invoice, line]);
+        final labor = payload['credit_labor'] as String? ?? jsonEncode([invoice, line]);
+        final task = payload['task_id'] as String? ?? jsonEncode([job, invoice, line]);
         final id = jsonEncode([task, employee]);
         final rate = payload['rate'] as int;
         final incomingRevision = payload['assignment_revision'] as int? ?? 0;
@@ -505,12 +512,12 @@ class LocalPayrollRepository {
         );
         await db.customStatement(
           'INSERT INTO regular_payroll_tasks VALUES(?,?,?,?,?,?) '
-          'ON CONFLICT(business_id,id) DO UPDATE SET description=excluded.description,planned=excluded.planned',
+          'ON CONFLICT(business_id,id) DO UPDATE SET description=excluded.description,planned=excluded.planned,job_id=excluded.job_id',
           [business, task, job, labor, payload['description'] as String, payload['planned'] as int? ?? 0],
         );
         await db.customStatement(
           'INSERT INTO regular_payroll_task_sources VALUES(?,?,?,?,?,?) '
-          'ON CONFLICT(business_id,task_id) DO UPDATE SET active=excluded.active',
+          'ON CONFLICT(business_id,task_id) DO UPDATE SET active=excluded.active,invoice_id=excluded.invoice_id,line_id=excluded.line_id',
           [business, task, isRecheck ? null : invoice, isRecheck ? null : line,
             isRecheck ? 'recheck' : 'invoice', payload['active'] as int? ?? 1],
         );
@@ -528,7 +535,7 @@ class LocalPayrollRepository {
             [business, id, task, employee],
           );
           await LocalMechanicWorkCreditRepository(database: db).createAssignment(
-            businessId: business, allocationId: id, jobId: job,
+            businessId: business, allocationId: id, jobId: payload['credit_job'] as String? ?? job,
             laborLineId: labor, taskId: task, employeeId: employee,
             actualMinutes: 0, rateCents: rate,
           );
@@ -1049,17 +1056,25 @@ class LocalPayrollRepository {
               task = null;
             }
           }
-          final jobId = snapshot['job_id'];
+          final source = taskId is String ? (await _read(
+            'SELECT t.job_id,s.invoice_id,s.source_kind FROM regular_payroll_tasks t '
+            'LEFT JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id '
+            'WHERE t.business_id=? AND t.id=?', [business, taskId],
+          )).firstOrNull : null;
+          final jobId = source?['job_id'] ?? snapshot['job_id'];
           final job = jobId is String ? (await _read(
             'SELECT id, job_number, vehicle_label FROM local_jobs '
             'WHERE business_id=? AND id=?', [business, jobId],
           )).firstOrNull : null;
-          final invoice = snapshot['source_kind'] != 'recheck' && task is List && task.length == 3 &&
-              task[0] == jobId && task[1] is String && jobId is String
+          final invoiceIdentity = source?['invoice_id'] ??
+              (task is List && task.length == 3 ? task[1] : null);
+          final invoice = (source?['source_kind'] ?? snapshot['source_kind']) != 'recheck' && invoiceIdentity is String &&
+              jobId is String && (source != null ||
+                (task is List && task.length == 3 && task[0] == jobId))
               ? (await _read(
                   "SELECT id AS invoice_id, document_number FROM local_documents "
                   "WHERE business_id=? AND id=? AND job_id=? AND kind='invoice'",
-                  [business, task[1] as String, jobId],
+                  [business, invoiceIdentity, jobId],
                 )).firstOrNull
               : null;
           work.add({

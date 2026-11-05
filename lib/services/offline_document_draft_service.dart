@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'local_number_allocator.dart';
+import 'local_invoice_task_store.dart';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
@@ -1576,6 +1577,8 @@ class OfflineDocumentDraftService {
             businessId,
             [serverDetail],
           );
+          await LocalInvoiceTaskStore(_database).remapDraft(
+            businessId, localId, localDetail, serverDetail);
           await _cache.save(businessId, serverId, serverDetail);
           await _cache.save(
             businessId,

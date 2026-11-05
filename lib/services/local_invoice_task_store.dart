@@ -63,7 +63,14 @@ class LocalInvoiceTaskStore {
       );
       for (final line in rows.where(isInvoiceLaborLine)) {
         final id = line['id'] as String;
-        final task = jsonEncode([job, document, id]);
+        final retained = await db.customSelect(
+          'SELECT task_id FROM regular_payroll_task_sources '
+          'WHERE business_id=? AND invoice_id=? AND line_id=?',
+          variables: [business, document, id].map(Variable<String>.new).toList(),
+        ).get();
+        if (retained.length > 1) throw StateError('Conflicting invoice task identities.');
+        final task = retained.isEmpty ? jsonEncode([job, document, id])
+            : retained.single.read<String>('task_id');
         final hours = invoiceLaborHours(line);
         final description = (line['description'] ?? line['name'] ?? 'Invoice labor').toString();
         await db.customStatement(
@@ -76,6 +83,71 @@ class LocalInvoiceTaskStore {
           "INSERT INTO regular_payroll_task_sources VALUES(?,?,?,?,'invoice',1) "
           'ON CONFLICT(business_id,task_id) DO UPDATE SET active=1',
           [business, task, document, id],
+        );
+      }
+    });
+  }
+
+  /// Called only by the existing successful draft replay transaction. Exact
+  /// ordered source-line equality is required; matching amounts alone is not proof.
+  /// Credit IDs and frozen payment snapshots are never changed.
+  Future<void> remapDraft(String business, String localId,
+      Map<String, dynamic> local, Map<String, dynamic> remote) async {
+    await prepare();
+    final sources = await db.customSelect(
+      'SELECT task_id,line_id FROM regular_payroll_task_sources '
+      'WHERE business_id=? AND invoice_id=?',
+      variables: [Variable(business), Variable(localId)],
+    ).get();
+    if (sources.isEmpty) return;
+    final invoice = remote['id'];
+    final job = remote['job_id'];
+    if (local['id'] != localId || local['kind'] != 'invoice' ||
+        remote['kind'] != 'invoice' || invoice is! String || invoice.isEmpty ||
+        job is! String || job.isEmpty ||
+        (remote['business_id'] != null && remote['business_id'] != business)) {
+      throw StateError('Payroll draft replay has no verified invoice identity.');
+    }
+    final before = (local['lines'] as List).cast<Map>();
+    final after = (remote['lines'] as List).cast<Map>();
+    String text(Map row, String key) => (row[key] ?? '').toString();
+    bool same(Map a, Map b) {
+      for (final key in ['name', 'description', 'line_kind']) {
+        if (text(a, key) != text(b, key)) return false;
+      }
+      for (final key in ['quantity', 'unit_price', 'tax_rate']) {
+        final left = num.tryParse(text(a, key));
+        final right = num.tryParse(text(b, key));
+        if (left != right) return false;
+      }
+      return true;
+    }
+    if (before.length != after.length ||
+        after.map((row) => row['id']).toSet().length != after.length ||
+        after.any((row) => row['id'] is! String || (row['id'] as String).isEmpty) ||
+        !List.generate(before.length, (i) => same(before[i], after[i])).every((v) => v)) {
+      throw StateError('Payroll source lines need reconciliation before invoice identity replacement.');
+    }
+    await db.transaction(() async {
+      for (final source in sources) {
+        final index = before.indexWhere((row) => row['id'] == source.data['line_id']);
+        if (index < 0) throw StateError('Original payroll labor identity is missing.');
+        final line = after[index]['id'] as String;
+        final conflict = await db.customSelect(
+          'SELECT task_id FROM regular_payroll_task_sources '
+          'WHERE business_id=? AND invoice_id=? AND line_id=? AND task_id<>?',
+          variables: [business, invoice, line, source.read<String>('task_id')]
+            .map(Variable<String>.new).toList(),
+        ).get();
+        if (conflict.isNotEmpty) throw StateError('Payroll task identities require review.');
+        await db.customStatement(
+          'UPDATE regular_payroll_task_sources SET invoice_id=?,line_id=? '
+          'WHERE business_id=? AND task_id=?',
+          [invoice, line, business, source.data['task_id']],
+        );
+        await db.customStatement(
+          'UPDATE regular_payroll_tasks SET job_id=? WHERE business_id=? AND id=?',
+          [job, business, source.data['task_id']],
         );
       }
     });
