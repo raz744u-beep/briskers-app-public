@@ -571,6 +571,10 @@ jobs:
           from pathlib import Path
           p = Path("android/app/src/main/AndroidManifest.xml")
           s = p.read_text()
+          permission = '<uses-permission android:name="android.permission.INTERNET" />'
+          if 'android.permission.INTERNET' not in s:
+              assert s.count('<application') == 1
+              s = s.replace('<application', permission + "\n    <application", 1)
           provider = '''
                   <provider
                       android:name="androidx.core.content.FileProvider"
