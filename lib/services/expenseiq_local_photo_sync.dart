@@ -239,6 +239,40 @@ class ExpenseIqLocalPhotoSync {
     return rows.first.data;
   }
 
+  /// Change only the original SAF locator after an explicit folder regrant
+  /// and verified file read. Never modify attachment, expense or upload state.
+  Future<bool> reconnectOriginalPhoto({
+    required String businessId,
+    required String transactionId,
+    required String expectedFilename,
+    required String verifiedUri,
+  }) async {
+    if (businessId.isEmpty ||
+        transactionId.isEmpty ||
+        expectedFilename.isEmpty ||
+        verifiedUri.isEmpty) return false;
+    final old = await localForExpense(businessId, transactionId);
+    if (old == null ||
+        old['filename']?.toString() != expectedFilename ||
+        !verifiedUri.startsWith('content://')) return false;
+    await _database.customStatement(
+      '''
+      UPDATE $_table SET source_uri = ?,
+        updated_at = ?
+      WHERE business_id = ? AND transaction_id = ?
+        AND filename = ?
+      ''',
+      [
+        verifiedUri,
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+        businessId,
+        transactionId,
+        expectedFilename,
+      ],
+    );
+    return true;
+  }
+
   Future<ExpenseIqBatchResult> uploadBatch(
     String businessId, {
     int maxPhotos = 25,
