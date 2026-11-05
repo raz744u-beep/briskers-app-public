@@ -38,7 +38,7 @@ class PayrollLanDelivery {
   static const _path = '/briskers/payroll-lan/v1';
   static const _timeout = Duration(seconds: 10);
 
-  Future<void> _prepare() => _ready ??= database.transaction(() async {
+  Future<void> prepare() => _ready ??= database.transaction(() async {
     await database.customStatement('''
       CREATE TABLE IF NOT EXISTS payroll_lan_delivery_v1 (
         business TEXT NOT NULL, local_device TEXT NOT NULL,
@@ -80,7 +80,7 @@ class PayrollLanDelivery {
     if (utf8.encode(body).length > 24000) {
       throw const FormatException('Payroll operation too large.');
     }
-    await _prepare();
+    await prepare();
     await database.transaction(() async {
       final prior = await _find('out', operationId);
       if (prior != null && prior['body'] != body) {
@@ -88,7 +88,7 @@ class PayrollLanDelivery {
       }
       if (prior == null) {
         await database.customStatement(
-          'INSERT INTO payroll_lan_delivery_v1 VALUES(?,?,?,?,?,?,?,0)',
+          'INSERT INTO payroll_lan_delivery_v1(business,local_device,peer_device,direction,operation,body,digest,acknowledged) VALUES(?,?,?,?,?,?,?,0)',
           [..._scope('out', operationId), body, await _digest(body)],
         );
       }
@@ -99,7 +99,7 @@ class PayrollLanDelivery {
   Future<int> listen(InternetAddress address, {int port = 0}) async {
     assertEnrollment();
     if (_listener != null) throw StateError('Payroll listener already started.');
-    await _prepare();
+    await prepare();
     final server = await HttpServer.bind(address, port);
     _listener = server;
     server.listen((request) => unawaited(_receive(request)));
@@ -149,7 +149,7 @@ class PayrollLanDelivery {
         if (prior == null) {
           await apply(kind, payload);
           await database.customStatement(
-            'INSERT INTO payroll_lan_delivery_v1 VALUES(?,?,?,?,?,?,?,1)',
+            'INSERT INTO payroll_lan_delivery_v1(business,local_device,peer_device,direction,operation,body,digest,acknowledged) VALUES(?,?,?,?,?,?,?,1)',
             [..._scope('in', id), body, digest],
           );
         } else if (prior['body'] != body) {
@@ -174,7 +174,7 @@ class PayrollLanDelivery {
           (bytes[0] == 192 && bytes[1] == 168))) {
       throw ArgumentError('Payroll delivery requires a private shop LAN address.');
     }
-    await _prepare();
+    await prepare();
     final pending = await database.customSelect(
       "SELECT * FROM payroll_lan_delivery_v1 WHERE business=? AND local_device=? "
       "AND peer_device=? AND direction='out' AND acknowledged=0 ORDER BY rowid LIMIT 50",

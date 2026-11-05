@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import 'local_mechanic_work_credit_repository.dart';
 import 'local_payroll_work_source.dart';
+import 'payroll_lan_peer.dart';
 
 /// Business-scoped local payroll ledger. Payment recording never sends money
 /// or connects to the general financial sync queue.
@@ -13,12 +14,16 @@ class LocalPayrollRepository {
     required this.owner,
     this.assertOwnerGrant,
     this.deviceId,
+    this.assertLanWriter,
+    this.pairedEmployee,
   });
   final BriskersLocalDatabase db;
   final String business;
   final bool owner;
   final void Function()? assertOwnerGrant;
   final String? deviceId;
+  final Future<void> Function()? assertLanWriter;
+  final String? pairedEmployee;
   Future<void>? _prepared;
   void _authorize() {
     if (!owner || business.trim().isEmpty)
@@ -101,6 +106,7 @@ class LocalPayrollRepository {
     required String employeeId,
     required String employeeName,
     required int rateCents,
+    Future<void> Function()? queueChange,
   }) async {
     _authorize();
     if (employeeName.trim().isEmpty || rateCents <= 0) {
@@ -138,7 +144,10 @@ class LocalPayrollRepository {
         'SELECT id FROM regular_payroll_portions WHERE business_id=? AND task_id=? AND employee_id=?',
         [business, task, employeeId],
       );
-      if (existing.isNotEmpty) return;
+      if (existing.isNotEmpty) {
+        await queueChange?.call();
+        return;
+      }
       await db.customStatement(
         'INSERT INTO regular_payroll_employees VALUES(?,?,?,?,0) '
         'ON CONFLICT(business_id,id) DO UPDATE SET name=excluded.name,rate=excluded.rate',
@@ -149,6 +158,7 @@ class LocalPayrollRepository {
         [business, employeeId],
       );
       await _assign(task, employeeId);
+      await queueChange?.call();
       _authorize();
     });
   }
@@ -187,6 +197,9 @@ class LocalPayrollRepository {
     required void Function() assertSession,
   }) async {
     assertSession();
+    if (pairedEmployee != null && pairedEmployee != employee) {
+      throw StateError('Only the paired employee can view this work.');
+    }
     await prepare();
     final rows = await _read(
       'SELECT c.allocation_id AS id,t.description,p.state,c.actual_minutes,c.revision '
@@ -194,10 +207,10 @@ class LocalPayrollRepository {
       'JOIN regular_payroll_portions p ON p.business_id=c.business_id AND p.id=c.allocation_id '
       'JOIN regular_payroll_tasks t ON t.business_id=p.business_id AND t.id=p.task_id '
       'WHERE c.business_id=? AND c.job_id=? AND c.employee_id=? '
-      'AND EXISTS (SELECT 1 FROM local_job_assignments a WHERE a.business_id=c.business_id '
-      'AND a.job_id=c.job_id AND a.employee_id=c.employee_id AND a.active=1) '
+      'AND (?=1 OR EXISTS (SELECT 1 FROM local_job_assignments a WHERE a.business_id=c.business_id '
+      'AND a.job_id=c.job_id AND a.employee_id=c.employee_id AND a.active=1)) '
       'ORDER BY c.allocation_id',
-      [business, job, employee],
+      [business, job, employee, pairedEmployee == employee ? 1 : 0],
     );
     assertSession();
     return rows;
@@ -212,6 +225,7 @@ class LocalPayrollRepository {
     required String date,
     required int expectedRevision,
     required void Function() assertSession,
+    Future<void> Function()? queueChange,
   }) async {
     assertSession();
     await prepare();
@@ -231,7 +245,125 @@ class LocalPayrollRepository {
         expectedRevision: expectedRevision,
         authorize: assertSession,
       );
+      await queueChange?.call();
     });
+  }
+
+  Future<({int unpaid, List<Map<String, dynamic>> receipts})> mechanicReport(
+    String employee, void Function() assertLink,
+  ) async {
+    assertLink();
+    if (owner || pairedEmployee != employee) {
+      throw StateError('Only the paired employee can view these receipts.');
+    }
+    await prepare();
+    final rows = await _read(
+      'SELECT COALESCE(SUM((actual_minutes * rate_cents + 30)/60),0) AS unpaid '
+      'FROM local_mechanic_work_credits_v1 WHERE business_id=? AND employee_id=? '
+      'AND completed=1 AND paid_operation_id IS NULL',
+      [business, employee],
+    );
+    final receipts = await _read(
+      'SELECT operation_id,net,method,verified_date FROM regular_payroll_payments '
+      'WHERE business_id=? AND employee_id=? ORDER BY verified_date DESC,operation_id',
+      [business, employee],
+    );
+    assertLink();
+    return (unpaid: rows.single['unpaid'] as int, receipts: receipts);
+  }
+
+  /// Apply only after the LAN transport validates the signed shop/employee
+  /// envelope. The transport commits this change and the replay receipt together.
+  Future<void> applyLanChange(
+    PayrollLanOperation operation,
+    Map<String, dynamic> payload, {
+    required String employee,
+    required void Function() assertLink,
+  }) async {
+    assertLink();
+    if (payload['employee'] != employee) {
+      throw StateError('Payroll change is for a different employee.');
+    }
+    await prepare();
+    final job = payload['job'] as String?;
+    switch (operation) {
+      case PayrollLanOperation.progress:
+        if (!owner) throw StateError('Only the Owner receives mechanic progress.');
+        await updateMechanicWork(
+          job: job!, employee: employee, id: payload['id'] as String,
+          state: payload['state'] as String, minutes: payload['minutes'] as int,
+          date: payload['date'] as String,
+          expectedRevision: payload['revision'] as int, assertSession: assertLink,
+        );
+      case PayrollLanOperation.assignment:
+        if (owner || pairedEmployee != employee || job == null) {
+          throw StateError('Labor assignment is unavailable to this device.');
+        }
+        final invoice = payload['invoice'] as String;
+        final line = payload['line'] as String;
+        final labor = jsonEncode([invoice, line]);
+        final task = jsonEncode([job, invoice, line]);
+        final id = jsonEncode([task, employee]);
+        final rate = payload['rate'] as int;
+        await db.customStatement(
+          'INSERT OR IGNORE INTO regular_payroll_jobs VALUES(?,?,?)',
+          [business, job, job],
+        );
+        await db.customStatement(
+          'INSERT OR IGNORE INTO regular_payroll_tasks VALUES(?,?,?,?,?,0)',
+          [business, task, job, labor, payload['description'] as String],
+        );
+        final existing = await _read(
+          'SELECT id FROM regular_payroll_portions WHERE business_id=? AND id=?',
+          [business, id],
+        );
+        if (existing.isEmpty) {
+          await db.customStatement(
+            "INSERT INTO regular_payroll_portions(business_id,id,task_id,employee_id,state) VALUES(?,?,?,?,'Open')",
+            [business, id, task, employee],
+          );
+          await LocalMechanicWorkCreditRepository(database: db).createAssignment(
+            businessId: business, allocationId: id, jobId: job,
+            laborLineId: labor, taskId: task, employeeId: employee,
+            actualMinutes: 0, rateCents: rate,
+          );
+        }
+      case PayrollLanOperation.payment:
+        if (owner || pairedEmployee != employee) {
+          throw StateError('Payroll receipt is unavailable to this device.');
+        }
+        final operationId = payload['operation'] as String;
+        final work = (payload['work'] as List).cast<String>();
+        for (final id in work) {
+          final rows = await _read(
+            'SELECT c.paid_operation_id,c.completed FROM local_mechanic_work_credits_v1 c '
+            'WHERE c.business_id=? AND c.allocation_id=? AND c.employee_id=?',
+            [business, id, employee],
+          );
+          if (rows.length != 1 || rows.single['completed'] != 1 ||
+              rows.single['paid_operation_id'] != null) {
+            throw StateError('Receipt conflicts with local payroll work.');
+          }
+        }
+        await db.customStatement(
+          'INSERT INTO regular_payroll_payments VALUES(?,?,?,?,?,?,?,?,?,?)',
+          [business, operationId, employee, payload['week'], jsonEncode(payload),
+            payload['gross'], payload['repayment'], payload['net'],
+            payload['method'], payload['date']],
+        );
+        for (final id in work) {
+          await db.customStatement(
+            'INSERT INTO regular_payroll_paid_work VALUES(?,?,?,?)',
+            [business, id, operationId, jsonEncode({'allocation_id': id})],
+          );
+          await db.customStatement(
+            'UPDATE local_mechanic_work_credits_v1 SET paid_operation_id=? '
+            'WHERE business_id=? AND allocation_id=? AND employee_id=?',
+            [operationId, business, id, employee],
+          );
+        }
+    }
+    assertLink();
   }
 
   /// Editing or reopening an unpaid portion increments its version. Paid
@@ -395,6 +527,7 @@ class LocalPayrollRepository {
   }
 
   Future<void> _assertPaymentAuthority() async {
+    await assertLanWriter?.call();
     final saved = await _read(
       'SELECT device_id FROM regular_payroll_payment_authority WHERE business_id=?',
       [business],
@@ -604,6 +737,7 @@ class LocalPayrollRepository {
         [business, operation, payload],
       );
       if (beforeCommit != null) { await beforeCommit(); }
+      await _assertPaymentAuthority();
       _authorize();
       return true;
     });
