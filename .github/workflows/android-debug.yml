@@ -327,7 +327,7 @@ jobs:
                       result,
                       pickExpenseFolderRequestCode,
                       Uri.parse(
-                          "content://com.android.externalstorage.documents/document/primary%3AExpenseIQ%2Fphotos"
+                          "content://com.android.externalstorage.documents/document/primary%3AExpenseIQ%2FPhotos"
                       )
                   )
               }
