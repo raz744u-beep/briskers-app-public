@@ -406,16 +406,38 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     ));
   }
 
+  Future<void> _editEstimated(Map<String, dynamic> row) async {
+    final input = await payrollLanInput(
+      context, 'Mechanic estimated hours', 'Estimated hours for this mechanic',
+    );
+    if (input == null || !mounted) return;
+    final hours = double.tryParse(input);
+    if (hours == null || !hours.isFinite || hours < 0 || hours > 10000) {
+      setState(() => _error = 'Enter valid estimated hours.');
+      return;
+    }
+    await _run(() => _repository.setEstimatedMinutes(
+      row['task_id'] as String, row['employee_id'] as String, (hours * 60).round(),
+    ));
+  }
+
   Widget _taskCard(Map<String, dynamic> row) => ListTile(
     title: Text(row['description'] as String),
     subtitle: Text('${row['employee_name']} · ${row['state']} · '
       '${row['actual_minutes']} actual min · ${row['estimated_minutes'] ?? 0} estimated min · '
       '${row['pay_status'] ?? (row['paid'] == 1 ? 'Paid' : 'Unpaid')}'),
-    trailing: row['state'] == 'Done' || (row['paid_minutes'] as int? ?? 0) > 0
-        ? null : TextButton(
-            onPressed: _busy ? null : () => _recordTaskProgress(row),
-            child: Text(row['state'] == 'Open' ? 'Start' : 'Complete'),
-          ),
+    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+      IconButton(
+        tooltip: 'Edit mechanic estimated hours',
+        icon: const Icon(Icons.edit_outlined, size: 19),
+        onPressed: _busy ? null : () => _editEstimated(row),
+      ),
+      if (row['state'] != 'Done' && (row['paid_minutes'] as int? ?? 0) == 0)
+        TextButton(
+          onPressed: _busy ? null : () => _recordTaskProgress(row),
+          child: Text(row['state'] == 'Open' ? 'Start' : 'Complete'),
+        ),
+    ]),
   );
 
   Future<void> _addRecheck() async {
@@ -740,10 +762,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         task['state'] == 'Done' && task['paid'] != 1 &&
         within(task['completed_date']));
     final payments = _history.where((payment) => within(payment['week']));
-    final unpaid = earned.fold<int>(0, (sum, task) => sum + (task['gross_cents'] as int));
+    final unpaid = earned.fold<int>(0, (sum, task) => sum + (task['remaining_cents'] as int? ?? task['gross_cents'] as int));
     final paidGross = payments.fold<int>(0, (sum, row) => sum + (row['gross'] as int));
     final net = payments.fold<int>(0, (sum, row) => sum + (row['net'] as int));
-    final unpaidMinutes = earned.fold<int>(0, (sum, task) => sum + (task['actual_minutes'] as int));
+    final unpaidMinutes = earned.fold<int>(0, (sum, task) => sum + (task['remaining_minutes'] as int? ?? task['actual_minutes'] as int));
     final paidMinutes = payments.expand((payment) => payment['work'] as List<Map<String, dynamic>>)
         .fold<int>(0, (sum, task) => sum + (task['actual_minutes'] as int? ?? 0));
     return (

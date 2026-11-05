@@ -1005,7 +1005,7 @@ class LocalPayrollRepository {
             'SELECT id, job_number, vehicle_label FROM local_jobs '
             'WHERE business_id=? AND id=?', [business, jobId],
           )).firstOrNull : null;
-          final invoice = task is List && task.length == 3 &&
+          final invoice = snapshot['source_kind'] != 'recheck' && task is List && task.length == 3 &&
               task[0] == jobId && task[1] is String && jobId is String
               ? (await _read(
                   "SELECT id AS invoice_id, document_number FROM local_documents "
@@ -1165,7 +1165,7 @@ class LocalPayrollRepository {
     _date(date);
     if (DateTime.parse(week).weekday != DateTime.monday ||
         operation.isEmpty ||
-        !['Cash', 'Zelle', 'Check', 'Card', 'Other'].contains(method) ||
+        !['Cash', 'Zelle', 'Check', 'ACH', 'Card', 'Other'].contains(method) ||
         base < 0 ||
         repayment < 0 ||
         confirmedNet < 0 ||

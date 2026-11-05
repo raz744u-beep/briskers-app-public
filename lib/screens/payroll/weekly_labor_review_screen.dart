@@ -308,6 +308,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   DropdownMenuItem(value:'Zelle',child:Text('Zelle')),
                   DropdownMenuItem(value:'Cash',child:Text('Cash')),
                   DropdownMenuItem(value:'Check',child:Text('Check')),
+                  DropdownMenuItem(value:'ACH',child:Text('ACH')),
                   DropdownMenuItem(value:'Card',child:Text('Card')),
                   DropdownMenuItem(value:'Other',child:Text('Other')),
                 ],

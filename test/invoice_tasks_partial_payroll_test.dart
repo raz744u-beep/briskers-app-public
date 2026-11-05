@@ -156,5 +156,12 @@ void main() {
     final additional = (await ledger.work(employee: 'mechanic')).where((row) => row['source_kind'] == 'recheck').single;
     expect(additional['pay_status'], 'Unpaid');
     expect((await ledger.work()).where((row) => row['id'] == revised['id']).single['pay_status'], 'Paid');
+    await db.customStatement("UPDATE local_documents SET kind='invoice' WHERE id='estimate'");
+    await LocalDocumentDetailCache(database: db).save('shop', 'estimate', {
+      ...invoice('Converted labor', 2, id: 'estimate'), 'kind': 'invoice',
+    });
+    await ledger.refreshInvoiceTasks();
+    expect((await ledger.tasks()).where((row) => row['invoice_id'] == 'estimate'), hasLength(1));
+    expect((await ledger.historyWithWork('mechanic')).length, 3);
   });
 }
