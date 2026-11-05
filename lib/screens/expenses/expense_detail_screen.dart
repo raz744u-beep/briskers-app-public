@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
-import 'package:flutter/services.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 
 import '../../core/module_modal_theme.dart';
 
@@ -516,7 +516,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         previousUri: previousUri,
         verifiedUri: verifiedUri,
       );
-      if (!_isCurrent(generation)) return;
+      if (!mounted || !_isCurrent(generation)) return;
       _localPhotoBytes.remove(previousUri);
       _localPhotoBytes.remove(verifiedUri);
       setState(() => _localExpenseIqPhoto = {
@@ -529,7 +529,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         )),
       );
     } catch (error) {
-      if (_isCurrent(generation)) {
+      if (mounted && _isCurrent(generation)) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
             'Could not reconnect this original receipt. '
