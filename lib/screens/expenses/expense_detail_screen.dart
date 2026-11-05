@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
 import 'package:flutter/services.dart';
@@ -608,7 +607,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     } catch (error) {
       if (mounted && _isCurrent(generation)) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(
+          const SnackBar(content: Text(
             'Could not reconnect the original picture. '
             'Select ExpenseIQ/Photos and check that the saved filename '
             'is present. No receipt was deleted.',
