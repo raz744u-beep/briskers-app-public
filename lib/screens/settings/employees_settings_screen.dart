@@ -1,4 +1,5 @@
 import '../payroll/owner_payroll_screen.dart';
+import '../payroll/payroll_lan_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -6,6 +7,7 @@ import '../../core/employee_role_style.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
 import '../../services/employee_nickname_store.dart';
+import '../../services/payroll_lan_identity.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../core/connection_mode.dart';
 import 'employee_edit_screen.dart';
@@ -383,12 +385,31 @@ class _EmployeesSettingsScreenState
     );
   }
 
+  Future<void> _showPayrollDeviceId() async {
+    try {
+      final identity = await PayrollLanIdentity.load();
+      if (!mounted) return;
+      await showPayrollLanCode(context, 'Public payroll device ID', identity.deviceId);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not load this phone’s payroll device ID.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Employees'),
         actions: [
+          if (widget.isOwner)
+            IconButton(
+              tooltip: 'Public payroll device ID',
+              icon: const Icon(Icons.phonelink_lock),
+              onPressed: _showPayrollDeviceId,
+            ),
           if (OwnerPayrollScreen.enabled && widget.isOwner)
             IconButton(
               tooltip: 'Owner payroll',

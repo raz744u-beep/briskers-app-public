@@ -24,6 +24,8 @@ import 'jobs/estimate_job_setup_screen.dart';
 import 'jobs/identifix_estimate_import_screen.dart';
 import 'jobs/job_document_screen.dart';
 import 'jobs/job_detail_screen.dart';
+import 'payroll/mechanic_labor_screen.dart';
+import 'payroll/owner_payroll_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -1258,6 +1260,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             const SizedBox(height: 8),
             _HomeTiles(
+              onReportsTap: () {
+                if (OwnerPayrollScreen.enabled && widget.roleCode == 'owner') {
+                  Navigator.of(context).push<void>(MaterialPageRoute(
+                    builder: (_) => OwnerPayrollScreen(
+                      businessId: widget.businessId, reportsOnly: true,
+                    ),
+                  ));
+                } else if (OwnerPayrollScreen.enabled && widget.roleCode == 'mechanic') {
+                  Navigator.of(context).push<void>(MaterialPageRoute(
+                    builder: (_) => MechanicLaborScreen(businessId: widget.businessId),
+                  ));
+                } else {
+                  widget.onMoreTap();
+                }
+              },
               expandedSection: _expandedSection,
               onToggle: _toggleSection,
               customersDrawer: KeyedSubtree(
@@ -1556,6 +1573,7 @@ class _HomeTiles extends StatelessWidget {
     required this.expensesDrawer,
     required this.onJobsTap,
     required this.onMoreTap,
+    required this.onReportsTap,
     required this.jobsCount,
     required this.appointmentsCount,
     required this.customersNewCount,
@@ -1572,6 +1590,7 @@ class _HomeTiles extends StatelessWidget {
   final Widget expensesDrawer;
   final VoidCallback onJobsTap;
   final VoidCallback onMoreTap;
+  final VoidCallback onReportsTap;
   final int jobsCount;
   final int appointmentsCount;
   final int customersNewCount;
@@ -1724,7 +1743,7 @@ class _HomeTiles extends StatelessWidget {
               'View Reports',
               Icons.bar_chart_outlined,
               BriskersColors.reports,
-              onMoreTap,
+              onReportsTap,
             ),
             _tile(
               'Chat',
