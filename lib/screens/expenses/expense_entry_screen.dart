@@ -19,6 +19,44 @@ import '../../services/local_financial_cache.dart';
 import '../../services/offline_financial_write_service.dart';
 import 'expense_receipt_attachments.dart';
 
+// Never display raw HTTP exception bodies, access tokens or receipt data.
+// Classify failures next to the scanner so the Owner can act without
+// scrolling to an unrelated Save Transaction error.
+@visibleForTesting
+String receiptAiFailureMessage(Object error) {
+  final message = error.toString().toLowerCase();
+  if (message.contains('active briskers sign-in') ||
+      message.contains('authorization is not configured') ||
+      message.contains('http 401') || message.contains('http 403')) {
+    return 'Receipt AI sign-in is unavailable or expired. The receipt photo '
+        'is still attached. Keep shop synchronization offline; use manual '
+        'entry until receipt-only authorization is restored.';
+  }
+  if (message.contains('http 429')) {
+    return 'Receipt AI reached its request limit. Your photo is safe. '
+        'Use manual entry or retry the scan later.';
+  }
+  if (message.contains('timeout') ||
+      message.contains('socketexception') ||
+      message.contains('connection') ||
+      message.contains('http 502') ||
+      message.contains('http 503') ||
+      message.contains('http 504')) {
+    return 'Receipt AI service or internet connection is unavailable. '
+        'The photo remains attached and manual entry still works.';
+  }
+  if (message.contains('no extraction') ||
+      message.contains('unexpected receipt') ||
+      message.contains('format') ||
+      message.contains('http 200')) {
+    return 'Receipt AI did not return readable receipt details. '
+        'You can retry with a clearer photo or enter it manually.';
+  }
+  return 'Receipt AI could not complete the scan. The photo is still '
+      'attached; retry or use manual entry. Shop sync stays unchanged.';
+}
+
+
 class ExpenseEntryScreen extends StatefulWidget {
   const ExpenseEntryScreen({
     super.key,
@@ -463,42 +501,6 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     }
   }
 
-  // Never display raw HTTP exception bodies, access tokens or receipt data.
-  // Classify failures next to the scanner so the Owner can act without
-  // scrolling to an unrelated Save Transaction error.
-  String _receiptAiFailureMessage(Object error) {
-    final message = error.toString().toLowerCase();
-    if (message.contains('active briskers sign-in') ||
-        message.contains('authorization is not configured') ||
-        message.contains('http 401') || message.contains('http 403')) {
-      return 'Receipt AI sign-in is unavailable or expired. The receipt photo '
-          'is still attached. Keep shop synchronization offline; use manual '
-          'entry until receipt-only authorization is restored.';
-    }
-    if (message.contains('http 429')) {
-      return 'Receipt AI reached its request limit. Your photo is safe. '
-          'Use manual entry or retry the scan later.';
-    }
-    if (message.contains('timeout') ||
-        message.contains('socketexception') ||
-        message.contains('connection') ||
-        message.contains('http 502') ||
-        message.contains('http 503') ||
-        message.contains('http 504')) {
-      return 'Receipt AI service or internet connection is unavailable. '
-          'The photo remains attached and manual entry still works.';
-    }
-    if (message.contains('no extraction') ||
-        message.contains('unexpected receipt') ||
-        message.contains('format') ||
-        message.contains('http 200')) {
-      return 'Receipt AI did not return readable receipt details. '
-          'You can retry with a clearer photo or enter it manually.';
-    }
-    return 'Receipt AI could not complete the scan. The photo is still '
-        'attached; retry or use manual entry. Shop sync stays unchanged.';
-  }
-
   Future<void> _readReceipt(XFile file) async {
     if (_readingReceipt) return;
     const independent = IndependentReceiptAiGateway();
@@ -612,7 +614,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _receiptReadMessage = _receiptAiFailureMessage(error);
+        _receiptReadMessage = receiptAiFailureMessage(error);
         // The cause is shown at the scanner, not as an unrelated save error.
         _error = null;
       });
