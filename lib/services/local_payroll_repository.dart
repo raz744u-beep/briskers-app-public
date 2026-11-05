@@ -518,7 +518,7 @@ class LocalPayrollRepository {
   }
 
   Future<void> addShopTask(
-    String employee, String description, String category, {DateTime? due},
+    String employee, String description, String category, {DateTime? due}
   ) async {
     _authorize();
     if (employee.isEmpty || description.trim().isEmpty) {

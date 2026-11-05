@@ -1184,8 +1184,21 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
             ],
             onChanged:(v)=>update(()=>category=v??'General')),
           const SizedBox(height:12),
-          FilledButton(onPressed:() async {
+          OutlinedButton.icon(
+            icon: const Icon(Icons.event_outlined),
+            label: Text(due == null ? 'Set due date' : DateFormat.yMMMd().format(due!)),
+            onPressed: saving ? null : () async {
+              final date = await showDatePicker(
+                context: sheet, initialDate: due ?? DateTime.now(),
+                firstDate: DateTime(2020), lastDate: DateTime(2100),
+              );
+              if (date != null && sheet.mounted) update(() => due = date);
+            },
+          ),
+          const SizedBox(height: 12),
+          FilledButton(onPressed: saving ? null : () async {
             if (description.text.trim().isEmpty) return;
+            update(() => saving = true);
             try {
               await _repository.addShopTask(
                 employee, description.text, category, due: due,
