@@ -4,6 +4,9 @@ The signed b2567 source is `267798b77403d147b4223927e863414931b616e4`.
 The last recovered Tasks TEST source is `d92595b26dab21d19927cf9fac56305ab878b48c`.
 PR #366 provides a status-policy checkpoint. Its code does not contain the later approved screens.
 The recovered branch contains the amount selection, collapsed debt deduction, repayment validation, full-screen history, and flexible-pay refinements.
+History sources include `00dd3bdf` for full-screen details, `b4617082` for links, and `ee6cbf4b` for the expansion hint.
+Tasks Workspace sources include `8635bdf6` for Service and General Tasks, `1ea516fe` for the responsive filters, and `1bb039aa` for separate status pills.
+Flexible payroll sources include `41644787` for the weekly settlement and `fa676b78` for net disbursement accounting.
 
 | Surface | Approved source or contract | b2567 | Restoration status |
 | --- | --- | --- | --- |

@@ -100,42 +100,73 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
     ]));
 
   void _showTaskHistory(_RecordedWeek week) {
+    var visibleTaskCount = 10;
+    final expanded = <Object?>{};
+    final work = week.work;
     Navigator.of(context).push<void>(MaterialPageRoute(
       builder: (context) => ValueListenableBuilder<bool>(
         valueListenable: widget.unlocked,
         builder: (context, unlocked, _) => Scaffold(
-        appBar: AppBar(title: Text('Week of ${_date.format(week.date)}')),
-        body: !unlocked ? const Center(child: Text('Owner payroll locked.')) : SafeArea(child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
-          children: [
-            Row(children: [
-              _metric('Gross pay', _money(week.gross), const Color(0xFF101828)),
-              _metric('Debt repaid', _money(week.repaid), const Color(0xFF101828)),
-              _metric('Transferred', _money(week.net), const Color(0xFF117C56)),
-            ]),
-            const Divider(height: 22),
-            Text('Paid tasks (${week.work.length})',
-              style: const TextStyle(fontWeight: FontWeight.w800)),
-            for (final row in week.work) _paidWork(row),
-            for (final payment in week.payments)
-              if ((payment['work'] as List).isEmpty)
-                ListTile(
-                  title: Text('Payment · ${_money(payment['net'] as int)}'),
-                  subtitle: Text('${payment['method']} · ${payment['verified_date']}'),
-                ),
-          ],
-        )),
-      )),
+          appBar: AppBar(title: Text('Week of ${_date.format(week.date)}')),
+          body: !unlocked
+              ? const Center(child: Text('Owner payroll locked.'))
+              : StatefulBuilder(builder: (context, updatePage) => SafeArea(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
+                    children: [
+                      Row(children: [
+                        _metric('Gross pay', _money(week.gross), const Color(0xFF101828)),
+                        _metric('Debt repaid', _money(week.repaid), const Color(0xFF101828)),
+                        _metric('Transferred', _money(week.net), const Color(0xFF117C56)),
+                      ]),
+                      const Divider(height: 22),
+                      Text('Paid tasks (${work.length})',
+                        style: const TextStyle(fontWeight: FontWeight.w800)),
+                      for (final row in work.take(visibleTaskCount))
+                        _paidWork(
+                          row,
+                          expanded: expanded.contains(row['credit_id']),
+                          onExpansion: (open) => updatePage(() {
+                            if (open) {
+                              expanded.add(row['credit_id']);
+                            } else {
+                              expanded.remove(row['credit_id']);
+                            }
+                          }),
+                        ),
+                      if (work.length > visibleTaskCount)
+                        TextButton(
+                          key: const Key('paid-task-history-load-more'),
+                          onPressed: () => updatePage(() => visibleTaskCount += 10),
+                          child: Text('Load More · ${work.length - visibleTaskCount} remaining'),
+                        ),
+                      for (final payment in week.payments)
+                        if ((payment['work'] as List).isEmpty)
+                          ListTile(
+                            title: Text('Payment · ${_money(payment['net'] as int)}'),
+                            subtitle: Text('${payment['method']} · ${payment['verified_date']}'),
+                          ),
+                    ],
+                  ),
+                )),
+        ),
+      ),
     ));
   }
 
-  Widget _paidWork(Map<String, dynamic> row) {
+  Widget _paidWork(
+    Map<String, dynamic> row, {
+    required bool expanded,
+    required ValueChanged<bool> onExpansion,
+  }) {
     final job = row['job_id'] as String?;
     final invoice = row['invoice_id'] as String?;
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ExpansionTile(
         key: ValueKey(row['credit_id']),
+        showTrailingIcon: false,
+        onExpansionChanged: onExpansion,
         tilePadding: const EdgeInsets.symmetric(horizontal: 12),
         title: Text(row['description'] as String? ?? 'Paid work',
           maxLines: 2, overflow: TextOverflow.ellipsis,
@@ -154,6 +185,8 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
           ]),
           Text('${((row['actual_minutes'] as int? ?? 0) / 60).toStringAsFixed(2)} hrs'
             ' · ${row['method']} · ${row['verified_date']}'),
+          Text(expanded ? 'Tap to collapse' : 'Tap to expand',
+            style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B))),
         ]),
         children: [
           ListTile(
