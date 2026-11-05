@@ -1260,6 +1260,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             const SizedBox(height: 8),
             _HomeTiles(
+              onTasksTap: OwnerPayrollScreen.enabled && widget.roleCode == 'owner'
+                  ? () => Navigator.of(context).push<void>(MaterialPageRoute(
+                      builder: (_) => OwnerPayrollScreen(
+                        businessId: widget.businessId, globalTasks: true,
+                      ),
+                    ))
+                  : null,
               onReportsTap: () {
                 if (OwnerPayrollScreen.enabled && widget.roleCode == 'owner') {
                   Navigator.of(context).push<void>(MaterialPageRoute(
@@ -1574,6 +1581,7 @@ class _HomeTiles extends StatelessWidget {
     required this.onJobsTap,
     required this.onMoreTap,
     required this.onReportsTap,
+    this.onTasksTap,
     required this.jobsCount,
     required this.appointmentsCount,
     required this.customersNewCount,
@@ -1591,6 +1599,7 @@ class _HomeTiles extends StatelessWidget {
   final VoidCallback onJobsTap;
   final VoidCallback onMoreTap;
   final VoidCallback onReportsTap;
+  final VoidCallback? onTasksTap;
   final int jobsCount;
   final int appointmentsCount;
   final int customersNewCount;
@@ -1737,6 +1746,11 @@ class _HomeTiles extends StatelessWidget {
             expensesDrawer,
           ],
           const SizedBox(height: 5),
+          if (onTasksTap != null) ...[
+            _tile('Tasks', 'Service & General Tasks', Icons.assignment_outlined,
+              BriskersColors.jobs, onTasksTap!),
+            const SizedBox(height: 5),
+          ],
           row(
             _tile(
               'Reports',

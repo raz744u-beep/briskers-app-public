@@ -55,7 +55,7 @@ class LocalPayrollRepository {
     for (final sql in [
       '''CREATE TABLE IF NOT EXISTS regular_payroll_payment_authority (business_id TEXT PRIMARY KEY, device_id TEXT NOT NULL)''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_weekly_defaults (business_id TEXT NOT NULL, employee_id TEXT NOT NULL, base_cents INTEGER NOT NULL, hourly_cents INTEGER NOT NULL, adjustment_cents INTEGER NOT NULL, add_labor INTEGER NOT NULL, PRIMARY KEY(business_id,employee_id))''',
-      '''CREATE TABLE IF NOT EXISTS regular_payroll_shop_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, business_id TEXT NOT NULL, employee_id TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','in_progress','done')))''',
+      '''CREATE TABLE IF NOT EXISTS regular_payroll_shop_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, business_id TEXT NOT NULL, employee_id TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, due_at INTEGER, status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','in_progress','done')))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_jobs (business_id TEXT NOT NULL, id TEXT NOT NULL, label TEXT NOT NULL, PRIMARY KEY(business_id,id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_tasks (business_id TEXT NOT NULL, id TEXT NOT NULL, job_id TEXT NOT NULL, labor_id TEXT NOT NULL, description TEXT NOT NULL, planned INTEGER NOT NULL CHECK(planned>=0), PRIMARY KEY(business_id,id), UNIQUE(business_id,job_id,labor_id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_portions (business_id TEXT NOT NULL, id TEXT NOT NULL, task_id TEXT NOT NULL, employee_id TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('Open','In Progress','Done')), version INTEGER NOT NULL DEFAULT 0, completed_date TEXT, PRIMARY KEY(business_id,id), UNIQUE(business_id,task_id,employee_id))''',
@@ -446,7 +446,7 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     return _read(
-      '''SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,p.state,p.completed_date,c.revision AS version,t.description,t.job_id,j.job_number,c.completed AS credit_completed,c.actual_minutes,(c.actual_minutes*100+30)/60 AS hours_hundredths,c.rate_cents,(c.actual_minutes*c.rate_cents+30)/60 AS gross_cents,CASE WHEN c.paid_operation_id IS NULL THEN 0 ELSE 1 END AS paid FROM regular_payroll_portions p JOIN regular_payroll_tasks t ON t.business_id=p.business_id AND t.id=p.task_id JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id LEFT JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id WHERE p.business_id=? ${employee == null ? '' : 'AND p.employee_id=?'} ${job == null ? '' : 'AND t.job_id=?'} ORDER BY p.id''',
+      '''SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,p.state,p.completed_date,c.revision AS version,t.description,t.job_id,j.job_number,j.customer_name,j.vehicle_label,c.completed AS credit_completed,c.actual_minutes,(c.actual_minutes*100+30)/60 AS hours_hundredths,c.rate_cents,(c.actual_minutes*c.rate_cents+30)/60 AS gross_cents,CASE WHEN c.paid_operation_id IS NULL THEN 0 ELSE 1 END AS paid FROM regular_payroll_portions p JOIN regular_payroll_tasks t ON t.business_id=p.business_id AND t.id=p.task_id JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id LEFT JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id WHERE p.business_id=? ${employee == null ? '' : 'AND p.employee_id=?'} ${job == null ? '' : 'AND t.job_id=?'} ORDER BY p.id''',
       [business, ?employee, ?job],
     );
   }
@@ -484,18 +484,21 @@ class LocalPayrollRepository {
     });
   }
 
-  Future<List<Map<String, dynamic>>> shopTasks(String employee) async {
+  Future<List<Map<String, dynamic>>> shopTasks([String? employee]) async {
     _authorize();
     await prepare();
     final rows = await _read(
-      'SELECT id, description, category, status FROM regular_payroll_shop_tasks '
-      'WHERE business_id=? AND employee_id=? ORDER BY id DESC', [business, employee],
+      'SELECT id, employee_id, description, category, due_at, status FROM regular_payroll_shop_tasks '
+      'WHERE business_id=? ${employee == null ? '' : 'AND employee_id=?'} ORDER BY id DESC',
+      [business, ?employee],
     );
     _authorize();
     return rows;
   }
 
-  Future<void> addShopTask(String employee, String description, String category) async {
+  Future<void> addShopTask(
+    String employee, String description, String category, {DateTime? due},
+  ) async {
     _authorize();
     if (employee.isEmpty || description.trim().isEmpty) {
       throw ArgumentError('Employee and task description are required.');
@@ -504,8 +507,8 @@ class LocalPayrollRepository {
     await db.transaction(() async {
       _authorize();
       await db.customStatement(
-        'INSERT INTO regular_payroll_shop_tasks (business_id,employee_id,description,category) '
-        'VALUES (?,?,?,?)', [business, employee, description.trim(), category],
+        'INSERT INTO regular_payroll_shop_tasks (business_id,employee_id,description,category,due_at) '
+        'VALUES (?,?,?,?,?)', [business, employee, description.trim(), category, due?.millisecondsSinceEpoch],
       );
       _authorize();
     });

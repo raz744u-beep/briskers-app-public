@@ -12,6 +12,7 @@ import '../../services/device_owner_authorization.dart';
 import '../../services/invoice_labor_work_summary.dart';
 import '../../services/local_owner_authorization.dart';
 import '../../services/local_payroll_repository.dart';
+import '../../services/offline_job_admin_service.dart';
 import '../../services/payroll_lan_enrollment.dart';
 import '../../services/payroll_lan_identity.dart';
 import '../../services/payroll_lan_workflow.dart';
@@ -20,6 +21,7 @@ import '../jobs/job_document_screen.dart';
 import 'payroll_history_panel.dart';
 import 'payroll_lan_controls.dart';
 import 'weekly_labor_review_screen.dart';
+import 'tasks_workspace.dart';
 
 class OwnerPayrollScreen extends StatefulWidget {
   const OwnerPayrollScreen({
@@ -35,6 +37,7 @@ class OwnerPayrollScreen extends StatefulWidget {
     this.employeeRole,
     this.employeeActive = true,
     this.openEmployeeDetails,
+    this.globalTasks = false,
   });
 
   static const enabled = bool.fromEnvironment('BRISKERS_ENABLE_OWNER_PAYROLL');
@@ -45,6 +48,7 @@ class OwnerPayrollScreen extends StatefulWidget {
   final String? employeeRole;
   final bool employeeActive;
   final VoidCallback? openEmployeeDetails;
+  final bool globalTasks;
   final String businessId;
   final String? jobId;
   final String? invoiceId;
@@ -195,7 +199,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     final employees = job == null
         ? await repository.employees()
         : await repository.assignedEmployees(job);
-    final employee = widget.employeeId ?? _employee ?? (employees.firstOrNull?['id'] as String?);
+    final employee = widget.globalTasks ? null : widget.employeeId ?? _employee ?? (employees.firstOrNull?['id'] as String?);
     final work = await repository.work(employee: _jobMode ? null : employee, job: job);
     final history = employee == null || _jobMode
         ? <Map<String, dynamic>>[]
@@ -208,13 +212,22 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     final weeklyDefaults = employee == null || widget.employeeId == null ||
         widget.reportsOnly || _weeklyDefaultsLoaded
         ? null : await repository.weeklyDefaults(employee);
-    final generalTasks = employee == null || widget.employeeId == null || widget.reportsOnly
-        ? <Map<String, dynamic>>[] : await repository.shopTasks(employee);
+    final generalTasks = widget.globalTasks ? await repository.shopTasks()
+        : employee == null || widget.employeeId == null || widget.reportsOnly
+            ? <Map<String, dynamic>>[] : await repository.shopTasks(employee);
+    final roster = widget.globalTasks
+        ? await OfflineJobAdminService().cachedEmployees(widget.businessId)
+        : <Map<String, dynamic>>[];
     _assertOwner();
     if (!mounted) return;
     _historyUnlocked.value = true;
     setState(() {
-      _employees = employees;
+      _employees = widget.globalTasks
+          ? {
+              for (final row in employees) row['id']: row,
+              for (final row in roster) row['id']: row,
+            }.values.toList()
+          : employees;
       _employee = employee;
       _work = work;
       _history = history;
@@ -978,8 +991,24 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   }
 
   Future<void> _createEmployeeGeneralTask() async {
+    final employee = widget.employeeId ?? await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Assign general task'),
+        children: [
+          for (final row in _employees)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, row['id']),
+              child: Text((row['nickname'] ?? row['name'] ?? row['id']).toString()),
+            ),
+        ],
+      ),
+    );
+    if (employee == null || !mounted) return;
     final description = TextEditingController();
     String category = 'General';
+    DateTime? due;
+    var saving = false;
     final created = await showModalBottomSheet<bool>(
       context:context,useSafeArea:true,isScrollControlled:true,
       showDragHandle:true,
@@ -989,7 +1018,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         child:SingleChildScrollView(child:Column(
           mainAxisSize:MainAxisSize.min,
           crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-          Text('New General Task · ${widget.employeeName ?? 'Employee'}',
+          Text('New General Task · ${widget.employeeName ?? _employeeLabel(employee)}',
             style:const TextStyle(fontSize:19,fontWeight:FontWeight.w800)),
           const SizedBox(height:12),
           TextField(controller:description,minLines:1,maxLines:3,
@@ -1011,11 +1040,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
             if (description.text.trim().isEmpty) return;
             try {
               await _repository.addShopTask(
-                widget.employeeId!, description.text, category,
+                employee, description.text, category, due: due,
               );
               if (sheet.mounted) Navigator.pop(sheet,true);
             } catch(error) {
               if (sheet.mounted) {
+                update(() => saving = false);
                 ScaffoldMessenger.of(sheet).showSnackBar(SnackBar(content: Text('$error')));
               }
             }
@@ -1092,6 +1122,74 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       )),
   ]);
 
+  String _employeeLabel(String? employee) {
+    final row = _employees.where((row) => row['id'] == employee).firstOrNull;
+    return (row?['nickname'] ?? row?['name'] ?? employee ?? 'Unassigned').toString();
+  }
+
+  Widget _workspace() {
+    final byTask = <String, List<Map<String, dynamic>>>{};
+    for (final row in _work) {
+      (byTask[row['task_id'] as String] ??= []).add(row);
+    }
+    final service = [
+      for (final entry in byTask.entries)
+        {...entry.value.first,
+          'line_id': entry.key,
+          'document_id': entry.key,
+          'source_description': entry.value.first['description'],
+          'status': entry.value.every((row) => row['state'] == 'Done') ? 'done'
+              : entry.value.any((row) => row['state'] != 'Open') ? 'in_progress'
+              : 'planned',
+        },
+    ];
+    return Scaffold(
+      appBar: AppBar(title: const Text('Tasks')),
+      body: Column(children: [
+        if (_grant == null || _error != null)
+          FilledButton(
+            onPressed: _busy ? null : () => _run(() async {}),
+            child: const Text('Unlock Owner tasks'),
+          ),
+        if (_busy) const LinearProgressIndicator(),
+        if (_error != null) Text(_error!),
+        if (_grant != null)
+          Expanded(child: TasksWorkspace(
+            serviceTasks: service,
+            generalTasks: _generalTasks,
+            allocationsByLine: byTask,
+            employeeName: _employeeLabel,
+            employeeIds: [
+              for (final row in _employees)
+                if (row['id'] case final String id) id,
+            ],
+            serviceTaskCard: (row) => ListTile(
+              title: Text(row['description'] as String),
+              subtitle: Text([
+                for (final allocation in byTask[row['line_id']]!)
+                  '${allocation['employee_name']} · ${allocation['state']} · '
+                  '${allocation['actual_minutes']} min · '
+                  '${allocation['paid'] == 1 ? 'Paid' : 'Unpaid'}',
+              ].join('\n')),
+            ),
+            onAddGeneral: _createEmployeeGeneralTask,
+            onGeneralStatus: (id, status) async {
+              final row = _generalTasks.where((row) => row['id'] == id).firstOrNull;
+              if (row == null) return;
+              await _run(() => _repository.setShopTaskStatus(row['employee_id'] as String, id, status));
+            },
+            onOpenJob: (id) => _openRecordedWork(id, invoice: false),
+            onEmployeeTap: (id) => Navigator.of(context).push<void>(MaterialPageRoute(
+              builder: (_) => OwnerPayrollScreen(
+                businessId: widget.businessId, employeeId: id,
+                employeeName: _employeeLabel(id),
+              ),
+            )),
+          )),
+      ]),
+    );
+  }
+
   Widget _profile() => DefaultTabController(
     length: 4,
     child: Scaffold(
@@ -1136,7 +1234,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   );
 
   @override
-  Widget build(BuildContext context) => widget.reportsOnly ? _reports() : widget.employeeId != null ? _profile() : Scaffold(
+  Widget build(BuildContext context) => widget.globalTasks ? _workspace() : widget.reportsOnly ? _reports() : widget.employeeId != null ? _profile() : Scaffold(
         appBar: AppBar(title: Text(widget.reportsOnly
             ? 'Payroll reports'
             : _jobMode ? 'Job labor tasks' : 'Owner payroll')),
