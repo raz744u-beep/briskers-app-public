@@ -495,7 +495,7 @@ class LocalPayrollRepository {
           'SELECT revision FROM regular_payroll_assignment_incoming '
           'WHERE business_id=? AND credit=?', [business, id]);
         if (previousRevision.isNotEmpty &&
-            (previousRevision.single['revision'] as int) >= incomingRevision) return;
+            (previousRevision.single['revision'] as int) >= incomingRevision) { return; }
         await db.customStatement('INSERT INTO regular_payroll_assignment_incoming VALUES(?,?,?) '
           'ON CONFLICT(business_id,credit) DO UPDATE SET revision=excluded.revision',
           [business, id, incomingRevision]);
