@@ -27,8 +27,10 @@ Future<LocalOwnerGrant> _owner(String session, {String business = 'shop'}) async
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  for (final concurrent in [false, true]) {
-    test('two authenticated Owners preserve one payment, concurrent=$concurrent', () async {
+  for (final scenario in [(false, false), (true, false), (false, true)]) {
+    final concurrent = scenario.$1;
+    final lostReply = scenario.$2;
+    test('two authenticated Owners preserve one payment, concurrent=$concurrent lostReply=$lostReply', () async {
       HttpOverrides.global = null;
       SharedPreferences.setMockInitialValues({});
       final folder = await Directory.systemTemp.createTemp('owner-payroll');
@@ -44,7 +46,11 @@ void main() {
       final gb = await _owner('iphone');
       var la = lease(0), lb = lease(1);
       await la.migrate(ga);
-      var na = PayrollOwnerLan(lease: la, database: a, actor: 'raz', approve: (_) async => ga);
+      var dropReply = lostReply;
+      var na = PayrollOwnerLan(lease: la, database: a, actor: 'raz', approve: (_) async => ga,
+        onResponse: (command) async {
+          if (command == 'take' && dropReply) { dropReply = false; throw StateError('Lost reply'); }
+        });
       var nb = PayrollOwnerLan(lease: lb, database: b, actor: 'raz', approve: (_) async => gb);
       addTearDown(() async {
         await na.close(); await nb.close(); await a.close(); await b.close();
@@ -73,6 +79,8 @@ void main() {
         await original.updateWork(work['id'] as String, 'Done', 100, '2026-11-04');
       }
       final selected = await original.work(employee: 'mechanic-a');
+      final scope = LocalPayrollRepository(a, business: 'shop', owner: false, deviceId: identities[0].deviceId, ownerProof: await la.proof(ga));
+      await expectLater(scope.history('mechanic-a'), throwsStateError);
       await expectLater(nb.acquire(gb, 'unconnected'), throwsA(isA<PayrollPending>()));
       await na.listen(InternetAddress.loopbackIPv4, port: 0);
       await nb.listen(InternetAddress.loopbackIPv4, port: 0);
@@ -93,6 +101,19 @@ void main() {
         ]);
         expect(results.where((r) => r == true), hasLength(1));
       } else {
+        if (lostReply) {
+          await expectLater(pay(nb, gb, 'iphone-payment', b), throwsA(isA<PayrollPending>()));
+          await expectLater(la.proof(ga), throwsA(isA<PayrollPending>()));
+          final pa = na.port, pb = nb.port;
+          await na.close(); await nb.close(); await a.close(); await b.close();
+          a = BriskersLocalDatabase(NativeDatabase(File('${folder.path}/a.sqlite')));
+          b = BriskersLocalDatabase(NativeDatabase(File('${folder.path}/b.sqlite')));
+          la = lease(0); lb = lease(1);
+          na = PayrollOwnerLan(lease: la, database: a, actor: 'raz', approve: (_) async => ga);
+          nb = PayrollOwnerLan(lease: lb, database: b, actor: 'raz', approve: (_) async => gb);
+          await na.listen(InternetAddress.loopbackIPv4, port: pa);
+          await nb.listen(InternetAddress.loopbackIPv4, port: pb);
+        }
         expect(await pay(nb, gb, 'iphone-payment', b), isTrue);
         // The authenticated Android Owner can take the ledger back, but cannot
         // pay an already covered credit under a different payment identity.

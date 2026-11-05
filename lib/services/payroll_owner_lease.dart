@@ -36,6 +36,8 @@ class PayrollOwnerLease {
   final String business;
   // Existing shop identity is only a migration trust anchor, NOT a writer pin.
   final String anchor;
+  Future<void> Function(String operation, String snapshot)? storeSnapshot;
+  Future<String?> Function(String operation)? loadSnapshot;
   final Future<String?> Function(String) read;
   final Future<void> Function(String, String) write;
   static final Map<String, Future<void>> _locks = {};
@@ -211,7 +213,9 @@ class PayrollOwnerLease {
     if (priorOffer != null && current['operation'] == operation) {
       final prior = Map<String, dynamic>.from(priorOffer as Map);
       if (prior['recipient'] != peer['device']) throw StateError('Conflicting lease retry.');
-      return prior;
+      final snapshot = await _snapshot(operation);
+      if (snapshot == null) throw const PayrollPending('The original payroll transfer snapshot is unavailable. Payment remains pending.');
+      return {...prior, 'snapshot': snapshot};
     }
     if ((current['used'] as List? ?? []).contains(operation)) {
       throw StateError('This payroll transfer was already superseded.');
@@ -236,17 +240,25 @@ class PayrollOwnerLease {
     final priorLease = Map<String, dynamic>.from(current['lease'] as Map);
     final previous = await verifyLease(priorLease);
     final peer = await verifyCertificate(recipient);
-    final snapshot = await export();
+    final snapshot = await _snapshot(operation) ?? await export();
+    if (storeSnapshot != null) {
+      await storeSnapshot!(operation, snapshot);
+    } else {
+      await write('$key:snapshot:$operation', snapshot);
+    }
     final previousEntry = {'body': priorLease['body'], 'signature': priorLease['signature']};
     final signedLease = await _signed({'version': 2, 'business': business,
       'epoch': (previous['epoch'] as int) + 1, 'holder': peer['device'],
       'actor': peer['actor'], 'operation': operation, 'issuer': identity.deviceId,
       'previous': await digest(jsonEncode(previousEntry)), 'snapshot': await digest(snapshot)});
     final lease = {...signedLease, 'chain': [...?priorLease['chain'] as List?, previousEntry]};
-    final offer = {'lease': lease, 'snapshot': snapshot, 'recipient': peer['device']};
+    final offer = {'lease': lease, 'recipient': peer['device']};
     await _save({...current, 'status': 'offered', 'operation': operation, 'offer': offer});
-    return offer;
+    return {...offer, 'snapshot': snapshot};
   }
+
+  Future<String?> _snapshot(String operation) => loadSnapshot != null
+      ? loadSnapshot!(operation) : read('$key:snapshot:$operation');
 
   Future<Map<String, dynamic>> resumeOffer({required String operation,
     required Map<String, dynamic> recipient, required Future<String> Function() export}) => serial(() async {

@@ -146,7 +146,7 @@ class PayrollOwnerLedger {
       for (final table in tables) {
         if (!canonical && (immutable.contains(table) ||
             ['regular_payroll_advances', 'regular_payroll_audit',
-             'regular_payroll_weekly_defaults', 'regular_payroll_sync_outbox'].contains(table))) continue;
+             'regular_payroll_weekly_defaults', 'regular_payroll_sync_outbox'].contains(table))) { continue; }
         final info = await db.customSelect('PRAGMA table_info($table)').get();
         final columns = info.map((r) => r.read<String>('name')).toList();
         final primary = info.where((r) => r.read<int>('pk') > 0)
@@ -191,7 +191,7 @@ class PayrollOwnerLedger {
                 }
                 if (!canonical && table == 'local_mechanic_work_credits_v1' &&
                     prior['paid_operation_id'] != null && row['paid_operation_id'] == null &&
-                    _same({...prior, 'paid_operation_id': null}, row)) continue;
+                    _same({...prior, 'paid_operation_id': null}, row)) { continue; }
                 throw const PayrollPending('Payment pending: mechanic work differs. Reconcile the task before payment.');
               }
             } else if (!canonical) {

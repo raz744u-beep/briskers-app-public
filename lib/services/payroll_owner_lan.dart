@@ -14,11 +14,25 @@ import 'payroll_owner_ledger.dart';
 /// No shared Owner code, cloud login or permanent payment phone is involved.
 class PayrollOwnerLan {
   PayrollOwnerLan({required this.lease, required this.database,
-    required this.approve, required this.actor, this.assertAccount});
+    required this.approve, required this.actor, this.assertAccount, this.onResponse}) {
+    lease.storeSnapshot = (operation, snapshot) async {
+      await database.customStatement('INSERT OR IGNORE INTO payroll_owner_snapshot_v2 VALUES(?,?,?)',
+        [lease.business, operation, snapshot]);
+      final rows = await database.customSelect('SELECT body FROM payroll_owner_snapshot_v2 WHERE business_id=? AND operation=?',
+        variables: [lease.business, operation].map(Variable<String>.new).toList()).get();
+      if (rows.single.data['body'] != snapshot) throw StateError('Conflicting payroll snapshot retry.');
+    };
+    lease.loadSnapshot = (operation) async {
+      final rows = await database.customSelect('SELECT body FROM payroll_owner_snapshot_v2 WHERE business_id=? AND operation=?',
+        variables: [lease.business, operation].map(Variable<String>.new).toList()).get();
+      return rows.firstOrNull?.read<String>('body');
+    };
+  }
   final PayrollOwnerLease lease;
   final BriskersLocalDatabase database;
   final String actor;
   final void Function()? assertAccount;
+  final Future<void> Function(String command)? onResponse;
   Future<LocalOwnerGrant?> Function(String device) approve;
   late final ledger = PayrollOwnerLedger(database, lease.business);
   HttpServer? _server;
@@ -31,6 +45,11 @@ class PayrollOwnerLan {
 
   Future<void> prepare() async {
     await ledger.prepare();
+    await database.customStatement('CREATE TABLE IF NOT EXISTS payroll_owner_proof_required_v2 '
+      '(business_id TEXT PRIMARY KEY NOT NULL)');
+    await database.customStatement('INSERT OR IGNORE INTO payroll_owner_proof_required_v2 VALUES(?)', [lease.business]);
+    await database.customStatement('CREATE TABLE IF NOT EXISTS payroll_owner_snapshot_v2 '
+      '(business_id TEXT NOT NULL,operation TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(business_id,operation))');
     await database.customStatement('CREATE TABLE IF NOT EXISTS payroll_owner_pages_v2 '
       '(business TEXT NOT NULL,peer TEXT NOT NULL,operation TEXT NOT NULL,'
       'direction TEXT NOT NULL,page INTEGER NOT NULL,body TEXT NOT NULL,'
@@ -69,7 +88,7 @@ class PayrollOwnerLan {
     }
     final b = ip.rawAddress;
     if (!(ip.isLoopback || b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) ||
-        (b[0] == 192 && b[1] == 168))) throw const PayrollPending('Payroll requires a private shop Wi-Fi connection.');
+        (b[0] == 192 && b[1] == 168))) { throw const PayrollPending('Payroll requires a private shop Wi-Fi connection.'); }
     return uri.replace(path: path, query: null, fragment: null);
   }
   Future<String> _read(Stream<List<int>> stream) async {
@@ -147,7 +166,7 @@ class PayrollOwnerLan {
             !await PayrollLanIdentity.verify(device, body, signed['signature'] as String)) {
           throw StateError('Invalid Owner connection.');
         }
-        var certificate = data['certificate'] as Map?;
+        var certificate = data['certificate'] as Map? ?? (await _peer(device))?['certificate'] as Map?;
         if (certificate != null) {
           final approved = await lease.verifyCertificate(Map<String, dynamic>.from(certificate));
           if (approved['device'] != device || approved['actor'] != actor) throw StateError('Owner identity differs.');
@@ -186,6 +205,7 @@ class PayrollOwnerLan {
           throw StateError('Owner payroll request expired.');
         }
         final result = await _handle(device, message, peer);
+        await onResponse?.call(message['command'] as String);
         request.response.write(await crypto.seal(lease.identity, device, result));
       } else { request.response.statusCode = 404; }
     } catch (_) { request.response.statusCode = 409; }
@@ -328,7 +348,7 @@ class PayrollOwnerLan {
         if (resumed['absent'] != true) {
           final offer = Map<String, dynamic>.from(jsonDecode(await _download(peer, operation, resumed)) as Map);
           await lease.acceptOffer(offer, grant, (value) => ledger.mergeSnapshot(value, canonical: true));
-          return lease.proof(grant);
+          return await lease.proof(grant);
         }
         final snapshot = await ledger.export();
         final chunks = _chunks(snapshot);
@@ -339,7 +359,7 @@ class PayrollOwnerLan {
           'count': chunks.length, 'digest': await PayrollOwnerLease.digest(snapshot)});
         final offer = Map<String, dynamic>.from(jsonDecode(await _download(peer, operation, result)) as Map);
         await lease.acceptOffer(offer, grant, (value) => ledger.mergeSnapshot(value, canonical: true));
-        return lease.proof(grant);
+        return await lease.proof(grant);
       } catch (_) { /* Durable offer/pending intent is retried with its original operation. */ }
     }
     throw const PayrollPending('Payment pending, not recorded: connect both Owner devices to shop Wi-Fi to verify the current payroll balance.');

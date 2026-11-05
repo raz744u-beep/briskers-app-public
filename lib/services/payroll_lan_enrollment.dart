@@ -12,9 +12,7 @@ import 'payroll_lan_peer.dart';
 class PayrollLanEnrollment {
   PayrollLanEnrollment(
     this.identity, {
-    String approvedWriter = const String.fromEnvironment(
-      'BRISKERS_PAYROLL_WRITER_DEVICE',
-    ),
+    String approvedWriter = '',
     FlutterSecureStorage storage = const FlutterSecureStorage(
       iOptions: IOSOptions(
         accessibility: KeychainAccessibility.unlocked_this_device,

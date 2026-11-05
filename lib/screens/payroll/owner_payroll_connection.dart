@@ -12,7 +12,7 @@ class OwnerPayrollConnections {
   static Future<PayrollOwnerLan> open(BuildContext context, String business,
       LocalOwnerGrant grant) async {
     grant.assertValid(business, grant.actorId);
-    final approve = (device) async {
+    Future<LocalOwnerGrant?> approve(String device) async {
         if (!context.mounted) return null;
         final approved = await showDialog<bool>(context: context, builder: (dialog) => AlertDialog(
           title: const Text('Connect your other Owner device?'),
@@ -22,7 +22,7 @@ class OwnerPayrollConnections {
         ));
         if (approved != true || !context.mounted) return null;
         return DeviceOwnerAuthorization.instance.authority.authorizeLocal(business);
-      };
+      }
     final existing = _instances[business];
     if (existing != null && existing.actor == grant.actorId) { existing.approve = approve; return existing; }
     if (existing != null) await existing.close();

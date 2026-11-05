@@ -227,6 +227,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         weeklyBase: ['fixed_weekly', 'flexible_weekly'].contains(widget.employeePayType),
       );
     }
+    if (!mounted) return;
     final ownerConnection = await OwnerPayrollConnections.open(context, widget.businessId, _grant!);
     if (!_refreshingOwnerState) {
       _refreshingOwnerState = true;

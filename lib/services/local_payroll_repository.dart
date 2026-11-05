@@ -1161,6 +1161,14 @@ class LocalPayrollRepository {
       await ownerProof!.validate(business, deviceId);
       return;
     }
+    final upgraded = await db.customSelect(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='payroll_owner_proof_required_v2'",
+    ).get();
+    if (upgraded.isNotEmpty && (await _read(
+      'SELECT business_id FROM payroll_owner_proof_required_v2 WHERE business_id=?', [business],
+    )).isNotEmpty) {
+      throw const PayrollPending('Payment pending: key-backed Owner payroll state must be reconciled.');
+    }
     await assertLanWriter?.call();
     final saved = await _read(
       'SELECT device_id FROM regular_payroll_payment_authority WHERE business_id=?',

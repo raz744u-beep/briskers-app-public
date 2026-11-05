@@ -97,6 +97,8 @@ jobs:
 
           info = ios / 'Runner' / 'Info.plist'
           config = plistlib.loads(info.read_bytes())
+          config['NSLocalNetworkUsageDescription'] = 'Synchronize Briskers payroll securely with your shop devices over Wi-Fi.'
+          config.setdefault('NSAppTransportSecurity', {})['NSAllowsLocalNetworking'] = True
           config['NSCameraUsageDescription'] = (
               'Capture a VIN barcode or photograph the vehicle VIN label.')
           config['NSPhotoLibraryUsageDescription'] = (
