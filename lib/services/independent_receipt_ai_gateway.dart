@@ -83,12 +83,30 @@ class IndependentReceiptAiGateway {
         'image_base64': base64Encode(bytes),
       },
     ).timeout(const Duration(seconds: 30));
+    // A proxy or provider sometimes returns HTTP 200 with an error object.
+    // Never treat such a response as extracted receipt fields or persist it.
+    if (decoded['error'] != null || decoded['success'] == false) {
+      throw const FormatException('Gateway returned no extraction.');
+    }
     final result = decoded['extraction'] ?? decoded;
     if (result is! Map || result.isEmpty) {
       throw const FormatException('Gateway returned no extraction.');
     }
+    final fields = Map<String, dynamic>.from(result);
+    const recognizedFields = <String>{
+      'vendor_name',
+      'receipt_total',
+      'receipt_date',
+      'vendor_invoice_number',
+      'items',
+      'subtotal',
+    };
+    if (!fields.keys.any(recognizedFields.contains) ||
+        fields.values.every((value) => value == null)) {
+      throw const FormatException('Gateway returned no extraction.');
+    }
     return <String, dynamic>{
-      ...Map<String, dynamic>.from(result),
+      ...fields,
       'extraction_source': _existingService
           ? 'existing_online_receipt_ai'
           : 'independent_online_ai',
