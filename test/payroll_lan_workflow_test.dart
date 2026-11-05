@@ -13,7 +13,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  for (final paidMinutes in [30, 60]) {
+  for (final paidMinutes in [30, 60, 180]) {
+  final creditedMinutes=paidMinutes==180?180:60;
   test('separate LAN ledgers preserve one $paidMinutes minute payment after lost reply and restart',
       () async {
     // The widget binding normally mocks HTTP. This test uses real loopback.
@@ -152,6 +153,10 @@ void main() {
       await ownerLinks[i].delivery.close();
     }
     expect((await ledger.work()).map((row) => row['state']), everyElement('Done'));
+    if(creditedMinutes!=60){
+      final first=(await ledger.work(employee:'a')).single;
+      await ledger.recordAllocatedTime(first['id'] as String,'Done',60,creditedMinutes,'2026-11-04');
+    }
     await expectLater(mechanicLinks[0].repository.mechanicReport('b', authorize),
         throwsStateError);
     await expectLater(mechanicLinks[0].pay(
@@ -222,10 +227,12 @@ void main() {
     final first = await mechanicLinks[0].repository.mechanicReport('a', authorize);
     final second = await mechanicLinks[1].repository.mechanicReport('b', authorize);
     expect(first.receipts.single['net'], paidMinutes * 4000 ~/ 60);
-    expect(first.unpaid, (60 - paidMinutes) * 4000 ~/ 60);
+    final actual=(await mechanics[0].customSelect("SELECT minutes FROM regular_payroll_actual_time WHERE business_id='shop'").getSingle()).data['minutes'];
+    expect(actual,60);
+    expect(first.unpaid, (creditedMinutes - paidMinutes) * 4000 ~/ 60);
     final ownerBalance = (await ownerLinks[0].repository.work(employee: 'a')).single;
     expect(ownerBalance['remaining_cents'], first.unpaid);
-    expect(ownerBalance['paid'], paidMinutes == 60 ? 1 : 0);
+    expect(ownerBalance['paid'], paidMinutes == creditedMinutes ? 1 : 0);
     expect(second.receipts, isEmpty);
     expect(second.unpaid, 4000);
   });

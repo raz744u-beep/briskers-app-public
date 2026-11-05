@@ -280,6 +280,17 @@ class LocalPayrollRepository {
     });
   }
 
+  Future<void> acceptChangedAssignment(String id) async {
+    _authorize();await prepare();
+    await db.transaction(()async{
+      final row=(await _read('SELECT task_id,employee_id FROM local_mechanic_work_credits_v1 WHERE business_id=? AND allocation_id=?',[business,id])).single;
+      await db.customStatement('UPDATE regular_payroll_assignment_meta SET active=1,inherited=0,revision=revision+1 WHERE business_id=? AND task_id=? AND employee_id=?',
+        [business,row['task_id'],row['employee_id']]);
+      await db.customStatement('INSERT INTO regular_payroll_task_policy VALUES(?,?,1) ON CONFLICT(business_id,task_id) DO UPDATE SET manual_override=1',[business,row['task_id']]);
+      _authorize();
+    });
+  }
+
   Future<void> recordAllocatedTime(String id, String state, int actualMinutes, int creditedMinutes, String date) async {
     _authorize(); await prepare();
     if(actualMinutes<0||creditedMinutes<0)throw ArgumentError('Hours must be positive.');
@@ -425,10 +436,14 @@ class LocalPayrollRepository {
     final rows = await _read(
       'SELECT c.allocation_id AS credit,t.job_id AS job,c.rate_cents AS rate,'
       'c.task_id,c.job_id AS credit_job,c.labor_line_id AS credit_labor,'
+      'c.actual_minutes AS total_credit_minutes,c.revision AS credit_revision,p.state,p.completed_date,'
+      'COALESCE(at.minutes,c.actual_minutes) AS recorded_actual_minutes,'
       't.description,t.planned,s.invoice_id AS invoice,s.line_id AS line,'
       's.source_kind AS kind,CASE WHEN m.active=0 THEN 0 ELSE s.active END AS active,e.minutes AS estimated_minutes '
       'FROM local_mechanic_work_credits_v1 c '
       'JOIN regular_payroll_tasks t ON t.business_id=c.business_id AND t.id=c.task_id '
+      'JOIN regular_payroll_portions p ON p.business_id=c.business_id AND p.id=c.allocation_id '
+      'LEFT JOIN regular_payroll_actual_time at ON at.business_id=c.business_id AND at.credit_id=c.allocation_id '
       'JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id '
       'LEFT JOIN regular_payroll_estimates e ON e.business_id=c.business_id '
       'AND e.task_id=c.task_id AND e.employee_id=c.employee_id '
@@ -497,7 +512,7 @@ class LocalPayrollRepository {
       await _updateWork(
         id, state, minutes, date,
         expectedRevision: expectedRevision,
-        authorize: assertSession,
+        authorize: assertSession, allowRetiredProgress: true,
       );
       await queueChange?.call();
     });
@@ -604,7 +619,7 @@ class LocalPayrollRepository {
             isRecheck ? payload['kind'] : 'invoice', payload['active'] as int? ?? 1],
         );
         await db.customStatement(
-          'INSERT OR IGNORE INTO regular_payroll_estimates VALUES(?,?,?,?)',
+          'INSERT INTO regular_payroll_estimates VALUES(?,?,?,?) ON CONFLICT(business_id,task_id,employee_id) DO UPDATE SET minutes=excluded.minutes',
           [business, task, employee, payload['estimated_minutes'] as int? ?? 0],
         );
         final existing = await _read(
@@ -622,6 +637,7 @@ class LocalPayrollRepository {
             actualMinutes: 0, rateCents: rate,
           );
         }
+        await _applyCanonicalProgress(id, employee, payload);
       case PayrollLanOperation.payment:
         if (owner || pairedEmployee != employee) {
           throw StateError('Payroll receipt is unavailable to this device.');
@@ -653,6 +669,8 @@ class LocalPayrollRepository {
         final staged = <Map<String, dynamic>>[];
         for (final entry in entries) {
           final id = entry['credit_id'] as String;
+          final canonical = entry['snapshot'];
+          if (canonical is Map){await _applyCanonicalProgress(id, employee, Map<String,dynamic>.from(canonical));}
           final rows = await _read(
             'SELECT c.* FROM local_mechanic_work_credits_v1 c '
             'WHERE c.business_id=? AND c.allocation_id=? AND c.employee_id=?',
@@ -723,6 +741,46 @@ class LocalPayrollRepository {
     assertLink();
   }
 
+  /// A signed Owner snapshot carries credited and actual hours separately.
+  /// Older snapshots never overwrite offline mechanic progress. Paid coverage
+  /// freezes the work, including partial payments; conflicts remain pending.
+  Future<void> _applyCanonicalProgress(String id,String employee,Map<String,dynamic> value) async {
+    if(value['credit_revision']==null){return;} // Existing receipts remain valid.
+    final revision=value['credit_revision'];
+    final minutes=value['total_credit_minutes'];
+    final actual=value['recorded_actual_minutes'];
+    final state=value['state'];
+    if(revision is! int || revision<0 || minutes is! int || minutes<0 || actual is! int || actual<0 ||
+        !['Open','In Progress','Done'].contains(state)){throw StateError('Invalid Owner work snapshot.');}
+    final rows=await _read('SELECT c.*,p.state,p.completed_date FROM local_mechanic_work_credits_v1 c '
+      'JOIN regular_payroll_portions p ON p.business_id=c.business_id AND p.id=c.allocation_id '
+      'WHERE c.business_id=? AND c.allocation_id=? AND c.employee_id=?',[business,id,employee]);
+    if(rows.length!=1){throw StateError('Payment pending: receive the labor assignment first.');}
+    final row=rows.single;
+    if(value['task_id']!=row['task_id'] || (value['job_id']??value['credit_job']??value['job'])!=row['job_id']){throw StateError('Owner work identity conflicts.');}
+    final prior=row['revision'] as int;
+    if(revision<prior){return;}
+    final recorded=await _read('SELECT minutes FROM regular_payroll_actual_time WHERE business_id=? AND credit_id=?',[business,id]);
+    final same=row['actual_minutes']==minutes && row['state']==state &&
+      row['completed_date']==value['completed_date'] && (recorded.firstOrNull?['minutes']??row['actual_minutes'])==actual;
+    if(revision==prior && !same){throw StateError('Payment pending: work revisions conflict. Reconcile before payment.');}
+    if(same){
+      if(revision>prior){
+        await db.customStatement('UPDATE local_mechanic_work_credits_v1 SET revision=? WHERE business_id=? AND allocation_id=?',[revision,business,id]);
+      }
+      return;
+    }
+    final coverage=await _read('SELECT credit_id FROM regular_payroll_work_coverage WHERE business_id=? AND credit_id=?',[business,id]);
+    if(coverage.isNotEmpty || row['paid_operation_id']!=null){throw StateError('Paid work history cannot be replaced.');}
+    if(state=='Done'){_date(value['completed_date'] as String);}
+    await db.customStatement('UPDATE local_mechanic_work_credits_v1 SET actual_minutes=?,completed=?,revision=? WHERE business_id=? AND allocation_id=? AND employee_id=?',
+      [minutes,state=='Done'?1:0,revision,business,id,employee]);
+    await db.customStatement('UPDATE regular_payroll_portions SET state=?,completed_date=?,version=? WHERE business_id=? AND id=?',
+      [state,value['completed_date'],revision,business,id]);
+    await db.customStatement('INSERT INTO regular_payroll_actual_time VALUES(?,?,?,?) ON CONFLICT(business_id,credit_id) DO UPDATE SET minutes=excluded.minutes,revision=excluded.revision',
+      [business,id,actual,revision]);
+  }
+
   /// Editing or reopening an unpaid portion increments its version. Paid
   /// portions require a new recheck labor line; their original hours stay frozen.
   Future<void> updateWork(
@@ -747,6 +805,7 @@ class LocalPayrollRepository {
     String date, {
     required int? expectedRevision,
     required void Function() authorize,
+    bool allowRetiredProgress=false,
   }) async {
     authorize();
     await prepare();
@@ -760,7 +819,7 @@ class LocalPayrollRepository {
       );
       final retired = await _read('SELECT active FROM regular_payroll_assignment_meta WHERE business_id=? AND task_id=? AND employee_id=?',
         [business, rows.firstOrNull?['task_id']?.toString() ?? '', rows.firstOrNull?['employee_id']?.toString() ?? '']);
-      if (retired.firstOrNull?['active'] == 0) throw StateError('This inherited assignment changed. Refresh tasks.');
+      if (!allowRetiredProgress && retired.firstOrNull?['active'] == 0){throw StateError('This inherited assignment changed. Refresh tasks.');}
       if (rows.length != 1 || rows.single['paid_operation_id'] != null)
         { throw StateError('Missing or paid work; add a recheck'); }
       if (rows.single['state'] == 'Open') {
@@ -823,7 +882,7 @@ class LocalPayrollRepository {
       "SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,"
       "p.state,p.completed_date,c.revision AS version,t.description,t.job_id,"
       "j.job_number,j.customer_name,j.vehicle_label,c.completed AS credit_completed,"
-      "s.source_kind,CASE WHEN m.active=0 THEN 0 ELSE s.active END AS source_active,s.invoice_id,s.line_id AS source_line_id,"
+      "s.source_kind,CASE WHEN m.active=0 THEN 1 ELSE 0 END AS assignment_conflict,CASE WHEN m.active=0 THEN 0 ELSE s.active END AS source_active,s.invoice_id,s.line_id AS source_line_id,"
       "COALESCE(est.minutes,0) AS estimated_minutes,"
       "c.actual_minutes,c.rate_cents,COALESCE(at.minutes,c.actual_minutes) AS recorded_actual_minutes,"
       "COALESCE((SELECT SUM(x.minutes) FROM regular_payroll_work_coverage x "
@@ -1418,7 +1477,7 @@ class LocalPayrollRepository {
         final match = current.where((w) => w['id'] == p['id']).toList();
         if (match.length != 1) { throw StateError('Missing work'); }
         final w = match.single;
-        if (w['state'] != 'Done' ||
+        if (w['assignment_conflict']==1 || w['state'] != 'Done' ||
             w['credit_completed'] != 1 ||
             w['paid'] != 0 ||
             (p.containsKey('paid_minutes') && w['paid_minutes'] != p['paid_minutes']) ||
@@ -1454,6 +1513,7 @@ class LocalPayrollRepository {
         gross += amount;
         snapshots.add(jsonEncode({
           ...w, 'employee_name': staff.single['name'],
+          'total_credit_minutes':w['actual_minutes'],'credit_revision':w['version'],
           'actual_minutes': minutes, 'hours_hundredths': (minutes * 100 + 30) ~/ 60,
           'gross_cents': amount, 'payment_rate_cents': paymentRate,
         }));

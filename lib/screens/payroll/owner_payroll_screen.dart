@@ -563,14 +563,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     subtitle: Text('${row['employee_name']} · ${row['state']} · '
       '${row['recorded_actual_minutes'] ?? row['actual_minutes']} actual min · ${row['actual_minutes']} credited min · ${row['estimated_minutes'] ?? 0} estimated min · '
       '${row['pay_status'] ?? (row['paid'] == 1 ? 'Paid' : 'Unpaid')}'
-      '${row['source_active'] == 0 ? ' · Removed from invoice' : ''}'),
+      '${row['assignment_conflict']==1?' · Assignment changed; Owner review required':row['source_active'] == 0 ? ' · Removed from invoice' : ''}'),
     trailing: Row(mainAxisSize: MainAxisSize.min, children: [
       IconButton(
         tooltip: 'Edit mechanic estimated hours',
         icon: const Icon(Icons.edit_outlined, size: 19),
         onPressed: _busy ? null : () => _editEstimated(row),
       ),
-      if (row['state'] != 'Done' && (row['paid_minutes'] as int? ?? 0) == 0 &&
+      if(row['assignment_conflict']==1)TextButton(onPressed:_busy?null:()=>_run(()async{await _repository.acceptChangedAssignment(row['id'] as String);}),child:const Text('Accept work')),
+      if (row['assignment_conflict']!=1 && row['state'] != 'Done' && (row['paid_minutes'] as int? ?? 0) == 0 &&
           (row['source_active'] != 0 || row['state'] != 'Open'))
         TextButton(
           onPressed: _busy ? null : () => _recordTaskProgress(row),

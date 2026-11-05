@@ -79,6 +79,7 @@ jobs:
         run: flutter analyze
 
       - name: Verify remaining Bugs 26 regressions
+        if: ${{ !cancelled() }}
         timeout-minutes: 4
         working-directory: generated
         run: >-
@@ -93,10 +94,12 @@ jobs:
           test/offline_expense_detail_route_test.dart
 
       - name: Verify enabled regular Tasks and Payroll navigation
+        if: ${{ !cancelled() }}
         working-directory: generated
         run: flutter test --dart-define=BRISKERS_ENABLE_OWNER_PAYROLL=true --reporter expanded test/b2568_regular_navigation_test.dart
 
       - name: Run diagnostic and regression tests
+        if: ${{ !cancelled() }}
         working-directory: generated
         run: flutter test
 
