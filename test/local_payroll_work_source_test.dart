@@ -218,6 +218,15 @@ void main() {
     payroll = LocalPayrollRepository(db, business: 'shop-a', owner: true, deviceId: 'owner-device');
     source = LocalPayrollWorkSource(db);
     expect((await payroll.history('employee-a')).single['net'], 10000);
+    final history = (await payroll.historyWithWork('employee-a')).single;
+    expect(history['gross'], 10000);
+    expect(history['repayment'], 0);
+    expect(history['net'], 10000);
+    final paidWork = (history['work'] as List<Map<String, dynamic>>).single;
+    expect(paidWork['job_id'], 'job-a');
+    expect(paidWork['invoice_id'], 'invoice-a');
+    expect(paidWork['actual_minutes'], 150);
+    expect(paidWork['method'], 'Cash');
     expect(await payroll.history('employee-b'), isEmpty);
     final unpaid = (await payroll.work(employee: 'employee-b')).single;
     expect(unpaid['state'], 'Done');

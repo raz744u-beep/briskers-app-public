@@ -497,6 +497,67 @@ class LocalPayrollRepository {
     );
   }
 
+  /// Read the settlement and its frozen allocations together. Grouping by
+  /// payment date would mix disbursements from different payroll weeks.
+  Future<List<Map<String, dynamic>>> historyWithWork(String employee) async {
+    _authorize();
+    await prepare();
+    return db.transaction(() async {
+      final payments = await history(employee);
+      final result = <Map<String, dynamic>>[];
+      for (final payment in payments) {
+        final rows = await _read(
+          'SELECT credit_id, snapshot FROM regular_payroll_paid_work '
+          'WHERE business_id=? AND operation_id=? ORDER BY credit_id',
+          [business, payment['operation_id'] as String],
+        );
+        final work = <Map<String, dynamic>>[];
+        for (final row in rows) {
+          final snapshot = Map<String, dynamic>.from(
+            jsonDecode(row['snapshot'] as String) as Map,
+          );
+          final taskId = snapshot['task_id'];
+          // Older snapshots may predate the encoded invoice linkage.
+          Object? task;
+          if (taskId is String) {
+            try {
+              task = jsonDecode(taskId);
+            } on FormatException {
+              task = null;
+            }
+          }
+          final jobId = snapshot['job_id'];
+          final job = jobId is String ? (await _read(
+            'SELECT id, job_number, vehicle_label FROM local_jobs '
+            'WHERE business_id=? AND id=?', [business, jobId],
+          )).firstOrNull : null;
+          final invoice = task is List && task.length == 3 &&
+              task[0] == jobId && task[1] is String && jobId is String
+              ? (await _read(
+                  "SELECT id AS invoice_id, document_number FROM local_documents "
+                  "WHERE business_id=? AND id=? AND job_id=? AND kind='invoice'",
+                  [business, task[1] as String, jobId],
+                )).firstOrNull
+              : null;
+          work.add({
+            ...snapshot,
+            'job_id': job?['id'],
+            'job_number': job?['job_number'],
+            'vehicle_label': job?['vehicle_label'],
+            ...?invoice,
+            'credit_id': row['credit_id'],
+            'operation_id': payment['operation_id'],
+            'method': payment['method'],
+            'verified_date': payment['verified_date'],
+          });
+        }
+        result.add({...payment, 'work': work});
+      }
+      _authorize();
+      return result;
+    });
+  }
+
   /// Install a verified, non-transferable payment authority. This is for
   /// trusted LAN enrollment, never self-election by a disconnected device.
   Future<void> bindPaymentAuthority({

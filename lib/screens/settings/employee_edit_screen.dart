@@ -5,6 +5,7 @@ import '../../core/formatters.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/employee_nickname_store.dart';
+import '../payroll/owner_payroll_screen.dart';
 
 class EmployeeEditScreen extends StatefulWidget {
   const EmployeeEditScreen({
@@ -12,11 +13,15 @@ class EmployeeEditScreen extends StatefulWidget {
     required this.businessId,
     required this.isOwner,
     this.employeeId,
+    this.rosterName,
+    this.rosterPosition,
   });
 
   final String businessId;
   final bool isOwner;
   final String? employeeId;
+  final String? rosterName;
+  final String? rosterPosition;
 
   @override
   State<EmployeeEditScreen> createState() => _EmployeeEditScreenState();
@@ -46,6 +51,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   bool _userLinked = false;
   bool _appLoginBusy = false;
   bool _loading = true;
+  bool _detailLoaded = false;
   bool _saving = false;
   bool _savingNickname = false;
   String? _error;
@@ -114,6 +120,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   Future<void> _load() async {
     try {
       if (_editing) {
+        _name.text = widget.rosterName ?? '';
         _nickname.text = await _nicknameStore.get(
               widget.businessId, widget.employeeId!,
             ) ?? '';
@@ -140,6 +147,9 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
 
       if (!mounted) return;
 
+      if (_editing && employee == null) {
+        throw StateError('Employee details could not be loaded.');
+      }
       _positions = positions;
       if (employee != null) {
         _name.text = employee['name']?.toString() ?? '';
@@ -166,6 +176,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
 
       setState(() {
         _loading = false;
+        _detailLoaded = true;
         _error = null;
       });
     } catch (error) {
@@ -449,15 +460,58 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
     return null;
   }
 
+  Widget _cachedDetails() => ListView(
+    padding: const EdgeInsets.all(16),
+    children: [
+      if (_name.text.isNotEmpty)
+        ListTile(title: const Text('Full name'), subtitle: Text(_name.text)),
+      if (widget.rosterPosition case final String position)
+        ListTile(title: const Text('Position'), subtitle: Text(position)),
+      const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Text('Contact, tax, and compensation details are unavailable '
+          'until the employee record can be loaded securely.'),
+      ),
+      if (widget.isOwner) ...[
+        TextFormField(
+          controller: _nickname,
+          maxLength: 32,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(labelText: 'Nickname (optional)'),
+        ),
+        OutlinedButton.icon(
+          onPressed: _savingNickname ? null : _saveNicknameLocally,
+          icon: const Icon(Icons.save_outlined),
+          label: const Text('Save nickname on this device'),
+        ),
+      ],
+      if (_error != null) Text(_error!),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_editing ? 'Edit employee' : 'Add employee'),
+        title: Text(_editing ? 'Employee Details' : 'Add employee'),
+        actions: [
+          if (_editing && widget.isOwner && OwnerPayrollScreen.enabled)
+            IconButton(
+              tooltip: 'Payroll History',
+              icon: const Icon(Icons.history),
+              onPressed: () => Navigator.of(context).push<void>(MaterialPageRoute(
+                builder: (_) => OwnerPayrollScreen(
+                  businessId: widget.businessId, reportsOnly: true,
+                  employeeId: widget.employeeId,
+                  employeeName: _name.text.isEmpty ? null : _name.text,
+                ),
+              )),
+            ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Form(
+          : _editing && !_detailLoaded ? _cachedDetails() : Form(
               key: _formKey,
               child: ListView(
                 padding: const EdgeInsets.all(16),

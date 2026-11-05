@@ -11,6 +11,9 @@ import '../../services/local_payroll_repository.dart';
 import '../../services/payroll_lan_enrollment.dart';
 import '../../services/payroll_lan_identity.dart';
 import '../../services/payroll_lan_workflow.dart';
+import '../jobs/job_detail_screen.dart';
+import '../jobs/job_document_screen.dart';
+import 'payroll_history_panel.dart';
 import 'payroll_lan_controls.dart';
 
 class OwnerPayrollScreen extends StatefulWidget {
@@ -21,11 +24,15 @@ class OwnerPayrollScreen extends StatefulWidget {
     this.invoiceId,
     this.invoiceLines = const [],
     this.reportsOnly = false,
+    this.employeeId,
+    this.employeeName,
   });
 
   static const enabled = bool.fromEnvironment('BRISKERS_ENABLE_OWNER_PAYROLL');
 
   final bool reportsOnly;
+  final String? employeeId;
+  final String? employeeName;
   final String businessId;
   final String? jobId;
   final String? invoiceId;
@@ -45,6 +52,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   String? _error;
   bool _busy = false;
   Timer? _lockCheck;
+  final _historyUnlocked = ValueNotifier(false);
 
   @override
   void initState() {
@@ -54,6 +62,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       try {
         _assertOwner();
       } on StateError {
+        _historyUnlocked.value = false;
         setState(() {
           _grant = null;
           _employee = null;
@@ -69,6 +78,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   @override
   void dispose() {
     _lockCheck?.cancel();
+    _historyUnlocked.dispose();
     super.dispose();
   }
 
@@ -122,13 +132,16 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     final employees = job == null
         ? await repository.employees()
         : await repository.assignedEmployees(job);
-    final employee = _employee ?? (employees.firstOrNull?['id'] as String?);
+    final employee = widget.employeeId ?? _employee ?? (employees.firstOrNull?['id'] as String?);
     final work = await repository.work(employee: _jobMode ? null : employee, job: job);
     final history = employee == null || _jobMode
         ? <Map<String, dynamic>>[]
-        : await repository.history(employee);
+        : widget.reportsOnly
+            ? await repository.historyWithWork(employee)
+            : await repository.history(employee);
     _assertOwner();
     if (!mounted) return;
+    _historyUnlocked.value = true;
     setState(() {
       _employees = employees;
       _employee = employee;
@@ -289,8 +302,63 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     }, verifyPayment: true);
   }
 
+  void _openRecordedWork(String id, {required bool invoice}) {
+    try {
+      _assertOwner();
+    } on StateError {
+      _run(() async {});
+      return;
+    }
+    Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => invoice
+          ? JobDocumentScreen(
+              businessId: widget.businessId, documentId: id, isOwner: true,
+              roleCode: 'owner',
+            )
+          : JobDetailScreen(
+              businessId: widget.businessId, jobId: id, roleCode: 'owner',
+            ),
+    ));
+  }
+
+  Widget _reports() => Scaffold(
+    appBar: AppBar(title: Text(widget.employeeName ?? 'Payroll reports')),
+    body: Column(children: [
+      if (_grant == null || _error != null)
+        FilledButton(
+          onPressed: _busy ? null : () => _run(() async {}),
+          child: const Text('Unlock Owner payroll'),
+        ),
+      if (_busy) const LinearProgressIndicator(),
+      if (_error != null) Text(_error!),
+      if (_grant != null && widget.employeeId == null && _employees.isNotEmpty)
+        DropdownButton<String>(
+          value: _employee,
+          items: [
+            for (final row in _employees)
+              DropdownMenuItem(value: row['id'] as String, child: Text(row['name'].toString())),
+          ],
+          onChanged: _busy ? null : (value) {
+            setState(() {
+              _employee = value;
+              _history = [];
+            });
+            _run(() async {});
+          },
+        ),
+      if (_grant != null)
+        Expanded(child: PayrollHistoryPanel(
+          key: ValueKey(_employee),
+          payments: _history,
+          unlocked: _historyUnlocked,
+          onOpenJob: (id) => _openRecordedWork(id, invoice: false),
+          onOpenInvoice: (id) => _openRecordedWork(id, invoice: true),
+        )),
+    ]),
+  );
+
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => widget.reportsOnly ? _reports() : Scaffold(
         appBar: AppBar(title: Text(widget.reportsOnly
             ? 'Payroll reports'
             : _jobMode ? 'Job labor tasks' : 'Owner payroll')),

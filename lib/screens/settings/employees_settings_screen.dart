@@ -97,6 +97,8 @@ class _EmployeesSettingsScreenState
         builder: (_) => EmployeeEditScreen(
           businessId: widget.businessId,
           employeeId: employee?['id']?.toString(),
+          rosterName: employee?['name']?.toString(),
+          rosterPosition: (employee?['position_name'] ?? employee?['position'])?.toString(),
           isOwner: widget.isOwner,
         ),
       ),
