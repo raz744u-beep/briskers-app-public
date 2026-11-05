@@ -8,7 +8,8 @@ class LocalMechanicWorkCreditRepository {
       : _db = database ?? localDatabase;
   final BriskersLocalDatabase _db;
 
-  Future<void> prepare() => _db.customStatement('''
+  Future<void> prepare() async {
+    await _db.customStatement('''
     CREATE TABLE IF NOT EXISTS local_mechanic_work_credits_v1 (
       business_id TEXT NOT NULL,
       allocation_id TEXT NOT NULL,
@@ -25,6 +26,37 @@ class LocalMechanicWorkCreditRepository {
       UNIQUE (business_id, task_id, employee_id, allocation_id)
     )
   ''');
+    await _db.customStatement('''
+      CREATE TABLE IF NOT EXISTS regular_payroll_work_coverage (
+        business_id TEXT NOT NULL, credit_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL, minutes INTEGER NOT NULL CHECK(minutes>0),
+        amount INTEGER NOT NULL CHECK(amount>=0), snapshot TEXT NOT NULL,
+        PRIMARY KEY(business_id,credit_id,operation_id)
+      )
+    ''');
+    await _db.customStatement('''
+      CREATE TRIGGER IF NOT EXISTS payroll_covered_work_immutable
+      BEFORE UPDATE OF actual_minutes, rate_cents, completed, employee_id, job_id,
+        labor_line_id, task_id, allocation_id, business_id
+      ON local_mechanic_work_credits_v1
+      WHEN EXISTS (SELECT 1 FROM regular_payroll_work_coverage
+        WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id)
+      BEGIN SELECT RAISE(ABORT,'Paid work is immutable'); END
+    ''');
+    await _db.customStatement('''
+      CREATE TRIGGER IF NOT EXISTS payroll_covered_work_no_delete
+      BEFORE DELETE ON local_mechanic_work_credits_v1
+      WHEN EXISTS (SELECT 1 FROM regular_payroll_work_coverage
+        WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id)
+      BEGIN SELECT RAISE(ABORT,'Paid work is immutable'); END
+    ''');
+    for (final action in ['UPDATE', 'DELETE']) {
+      await _db.customStatement(
+        'CREATE TRIGGER IF NOT EXISTS payroll_coverage_no_$action BEFORE $action '
+        "ON regular_payroll_work_coverage BEGIN SELECT RAISE(ABORT,'Paid work is immutable'); END",
+      );
+    }
+  }
 
   /// The caller supplies a stable allocation identity originating in the
   /// actual labor task / mechanic assignment. This does not infer worked time.

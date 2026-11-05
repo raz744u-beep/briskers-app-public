@@ -36,6 +36,7 @@ class OwnerPayrollScreen extends StatefulWidget {
     this.employeeName,
     this.employeeRole,
     this.employeePayType,
+    this.employeeHourlyCents,
     this.employeeActive = true,
     this.openEmployeeDetails,
     this.globalTasks = false,
@@ -48,6 +49,7 @@ class OwnerPayrollScreen extends StatefulWidget {
   final String? employeeName;
   final String? employeeRole;
   final String? employeePayType;
+  final int? employeeHourlyCents;
   final bool employeeActive;
   final VoidCallback? openEmployeeDetails;
   final bool globalTasks;
@@ -65,6 +67,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
   LocalOwnerGrant? _grant;
   List<Map<String, dynamic>> _employees = [];
   List<Map<String, dynamic>> _work = [];
+  List<Map<String, dynamic>> _taskSources = [];
   List<Map<String, dynamic>> _history = [];
   String? _employee;
   DateTime _week = DateTime.now();
@@ -111,6 +114,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
           _employee = null;
           _employees = [];
           _work = [];
+          _taskSources = [];
           _history = [];
           _advanceBalance = null;
           _repayments = [];
@@ -198,6 +202,16 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
 
   Future<void> _load() async {
     final repository = _repository;
+    if (widget.employeeId != null && widget.employeeName != null &&
+        widget.employeeHourlyCents != null) {
+      await repository.saveEmployeeCompensation(
+        employee: widget.employeeId!, name: widget.employeeName!,
+        rate: widget.employeeHourlyCents!,
+        weeklyBase: ['fixed_weekly', 'flexible_weekly'].contains(widget.employeePayType),
+      );
+    }
+    await repository.refreshInvoiceTasks();
+    final sources = await repository.tasks();
     final job = widget.jobId;
     final employees = job == null
         ? await repository.employees()
@@ -233,6 +247,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
           : employees;
       _employee = employee;
       _work = work;
+      _taskSources = sources;
       _history = history;
       _advanceBalance = advance;
       _repayments = repayments;
@@ -353,13 +368,91 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     }
     final rate = cents;
     await _run(() async {
-      final workflow = await _workflow(employeeId);
-      await workflow.assign(
-        job: widget.jobId!, invoice: invoiceId, line: line['id'] as String,
-        description: (line['description'] ?? line['name'] ?? 'Invoice labor').toString(),
-        employeeName: name, rate: rate,
-      );
+      final identity = await PayrollLanIdentity.load();
+      final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, employeeId);
+      if (peer == null) {
+        await _repository.registerAssignedLabor(
+          jobId: widget.jobId!, invoiceId: invoiceId, lineId: line['id'] as String,
+          employeeId: employeeId, employeeName: name, rateCents: rate,
+        );
+      } else {
+        final workflow = await _workflow(employeeId);
+        await workflow.assign(
+          job: widget.jobId!, invoice: invoiceId, line: line['id'] as String,
+          description: (line['description'] ?? line['name'] ?? 'Invoice labor').toString(),
+          employeeName: name, rate: rate,
+        );
+      }
     });
+  }
+
+  Future<void> _recordTaskProgress(Map<String, dynamic> row) async {
+    final next = row['state'] == 'Open' ? 'In Progress' : 'Done';
+    if (row['state'] == 'Done' || (row['paid_minutes'] as int? ?? 0) > 0) return;
+    var minutes = row['actual_minutes'] as int;
+    if (next == 'Done') {
+      final value = await payrollLanInput(context, 'Complete mechanic work', 'Actual hours worked');
+      if (!mounted || value == null) return;
+      final hours = double.tryParse(value);
+      if (hours == null || !hours.isFinite || hours <= 0 || hours > 10000) {
+        setState(() => _error = 'Enter valid actual hours.');
+        return;
+      }
+      minutes = (hours * 60).round();
+    }
+    await _run(() => _repository.updateWork(
+      row['id'] as String, next, (minutes * 100 + 30) ~/ 60, _date(DateTime.now()),
+      expectedRevision: row['version'] as int,
+    ));
+  }
+
+  Widget _taskCard(Map<String, dynamic> row) => ListTile(
+    title: Text(row['description'] as String),
+    subtitle: Text('${row['employee_name']} · ${row['state']} · '
+      '${row['actual_minutes']} actual min · ${row['estimated_minutes'] ?? 0} estimated min · '
+      '${row['pay_status'] ?? (row['paid'] == 1 ? 'Paid' : 'Unpaid')}'),
+    trailing: row['state'] == 'Done' || (row['paid_minutes'] as int? ?? 0) > 0
+        ? null : TextButton(
+            onPressed: _busy ? null : () => _recordTaskProgress(row),
+            child: Text(row['state'] == 'Open' ? 'Start' : 'Complete'),
+          ),
+  );
+
+  Future<void> _addRecheck() async {
+    final job = widget.jobId;
+    if (job == null) return;
+    final employee = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Assign recheck'),
+        children: [
+          for (final employee in _employees)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, employee),
+              child: Text((employee['employee_name'] ?? employee['name']).toString()),
+            ),
+        ],
+      ),
+    );
+    if (!mounted || employee == null) return;
+    final description = await payrollLanInput(context, 'Additional job work / Recheck', 'Task description');
+    if (!mounted || description == null || description.isEmpty) return;
+    final estimated = await payrollLanInput(context, 'Mechanic estimated hours', 'Estimated hours');
+    if (!mounted || estimated == null) return;
+    final hours = double.tryParse(estimated);
+    if (hours == null || !hours.isFinite || hours < 0 || hours > 10000) return;
+    final rate = employee['rate'] as int?;
+    if (rate == null || rate <= 0) {
+      setState(() => _error = 'Save this employee’s hourly compensation first.');
+      return;
+    }
+    final operation = _operationId();
+    await _run(() => _repository.createRecheck(
+      operation: operation, job: job, description: description,
+      employee: employee['employee_id'] as String,
+      name: (employee['name'] ?? employee['employee_name']).toString(),
+      rate: rate, estimatedMinutes: (hours * 60).round(),
+    ));
   }
 
   Future<void> _recordWeekly(
@@ -1297,13 +1390,20 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       for (final entry in byTask.entries)
         {...entry.value.first,
           'line_id': entry.key,
-          'document_id': entry.key,
+          'document_id': entry.value.first['invoice_id'],
           'source_description': entry.value.first['description'],
           'status': entry.value.every((row) => row['state'] == 'Done') ? 'done'
               : entry.value.any((row) => row['state'] != 'Open') ? 'in_progress'
               : 'planned',
         },
     ];
+    for (final task in _taskSources) {
+      if (byTask.containsKey(task['id']) || task['source_active'] == 0) continue;
+      service.add({
+        ...task, 'line_id': task['id'], 'document_id': task['invoice_id'],
+        'source_description': task['description'], 'status': 'planned',
+      });
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Tasks')),
       body: Column(children: [
@@ -1324,15 +1424,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
               for (final row in _employees)
                 if (row['id'] case final String id) id,
             ],
-            serviceTaskCard: (row) => ListTile(
-              title: Text(row['description'] as String),
-              subtitle: Text([
-                for (final allocation in byTask[row['line_id']]!)
-                  '${allocation['employee_name']} · ${allocation['state']} · '
-                  '${allocation['actual_minutes']} min · '
-                  '${allocation['paid'] == 1 ? 'Paid' : 'Unpaid'}',
-              ].join('\n')),
-            ),
+            serviceTaskCard: (row) => byTask.containsKey(row['line_id'])
+                ? Column(children: [for (final allocation in byTask[row['line_id']]!) _taskCard(allocation)])
+                : ListTile(
+                    title: Text(row['description'] as String),
+                    subtitle: const Text('Unassigned · Planned'),
+                  ),
             onAddGeneral: _createEmployeeGeneralTask,
             onGeneralStatus: (id, status) async {
               final row = _generalTasks.where((row) => row['id'] == id).firstOrNull;
@@ -1433,13 +1530,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
                       ),
                     ),
               if (_employees.isEmpty) const Text('No active assignment is saved for this job.'),
-              for (final row in _work)
-                ListTile(
-                  title: Text(row['description'].toString()),
-                  subtitle: Text('${row['employee_name']} · ${row['state']} · '
-                    '${row['actual_minutes']} min · ${row['paid'] == 1 ? 'Paid' : 'Unpaid'}'),
-
+              ListTile(
+                title: const Text('Additional job work / Rechecks'),
+                trailing: TextButton.icon(
+                  onPressed: _busy || _employees.isEmpty ? null : _addRecheck,
+                  icon: const Icon(Icons.add), label: const Text('Add Recheck'),
                 ),
+              ),
+              for (final row in _work) _taskCard(row),
             ],
             if (_grant != null && !_jobMode) ...[
               if (_employees.isEmpty) const Text('No employee work has been recorded yet.'),

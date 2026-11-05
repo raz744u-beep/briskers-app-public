@@ -141,8 +141,10 @@ void main() {
     ), throwsStateError);
     expect(await ownerLinks[0].pay(
       operation: 'receipt-a', week: '2026-11-02', date: '2026-11-04',
-      method: 'Cash', selected: await ledger.work(employee: 'a'),
-      net: 4000, reason: '',
+      method: 'Cash', selected: [
+        for (final row in await ledger.work(employee: 'a')) {...row, 'pay_minutes': 30},
+      ],
+      net: 2000, reason: '',
     ), isTrue);
     expect((await owner.customSelect("SELECT status FROM local_jobs WHERE id='job'")
         .getSingle()).data['status'], 'open');
@@ -191,8 +193,8 @@ void main() {
     expect(await ownerLinks[1].repository.history('b'), isEmpty);
     final first = await mechanicLinks[0].repository.mechanicReport('a', authorize);
     final second = await mechanicLinks[1].repository.mechanicReport('b', authorize);
-    expect(first.receipts.single['net'], 4000);
-    expect(first.unpaid, 0);
+    expect(first.receipts.single['net'], 2000);
+    expect(first.unpaid, 2000);
     expect(second.receipts, isEmpty);
     expect(second.unpaid, 4000);
   });

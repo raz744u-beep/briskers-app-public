@@ -131,11 +131,12 @@ class PayrollLanWorkflow {
       operation: operation, employee: peer.employee, week: week, date: date,
       method: method, selected: selected, base: base, hourlyAdjustment: adjustment,
       adjustmentReason: reason, repayment: repayment, confirmedNet: net,
-      beforeCommit: () => delivery.enqueue(
+      beforeCommit: () async => delivery.enqueue(
         operationId: operation, kind: PayrollLanOperation.payment,
         payload: {'operation': operation, 'employee': peer.employee, 'week': week,
           'date': date, 'method': method, 'gross': net + repayment, 'repayment': repayment, 'net': net,
-          'work': selected.map((row) => row['id'] as String).toList()},
+          'work': selected.map((row) => row['id'] as String).toList(),
+          'coverage': await repository.recordedCoverage(peer.employee, operation)},
       ),
     );
   }

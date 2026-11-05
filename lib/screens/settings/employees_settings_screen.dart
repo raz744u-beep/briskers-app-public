@@ -90,6 +90,12 @@ class _EmployeesSettingsScreenState
         : '$money / hr';
   }
 
+  int? _hourlyCents(Object? raw) {
+    final rate = num.tryParse(raw?.toString() ?? '');
+    return rate != null && rate.isFinite && rate >= 0 && rate <= 100000
+        ? (rate * 100).round() : null;
+  }
+
   Future<void> _open([Map<String, dynamic>? employee, bool detailsOnly = false]) async {
     final employeeId = employee?['id']?.toString();
     final name = employee?['name']?.toString();
@@ -104,6 +110,7 @@ class _EmployeesSettingsScreenState
           employeeName: employee?['nickname']?.toString() ?? name,
           employeeRole: position,
           employeePayType: employee?['payment_type']?.toString(),
+          employeeHourlyCents: _hourlyCents(employee?['hourly_rate']),
           employeeActive: employee?['active'] != false,
           openEmployeeDetails: () => _open(employee, true),
         )),

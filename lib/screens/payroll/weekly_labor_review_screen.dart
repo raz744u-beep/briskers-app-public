@@ -59,7 +59,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   static double _assigned(Map<String, dynamic> task) =>
       (task['actual_minutes'] as int) / 60;
   static double _paidHours(Map<String, dynamic> task) =>
-      task['paid'] == 1 ? _assigned(task) : 0;
+      (task['paid_minutes'] as int? ?? (task['paid'] == 1 ? task['actual_minutes'] as int : 0)) / 60;
   static String _statusLabel(Map<String, dynamic> task) => switch (task['state']) {
     'In Progress' => 'In Progress',
     'Done' => 'Completed',
@@ -97,7 +97,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
         if (_available(task) > 0) _id(task): _available(task),
     };
     _selected.removeWhere((id, _) => !available.containsKey(id));
-    _selected.updateAll((id, _) => available[id]!);
+    _selected.updateAll((id, requested) => requested.clamp(0.0, available[id]!).toDouble());
   }
 
   void _selectUnpaid() {
@@ -120,7 +120,8 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   }
 
   static double _available(Map<String, dynamic> task) =>
-      task['paid'] == 1 || task['state'] != 'Done' ? 0 : _assigned(task);
+      task['paid'] == 1 || task['state'] != 'Done' ? 0 :
+        (task['remaining_minutes'] as int? ?? task['actual_minutes'] as int) / 60;
 
   double get _totalHours {
     final ids = _eligible.map(_id).toSet();
@@ -144,6 +145,50 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
         }
       }
     });
+  }
+
+  Future<void> _editHours(Map<String, dynamic> task) async {
+    if (_saving || _available(task) <= 0) return;
+    final input = TextEditingController(text:
+      (_selected[_id(task)] ?? _available(task)).toStringAsFixed(2));
+    final minutes = await showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Mechanic Labor'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          _detailHours('Mechanic actual', _assigned(task)),
+          _detailHours('Previously paid', _paidHours(task)),
+          _detailHours('Remaining to pay', _available(task)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: input,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            onTapAlwaysCalled: true,
+            onTap: () => input.selection = TextSelection(
+              baseOffset: 0, extentOffset: input.text.length,
+            ),
+            decoration: const InputDecoration(
+              labelText: 'Hours to pay this week', border: OutlineInputBorder(),
+            ),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final hours = double.tryParse(input.text.trim());
+              if (hours == null || !hours.isFinite || hours <= 0) return;
+              final minutes = (hours * 60).round();
+              if (minutes <= 0 || minutes > (_available(task) * 60).round()) return;
+              Navigator.pop(context, minutes);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (minutes != null && mounted) setState(() => _selected[_id(task)] = minutes / 60);
+    Future<void>.delayed(const Duration(milliseconds: 400), input.dispose);
   }
 
   void _moveWeek(int weeks) {
@@ -178,10 +223,20 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     }
     if (!mounted) return;
     final week = _start(_week);
-    final selected = _eligible.where((task) =>
-      _selected.containsKey(_id(task)) && _available(task) > 0).toList();
-    final laborCents = selected.fold<int>(0, (sum, task) => sum + (task['gross_cents'] as int));
-    final hours = selected.fold<double>(0, (sum, task) => sum + _assigned(task));
+    final selected = [
+      for (final task in _eligible)
+        if (_selected.containsKey(_id(task)) && _available(task) > 0)
+          {...task, 'pay_minutes': (_selected[_id(task)]! * 60).round()},
+    ];
+    final laborCents = selected.fold<int>(0, (sum, task) {
+      final paid = task['paid_minutes'] as int? ?? 0;
+      final minutes = task['pay_minutes'] as int;
+      final rate = task['rate_cents'] as int? ?? 0;
+      // Older widget fixtures provide a total but real records carry the rate.
+      if (!task.containsKey('rate_cents')) return sum + (task['gross_cents'] as int);
+      return sum + (((paid + minutes) * rate + 30) ~/ 60) - (task['paid_cents'] as int? ?? 0);
+    });
+    final hours = selected.fold<int>(0, (sum, task) => sum + (task['pay_minutes'] as int)) / 60;
     final amount=TextEditingController(
       text:(laborCents/100).toStringAsFixed(2));
     final debtInput=TextEditingController();
@@ -646,6 +701,11 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                       Text((_selected[_id(task)] ?? _assigned(task))
                         .toStringAsFixed(2)+'h',
                         style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(
+                        icon: const Icon(Icons.edit_outlined, size: 19),
+                        tooltip: 'Edit payable hours',
+                        onPressed: _saving || _available(task) <= 0 ? null : () => _editHours(task),
+                      ),
                       const SizedBox(width:6),
                     ]),
                     if(_expandedTasks.contains(_id(task)))

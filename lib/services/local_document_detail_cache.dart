@@ -10,6 +10,7 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_job_retirement.dart';
 import 'test_job_cleanup_policy.dart';
+import 'local_invoice_task_store.dart';
 
 class LocalDocumentDetailCache {
   static bool sqliteWritesEnabled=false;
@@ -131,6 +132,7 @@ class LocalDocumentDetailCache {
           await _database.customStatement(
             'UPDATE recovery_document_cache SET payload_json=? WHERE business_id=? AND document_id=?',
             [encoded,businessId,documentId]);
+          await LocalInvoiceTaskStore(_database).save(businessId, documentId, detail);
           return;
         }
         final prefs = await SharedPreferences.getInstance();
@@ -146,6 +148,7 @@ class LocalDocumentDetailCache {
         if(sqliteWritesEnabled) {
           await LocalDocumentSqlStore.write(_database,key,encoded);
         } else { await prefs.setString(key,encoded); }
+        await LocalInvoiceTaskStore(_database).save(businessId, documentId, detail);
       }),
     );
   }
