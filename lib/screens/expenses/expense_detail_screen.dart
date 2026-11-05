@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+import 'package:flutter/services.dart';
 
 import '../../core/module_modal_theme.dart';
 
@@ -78,6 +79,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   Color get modalAccent => BriskersColors.expenses;
   BriskersApi get _api => widget.api;
   final _picker = ImagePicker();
+  static const _expenseIqChannel = MethodChannel('com.briskers/expenseiq');
+  bool _reconnectingOriginalFolder = false;
   late LocalAttachmentCache _attachmentCache;
   late LocalFinancialCache _localFinancial;
   late ExpenseIqLocalPhotoSync _localExpenseIq;
@@ -552,6 +555,71 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         duration: Duration(seconds: 7),
       ),
     );
+  }
+
+  Future<void> _reconnectOriginalExpenseIqFolder() async {
+    if (_reconnectingOriginalFolder || _localExpenseIqPhoto == null) return;
+    final expectedFilename =
+        _localExpenseIqPhoto!['filename']?.toString() ?? '';
+    if (expectedFilename.isEmpty) return;
+    final generation = _loadGeneration;
+    setState(() => _reconnectingOriginalFolder = true);
+    try {
+      // Existing native picker grants persisted SAF read permission.
+      // This is read-only enumeration: it never starts photo indexing/sync.
+      final picked = await _expenseIqChannel.invokeMethod<List<dynamic>>(
+        'pickExpenseIqFolder',
+      );
+      if (picked == null || !_isCurrent(generation)) return;
+      final matches = picked.whereType<Map>().where((file) =>
+          file['name']?.toString() == expectedFilename &&
+          (file['uri']?.toString() ?? '').startsWith('content://')).toList();
+      if (matches.length != 1) {
+        throw StateError(matches.isEmpty
+            ? 'That filename was not found in the selected folder.'
+            : 'Multiple matching filenames exist; no photo link was changed.');
+      }
+      final newUri = matches.single['uri']!.toString();
+      // Require a real read before changing the saved pointer.
+      final bytes = await (widget.localPhotoReader ??
+          Saf().readFileBytes)(newUri);
+      if (bytes.isEmpty) {
+        throw StateError('Selected photo could not be read.');
+      }
+      if (!_isCurrent(generation)) return;
+      final updated = await _localExpenseIq.reconnectOriginalPhoto(
+        businessId: widget.businessId,
+        transactionId: widget.transactionId,
+        expectedFilename: expectedFilename,
+        verifiedUri: newUri,
+      );
+      if (!updated) throw StateError('Original photo reference changed.');
+      if (!mounted || !_isCurrent(generation)) return;
+      setState(() {
+        _localExpenseIqPhoto = {..._localExpenseIqPhoto!, 'source_uri': newUri};
+        _localPhotoBytes.remove(newUri);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(
+          'Original photo folder reconnected. Existing receipts and '
+          'financial records were not changed.',
+        )),
+      );
+    } catch (error) {
+      if (mounted && _isCurrent(generation)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(
+            'Could not reconnect the original picture. '
+            'Select ExpenseIQ/Photos and check that the saved filename '
+            'is present. No receipt was deleted.',
+          )),
+        );
+      }
+    } finally {
+      if (mounted && _isCurrent(generation)) {
+        setState(() => _reconnectingOriginalFolder = false);
+      }
+    }
   }
 
   Widget _localExpenseIqReceiptCard() {
@@ -1826,6 +1894,20 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
           if (_localExpenseIqPhoto != null &&
               !attachments.any((row) => _originalPhotoUriFor(row) != null))
             _localExpenseIqReceiptCard(),
+          if (_localExpenseIqPhoto != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: _reconnectingOriginalFolder
+                      ? null : _reconnectOriginalExpenseIqFolder,
+                  icon: const Icon(Icons.folder_open_outlined),
+                  label: Text(_reconnectingOriginalFolder
+                      ? 'Checking folder...' : 'Reconnect original photo folder'),
+                ),
+              ),
+            ),
           if (attachments.isEmpty && _localExpenseIqPhoto == null)
             Card(
               child: Padding(
