@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../services/secure_employee_details_cache.dart';
 import '../../services/device_owner_authorization.dart';
 import '../../services/local_owner_authorization.dart';
+import '../../services/local_payroll_repository.dart';
+import '../../local/local_database_provider.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/formatters.dart';
@@ -19,6 +21,9 @@ class EmployeeEditScreen extends StatefulWidget {
     this.employeeId,
     this.rosterName,
     this.rosterPosition,
+    this.nicknameStore,
+    this.unlockOwner,
+    this.currentOwner,
   });
 
   final String businessId;
@@ -26,6 +31,9 @@ class EmployeeEditScreen extends StatefulWidget {
   final String? employeeId;
   final String? rosterName;
   final String? rosterPosition;
+  final EmployeeNicknameStore? nicknameStore;
+  final Future<LocalOwnerGrant> Function(String)? unlockOwner;
+  final OwnerSessionIdentity? Function()? currentOwner;
 
   @override
   State<EmployeeEditScreen> createState() => _EmployeeEditScreenState();
@@ -33,7 +41,8 @@ class EmployeeEditScreen extends StatefulWidget {
 
 class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   static const _api = BriskersApi();
-  final _nicknameStore = EmployeeNicknameStore();
+  late final _nicknameStore = widget.nicknameStore ?? EmployeeNicknameStore();
+  OwnerSessionIdentity? _currentOwner(){try{return widget.currentOwner?.call() ?? DeviceOwnerAuthorization.instance.currentIdentity();}catch(_){return null;}}
 
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
@@ -56,6 +65,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   bool _appLoginBusy = false;
   bool _loading = true;
   bool _secureOffline = false;
+  Set<String> _secureKeys={};
   LocalOwnerGrant? _detailsGrant;
   Timer? _privacyTimer;
   OwnerSessionIdentity? _loadedIdentity;
@@ -110,13 +120,13 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   @override
   void initState() {
     super.initState();
-    _loadedIdentity=DeviceOwnerAuthorization.instance.currentIdentity();
+    _loadedIdentity=_currentOwner();
     _name.text=widget.rosterName??'';
     _loading=!_editing;
     unawaited(_hydrateNickname());
     unawaited(_load());
     _privacyTimer=Timer.periodic(const Duration(seconds:2),(_){
-      final changed=_loadedIdentity!=null && !_loadedIdentity!.matches(DeviceOwnerAuthorization.instance.currentIdentity());
+      final changed=_loadedIdentity!=null && !_loadedIdentity!.matches(_currentOwner());
       if(changed){
         if(mounted)setState((){_detailLoaded=false;_secureOffline=false;_detailsGrant=null;_phone.clear();_email.clear();_address.clear();_rate.clear();_ssn.clear();_revealedSsn=null;_ssnLast4=null;});
         return;
@@ -217,12 +227,25 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   Future<void> _unlockOffline() async {
     if(!widget.isOwner||!_editing)return;
     try{
-      final grant=await DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId);
+      final grant=await (widget.unlockOwner?.call(widget.businessId) ?? DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId));
       final snapshot=await const SecureEmployeeDetailsCache().read(widget.businessId,widget.employeeId!,grant);
       if(!mounted)return;
-      if(snapshot==null){setState(()=>_error='No verified secure offline snapshot is saved for this employee. This does not mean the record is missing.');return;}
+      if(snapshot==null){
+        final ledger=LocalPayrollRepository(localDatabase,business:widget.businessId,owner:true,
+          assertOwnerGrant:()=>grant.assertValid(widget.businessId,grant.actorId));
+        final saved=(await ledger.employees()).where((r)=>r['id']==widget.employeeId).firstOrNull;
+        if(!mounted)return;
+        setState((){
+          _detailsGrant=grant;
+          _secureOffline=saved!=null;
+          _secureKeys=saved==null?{}:{'hourly_rate'};
+          _rate.text=saved==null?'':((saved['rate'] as int)/100).toStringAsFixed(2);
+          _error='No verified contact/tax snapshot is saved. This does not mean the record is missing. '
+            '${saved==null?'':'Showing the Owner-configured local payroll rate; current server values are unknown.'}';
+        });return;
+      }
       final d=snapshot['details'] as Map;
-      setState((){_detailsGrant=grant;_secureOffline=true;
+      setState((){_detailsGrant=grant;_secureOffline=true;_secureKeys=d.keys.map((k)=>k.toString()).toSet();
         _phone.text=d['phone']?.toString()??'';_email.text=d['email']?.toString()??'';
         _address.text=d['address']?.toString()??'';_rate.text=(d['hourly_rate']??d['weekly_rate'])?.toString()??'';
         _ssnLast4=d['ssn_last4']?.toString();_error='Verified snapshot: ${snapshot['verified_at']}. Offline copy; current server changes are not known.';});
@@ -232,7 +255,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   Future<void> _saveSecureSnapshot() async {
     if(!widget.isOwner||!_detailLoaded||!_editing)return;
     try{
-      final grant=await DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId);
+      final grant=await (widget.unlockOwner?.call(widget.businessId) ?? DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId));
       await const SecureEmployeeDetailsCache().save(widget.businessId,widget.employeeId!,{
         'id':widget.employeeId,'name':_name.text,'phone':_phone.text,'email':_email.text,'address':_address.text,
         'position_id':_positionId,'payment_type':_paymentType,'hourly_rate':_paymentType=='hourly'?_rate.text:null,
@@ -527,9 +550,9 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
       ),
       if(widget.isOwner)OutlinedButton(onPressed:_unlockOffline,child:const Text('Unlock verified offline details')),
       if(_secureOffline && _detailsGrant!=null)...[
-        ListTile(title:const Text('Phone'),subtitle:Text(_phone.text)),
-        ListTile(title:const Text('Email'),subtitle:Text(_email.text)),
-        ListTile(title:const Text('Address'),subtitle:Text(_address.text)),
+        ListTile(title:const Text('Phone'),subtitle:Text(_secureKeys.contains('phone')?(_phone.text.isEmpty?'Not recorded in verified copy':_phone.text):'Not cached')),
+        ListTile(title:const Text('Email'),subtitle:Text(_secureKeys.contains('email')?(_email.text.isEmpty?'Not recorded in verified copy':_email.text):'Not cached')),
+        ListTile(title:const Text('Address'),subtitle:Text(_secureKeys.contains('address')?(_address.text.isEmpty?'Not recorded in verified copy':_address.text):'Not cached')),
         ListTile(title:const Text('Compensation'),subtitle:Text(_rate.text)),
         if(_ssnLast4!=null)ListTile(title:const Text('SSN ending'),subtitle:Text(_ssnLast4!)),
       ],

@@ -727,7 +727,7 @@ jobs:
           BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
           test "$BUILD_NUMBER" -gt 2545
           if [ "$PAYROLL_CANDIDATE" = true ] || [ "$GITHUB_REF_NAME" = candidate/payroll-bootstrap ]; then
-            test "$BUILD_NUMBER" -gt 2567
+            test "$BUILD_NUMBER" -gt 2568
           fi
 
           # Native-asset downloads (notably sqlite3) occasionally arrive
@@ -798,7 +798,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: briskers-android-debug
-          run-id: ${{ github.ref_name == 'candidate/payroll-enabled' && '41951142554' || '41925087962' }}
+          run-id: ${{ github.ref_name == 'candidate/payroll-enabled' && '41997297822' || '41925087962' }}
           github-token: ${{ github.token }}
           path: upgrade-baseline
 

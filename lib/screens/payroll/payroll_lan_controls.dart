@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 import '../../services/payroll_lan_workflow.dart';
 
 Future<String?> payrollLanInput(
-  BuildContext context, String title, String label,
+  BuildContext context, String title, String label, {String initialValue = ''}
 ) async {
-  final controller = TextEditingController();
+  final controller = TextEditingController(text:initialValue);
   try {
     return await showDialog<String>(
       context: context,
@@ -15,6 +15,8 @@ Future<String?> payrollLanInput(
         title: Text(title),
         content: TextField(
           controller: controller,
+          onTapAlwaysCalled:true,
+          onTap:()=>controller.selection=TextSelection(baseOffset:0,extentOffset:controller.text.length),
           decoration: InputDecoration(labelText: label),
           autocorrect: false,
           enableSuggestions: false,

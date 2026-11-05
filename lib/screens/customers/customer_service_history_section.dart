@@ -66,6 +66,7 @@ class _CustomerServiceHistorySectionState
   final Map<String, Future<Map<String, dynamic>>> _documentSummaries = {};
   bool _loading = true;
   final Map<String,String> _completedSearch={};
+  int _historyRevision=0;
   String? _error;
   String get _roleCode => widget.roleCode;
   String? _selectedVehicleId;
@@ -200,6 +201,10 @@ class _CustomerServiceHistorySectionState
     }
     data['jobs'] = merge(data['jobs'], localJobs);
     data['documents'] = merge(data['documents'], localDocuments);
+    for(final d in (data['documents'] as List).whereType<Map>()){
+      final id=d['job_id']?.toString();
+      if(id!=null)_completedSearch[id]='${_completedSearch[id]??''} ${d['document_number']??''}';
+    }
     final jobs = await visibility.filter(
       List<dynamic>.from(data['jobs'] ?? const [])
           .whereType<Map>().map((row) => Map<String, dynamic>.from(row)),
@@ -211,6 +216,7 @@ class _CustomerServiceHistorySectionState
     );
     if (!mounted || !visibility.isCurrent(generation)) return true;
     setState((){
+      _historyRevision++;
       _jobs = jobs;
       _documents = documents;
       _expenses = List<dynamic>.from(data['expenses'] ?? const [])
@@ -861,7 +867,7 @@ class _CustomerServiceHistorySectionState
                 job: job,
                 statusControl: _statusControl(job),
                 onOpen: () => _openJob(job),
-              ),if(_canSeeFinancial)CompletedWorkSection(business:widget.businessId,job:job['id'] as String)]),
+              ),if(_canSeeFinancial)CompletedWorkSection(business:widget.businessId,job:job['id'] as String,revision:_historyRevision)]),
             )
             .toList(),
       ),

@@ -13,18 +13,20 @@ class LocalTaskAssignmentStore {
   Future<void> prepare() async {
     await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_assignment_meta '
       '(business_id TEXT NOT NULL,task_id TEXT NOT NULL,employee_id TEXT NOT NULL,inherited INTEGER NOT NULL DEFAULT 0,'
-      'active INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(business_id,task_id,employee_id))');
+      'active INTEGER NOT NULL DEFAULT 1,revision INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(business_id,task_id,employee_id))');
     await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_task_policy '
       '(business_id TEXT NOT NULL,task_id TEXT NOT NULL,manual_override INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(business_id,task_id))');
     await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_actual_time '
-      '(business_id TEXT NOT NULL,credit_id TEXT NOT NULL,minutes INTEGER NOT NULL CHECK(minutes>=0),PRIMARY KEY(business_id,credit_id))');
+      '(business_id TEXT NOT NULL,credit_id TEXT NOT NULL,minutes INTEGER NOT NULL CHECK(minutes>=0),revision INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(business_id,credit_id))');
   }
   Future<void> linkEmployee(String business,String job,String employee,String name) async {
     final exists=await _read('SELECT id FROM local_jobs WHERE business_id=? AND id=?',[business,job]);
     if(exists.length!=1) throw StateError('Saved Job is unavailable.');
+    final assigned=await _read('SELECT assignment_id FROM local_job_assignments WHERE business_id=? AND job_id=? AND employee_id=? AND active=1',[business,job,employee]);
+    if(assigned.isNotEmpty)return;
     await db.customStatement('INSERT OR IGNORE INTO local_job_assignments '
       '(assignment_id,business_id,job_id,employee_id,employee_name,active,source) VALUES(?,?,?,?,?,1,?)',
-      [jsonEncode(['payroll',job,employee]),business,job,employee,name,'payroll_task']);
+      [jsonEncode(['payroll',business,job,employee]),business,job,employee,name,'payroll_task']);
   }
   Future<void> allocate(String business,String task,String employee,{required bool inherited}) async {
     await prepare();
@@ -42,14 +44,14 @@ class LocalTaskAssignmentStore {
         actualMinutes:0,rateCents:e['rate'] as int);
     }
     await db.customStatement('INSERT OR IGNORE INTO regular_payroll_estimates VALUES(?,?,?,?)',[business,task,employee,((t['planned'] as int)*60+50)~/100]);
-    await db.customStatement('INSERT INTO regular_payroll_assignment_meta VALUES(?,?,?,?,1) '
-      'ON CONFLICT(business_id,task_id,employee_id) DO UPDATE SET inherited=excluded.inherited,active=1',[business,task,employee,inherited?1:0]);
-    if(!inherited) await db.customStatement('INSERT INTO regular_payroll_task_policy VALUES(?,?,1) '
-      'ON CONFLICT(business_id,task_id) DO UPDATE SET manual_override=1',[business,task]);
+    await db.customStatement('INSERT INTO regular_payroll_assignment_meta(business_id,task_id,employee_id,inherited,active) VALUES(?,?,?,?,1) '
+      'ON CONFLICT(business_id,task_id,employee_id) DO UPDATE SET inherited=excluded.inherited,active=1,revision=revision+1 WHERE inherited<>excluded.inherited OR active<>1',[business,task,employee,inherited?1:0]);
+    if(!inherited) { await db.customStatement('INSERT INTO regular_payroll_task_policy VALUES(?,?,1) '
+      'ON CONFLICT(business_id,task_id) DO UPDATE SET manual_override=1',[business,task]); }
   }
   Future<void> retireInherited(String business,String task,{String? except}) async {
     await prepare();
-    await db.customStatement("UPDATE regular_payroll_assignment_meta SET active=0 WHERE business_id=? AND task_id=? AND inherited=1 "
+    await db.customStatement("UPDATE regular_payroll_assignment_meta SET active=0,revision=revision+1 WHERE active=1 AND business_id=? AND task_id=? AND inherited=1 "
       "AND employee_id<>? AND EXISTS(SELECT 1 FROM regular_payroll_portions p JOIN local_mechanic_work_credits_v1 c "
       "ON c.business_id=p.business_id AND c.allocation_id=p.id WHERE p.business_id=regular_payroll_assignment_meta.business_id "
       "AND p.task_id=regular_payroll_assignment_meta.task_id AND p.employee_id=regular_payroll_assignment_meta.employee_id "

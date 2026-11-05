@@ -8518,7 +8518,7 @@ class _AmountRow extends StatelessWidget {
       color: valueColor ?? const Color(0xFF182239),
     );
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
       child: Row(
         children: [
           Expanded(

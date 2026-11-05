@@ -178,12 +178,19 @@ class PayrollOwnerLedger {
           final where = primary.map((key) => '$key=?').join(' AND ');
           final existing = await db.customSelect('SELECT * FROM $table WHERE $where',
             variables: primary.map((key) => _variable(row[key])).toList()).get();
+          if(table=='regular_payroll_task_policy' && existing.isNotEmpty && existing.single.data['manual_override']==1 && row['manual_override']==0)continue;
           if (existing.isEmpty) {
             await _insert(table, row);
           } else if (!_same(existing.single.data, row)) {
             if (immutable.contains(table) || table == 'regular_payroll_progress_claims') throw StateError('Conflicting immutable payroll record.');
             final prior = existing.single.data;
-            if (table == 'local_mechanic_work_credits_v1' || table == 'regular_payroll_portions' || table == 'regular_payroll_assignment_outgoing') {
+            if(table=='regular_payroll_actual_time'){
+              final paid=await db.customSelect('SELECT credit_id FROM regular_payroll_work_coverage WHERE business_id=? AND credit_id=?',
+                variables:[Variable(business),Variable(row['credit_id'] as String)]).get();
+              if(paid.isNotEmpty && row['minutes']!=prior['minutes'])throw const PayrollPending('Recorded actual work differs from paid history. Existing records were preserved.');
+            }
+
+            if (table == 'local_mechanic_work_credits_v1' || table == 'regular_payroll_portions' || table == 'regular_payroll_assignment_outgoing' || table == 'regular_payroll_assignment_meta' || table == 'regular_payroll_actual_time') {
               final field = table == 'regular_payroll_portions' ? 'version' : 'revision';
               final previous = prior[field] as int;
               final next = row[field] as int;

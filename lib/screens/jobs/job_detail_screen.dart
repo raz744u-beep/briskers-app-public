@@ -6022,7 +6022,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
             assignment: assignment,
           ),
           if (_canSeeFinancial)
-            CompletedWorkSection(business:widget.businessId,job:widget.jobId),
+            CompletedWorkSection(business:widget.businessId,job:widget.jobId,revision:_loadEpoch),
           if (OwnerPayrollScreen.enabled && _owner)
             Padding(padding:const EdgeInsets.all(8),child:JobTasksAccess(business:widget.businessId,job:widget.jobId)),
           if (_canSeeFinancial &&

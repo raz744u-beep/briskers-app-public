@@ -278,8 +278,8 @@ class LocalPayrollRepository {
       final covered=await _read('SELECT credit_id FROM regular_payroll_work_coverage WHERE business_id=? AND credit_id=?',[business,id]);
       if(covered.isNotEmpty)throw StateError('Paid time is immutable. Create a separate recheck.');
       await _updateWork(id,state,creditedMinutes,date,expectedRevision:null,authorize:_authorize);
-      await db.customStatement('INSERT INTO regular_payroll_actual_time VALUES(?,?,?) '
-        'ON CONFLICT(business_id,credit_id) DO UPDATE SET minutes=excluded.minutes',[business,id,actualMinutes]);
+      await db.customStatement('INSERT INTO regular_payroll_actual_time(business_id,credit_id,minutes,revision) SELECT ?,?,?,revision FROM local_mechanic_work_credits_v1 WHERE business_id=? AND allocation_id=? '
+        'ON CONFLICT(business_id,credit_id) DO UPDATE SET minutes=excluded.minutes,revision=excluded.revision',[business,id,actualMinutes,business,id]);
       _authorize();
     });
   }
@@ -592,7 +592,7 @@ class LocalPayrollRepository {
           'INSERT INTO regular_payroll_task_sources VALUES(?,?,?,?,?,?) '
           'ON CONFLICT(business_id,task_id) DO UPDATE SET active=excluded.active,invoice_id=excluded.invoice_id,line_id=excluded.line_id',
           [business, task, isRecheck ? null : invoice, isRecheck ? null : line,
-            isRecheck ? 'recheck' : 'invoice', payload['active'] as int? ?? 1],
+            isRecheck ? payload['kind'] : 'invoice', payload['active'] as int? ?? 1],
         );
         await db.customStatement(
           'INSERT OR IGNORE INTO regular_payroll_estimates VALUES(?,?,?,?)',
@@ -774,8 +774,8 @@ class LocalPayrollRepository {
         expectedRevision: rows.single['revision'] as int,
         actualMinutes: minutes, completed: state == 'Done',
       );
-      await db.customStatement('INSERT INTO regular_payroll_actual_time VALUES(?,?,?) '
-        'ON CONFLICT(business_id,credit_id) DO UPDATE SET minutes=excluded.minutes',[business,id,minutes]);
+      await db.customStatement('INSERT INTO regular_payroll_actual_time(business_id,credit_id,minutes,revision) SELECT ?,?,?,revision FROM local_mechanic_work_credits_v1 WHERE business_id=? AND allocation_id=? '
+        'ON CONFLICT(business_id,credit_id) DO UPDATE SET minutes=excluded.minutes,revision=excluded.revision',[business,id,minutes,business,id]);
       await db.customStatement(
         'UPDATE regular_payroll_portions SET state=?,version=version+1,completed_date=? WHERE business_id=? AND id=?',
         [state, state == 'Done' ? date : null, business, id],
@@ -1439,6 +1439,7 @@ class LocalPayrollRepository {
             (paymentRate != p['rate'] && adjustmentReason.trim().isEmpty)) {
           throw StateError('An adjusted labor rate requires an Owner reason.');
         }
+        if(paymentRate==0 && base==0)throw StateError('Configure an hourly rate or approve weekly base before paying this work.');
         final amount = (((previouslyPaid + minutes) * paymentRate + 30) ~/ 60) -
             ((previouslyPaid * paymentRate + 30) ~/ 60);
         gross += amount;

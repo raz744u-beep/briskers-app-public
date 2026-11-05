@@ -92,6 +92,10 @@ jobs:
           test/expense_detail_preview_hydration_test.dart
           test/offline_expense_detail_route_test.dart
 
+      - name: Verify enabled regular Tasks and Payroll navigation
+        working-directory: generated
+        run: flutter test --dart-define=BRISKERS_ENABLE_OWNER_PAYROLL=true --reporter expanded test/b2568_regular_navigation_test.dart
+
       - name: Run diagnostic and regression tests
         working-directory: generated
         run: flutter test
@@ -104,3 +108,12 @@ jobs:
           path: generated/build/pdf-qa/*.pdf
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Upload exact-source payroll widget QA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: briskers-payroll-source-qa
+          path: generated/build/payroll-qa/*.png
+          if-no-files-found: ignore
+          retention-days: 14

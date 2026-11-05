@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
+import 'employee_nickname_store.dart';
 
 /// Read-only completion projection. Internal chores never enter service history;
 /// legacy manual notes remain in their original visit records.
@@ -23,6 +24,7 @@ class CompletedTaskHistory {
       '${job==null?'':'AND t.job_id=? '} ${customer==null?'':'AND j.customer_id=? '}'
       'ORDER BY p.completed_date DESC,t.id,p.employee_id',
       variables:[business,?job,?customer].map(Variable<String>.new).toList()).get();
-    return rows.map((r)=>r.data).toList();
+    final nicknames=await EmployeeNicknameStore(database:db).all(business);
+    return rows.map((r)=><String,dynamic>{...r.data,'mechanic':nicknames[r.data['employee_id']]??r.data['mechanic']}).toList();
   }
 }

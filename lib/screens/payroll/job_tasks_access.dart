@@ -7,6 +7,7 @@ import '../../services/device_owner_authorization.dart';
 import '../../services/local_payroll_repository.dart';
 import '../../services/offline_job_admin_service.dart';
 import 'owner_payroll_screen.dart';
+import 'payroll_ui_scope.dart';
 
 /// The same task identity is used by the invoice, Job and employee screens.
 class JobTasksAccess extends StatefulWidget {
@@ -22,18 +23,20 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
   String? main;
   String? warning;
   bool busy=false;
-  @override void initState(){super.initState();unawaited(load());}
+  @override void initState(){super.initState();if(widget.line==null)unawaited(load());}
   @override void didUpdateWidget(covariant JobTasksAccess old){super.didUpdateWidget(old);if(old.job!=widget.job)unawaited(load());}
   Future<void> load()async{
     try{
       final roster=await OfflineJobAdminService(database:db).cachedEmployees(widget.business).timeout(const Duration(seconds:3));
-      final row=await db.customSelect('SELECT assigned_employee_id FROM local_jobs WHERE business_id=? AND id=?',
+      final row=await db.customSelect('SELECT assigned_employee_id,assigned_employee_name FROM local_jobs WHERE business_id=? AND id=?',
         variables:[Variable(widget.business),Variable(widget.job)]).getSingleOrNull();
-      if(mounted)setState((){staff=roster;main=row?.data['assigned_employee_id'] as String?;warning=null;});
+      if(mounted)setState((){staff=roster;main=row?.data['assigned_employee_id'] as String?;
+        if(main!=null && !staff.any((r)=>r['id']==main))staff=[...staff,{'id':main,'name':row?.data['assigned_employee_name']??'Saved mechanic'}];
+        warning=null;});
     }catch(_){if(mounted)setState(()=>warning='Saved mechanic list is not available yet. Retry.');}
   }
   Future<LocalPayrollRepository> unlock()async{
-    final grant=await DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.business);
+    final grant=await (PayrollUiScope.of(context)?.unlock(widget.business) ?? DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.business));
     void check()=>grant.assertValid(widget.business,grant.actorId);
     return LocalPayrollRepository(db,business:widget.business,owner:true,assertOwnerGrant:check);
   }
@@ -53,8 +56,9 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
   }
   Future<void> open()async{
     await Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>OwnerPayrollScreen(
-      businessId:widget.business,jobId:widget.job,invoiceId:widget.invoice,focusLineId:widget.line)));
-    if(mounted)await load();
+      businessId:widget.business,jobId:widget.job,invoiceId:widget.invoice,focusLineId:widget.line,
+      database:db,unlockOwner:PayrollUiScope.of(context)?.unlock,ownerConnection:PayrollUiScope.of(context)?.connection)));
+    if(mounted && widget.line==null)await load();
   }
   @override Widget build(BuildContext context){
     if(widget.line!=null)return TextButton.icon(onPressed:open,icon:const Icon(Icons.assignment_ind_outlined,size:18),label:const Text('Assign mechanics / task'));

@@ -25,6 +25,7 @@ import '../../services/payroll_lan_identity.dart';
 import '../../services/payroll_owner_lease.dart';
 import '../../services/payroll_owner_ledger.dart';
 import 'owner_payroll_connection.dart';
+import 'payroll_ui_scope.dart';
 import '../../services/payroll_lan_workflow.dart';
 import '../jobs/job_detail_screen.dart';
 import '../settings/employee_edit_screen.dart';
@@ -89,7 +90,7 @@ class OwnerPayrollScreen extends StatefulWidget {
 }
 
 class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBindingObserver {
-  BriskersLocalDatabase get _db => widget.database ?? localDatabase;
+  BriskersLocalDatabase get _db => widget.database ?? PayrollUiScope.of(context)?.database ?? localDatabase;
   LocalOwnerGrant? _grant;
   List<Map<String, dynamic>> _employees = [];
   List<Map<String, dynamic>> _work = [];
@@ -100,6 +101,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   bool _refreshingOwnerState = false;
   bool _loadingLocal = false;
   bool _hasLocalData = false;
+  bool _reportsLoaded = false;
   bool _authorizing = false;
   int _loadGeneration = 0;
   String _loadStage = 'saved payroll';
@@ -150,6 +152,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         setState(() {
           _loadGeneration++;
           _hasLocalData = false;
+          _reportsLoaded = false;
           _grant = null;
           _employee = null;
           _employees = [];
@@ -206,6 +209,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if(state==AppLifecycleState.paused && !_authorizing && _grant!=null){
+      _historyUnlocked.value=false;
+      setState((){_grant=null;_hasLocalData=false;_reportsLoaded=false;_loadGeneration++;});
+    }
     if (state == AppLifecycleState.resumed && _grant != null) {
       try { _assertOwner(); } on StateError {
         _historyUnlocked.value = false;
@@ -230,7 +237,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       try { _assertOwner(); } on StateError { needsUnlock = true; }
       if (needsUnlock) {
         setState(() => _authorizing = true);
-        final grant = await (widget.unlockOwner?.call(widget.businessId) ??
+        final grant = await ((widget.unlockOwner ?? PayrollUiScope.of(context)?.unlock)?.call(widget.businessId) ??
             DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId))
             .timeout(const Duration(seconds: 45), onTimeout: () =>
               throw StateError('Owner unlock did not finish. Cancel the device prompt and retry.'));
@@ -258,7 +265,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     _refreshingOwnerState = true;
     final grant = _grant!;
     try {
-      final connection = widget.ownerConnection ??
+      final connection = widget.ownerConnection ?? PayrollUiScope.of(context)?.connection ??
           await OwnerPayrollConnections.open(context, widget.businessId, grant)
               .timeout(const Duration(seconds: 8));
       await connection.refresh(grant).timeout(const Duration(seconds: 8));
@@ -269,7 +276,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Future<void> _load() async {
-    if (_localRead != null) return;
+    if (_localRead != null) {
+      if(mounted && !_loadingLocal)setState(()=>_error='Saved payroll database is still busy. Navigation remains available; retry shortly.');
+      return;
+    }
     final generation = ++_loadGeneration;
     setState(() { _loadingLocal = true; _loadStage = 'saved payroll'; });
     final timer = Stopwatch()..start();
@@ -327,6 +337,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final employee = widget.globalTasks || overview ? null :
         widget.employeeId ?? _employee ?? (employees.firstOrNull?['id'] as String?);
     final work = await repository.work(employee: _jobMode ? null : employee, job: job);
+    if(!mounted||generation!=_loadGeneration)return;
+    _assertOwner();
+    setState((){_hasLocalData=true;_employees=employees;_employee=employee;_work=work;_taskSources=sources;});
     _loadStage = 'payment history';
     final history = employee == null || _jobMode
         ? <Map<String, dynamic>>[] : await repository.historyWithWork(employee);
@@ -352,7 +365,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if (!mounted || generation != _loadGeneration) return;
     _historyUnlocked.value = true;
     setState(() {
+      if(_error?.startsWith('Saved payroll is taking longer')==true || _error?.startsWith('Could not load ')==true)_error=null;
       _hasLocalData = true;
+      _reportsLoaded = true;
       _employees = employees;
       _overviewPayments = allPayments;
       _pendingPayments = employee == null ? pendingPayments :
@@ -437,7 +452,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       final roster=await OfflineJobAdminService(database:_db).cachedEmployees(widget.businessId);
       final known=await _repository.employees();
       candidates={for(final r in roster) r['id']:{...r,'employee_id':r['id']},
-        for(final r in known) r['id']:{...r,'employee_id':r['id']}}.values.toList();
+        for(final r in known) r['id']:{...?roster.where((p)=>p['id']==r['id']).firstOrNull,...r,'employee_id':r['id']}}.values.toList();
     });
     if (!mounted || _error != null) return;
     if (candidates.isEmpty) {
@@ -502,7 +517,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if (row['state'] == 'Done' || (row['paid_minutes'] as int? ?? 0) > 0) return;
     var minutes = row['actual_minutes'] as int;
     if (next == 'Done') {
-      final value = await payrollLanInput(context, 'Complete mechanic work', 'Actual hours worked');
+      final value = await payrollLanInput(context, 'Complete mechanic work', 'Actual hours worked',initialValue:((row['recorded_actual_minutes'] as int? ?? row['actual_minutes'] as int)/60).toStringAsFixed(2));
       if (!mounted || value == null) return;
       final hours = double.tryParse(value);
       if (hours == null || !hours.isFinite || hours <= 0 || hours > 10000) {
@@ -513,7 +528,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     }
     var credited=minutes;
     if(next=='Done') {
-      final value=await payrollLanInput(context,'Credited mechanic labor','Credited hours (actual: ${minutes/60})');
+      final value=await payrollLanInput(context,'Credited mechanic labor','Credited hours (actual: ${minutes/60})',initialValue:(minutes/60).toStringAsFixed(2));
       if(value==null||!mounted)return;
       final h=double.tryParse(value);
       if(h==null||!h.isFinite||h<0||h>10000)return;
@@ -525,6 +540,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   Future<void> _editEstimated(Map<String, dynamic> row) async {
     final input = await payrollLanInput(
       context, 'Mechanic estimated hours', 'Estimated hours for this mechanic',
+      initialValue: ((row['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(2),
     );
     if (input == null || !mounted) return;
     final hours = double.tryParse(input);
@@ -661,7 +677,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
   Future<LocalPayrollRepository> _localPaymentLedger({String? operation}) async {
     _assertOwner();
-    final connection = widget.ownerConnection ?? await OwnerPayrollConnections.open(context, widget.businessId, _grant!);
+    final connection = widget.ownerConnection ?? PayrollUiScope.of(context)?.connection ?? await OwnerPayrollConnections.open(context, widget.businessId, _grant!);
     final proof = await connection.acquire(_grant!, operation ?? _operationId());
     return LocalPayrollRepository(
       _db, business: widget.businessId, owner: true,
@@ -1281,6 +1297,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final roster=await OfflineJobAdminService(database:_db).cachedEmployees(widget.businessId);
     final known=await _repository.employees();
     final staff={for(final r in roster) r['id']:r,for(final r in known) r['id']:r};
+    if(!mounted)return;
     String? employee=widget.employeeId;
     employee??=await showDialog<String>(context:context,builder:(c)=>SimpleDialog(title:const Text('Assign task'),children:[
       for(final e in staff.entries)SimpleDialogOption(onPressed:()=>Navigator.pop(c,e.key),child:Text((e.value['nickname']??e.value['name']??e.key).toString()))]));
@@ -1292,6 +1309,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if(hours==null||!hours.isFinite||hours<0||hours>10000||!mounted)return;
     final jobs=(await _db.customSelect("SELECT * FROM local_jobs WHERE business_id=? AND status NOT IN ('completed','closed','cancelled','deleted') ORDER BY created_at DESC",
       variables:[Variable<String>(widget.businessId)]).get()).map((r)=>r.data).toList();
+    if(!mounted)return;
     Future<String?> chooseJob(List<Map<String,dynamic>> rows)=>showDialog<String>(context:context,builder:(c)=>SimpleDialog(
       title:const Text('Choose an open Job or create a new Job'),children:[
         for(final j in rows)SimpleDialogOption(onPressed:()=>Navigator.pop(c,j['id']),child:Text('${j['job_number']??'Job'} · ${j['title']??''}')),
@@ -1305,6 +1323,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       if(customer==null||!mounted)return;
       final details=await LocalCustomerRepository(database:_db).customerDetail(widget.businessId,customer['id'] as String);
       final vehicles=(details?['vehicles'] as List? ?? []).whereType<Map>().map(Map<String,dynamic>.from).toList();
+      if(!mounted)return;
       if(vehicles.isNotEmpty){
         vehicle=await showDialog<Map<String,dynamic>>(context:context,builder:(c)=>SimpleDialog(title:const Text('Vehicle (optional)'),children:[
           SimpleDialogOption(onPressed:()=>Navigator.pop(c,<String,dynamic>{}),child:const Text('No vehicle')),
@@ -1312,6 +1331,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         if(vehicle==null||!mounted)return;
       }
       final matching=jobs.where((j)=>j['customer_id']==customer!['id'] && (vehicle?['id']==null||j['vehicle_id']==vehicle?['id'])).toList();
+      if(!mounted)return;
       job=await showDialog<String>(context:context,builder:(c)=>SimpleDialog(title:const Text('Use existing Job or explicitly create new'),children:[
         for(final j in matching)SimpleDialogOption(onPressed:()=>Navigator.pop(c,j['id']),child:Text('${j['job_number']} · ${j['title']}')),
         SimpleDialogOption(onPressed:()=>Navigator.pop(c,'create'),child:const Text('Create new Job (no invoice charge)'))]));
@@ -1330,9 +1350,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     await _run(() async {
       await _db.transaction(() async {
         var jobId=selected;
-        if(selected=='create')jobId=await OfflineJobAdminService(database:_db).queueJobCreate(widget.businessId,
+        if(selected=='create'){jobId=await OfflineJobAdminService(database:_db).queueJobCreate(widget.businessId,
           customerId:customer!['id'] as String,customerName:(customer['display_name']??customer['name']??'Customer').toString(),
-          vehicleId:vehicle?['id'] as String?,vehicleLabel:vehicle==null?null:'${vehicle!['year']??''} ${vehicle['make']??''} ${vehicle['model']??''}',title:description);
+          vehicleId:vehicle?['id'] as String?,vehicleLabel:vehicle==null?null:'${vehicle['year']??''} ${vehicle['make']??''} ${vehicle['model']??''}',title:description);}
         await LocalTaskAssignmentStore(_db).linkEmployee(widget.businessId,jobId,id,name);
         await _repository.createRecheck(operation:operation,job:jobId,description:description,employee:id,name:name,
           rate:rate,estimatedMinutes:(hours*60).round(),kind:'job');
@@ -1585,10 +1605,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             labelPadding: EdgeInsets.symmetric(horizontal: 2),
             labelStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             tabs: [
-              Tab(text: 'Tasks'),
-              Tab(text: 'Payroll'),
-              Tab(text: 'Reports'),
-              Tab(text: 'Taxes'),
+              Tab(child:FittedBox(fit:BoxFit.scaleDown,child:Text('Tasks'))),
+              Tab(child:FittedBox(fit:BoxFit.scaleDown,child:Text('Payroll'))),
+              Tab(child:FittedBox(fit:BoxFit.scaleDown,child:Text('Reports'))),
+              Tab(child:FittedBox(fit:BoxFit.scaleDown,child:Text('Taxes'))),
             ],
           ),
         ),
@@ -1612,7 +1632,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   );
 
   Widget _safeTab(Widget Function() content, String name) {
-    if (_grant != null && _hasLocalData) return content();
+    if (_grant != null && _hasLocalData && (name=='Tasks'||_reportsLoaded)) return content();
     return Center(child: Padding(padding: const EdgeInsets.all(20), child: Text(
       _grant == null ? '$name is locked. Unlock Owner payroll above to read saved records.'
         : _loadingLocal ? 'Loading saved $name…' : 'Saved $name has not loaded. Use Retry above.')));
