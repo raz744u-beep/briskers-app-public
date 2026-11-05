@@ -246,6 +246,8 @@ class PayrollOwnerLedger {
     await prepare();
     final raw = jsonEncode(request);
     final operation = await operationFor(request);
+    if ((await db.customSelect('SELECT operation_id FROM regular_payroll_payments WHERE business_id=? AND operation_id=?',
+      variables: [business, operation].map(Variable<String>.new).toList()).get()).isNotEmpty) return operation;
     await db.customStatement('INSERT OR IGNORE INTO payroll_owner_pending_v2 VALUES(?,?,?,\'pending\',\'Awaiting current payroll state\')',
       [business, operation, raw]);
     return operation;

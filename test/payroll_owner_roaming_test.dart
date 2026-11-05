@@ -34,10 +34,11 @@ Future<LocalOwnerGrant> _owner(String session, {String business = 'shop'}) async
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  for (final scenario in [(false, false), (true, false), (false, true)]) {
+  for (final scenario in [(false, false, false), (true, false, false), (false, true, false), (false, false, true)]) {
     final concurrent = scenario.$1;
     final lostReply = scenario.$2;
-    test('two authenticated Owners preserve one payment, concurrent=$concurrent lostReply=$lostReply', () async {
+    var activationFailure = scenario.$3;
+    test('two authenticated Owners preserve one payment, concurrent=$concurrent lostReply=$lostReply activationFailure=${scenario.$3}', () async {
       HttpOverrides.global = null;
       SharedPreferences.setMockInitialValues({});
       final folder = await Directory.systemTemp.createTemp('owner-payroll');
@@ -48,7 +49,16 @@ void main() {
       final secure = [<String, String>{}, <String, String>{}];
       PayrollOwnerLease lease(int i) => PayrollOwnerLease(identity: identities[i],
         business: 'shop', anchor: identities[0].deviceId,
-        read: (key) async => secure[i][key], write: (key, value) async { secure[i][key] = value; });
+        read: (key) async => secure[i][key], write: (key, value) async {
+          if (i == 1 && activationFailure && key == 'briskers_owner_payroll_lease_v2:shop') {
+            final candidate = jsonDecode(value) as Map;
+            if (candidate['status'] == 'active') {
+              activationFailure = false;
+              throw StateError('Interrupted secure activation after SQLite commit');
+            }
+          }
+          secure[i][key] = value;
+        });
       final ga = await _owner('android');
       final gb = await _owner('iphone');
       var la = lease(0), lb = lease(1);
@@ -108,7 +118,7 @@ void main() {
         ]);
         expect(results.where((r) => r == true), hasLength(1));
       } else {
-        if (lostReply) {
+        if (lostReply || scenario.$3) {
           await expectLater(pay(nb, gb, 'iphone-payment', b), throwsA(isA<PayrollPending>()));
           await expectLater(la.proof(ga), throwsA(isA<PayrollPending>()));
           final pa = na.port, pb = nb.port;
@@ -122,10 +132,12 @@ void main() {
           await nb.listen(InternetAddress.loopbackIPv4, port: pb);
         }
         expect(await pay(nb, gb, 'iphone-payment', b), isTrue);
+        expect(await pay(nb, gb, 'iphone-payment', b), isFalse);
+        final originalTransfer = (await la.state())!['operation'] as String;
         // The authenticated Android Owner can take the ledger back, but cannot
         // pay an already covered credit under a different payment identity.
         await expectLater(pay(na, ga, 'duplicate-android', a), throwsA(anything));
-        await expectLater(la.offer(operation: 'iphone-payment',
+        await expectLater(la.offer(operation: originalTransfer,
           recipient: Map<String, dynamic>.from((await lb.state())!['certificate'] as Map),
           export: na.ledger.export), throwsA(anything));
         await la.proof(ga);

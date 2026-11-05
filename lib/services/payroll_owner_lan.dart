@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -41,6 +42,7 @@ class PayrollOwnerLan {
   late final ledger = PayrollOwnerLedger(database, lease.business);
   HttpServer? _server;
   Object? lastFailure;
+  Future<void>? _ackWork;
   int get port => _server?.port ?? 0;
   static final _exchange = X25519();
   static final _cipher = AesGcm.with256bits();
@@ -50,6 +52,8 @@ class PayrollOwnerLan {
 
   Future<void> prepare() async {
     await ledger.prepare();
+    await database.customStatement('CREATE TABLE IF NOT EXISTS payroll_owner_acquisitions_v2 '
+      '(business TEXT NOT NULL,payment TEXT NOT NULL,operation TEXT NOT NULL,PRIMARY KEY(business,payment))');
     await database.customStatement('CREATE TABLE IF NOT EXISTS payroll_owner_acks_v2 '
       '(business TEXT NOT NULL,peer TEXT NOT NULL,operation TEXT NOT NULL,direction TEXT NOT NULL,'
       'digest TEXT NOT NULL,acknowledged INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(business,peer,operation,direction))');
@@ -74,7 +78,7 @@ class PayrollOwnerLan {
     server.listen(_receive);
     return server.port;
   }
-  Future<void> close() async { await _server?.close(force: true); _server = null; }
+  Future<void> close() async { await _server?.close(force: true); _server = null; await _ackWork; }
   Future<Map<String, dynamic>?> _peer(String device) async {
     final raw = await lease.read(_peerKey(device));
     return raw == null ? null : Map<String, dynamic>.from(jsonDecode(raw) as Map);
@@ -340,9 +344,16 @@ class PayrollOwnerLan {
   Future<String> _download(Map<String, dynamic> peer, String op, Map<String, dynamic> result) async {
     final count = result['count'] as int;
     if (count < 1 || count > 4096) throw StateError('Invalid payroll response size.');
+    final device = peer['server'] == lease.identity.deviceId ? peer['client'] as String : peer['server'] as String;
+    await _page(device, op, 'download-manifest', 0, jsonEncode(result));
     final chunks = <String>[];
     for (var i = 0; i < count; i++) {
-      chunks.add((await _call(peer, {'command': 'page', 'operation': op, 'page': i}))['body'] as String);
+      final saved = await database.customSelect("SELECT body FROM payroll_owner_pages_v2 WHERE business=? AND peer=? AND operation=? AND direction='download' AND page=?",
+        variables: [Variable(lease.business), Variable(device), Variable(op), Variable(i)]).get();
+      if (saved.isNotEmpty) { chunks.add(saved.single.read<String>('body')); continue; }
+      final chunk = (await _call(peer, {'command': 'page', 'operation': op, 'page': i}))['body'] as String;
+      await _page(device, op, 'download', i, chunk);
+      chunks.add(chunk);
     }
     final body = utf8.decode(base64Url.decode(chunks.join()));
     if (await PayrollOwnerLease.digest(body) != result['digest']) throw StateError('Payroll response digest differs.');
@@ -377,6 +388,11 @@ class PayrollOwnerLan {
     }
   }
 
+  Future<void> _cacheOffer(Map<String, dynamic> peer, String operation, Map<String, dynamic> offer) async {
+    final device = peer['server'] == lease.identity.deviceId ? peer['client'] : peer['server'];
+    await lease.storeSnapshot!('incoming:$operation', jsonEncode({'peer': device, 'offer': offer}));
+  }
+
   Future<void> _accept(Map<String, dynamic> peer, Map<String, dynamic> offer, LocalOwnerGrant grant, String operation) async {
     final device = peer['server'] == lease.identity.deviceId ? peer['client'] as String : peer['server'] as String;
     final digest = await PayrollOwnerLease.digest(jsonEncode(offer['lease']));
@@ -385,7 +401,11 @@ class PayrollOwnerLan {
       await _ack(device, operation, 'out', digest, 0);
     }));
     try { await _syncMechanicLinks(peer, grant); } catch (_) { /* Approved links can reconcile after reconnect. */ }
-    await _flushAcks();
+    _scheduleAcks();
+  }
+  void _scheduleAcks() {
+    _ackWork ??= _flushAcks().catchError((Object _) {}).whenComplete(() => _ackWork = null);
+    unawaited(_ackWork);
   }
   Future<void> _flushAcks() async {
     final rows = await database.customSelect("SELECT * FROM payroll_owner_acks_v2 WHERE business=? AND direction='out' AND acknowledged=0",
@@ -433,19 +453,44 @@ class PayrollOwnerLan {
     }
     throw const PayrollPending('Payment pending: reconnect to the current Owner payroll ledger over shop Wi-Fi.');
   }
-  Future<PayrollOwnerProof> acquire(LocalOwnerGrant grant, String operation) async {
+  Future<PayrollOwnerProof> acquire(LocalOwnerGrant grant, String paymentOperation) async {
     await prepare();
     try { await lease.migrate(grant); } on PayrollPending { /* A connected Owner can transfer its lease. */ }
     try {
       final proof = await lease.proof(grant);
-      await _flushAcks();
+      _scheduleAcks();
       return proof;
     } on PayrollPending { /* Reconcile before finalizing. */ }
+    final highWater = int.tryParse(await lease.read('${lease.key}:epoch') ?? '-1') ?? -1;
+    final existing = await database.customSelect('SELECT operation FROM payroll_owner_acquisitions_v2 WHERE business=? AND payment=?',
+      variables: [lease.business, paymentOperation].map(Variable<String>.new).toList()).get();
+    var operation = existing.firstOrNull?.read<String>('operation');
+    if (operation != null) {
+      final cached = await lease.loadSnapshot!('incoming:$operation');
+      if (cached != null) {
+        final record = jsonDecode(cached) as Map;
+        final offer = Map<String, dynamic>.from(record['offer'] as Map);
+        final certified = await lease.verifyLease(Map<String, dynamic>.from(offer['lease'] as Map));
+        if ((certified['epoch'] as int) < highWater) {
+          operation = null;
+        } else {
+          final peer = await _peer(record['peer'] as String);
+          if (peer != null) {
+            await _accept(peer, offer, grant, operation);
+            return lease.proof(grant);
+          }
+        }
+      }
+    }
+    operation ??= await PayrollOwnerLease.digest(jsonEncode(['owner-ledger', paymentOperation, highWater]));
+    await database.customStatement('INSERT INTO payroll_owner_acquisitions_v2 VALUES(?,?,?) '
+      'ON CONFLICT(business,payment) DO UPDATE SET operation=excluded.operation', [lease.business, paymentOperation, operation]);
     for (final peer in await peers()) {
       try {
         final resumed = await _call(peer, {'command': 'resume', 'operation': operation});
         if (resumed['absent'] != true) {
           final offer = Map<String, dynamic>.from(jsonDecode(await _download(peer, operation, resumed)) as Map);
+          await _cacheOffer(peer, operation, offer);
           await _accept(peer, offer, grant, operation);
           return await lease.proof(grant);
         }
@@ -459,6 +504,7 @@ class PayrollOwnerLan {
         final result = await _call(peer, {'command': 'take', 'operation': operation,
           'count': chunks.length, 'digest': await PayrollOwnerLease.digest(snapshot)});
         final offer = Map<String, dynamic>.from(jsonDecode(await _download(peer, operation, result)) as Map);
+        await _cacheOffer(peer, operation, offer);
         await _accept(peer, offer, grant, operation);
         return await lease.proof(grant);
       } catch (_) { /* Durable offer/pending intent is retried with its original operation. */ }

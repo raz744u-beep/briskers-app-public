@@ -89,7 +89,7 @@ class PayrollLanEnrollment {
     final body = jsonEncode([
       'briskers-payroll-pair-v1', business, employee, identity.deviceId,
       mechanicDevice, base64UrlEncode(secret),
-      if (certificate != null) certificate,
+      ?certificate,
     ]);
     final code = jsonEncode([body, await identity.sign(body)]);
     await assertWriter(business, grant);

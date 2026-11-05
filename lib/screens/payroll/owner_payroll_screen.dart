@@ -537,6 +537,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       'repayment': repayment, 'net': net, 'reason': reason, 'base': base};
     // Stable intent identity survives a lost UI/transport response and restart.
     final operation = await PayrollOwnerLedger.operationFor(request);
+    var recordedNew = false;
     await _run(() async {
       await pending.intent(request);
       final ledger = await _localPaymentLedger(operation: operation);
@@ -546,7 +547,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       final identity = await PayrollLanIdentity.load();
       final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, employee);
       if (peer == null) {
-        await ledger.verify(
+        recordedNew = await ledger.verify(
           operation: operation, employee: employee, week: _date(week), date: _date(date),
           method: method, selected: selected, base: base, hourlyAdjustment: adjustment,
           adjustmentReason: reason, repayment: repayment, confirmedNet: net,
@@ -554,11 +555,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         );
       } else {
         final workflow = await _workflow(employee, ownerProof: ledger.ownerProof);
-        await workflow.pay(operation: operation, week: _date(week), date: _date(date), method: method,
+        recordedNew = await workflow.pay(operation: operation, week: _date(week), date: _date(date), method: method,
           selected: selected, reason: reason, net: net, base: base,
           adjustment: adjustment, repayment: repayment, onRecorded: () => pending.resolve(operation));
       }
     }, verifyPayment: true, rethrowError: true);
+    if (!recordedNew) throw const PayrollAlreadyRecorded();
   }
 
   String _operationId() {

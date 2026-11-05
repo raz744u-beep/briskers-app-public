@@ -475,6 +475,9 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
             }
           }
         }
+      } on PayrollAlreadyRecorded catch (error) {
+        if (mounted) setState(() { _error = error.message; _selected.clear(); });
+        await widget.onPaymentSaved?.call();
       } on PayrollPending catch (error) {
         if (mounted) setState(() => _error = error.message);
       } catch(error) {

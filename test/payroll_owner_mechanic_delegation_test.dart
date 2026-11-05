@@ -6,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_owner_authorization.dart';
-import 'package:briskers_app/services/local_payroll_repository.dart';
 import 'package:briskers_app/services/payroll_lan_enrollment.dart';
 import 'package:briskers_app/services/payroll_lan_identity.dart';
 import 'package:briskers_app/services/payroll_lan_workflow.dart';

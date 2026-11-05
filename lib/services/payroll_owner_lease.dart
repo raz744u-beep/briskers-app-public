@@ -16,6 +16,12 @@ class PayrollPending implements Exception {
   String toString() => message;
 }
 
+class PayrollAlreadyRecorded implements Exception {
+  const PayrollAlreadyRecorded();
+  String get message => 'This payment was already recorded. No second payment was created. See Reports for its receipt.';
+  @override String toString() => message;
+}
+
 class PayrollOwnerProof {
   PayrollOwnerProof._(this.business, this.device, this._check);
   final String business;
