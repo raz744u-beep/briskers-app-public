@@ -33,4 +33,48 @@ void main() {
     ).onPressed, isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+  testWidgets('partial labor review records only selected remaining minutes',
+      (tester) async {
+    final now = DateTime.now();
+    final monday = DateTime(now.year, now.month, now.day - now.weekday + 1);
+    List<Map<String, dynamic>>? selection;
+    int? verifiedNet;
+    await tester.pumpWidget(MaterialApp(home: WeeklyLaborReview(
+      employeeId: 'mechanic', employeeName: 'Mechanic', week: monday,
+      tasks: [
+        {'id': 'labor', 'description': 'Partially settled labor',
+          'actual_minutes': 60, 'remaining_minutes': 40, 'paid_minutes': 20,
+          'rate_cents': 1001, 'state': 'Done', 'paid': 0,
+          'completed_date': monday.toIso8601String().split('T').first,
+          'gross_cents': 1001, 'job_number': 'J-18'},
+      ],
+      advanceBalance: () async => 0,
+      recordPayment: (_, _, _, selected, adjustment, repayment, net, _, base) async {
+        selection = selected;
+        verifiedNet = net;
+        expect(adjustment, 0);
+        expect(repayment, 0);
+        expect(base, 0);
+      },
+    )));
+    expect(find.text('Partially Paid · Remaining hours only'), findsOneWidget);
+    await tester.tap(find.byTooltip('Edit payable hours'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Hours to pay this week'), '0.33');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Verify Payment'));
+    await tester.pumpAndSettle();
+    expect(find.text(r'Calculated labor: $3.33'), findsOneWidget);
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Record payment'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Record payment'));
+    await tester.pumpAndSettle();
+    expect(selection!.single['pay_minutes'], 20);
+    expect(selection!.single['paid_minutes'], 20);
+    expect(verifiedNet, 333);
+    expect(find.text('Payment Recorded'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 500));
+  });
+
 }
