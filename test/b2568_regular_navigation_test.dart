@@ -73,7 +73,8 @@ void main(){
       await repo.saveEmployeeCompensation(employee:'a',name:'Mechanic Alpha',rate:4000,weeklyBase:false);
       await repo.saveEmployeeCompensation(employee:'b',name:'Mechanic Beta',rate:4000,weeklyBase:false);
       invoice=await OfflineDocumentDraftService(database:db).createQuickInvoice('shop',customerId:'customer',customerName:'Synthetic Customer',
-        vehicleId:'vehicle',vehicleLabel:'2021 Synthetic SUV',initialLines:[{'name':'Labor','description':'Replace turbocharger and gaskets','line_kind':'labor','quantity':6,'unit_price':100}]);
+        vehicleId:'vehicle',vehicleLabel:'2021 Synthetic SUV',initialLines:[{'name':'Labor','description':'Replace turbocharger and gaskets','line_kind':'labor','quantity':6,'unit_price':100},
+          {'name':'Labor','description':'Shared diagnostic labor','line_kind':'labor','quantity':3,'unit_price':100}]);
     });
     final boundary=GlobalKey();final navigator=GlobalKey<NavigatorState>();
     await tester.pumpWidget(PayrollUiScope(database:db,unlock:auth.authorizeLocal,connection:network,
@@ -90,7 +91,7 @@ void main(){
     await click(find.byType(DropdownButtonFormField<String>).first);
     await click(find.text('Alpha').last);
     await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:150)));await tester.pump();
-    await click(find.text('Assign mechanics / task'));
+    await click(find.text('Assign mechanics / task').first);
     await click(find.text('Unlock Owner payroll'));
     await click(find.text('Assign / split'));
     await click(find.text('Beta'));
@@ -104,17 +105,47 @@ void main(){
     await tester.runAsync(()async{
       final repo=LocalPayrollRepository(db,business:'shop',owner:true);
       final work=await repo.work(employee:'b');expect(work.single['actual_minutes'],180);expect(work.single['recorded_actual_minutes'],120);
-      final saved=await LocalDocumentDetailCache(database:db).load('shop',invoice);expect((saved!['lines'] as List).single['quantity'],6);
+      final saved=await LocalDocumentDetailCache(database:db).load('shop',invoice);expect((saved!['lines'] as List).first['quantity'],6);
+    });
+    navigator.currentState!.pop();await tester.pumpAndSettle();
+    await click(find.text('Assign mechanics / task').at(1));
+    await click(find.text('Unlock Owner payroll'));
+    // Keep Alpha explicitly assigned, then add Beta to the same task identity.
+    for(final name in ['Alpha','Beta']){
+      await click(find.text('Assign / split'));await click(find.text(name));
+      await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:400)));await tester.pump();
+    }
+    for(final name in ['Mechanic Alpha','Mechanic Beta']){
+      await until(find.textContaining('$name · Open'));
+      final card=find.ancestor(of:find.textContaining('$name · Open'),matching:find.byType(ListTile)).last;
+      await click(find.descendant(of:card,matching:find.widgetWithText(TextButton,'Start')));
+      await until(find.textContaining('$name · In Progress'));
+      final started=find.ancestor(of:find.textContaining('$name · In Progress'),matching:find.byType(ListTile)).last;
+      await click(find.descendant(of:started,matching:find.widgetWithText(TextButton,'Complete')));
+      for(var step=0;step<2;step++){
+        await until(find.byType(AlertDialog));
+        await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),name.endsWith('Alpha')?'1':'2');
+        await click(find.text('Continue'));
+      }
+      await until(find.textContaining('$name · Done'));
+    }
+    await tester.runAsync(()async{
+      final all=await LocalPayrollRepository(db,business:'shop',owner:true).work();
+      final split=all.where((r)=>r['description']=='Shared diagnostic labor').toList();
+      expect(split,hasLength(2));expect(split.map((r)=>r['task_id']).toSet(),hasLength(1));
+      expect(split.map((r)=>r['actual_minutes']).toSet(),{60,120});
     });
     navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>const OwnerPayrollScreen(businessId:'shop',employeeId:'b',employeeName:'Mechanic Beta',employeeRole:'Mechanic')));
     await tester.pumpAndSettle();await click(find.text('Unlock Owner payroll'));
     await click(find.widgetWithText(FilledButton,'Verify Payment'));
-    await until(find.text(r'Calculated labor: $120.00'));
+    await until(find.text(r'Calculated labor: $200.00'));
     await click(find.widgetWithText(FilledButton,'Record payment'));
     await until(find.text('Payment Recorded'));await click(find.widgetWithText(FilledButton,'Done'));
     await click(find.text('Reports'));await until(find.text('Payroll History'));
     await tester.runAsync(()async{
-      final rows=await LocalPayrollRepository(db,business:'shop',owner:true).history('b');expect(rows,hasLength(1));expect(rows.single['net'],12000);
+      final rows=await LocalPayrollRepository(db,business:'shop',owner:true).history('b');expect(rows,hasLength(1));expect(rows.single['net'],20000);
+      final alpha=(await LocalPayrollRepository(db,business:'shop',owner:true).work(employee:'a')).where((r)=>r['state']=='Done').single;
+      expect(alpha['remaining_cents'],4000);expect(await LocalPayrollRepository(db,business:'shop',owner:true).history('a'),isEmpty);
     });
     // Render the actual regular widgets, not a separately designed mockup.
     await tester.runAsync(()async{

@@ -6019,7 +6019,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           ),
           if (OwnerPayrollScreen.enabled && widget.isOwner && !_estimate && _detail?['job_id'] is String)
             Padding(padding:const EdgeInsets.all(12),child:JobTasksAccess(
-              business:widget.businessId,job:_detail!['job_id'] as String,invoice:widget.documentId)),
+              business:widget.businessId,job:_detail!['job_id'] as String,invoice:widget.documentId,revision:_loadGeneration,onChanged:()=>unawaited(_load()))),
           if (lines.isEmpty)
             const Padding(
               padding: EdgeInsets.all(22),
@@ -6074,7 +6074,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                             if (OwnerPayrollScreen.enabled && widget.isOwner && !_estimate &&
                                 isInvoiceLaborLine(line) && line['id'] is String && _detail?['job_id'] is String)
                               JobTasksAccess(business:widget.businessId,job:_detail!['job_id'] as String,
-                                invoice:widget.documentId,line:line['id'] as String),
+                                invoice:widget.documentId,line:line['id'] as String,revision:_loadGeneration,onChanged:()=>unawaited(_load())),
                             if (description.isNotEmpty) ...[
                               const SizedBox(height: 3),
                               Text(

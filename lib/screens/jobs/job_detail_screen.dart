@@ -5935,7 +5935,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           if (_canSeeFinancial)
             CompletedWorkSection(business:widget.businessId,job:widget.jobId,revision:_loadEpoch),
           if (OwnerPayrollScreen.enabled && _owner)
-            Padding(padding:const EdgeInsets.all(8),child:JobTasksAccess(business:widget.businessId,job:widget.jobId,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);})),
+            Padding(padding:const EdgeInsets.all(8),child:JobTasksAccess(business:widget.businessId,job:widget.jobId,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);})),
           if (_canSeeFinancial &&
               _job?['status']?.toString() == 'completed') ...[
             const SizedBox(height: 8),

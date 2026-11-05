@@ -11,8 +11,9 @@ import 'payroll_ui_scope.dart';
 
 /// The same task identity is used by the invoice, Job and employee screens.
 class JobTasksAccess extends StatefulWidget {
-  const JobTasksAccess({super.key,required this.business,required this.job,this.invoice,this.line,this.database,this.onChanged,this.onHours});
+  const JobTasksAccess({super.key,required this.business,required this.job,this.invoice,this.line,this.database,this.onChanged,this.onHours,this.revision=0});
   final String business,job;
+  final int revision;
   final String? invoice,line;
   final BriskersLocalDatabase? database;
   final VoidCallback? onChanged;
@@ -26,8 +27,29 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
   String? warning;
   bool busy=false;
   int? estimated,actual;
-  @override void initState(){super.initState();if(widget.line==null)unawaited(load());}
-  @override void didUpdateWidget(covariant JobTasksAccess old){super.didUpdateWidget(old);if(old.job!=widget.job)unawaited(load());}
+  String? lineAssignment;
+  @override void initState(){super.initState();unawaited(widget.line==null?load():loadLine());}
+  @override void didUpdateWidget(covariant JobTasksAccess old){super.didUpdateWidget(old);if(old.job!=widget.job || old.line!=widget.line || old.invoice!=widget.invoice || old.revision!=widget.revision){unawaited(widget.line==null?load():loadLine());}}
+  Future<void> loadLine()async{
+    try{
+      final tables=await db.customSelect("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('regular_payroll_task_sources','regular_payroll_portions','regular_payroll_employees','regular_payroll_assignment_meta','local_employee_nicknames')").get();
+      final names=tables.map((r)=>r.read<String>('name')).toSet();
+      var caption='Unassigned';
+      if(names.containsAll({'regular_payroll_task_sources','regular_payroll_portions','regular_payroll_employees'})){
+        final nicknames=names.contains('local_employee_nicknames');
+        final meta=names.contains('regular_payroll_assignment_meta');
+        final rows=await db.customSelect('SELECT ${nicknames?"COALESCE(NULLIF(n.nickname,''),e.name)":"e.name"} AS name '
+          'FROM regular_payroll_task_sources s JOIN regular_payroll_portions p ON p.business_id=s.business_id AND p.task_id=s.task_id '
+          'JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id '
+          '${nicknames?'LEFT JOIN local_employee_nicknames n ON n.business_id=p.business_id AND n.employee_id=p.employee_id ':''}'
+          '${meta?'LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id ':''}'
+          'WHERE s.business_id=? AND s.invoice_id=? AND s.line_id=? AND s.active=1 ${meta?'AND COALESCE(m.active,1)=1 ':''}ORDER BY e.name',
+          variables:[widget.business,widget.invoice!,widget.line!].map(Variable<String>.new).toList()).get();
+        if(rows.isNotEmpty){caption='Assigned: ${rows.map((r)=>r.read<String>('name')).join(' + ')}';}
+      }
+      if(mounted){setState(()=>lineAssignment=caption);}
+    }catch(_){if(mounted){setState(()=>lineAssignment='Assignment unavailable; open task to retry');}}
+  }
   Future<void> load()async{
     try{
       final roster=await OfflineJobAdminService(database:db).cachedEmployees(widget.business).timeout(const Duration(seconds:3));
@@ -74,10 +96,12 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
     await Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>OwnerPayrollScreen(
       businessId:widget.business,jobId:widget.job,invoiceId:widget.invoice,focusLineId:widget.line,
       database:db,unlockOwner:PayrollUiScope.of(context)?.unlock,ownerConnection:PayrollUiScope.of(context)?.connection)));
-    if(mounted && widget.line==null)await load();
+    if(mounted){await (widget.line==null?load():loadLine());widget.onChanged?.call();}
   }
   @override Widget build(BuildContext context){
-    if(widget.line!=null)return TextButton.icon(onPressed:open,icon:const Icon(Icons.assignment_ind_outlined,size:18),label:const Text('Assign mechanics / task'));
+    if(widget.line!=null){return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      Text(lineAssignment??'Loading saved assignment…',style:const TextStyle(fontSize:12),maxLines:2,overflow:TextOverflow.ellipsis),
+      TextButton.icon(onPressed:open,icon:const Icon(Icons.assignment_ind_outlined,size:18),label:const Text('Assign mechanics / task'))]);}
     final values={for(final p in staff) p['id']:p};
     return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
       Row(children:[
