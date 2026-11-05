@@ -238,10 +238,9 @@ class PayrollOwnerLease {
         prior['holder'] != identity.deviceId || current['status'] != 'active') {
       throw const PayrollPending('Payment pending: another Owner device holds the current ledger.');
     }
-    await write('$key:epoch', '${(prior['epoch'] as int) + 1}');
-    // No clock timeout or disconnected re-election can undo this fence.
-    // Fence the legacy release as well if the same installation is restored.
-    await write('briskers_payroll_lan_v1:${jsonEncode([business, 'writer'])}', peer['device'] as String);
+    // Persist the original recipient/operation before fencing the epoch. A
+    // crash at either secure write can resume this same offer; status=offering
+    // already prevents any local payment proof from authorizing another write.
     await _save({...current, 'status': 'offering', 'operation': operation,
       'recipient': peer['device'], 'used': [...?current['used'] as List?, operation]});
     return _finishOffer(operation, recipient, export);
@@ -253,6 +252,10 @@ class PayrollOwnerLease {
     final priorLease = Map<String, dynamic>.from(current['lease'] as Map);
     final previous = await verifyLease(priorLease);
     final peer = await verifyCertificate(recipient);
+    // Repeat the protected fence on recovery before reading/exporting SQLite.
+    // No timeout or disconnected re-election can undo this handoff.
+    await write('$key:epoch', '${(previous['epoch'] as int) + 1}');
+    await write('briskers_payroll_lan_v1:${jsonEncode([business, 'writer'])}', peer['device'] as String);
     final snapshot = await _snapshot(operation) ?? await export();
     if (storeSnapshot != null) {
       await storeSnapshot!(operation, snapshot);

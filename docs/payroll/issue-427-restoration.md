@@ -17,7 +17,7 @@ Flexible payroll sources include `41644787` for the weekly settlement and `fa676
 | Payroll and Advances | Original employee profile, #341, #343, #399 | Basic totals and verified payment | Recovered summary cards, period filters, optional payment deductions, and standalone repayment form. Recovered opening-balance control and flexible weekly preview with locally saved defaults. Fixed and flexible weekly settlement uses selected outstanding credits, with base-inclusive or supplemental labor, adjustments, and debt repayment. Paid base is protected against repeat payment for the same employee/week. The restored all-employee Payroll overview uses actual work and settlement records. |
 | Reports and week details | History panel and #371 | Flat payment history | Recovered period filters, weekly cards, full-screen details, frozen paid work and separate scoped Job and Invoice links. |
 | Taxes & 1099 | Original employee profile | Employee details form | Recovered Taxes tab and Taxes & 1099 card. The original test kept tax calculations and filing disabled. |
-| Owner payment authorization | #427 | One pinned payment phone | Unfinished release gate: the existing enrollment and repository still enforce the b2567 writer device. This must be replaced by safe transferable or coordinated Owner payment authority before this can be called the requested release. Removing the check alone would permit conflicting disconnected payments. |
+| Owner payment authorization | #427 | One pinned payment phone | Permanent writer restriction removed. Existing Owner unlock authorizes payments on Android or iPhone. An encrypted LAN handoff transfers the reconciled ledger and exclusive payment capability; the sender is fenced before the receiver can pay. A disconnected non-holder retains a durable pending request. No special Owner codes or replacement signing identities. The original installation identity is a migration trust origin only, not a permanent payment device. |
 
 ## Reconciliation
 
@@ -25,7 +25,7 @@ Issue #372 reports different scopes in Tasks TEST. The restored history groups b
 
 ## Delivery gates
 
-The current changes are a draft on the b2567 baseline. Remaining gates include complete UI parity/interaction evidence, coordinated any-Owner payment authority, final combined Android and iOS verification, physical shop Wi-Fi tests, and signed install-over verification. No production writes or migrations are part of this draft.
+The changes preserve the b2567 baseline and the recovered screens. Release requires the exact combined source to pass diagnostics/full regressions, Android compilation, iOS compilation and Gloria regression, followed by permanently signed Android packaging and an emulator install-over test from b2567. Physical shop Wi-Fi and platform biometric acceptance remain separate. No production writes or backend migrations are part of this release.
 
 ## Automated evidence and limitations
 
@@ -37,6 +37,27 @@ The current changes are a draft on the b2567 baseline. Remaining gates include c
 
 Synthetic records only. No production financial records, phone storage or general synchronization were changed. Android compile is not install-over testing. Local/loopback tests do not establish physical Android/iOS or shop Wi-Fi acceptance. No consolidated release APK is certified by these intermediate checks.
 
-### Identity reconciliation still to verify
+### Document identity reconciliation
 
 Local estimate conversion is exercised through `OfflineDocumentDraftService` in `test/offline_estimate_to_invoice_create_test.dart`, including subsequent labor additions/edits. Syncing a provisional invoice later replaces document and line identities. The draft replay transaction now retains task identities when every ordered source line agrees exactly with the successful replay response. Current invoice/line and Job references change only on the derived source records; earned credit IDs and frozen payment snapshots remain unchanged. Missing or conflicting provenance fails reconciliation instead of guessing from amounts. A regular conversion regression now pays a real local work credit before replay, then checks one paid credit and current Job/Invoice links after replay. Final combined tests and multi-device replay verification remain required.
+
+## Portable Owner payment coordination
+
+The existing local Owner authentication remains unchanged. Settings → Employees → Wi-Fi connects approved Owner devices on the same private network; approval uses the existing Owner unlock. Device keys and per-employee pairing secrets stay in secure storage. An Owner certificate authorizes the new Owner route for existing mechanic links, without requesting mechanic re-enrollment. No account, Supabase or internet connection is needed for payroll.
+
+The currently reconciled ledger capability can move between Owner devices. Transfer fences the sender before exporting a recipient-bound signed lease. A device may finalize offline only while holding that capability. Losing the transfer response, delivery acknowledgment or application process cannot create another active payer: durable offers, acquisition IDs, protected epoch counters and immutable payment coverage recover the same operation. There is no timed election while disconnected. A non-current Owner can start a payment; it stays explicitly pending until current state is available. Reports preserve verified receipts separately from pending requests.
+
+| Automated acceptance | Production path exercised | Evidence boundary |
+| --- | --- | --- |
+| `payroll_owner_roaming_test.dart` | Two independent Owner SQLite databases and secure stores; real signed/encrypted loopback, concurrent payment acquisition, lost transfer response, interrupted secure activation, restart and duplicate attempts | Native test processes and loopback, not physical phones |
+| `payroll_owner_mechanic_delegation_test.dart` | Two Owners plus two mechanic databases; approved Owner route transfer, original Owner offline, independent completion, pay only one, lost receipt response, restart and exactly-once delivery | Authenticated local grant and pairing classes; synthetic financial records |
+| `payroll_owner_screen_workflow_test.dart` | Regular restored employee Tasks → Verify Payment → Reports, actual SQLite persistence; current-holder payment and disconnected pending request after reopening | Flutter widget automation, not physical biometric/Wi-Fi acceptance |
+| Existing invoice/weekly/LAN suites | Real saved labor, edits and conversions, rechecks, partial installments, flexible base/supplements, repayment, frozen history, private mechanic scope | Synthetic records only |
+
+Final exact-commit CI and signed APK evidence must be recorded in the delivery manifest after those jobs finish; test names alone are not a passing result.
+
+## Included / Not included / Needs phone testing
+
+- Included in source: recovered profile, Tasks, Payroll, Reports, full-screen history, Advances/Repayments and original Taxes placeholder; invoice-derived work, independent mechanic credits, rechecks, partial payments, weekly settlement, portable Owner payment coordination and LAN receipt delivery. Existing daily-use fixes remain in history.
+- Not included: live tax filing/calculation (never part of recovered TEST), production historical record corrections, general synchronization enablement or new backend deployment. Receipt gateway deployment, offline recurrence editing/generation and J-18/Worldpac provenance remain outside this payroll change and are not newly claimed complete.
+- Needs phone testing after automated gates: install the signed update without uninstalling, retain Force Offline and verify familiar data; same-Wi-Fi Owner approval and Android/iPhone unlock; two mechanics complete a shared open Job, pay only one, interrupt/retry and restart, verify one receipt in Reports and the second mechanic unpaid. A pending request must not be treated as a paid receipt. Never use a second real payment to test retry behavior.

@@ -34,11 +34,12 @@ Future<LocalOwnerGrant> _owner(String session, {String business = 'shop'}) async
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  for (final scenario in [(false, false, false), (true, false, false), (false, true, false), (false, false, true)]) {
+  for (final scenario in [(false, false, false, false), (true, false, false, false), (false, true, false, false), (false, false, true, false), (false, false, false, true)]) {
     final concurrent = scenario.$1;
     final lostReply = scenario.$2;
     var activationFailure = scenario.$3;
-    test('two authenticated Owners preserve one payment, concurrent=$concurrent lostReply=$lostReply activationFailure=${scenario.$3}', () async {
+    var fenceFailure = scenario.$4;
+    test('two authenticated Owners preserve one payment, concurrent=$concurrent lostReply=$lostReply activationFailure=${scenario.$3} fenceFailure=${scenario.$4}', () async {
       HttpOverrides.global = null;
       SharedPreferences.setMockInitialValues({});
       final folder = await Directory.systemTemp.createTemp('owner-payroll');
@@ -56,6 +57,10 @@ void main() {
               activationFailure = false;
               throw StateError('Interrupted secure activation after SQLite commit');
             }
+          }
+          if (i == 0 && fenceFailure && key == 'briskers_owner_payroll_lease_v2:shop:epoch' && value == '1') {
+            fenceFailure = false;
+            throw StateError('Interrupted sender fence after durable offering state');
           }
           secure[i][key] = value;
         });
@@ -118,7 +123,7 @@ void main() {
         ]);
         expect(results.where((r) => r == true), hasLength(1));
       } else {
-        if (lostReply || scenario.$3) {
+        if (lostReply || scenario.$3 || scenario.$4) {
           await expectLater(pay(nb, gb, 'iphone-payment', b), throwsA(isA<PayrollPending>()));
           await expectLater(la.proof(ga), throwsA(isA<PayrollPending>()));
           final pa = na.port, pb = nb.port;

@@ -252,7 +252,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         ? await repository.employees()
         : await repository.assignedEmployees(job);
     final roster = job == null
-        ? await OfflineJobAdminService().cachedEmployees(widget.businessId)
+        ? await OfflineJobAdminService(database: _db).cachedEmployees(widget.businessId)
         : <Map<String, dynamic>>[];
     final employees = {
       for (final row in roster) row['id']: row,
