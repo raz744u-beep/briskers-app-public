@@ -282,7 +282,7 @@ class LocalPayrollRepository {
         'SELECT task_id FROM regular_payroll_task_sources '
         'WHERE business_id=? AND invoice_id=? AND line_id=?',
         [business, invoiceId, lineId]);
-      if (sources.length > 1) throw StateError('Conflicting invoice task identity.');
+      if (sources.length > 1) { throw StateError('Conflicting invoice task identity.'); }
       final task = sources.isEmpty ? jsonEncode([jobId, invoiceId, lineId])
           : sources.single['task_id'] as String;
       final description = line['description']?.toString().trim() ?? '';

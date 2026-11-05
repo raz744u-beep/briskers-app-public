@@ -68,7 +68,7 @@ class LocalInvoiceTaskStore {
           'WHERE business_id=? AND invoice_id=? AND line_id=?',
           variables: [business, document, id].map(Variable<String>.new).toList(),
         ).get();
-        if (retained.length > 1) throw StateError('Conflicting invoice task identities.');
+        if (retained.length > 1) { throw StateError('Conflicting invoice task identities.'); }
         final task = retained.isEmpty ? jsonEncode([job, document, id])
             : retained.single.read<String>('task_id');
         final hours = invoiceLaborHours(line);
@@ -99,7 +99,7 @@ class LocalInvoiceTaskStore {
       'WHERE business_id=? AND invoice_id=?',
       variables: [Variable(business), Variable(localId)],
     ).get();
-    if (sources.isEmpty) return;
+    if (sources.isEmpty) { return; }
     final invoice = remote['id'];
     final job = remote['job_id'];
     if (local['id'] != localId || local['kind'] != 'invoice' ||
@@ -113,12 +113,12 @@ class LocalInvoiceTaskStore {
     String text(Map row, String key) => (row[key] ?? '').toString();
     bool same(Map a, Map b) {
       for (final key in ['name', 'description', 'line_kind']) {
-        if (text(a, key) != text(b, key)) return false;
+        if (text(a, key) != text(b, key)) { return false; }
       }
       for (final key in ['quantity', 'unit_price', 'tax_rate']) {
         final left = num.tryParse(text(a, key));
         final right = num.tryParse(text(b, key));
-        if (left != right) return false;
+        if (left != right) { return false; }
       }
       return true;
     }
@@ -131,7 +131,7 @@ class LocalInvoiceTaskStore {
     await db.transaction(() async {
       for (final source in sources) {
         final index = before.indexWhere((row) => row['id'] == source.data['line_id']);
-        if (index < 0) throw StateError('Original payroll labor identity is missing.');
+        if (index < 0) { throw StateError('Original payroll labor identity is missing.'); }
         final line = after[index]['id'] as String;
         final conflict = await db.customSelect(
           'SELECT task_id FROM regular_payroll_task_sources '
@@ -139,7 +139,7 @@ class LocalInvoiceTaskStore {
           variables: [business, invoice, line, source.read<String>('task_id')]
             .map(Variable<String>.new).toList(),
         ).get();
-        if (conflict.isNotEmpty) throw StateError('Payroll task identities require review.');
+        if (conflict.isNotEmpty) { throw StateError('Payroll task identities require review.'); }
         await db.customStatement(
           'UPDATE regular_payroll_task_sources SET invoice_id=?,line_id=? '
           'WHERE business_id=? AND task_id=?',
