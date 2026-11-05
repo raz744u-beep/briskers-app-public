@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// An installation identity independent of the payroll database. Copying the
@@ -17,13 +18,14 @@ class PayrollLanIdentity {
   String get deviceId => base64UrlEncode(publicKey.bytes);
 
   static Future<PayrollLanIdentity> load() =>
-      _installation ??= _load(const FlutterSecureStorage(
+      _installation ??= loadFromStorage(const FlutterSecureStorage(
         iOptions: IOSOptions(
           accessibility: KeychainAccessibility.unlocked_this_device,
         ),
       ));
 
-  static Future<PayrollLanIdentity> _load(FlutterSecureStorage storage) async {
+  @visibleForTesting
+  static Future<PayrollLanIdentity> loadFromStorage(FlutterSecureStorage storage) async {
     final saved = await storage.read(key: _seedKey);
     if (saved != null) return fromSeed(base64Url.decode(saved));
     final random = Random.secure();
