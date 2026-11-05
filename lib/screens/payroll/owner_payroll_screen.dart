@@ -590,11 +590,6 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     );
   }
 
-  Future<PayrollLanWorkflow> _paymentWorkflow(String employee) async {
-    final ledger = await _localPaymentLedger();
-    return _workflow(employee, ownerProof: ledger.ownerProof);
-  }
-
   Future<void> _saveOpening() async {
     final employee = _employee;
     final amount = double.tryParse(_opening.text.trim());
@@ -604,8 +599,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       return;
     }
     await _run(() async {
-      final workflow = await _paymentWorkflow(employee);
-      await workflow.repository.recordOpeningAdvance(employee, (amount * 100).round());
+      final ledger = await _localPaymentLedger();
+      await ledger.recordOpeningAdvance(employee, (amount * 100).round());
       if (mounted) setState(() => _editingOpening = false);
     }, verifyPayment: true);
   }
@@ -622,8 +617,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     final employee = _employee;
     if (amount == null || employee == null) return;
     await _run(() async {
-      final workflow = await _paymentWorkflow(employee);
-      await workflow.repository.recordRepayment(
+      final ledger = await _localPaymentLedger();
+      await ledger.recordRepayment(
         employee: employee, operation: _operationId(), amount: amount,
         date: _date(_repaymentDate), method: _repaymentMethod,
         note: _repaymentNote.text.trim(),

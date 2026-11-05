@@ -89,6 +89,29 @@ void main() {
       expect(find.text('Tasks'), findsOneWidget);
       expect(find.text('Payroll'), findsOneWidget);
       expect(find.text('Reports'), findsOneWidget);
+      if (currentHolder) {
+        // Owner bookkeeping must not require the employee to own a paired phone.
+        await tester.tap(find.text('Payroll'));
+        await tester.pump(const Duration(milliseconds: 600));
+        await until(find.text('Advances & Repayments'));
+        await tester.ensureVisible(find.text('Advances & Repayments'));
+        await tester.tap(find.text('Advances & Repayments'));
+        await tester.pump();
+        await tester.ensureVisible(find.byTooltip('Edit opening balance'));
+        await tester.tap(find.byTooltip('Edit opening balance'));
+        await tester.pump();
+        await tester.enterText(find.widgetWithText(TextField, 'Original amount owed'), '5.00');
+        await tester.tap(find.byTooltip('Save opening balance'));
+        await until(find.text(r'Remaining balance: $5.00'));
+        await tester.enterText(find.widgetWithText(TextField, 'Amount'), '5.00');
+        await tester.pump();
+        await tester.ensureVisible(find.widgetWithText(FilledButton, 'Save Repayment'));
+        await tester.tap(find.widgetWithText(FilledButton, 'Save Repayment'));
+        await until(find.text(r'Remaining balance: $0.00'));
+        await tester.tap(find.text('Tasks'));
+        await tester.pump(const Duration(milliseconds: 600));
+        await until(find.widgetWithText(FilledButton, 'Verify Payment'));
+      }
       await tester.tap(find.widgetWithText(FilledButton, 'Verify Payment'));
       await until(find.widgetWithText(FilledButton, 'Record payment'));
       expect(find.text(r'Calculated labor: $40.00'), findsOneWidget);
@@ -126,6 +149,10 @@ void main() {
         await tester.runAsync(() async {
           final saved = await LocalPayrollRepository(db, business: 'shop', owner: true).history('a');
           expect(saved, hasLength(1)); expect(saved.single['net'], 4000);
+          final reopened = LocalPayrollRepository(db, business: 'shop', owner: true);
+          expect(await reopened.openingAdvance('a'), 500);
+          expect(await reopened.advance('a'), 0);
+          expect(await reopened.repaymentHistory('a'), hasLength(1));
         });
       } else {
         expect(find.textContaining('payment request(s) pending'), findsOneWidget);
