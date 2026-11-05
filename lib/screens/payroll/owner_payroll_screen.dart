@@ -102,6 +102,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   bool _loadingLocal = false;
   bool _hasLocalData = false;
   bool _reportsLoaded = false;
+  bool _backfillActive=false,_backfillDone=false;
   bool _authorizing = false;
   int _loadGeneration = 0;
   String _loadStage = 'saved payroll';
@@ -299,7 +300,26 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       }
     } finally {
       debugPrint('PAYROLL_LOCAL stage=$_loadStage elapsed_ms=${timer.elapsedMilliseconds}');
-      if (mounted) setState(() => _loadingLocal = false);
+      if (mounted) {
+        setState(() => _loadingLocal = false);
+        if(_hasLocalData && !_backfillDone && !_backfillActive){unawaited(_backfillTasks());}
+      }
+    }
+  }
+
+  Future<void> _backfillTasks()async{
+    if(_backfillActive || !mounted){return;}
+    setState(()=>_backfillActive=true);
+    try{
+      await _repository.backfillInvoiceTasks(job:widget.jobId,onBatch:()async{
+        if(!mounted){throw StateError('Tasks view closed');}
+        if(!_loadingLocal && _localRead==null){await _load();}
+      });
+      _backfillDone=true;
+    }catch(error){
+      if(mounted && _grant!=null){setState(()=>_error='Existing invoice tasks could not finish loading. Retry: $error');}
+    }finally{
+      if(mounted){setState(()=>_backfillActive=false);}
     }
   }
 
@@ -1618,15 +1638,16 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             onPressed: _authorizing ? null : () => _run(() async {}),
             child: Text(_authorizing ? 'Unlocking Owner payroll…' : 'Unlock Owner payroll'),
           ),
-        if (_authorizing || _loadingLocal) const LinearProgressIndicator(),
+        if (_authorizing || _loadingLocal || _backfillActive) const LinearProgressIndicator(),
+        if(_backfillActive)const Text('Checking saved invoice tasks…'),
         if (_error != null)
           ListTile(dense: true, title: Text(_error!), trailing: TextButton(
             onPressed: _authorizing ? null : () => _run(() async {}), child: const Text('Retry'))),
         Expanded(child: TabBarView(children: [
-          _safeTab(_tasksTab, 'Tasks'),
-          _safeTab(_payrollTab, 'Payroll'),
-          _safeTab(_reportsPanel, 'Reports'),
-          _taxesTab(),
+          _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Tasks'),child:_safeTab(_tasksTab, 'Tasks')),
+          _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Payroll'),child:_safeTab(_payrollTab, 'Payroll')),
+          _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Reports'),child:_safeTab(_reportsPanel, 'Reports')),
+          _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Taxes'),child:_taxesTab()),
         ])),
       ]),
     ),
@@ -1788,4 +1809,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           ],
         ),
       );
+}
+
+// Tab navigation never discards the approved screens' scroll/selection state.
+class _PayrollTabAlive extends StatefulWidget {
+  const _PayrollTabAlive({super.key,required this.child});
+  final Widget child;
+  @override State<_PayrollTabAlive> createState()=>_PayrollTabAliveState();
+}
+class _PayrollTabAliveState extends State<_PayrollTabAlive> with AutomaticKeepAliveClientMixin {
+  @override bool get wantKeepAlive=>true;
+  @override Widget build(BuildContext context){super.build(context);return widget.child;}
 }

@@ -113,6 +113,26 @@ class LocalPayrollRepository {
     payload['minutes'], payload['date'], payload['revision'],
   ]);
 
+  /// Incremental recovery of pre-existing cached invoices, after first paint.
+  /// Missing photos/details remain unknown; never invokes cloud sync.
+  Future<void> backfillInvoiceTasks({String? job,Future<void> Function()? onBatch}) async {
+    _authorize();await prepare();
+    var after='';
+    while(true){
+      _authorize();
+      final rows=await _read("SELECT id FROM local_documents WHERE business_id=? AND kind='invoice' AND id>? AND NOT EXISTS(SELECT 1 FROM regular_payroll_task_sources s WHERE s.business_id=local_documents.business_id AND s.invoice_id=local_documents.id) "
+        "${job==null?'':'AND job_id=? '}ORDER BY id LIMIT 10",[business,after,?job]);
+      if(rows.isEmpty){return;}
+      for(final row in rows){
+        _authorize();
+        await LocalDocumentDetailCache(database:db).load(business,row['id'] as String);
+      }
+      after=rows.last['id'] as String;
+      await onBatch?.call();
+      await Future<void>.delayed(const Duration(milliseconds:10));
+    }
+  }
+
   Future<void> refreshInvoiceTasks() async {
     _authorize();
     await prepare();
