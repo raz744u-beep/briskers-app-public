@@ -250,11 +250,15 @@ class ExpenseIqLocalPhotoSync {
     if (businessId.isEmpty ||
         transactionId.isEmpty ||
         expectedFilename.isEmpty ||
-        verifiedUri.isEmpty) return false;
+        verifiedUri.isEmpty) {
+      return false;
+    }
     final old = await localForExpense(businessId, transactionId);
     if (old == null ||
         old['filename']?.toString() != expectedFilename ||
-        !verifiedUri.startsWith('content://')) return false;
+        !verifiedUri.startsWith('content://')) {
+      return false;
+    }
     await _database.customStatement(
       '''
       UPDATE $_table SET source_uri = ?,
