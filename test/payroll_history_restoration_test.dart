@@ -37,10 +37,10 @@ void main() {
     expect(find.text('Gross pay'), findsOneWidget);
     expect(find.text('Debt repaid'), findsOneWidget);
     expect(find.text('Transferred'), findsOneWidget);
-    expect(find.text('$85.00'), findsOneWidget);
-    expect(find.text('$20.00'), findsOneWidget);
-    expect(find.text('$65.00'), findsOneWidget);
-    expect(find.text('Paid · $100.00'), findsOneWidget);
+    expect(find.text(r'$85.00'), findsOneWidget);
+    expect(find.text(r'$20.00'), findsOneWidget);
+    expect(find.text(r'$65.00'), findsOneWidget);
+    expect(find.text(r'Paid · $100.00'), findsOneWidget);
     await tester.tap(find.text('Job J-24'));
     await tester.tap(find.text('Invoice #6342'));
     expect(openedJob, 'job-id');
@@ -48,6 +48,6 @@ void main() {
     unlocked.value = false;
     await tester.pumpAndSettle();
     expect(find.text('Owner payroll locked.'), findsOneWidget);
-    expect(find.text('Paid · $100.00'), findsNothing);
+    expect(find.text(r'Paid · $100.00'), findsNothing);
   });
 }
