@@ -729,6 +729,9 @@ jobs:
           VERSION="$(awk '/^version:/ {print $2}' pubspec.yaml | cut -d+ -f1)"
           BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
           test "$BUILD_NUMBER" -gt 2545
+          if [ "$PAYROLL_CANDIDATE" = true ]; then
+            test "$BUILD_NUMBER" -gt 2565
+          fi
 
           # Native-asset downloads (notably sqlite3) occasionally arrive
           # corrupted from the upstream CDN. Clean only generated/native
