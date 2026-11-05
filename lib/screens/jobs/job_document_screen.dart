@@ -7489,14 +7489,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Invoice labor · automatic Work Performed',
+                      'Customer-billed labor reference',
                       style: TextStyle(fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 6),
                     Text(derivedLabor),
                     const SizedBox(height: 5),
                     const Text(
-                      'Updates with invoice labor changes. '
+                      'Billing reference only; task completion is separate. '
                       'Manual notes remain separate.',
                       style: TextStyle(fontSize: 12),
                     ),

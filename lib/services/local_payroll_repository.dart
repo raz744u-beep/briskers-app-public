@@ -253,7 +253,16 @@ class LocalPayrollRepository {
       _authorize();
       await OfflineJobAdminService(database: db).queueMainMechanic(business, job,
         employeeId: employee, employeeName: name);
-      if (employee != null) await LocalTaskAssignmentStore(db).inherit(business, job);
+      await db.customStatement('INSERT INTO regular_payroll_job_lead(business_id,job_id,employee_id,employee_name) VALUES(?,?,?,?) '
+        'ON CONFLICT(business_id,job_id) DO UPDATE SET employee_id=excluded.employee_id,employee_name=excluded.employee_name,revision=revision+1 '
+        'WHERE employee_id IS NOT excluded.employee_id OR employee_name IS NOT excluded.employee_name',[business,job,employee,name]);
+      if (employee != null) {
+        await LocalTaskAssignmentStore(db).inherit(business, job);
+      } else {
+        for(final task in await tasks()){
+          if(task['job_id']==job)await LocalTaskAssignmentStore(db).retireInherited(business,task['id'] as String);
+        }
+      }
       _authorize();
     });
   }

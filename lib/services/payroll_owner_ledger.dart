@@ -20,7 +20,7 @@ class PayrollOwnerLedger {
     'regular_payroll_paid_work', 'regular_payroll_paid_base',
     'regular_payroll_work_coverage', 'regular_payroll_weekly_defaults',
     'regular_payroll_audit', 'regular_payroll_sync_outbox',
-    'regular_payroll_assignment_meta', 'regular_payroll_task_policy', 'regular_payroll_actual_time',
+    'regular_payroll_assignment_meta', 'regular_payroll_task_policy', 'regular_payroll_actual_time', 'regular_payroll_job_lead',
   ];
   static const immutable = {
     'regular_payroll_payments', 'regular_payroll_paid_work',
@@ -85,7 +85,7 @@ class PayrollOwnerLedger {
     final incoming = Map<String, dynamic>.from(bundle['tables'] as Map);
     if (incoming.keys.any((key) => !tables.contains(key)) ||
         tables.any((table) => incoming[table] is! List)) {
-      throw StateError('Incomplete payroll snapshot.');
+      throw const PayrollPending('Both Owner devices must use the current Briskers payroll version before sharing this ledger. Existing records were preserved.');
     }
     await prepare();
     await db.transaction(() async {
@@ -190,7 +190,7 @@ class PayrollOwnerLedger {
               if(paid.isNotEmpty && row['minutes']!=prior['minutes'])throw const PayrollPending('Recorded actual work differs from paid history. Existing records were preserved.');
             }
 
-            if (table == 'local_mechanic_work_credits_v1' || table == 'regular_payroll_portions' || table == 'regular_payroll_assignment_outgoing' || table == 'regular_payroll_assignment_meta' || table == 'regular_payroll_actual_time') {
+            if (table == 'local_mechanic_work_credits_v1' || table == 'regular_payroll_portions' || table == 'regular_payroll_assignment_outgoing' || table == 'regular_payroll_assignment_meta' || table == 'regular_payroll_actual_time' || table == 'regular_payroll_job_lead') {
               final field = table == 'regular_payroll_portions' ? 'version' : 'revision';
               final previous = prior[field] as int;
               final next = row[field] as int;
@@ -218,6 +218,19 @@ class PayrollOwnerLedger {
               [...changed.map((key) => row[key]), ...primary.map((key) => row[key])]);
           }
         }
+      }
+      // Only task-assignment projections change here, never invoices or money.
+      for(final lead in await _rows('regular_payroll_job_lead')){
+        final pending=await db.customSelect("SELECT id,payload_json FROM sync_outbox WHERE business_id=? AND entity_type='job_admin' AND entity_id=? AND state='pending'",
+          variables:[Variable(business),Variable(lead['job_id'] as String)]).get();
+        for(final op in pending){
+          final p=jsonDecode(op.read<String>('payload_json')) as Map;
+          if(p['assignment_changed']==true && p['employee_id']!=lead['employee_id']){
+            await db.customStatement("UPDATE sync_outbox SET state='conflict' WHERE id=? AND business_id=?",[op.read<int>('id'),business]);
+          }
+        }
+        await db.customStatement('UPDATE local_jobs SET assigned_employee_id=?,assigned_employee_name=?,is_unassigned=? WHERE business_id=? AND id=?',
+          [lead['employee_id'],lead['employee_name'],lead['employee_id']==null?1:0,business,lead['job_id']]);
       }
       final invalid = await db.customSelect(
         'SELECT 1 FROM regular_payroll_payments WHERE business_id=? '

@@ -11,6 +11,8 @@ class LocalTaskAssignmentStore {
   Future<List<Map<String,dynamic>>> _read(String sql,List<Object> args) async =>
     (await db.customSelect(sql,variables:args.map((a)=>a is int?Variable<int>(a):Variable<String>(a as String)).toList()).get()).map((r)=>r.data).toList();
   Future<void> prepare() async {
+    await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_job_lead '
+      '(business_id TEXT NOT NULL,job_id TEXT NOT NULL,employee_id TEXT,employee_name TEXT,revision INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(business_id,job_id))');
     await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_assignment_meta '
       '(business_id TEXT NOT NULL,task_id TEXT NOT NULL,employee_id TEXT NOT NULL,inherited INTEGER NOT NULL DEFAULT 0,'
       'active INTEGER NOT NULL DEFAULT 1,revision INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(business_id,task_id,employee_id))');
@@ -63,8 +65,9 @@ class LocalTaskAssignmentStore {
     await prepare();
     final ready=await _read("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('regular_payroll_portions','regular_payroll_employees','regular_payroll_estimates','regular_payroll_work_coverage','local_mechanic_work_credits_v1')",[]);
     if(ready.length!=5)return;
-    final lead=await _read('SELECT j.assigned_employee_id,e.name FROM local_jobs j JOIN regular_payroll_employees e '
-      'ON e.business_id=j.business_id AND e.id=j.assigned_employee_id WHERE j.business_id=? AND j.id=?',[business,job]);
+    final lead=await _read('SELECT CASE WHEN l.job_id IS NULL THEN j.assigned_employee_id ELSE l.employee_id END AS assigned_employee_id,e.name FROM local_jobs j '
+      'LEFT JOIN regular_payroll_job_lead l ON l.business_id=j.business_id AND l.job_id=j.id '
+      'JOIN regular_payroll_employees e ON e.business_id=j.business_id AND e.id=CASE WHEN l.job_id IS NULL THEN j.assigned_employee_id ELSE l.employee_id END WHERE j.business_id=? AND j.id=?',[business,job]);
     if(lead.isEmpty)return;
     final employee=lead.single['assigned_employee_id'] as String;
     final tasks=await _read("SELECT t.id FROM regular_payroll_tasks t JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id "

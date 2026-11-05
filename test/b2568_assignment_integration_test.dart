@@ -41,7 +41,7 @@ void main(){
     await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status,job_number,customer_id,vehicle_label) VALUES('job','shop','owner','Turbo repair','open','J-44','customer','2021 Synthetic SUV')");
     await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind,document_number) VALUES('invoice','shop','job','invoice','6363')");
     for(final e in ['a','b','c']){await repo.saveEmployeeCompensation(employee:e,name:'Mechanic $e',rate:4000,weeklyBase:false);}
-    Map<String,dynamic> invoice({num quantity=6,bool more=false})=>{'id':'invoice','kind':'invoice','job_id':'job','total_amount':600,
+    Map<String,dynamic> invoice({num quantity=6,bool more=false})=>{'id':'invoice','kind':'invoice','job_id':'job','total_amount':quantity*100,
       'lines':[{'id':'turbo','line_kind':'labor','description':'Replace turbocharger and gaskets','quantity':quantity,'unit_price':100},
         {'id':'second','line_kind':'labor','description':'Diagnostic','quantity':1},
         {'id':'inherited','line_kind':'labor','description':'Test drive','quantity':1},
@@ -88,7 +88,7 @@ void main(){
     expect(remaining['remaining_minutes'],120);expect(remaining['remaining_cents'],8000);
     expect(await repo.history('a'),isEmpty);expect(await repo.history('b'),hasLength(1));
     final document=await LocalDocumentDetailCache(database:db).load('shop','invoice');
-    expect(document!['total_amount'],600);expect((document['lines'] as List).first['quantity'],7);
+    expect(document!['total_amount'],700);expect((document['lines'] as List).first['quantity'],7);
     expect((await db.customSelect("SELECT status FROM local_jobs WHERE id='job'").getSingle()).data['status'],'open');
     await repo.addShopTask('a','Clean desk','General');
     expect(await CompletedTaskHistory(db).read('shop',job:'job'),hasLength(1));

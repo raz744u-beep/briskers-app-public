@@ -7,6 +7,7 @@ import '../../local/local_database_provider.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
@@ -184,6 +185,10 @@ class _CustomerServiceHistorySectionState
     final completed=await CompletedTaskHistory(localDatabase).read(businessId,customer:customerId);
     final nicknames=await EmployeeNicknameStore().all(businessId);
     _completedSearch.clear();
+    final legacyNotes=await localDatabase.customSelect('SELECT v.job_id,v.work_summary FROM local_job_visits v JOIN local_jobs j ON j.business_id=v.business_id AND j.id=v.job_id WHERE j.business_id=? AND j.customer_id=?',
+      variables:[Variable(businessId),Variable(customerId)]).get();
+    for(final row in legacyNotes){final id=row.data['job_id'] as String;_completedSearch[id]='${_completedSearch[id]??''} ${row.data['work_summary']??''}';}
+
     for(final task in completed){
       final job=task['job_id'] as String;
       _completedSearch[job]='${_completedSearch[job]??''} ${task['description']} ${task['mechanic']} ${nicknames[task['employee_id']]??''}';
@@ -512,7 +517,7 @@ class _CustomerServiceHistorySectionState
 
   List<Map<String, dynamic>> get _visibleJobs =>
       _jobs.where(_matchesVehicle).where((j)=>_repairQuery.trim().isEmpty ||
-        '${j['job_number']} ${j['title']} ${j['requested_work']} ${j['vehicle_label']} ${_completedSearch[j['id']]??''}'.toLowerCase().contains(_repairQuery.trim().toLowerCase())).toList();
+        '${j['job_number']} ${j['title']} ${j['requested_work']} ${j['vehicle_label']} ${j['vehicle']} ${j['customer_name']} ${_completedSearch[j['id']]??''}'.toLowerCase().contains(_repairQuery.trim().toLowerCase())).toList();
 
   List<Map<String, dynamic>> get _visibleEstimates => _documents
       .where((row) => row['kind']?.toString() == 'estimate')
