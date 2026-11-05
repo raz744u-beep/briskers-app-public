@@ -8,7 +8,12 @@ state=/data/user/0/$package
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-printf '%s  %s\n' d23e5d325db3e0470a07ea6b1d43973ea592c5f77246960da4d74d1d6d496342 "$baseline" | sha256sum -c
+case "$(basename "$baseline")" in
+  Briskers-v0.10.9-b2565.apk) expected=d23e5d325db3e0470a07ea6b1d43973ea592c5f77246960da4d74d1d6d496342 ;;
+  Briskers-v0.10.9-b2566.apk) expected=62cb4723999c8767a9af128828837d297d0add476c899f7505ebbdde58c174d9 ;;
+  *) echo "Unknown signed upgrade baseline" >&2; exit 1 ;;
+esac
+printf '%s  %s\n' "$expected" "$baseline" | sha256sum -c
 adb install "$baseline"
 adb root
 adb wait-for-device
@@ -41,4 +46,4 @@ import sys
 with sqlite3.connect(sys.argv[1]) as db:
     assert db.execute("select value from marker").fetchall() == [('b2565 upgrade retention',)]
 PY
-echo "Verified signed b2565 install-over retained the app UID, SQLite data and preferences."
+echo "Verified signed install-over retained the app UID, SQLite data and preferences."
