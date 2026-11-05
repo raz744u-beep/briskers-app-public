@@ -542,7 +542,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     }
     final attachment = _matchingLocalExpenseIqAttachment();
     if (attachment != null) {
-      await _openAttachment(attachment);
+      await _openAttachment(attachment, tryOriginal: false);
       return;
     }
     if (!mounted) return;
@@ -903,10 +903,14 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     }
   }
 
-  Future<void> _openAttachment(Map<String, dynamic> attachment) async {
+  Future<void> _openAttachment(
+    Map<String, dynamic> attachment, {
+    bool tryOriginal = true,
+  }) async {
     final generation = _loadGeneration;
     try {
-      final originalUri = _originalPhotoUriFor(attachment);
+      final originalUri =
+          tryOriginal ? _originalPhotoUriFor(attachment) : null;
       if (originalUri != null &&
           await _openLocalExpenseIqPhoto(originalUri, reportError: false)) {
         return;
