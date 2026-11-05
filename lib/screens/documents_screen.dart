@@ -1222,6 +1222,36 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   Future<void> _showCloseInvoices() async {
     if (_estimate || !widget.isOwner) return;
 
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      // A locally recorded receipt can be Pending Close, but it must not
+      // become an authoritative Closed invoice before reconciliation.
+      // Avoid surfacing the intentional InvoiceFinalizationGuard StateError
+      // as a misleading "Bad state" failure on the invoice list.
+      if (!mounted) return;
+      setState(() => _error = null);
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Invoice closeout is paused offline'),
+          content: const Text(
+            'You can keep working and recording payments offline. '
+            'A fully paid invoice may show Pending Close until its payments '
+            'have been synchronized and verified. No invoice was closed '
+            'by this action.\n\n'
+            'Your unsynced work remains stored locally. Do not switch '
+            'to Auto just to close invoices while Sync needs attention.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Continue offline'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     final eligible = (_rows ?? const <Map<String, dynamic>>[])
         .where((row) => _invoiceStage(row) == 'Pending Close')
         .toList();
