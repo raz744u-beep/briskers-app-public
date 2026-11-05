@@ -114,6 +114,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   List<Map<String, dynamic>> _repayments = [];
   List<Map<String, dynamic>> _generalTasks = [];
   bool _showGeneralTasks = false;
+  bool _currentJobsExpanded=false;
   bool _advanceExpanded = false;
   bool _editingOpening = false;
   int? _openingAdvance;
@@ -1464,7 +1465,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   Future<void> _updateEmployeeGeneralTask(int id, String status) =>
       _run(() => _repository.setShopTaskStatus(widget.employeeId!, id, status));
 
-  Widget _tasksTab() => Column(children:[
+  Widget _tasksTab() => _PayrollViewport(minHeight:_currentJobsExpanded?600:440,child:Column(children:[
     Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),
       child:Row(children:[
         for(final general in [false,true])
@@ -1488,6 +1489,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       TextButton.icon(onPressed:_newServiceTask,icon:const Icon(Icons.add),label:const Text('New Task'))]),
     if(!_showGeneralTasks && _work.any((r)=>r['state']!='Done'))
       ExpansionTile(key:PageStorageKey('employee-current-jobs-${widget.employeeId}'),
+        initiallyExpanded:_currentJobsExpanded,onExpansionChanged:(v)=>setState(()=>_currentJobsExpanded=v),
         title:const Text('Current assigned Jobs'),children:[SizedBox(height:160,child:ListView(children:[
           for(final row in _work.where((r)=>r['state']!='Done'))Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
             Text('${row['job_number']??'Job'} · ${row['vehicle_label']??''}'),_taskCard(row)])]))]),
@@ -1532,7 +1534,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         onWeekChanged: (week) => _week = week,
         onCancel: () => Navigator.of(context).pop(),
       )),
-  ]);
+  ]));
 
   String _employeeLabel(String? employee) {
     final row = _employees.where((row) => row['id'] == employee).firstOrNull;
@@ -1641,8 +1643,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         if (_authorizing || _loadingLocal || _backfillActive) const LinearProgressIndicator(),
         if(_backfillActive)const Text('Checking saved invoice tasks…'),
         if (_error != null)
-          ListTile(dense: true, title: Text(_error!), trailing: TextButton(
-            onPressed: _authorizing ? null : () => _run(() async {}), child: const Text('Retry'))),
+          ConstrainedBox(constraints:const BoxConstraints(maxHeight:96),child:SingleChildScrollView(child:ListTile(dense: true, title: Text(_error!), trailing: TextButton(
+            onPressed: _authorizing ? null : () => _run(() async {}), child: const Text('Retry'))))),
         Expanded(child: TabBarView(children: [
           _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Tasks'),child:_safeTab(_tasksTab, 'Tasks')),
           _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Payroll'),child:_safeTab(_payrollTab, 'Payroll')),
@@ -1660,7 +1662,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         : _loadingLocal ? 'Loading saved $name…' : 'Saved $name has not loaded. Use Retry above.')));
   }
 
-  Widget _reportsPanel() => Column(children: [
+  Widget _reportsPanel() => _PayrollViewport(minHeight:360,child:Column(children: [
     if (_pendingPayments.isNotEmpty)
       MaterialBanner(content: Text(
         "${_pendingPayments.length} payment request(s) pending — not recorded as paid. "
@@ -1673,7 +1675,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               onOpenJob: (id) => _openRecordedWork(id, invoice: false),
               onOpenInvoice: (id) => _openRecordedWork(id, invoice: true),
             )),
-  ]);
+  ]));
 
   Future<void> _openEmployeeProfile(String id, DateTime week, int tab) async {
     final row = _employees.where((row) => row['id'] == id).firstOrNull;
@@ -1820,4 +1822,14 @@ class _PayrollTabAlive extends StatefulWidget {
 class _PayrollTabAliveState extends State<_PayrollTabAlive> with AutomaticKeepAliveClientMixin {
   @override bool get wantKeepAlive=>true;
   @override Widget build(BuildContext context){super.build(context);return widget.child;}
+}
+
+/// Retain the original fixed-footer panels at normal phone sizes. A short
+/// viewport (keyboard, error message, split-screen) can still reach every control.
+class _PayrollViewport extends StatelessWidget {
+  const _PayrollViewport({required this.minHeight,required this.child});
+  final double minHeight;
+  final Widget child;
+  @override Widget build(BuildContext context)=>LayoutBuilder(builder:(context,size)=>
+    SingleChildScrollView(primary:false,child:SizedBox(height:size.maxHeight<minHeight?minHeight:size.maxHeight,child:child)));
 }

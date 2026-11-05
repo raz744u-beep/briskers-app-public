@@ -8371,6 +8371,7 @@ class _DocumentTabsHeaderDelegate
       elevation: overlapsContent ? 1 : 0,
       color: Colors.white,
       child: Container(
+        height: maxExtent,
         decoration: const BoxDecoration(
           border: Border(
             top: BorderSide(color: Color(0xFFE4E9EB)),
