@@ -465,18 +465,37 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       );
       return true;
     } catch (error) {
+      // A failed SAF read must not become a permanently cached failed Future.
+      // An Android folder permission can be restored without restarting Briskers.
+      _localPhotoBytes.remove(uri);
       if (reportError && mounted && _isCurrent(generation)) {
+        final message = _localPhotoFailureMessage(error);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Original photo unavailable: $error')),
+          SnackBar(content: Text(message), duration: const Duration(seconds: 7)),
         );
       }
       return false;
     }
   }
 
+  String _localPhotoFailureMessage(Object error) {
+    final description = error.toString().toLowerCase();
+    if (description.contains('permission') ||
+        description.contains('securityexception') ||
+        description.contains('safpermission')) {
+      return 'Android no longer allows Briskers to read the original ExpenseIQ photo folder. '
+          'The picture may still exist. Reconnect folder access to restore originals; '
+          'a saved receipt attachment can still be opened separately.';
+    }
+    return 'Original photo cannot be opened from its saved location. '
+        'This does not mean it was deleted. Try the saved receipt attachment.';
+  }
+
   Future<Uint8List> _readLocalPhoto(String uri) =>
-      _localPhotoBytes.putIfAbsent(uri,
-        () => (widget.localPhotoReader ?? Saf().readFileBytes)(uri));
+      _localPhotoBytes.putIfAbsent(
+        uri,
+        () => (widget.localPhotoReader ?? Saf().readFileBytes)(uri),
+      );
 
   // The original is looked up by this exact business + expense. A filename
   // alone must never connect images from separate expenses or ambiguous rows.
@@ -494,6 +513,45 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     final rows = (_detail?['attachments'] as List? ?? const []).whereType<Map>();
     return rows.where((row) => row['filename']?.toString() == filename).length == 1
         ? uri : null;
+  }
+
+  // The original and cloud/cache attachment describe the same exact expense.
+  // Never recover by filename alone across different transactions.
+  Map<String, dynamic>? _matchingLocalExpenseIqAttachment() {
+    final photo = _localExpenseIqPhoto;
+    if (photo == null) return null;
+    final filename = photo['filename']?.toString() ?? '';
+    if (filename.isEmpty) return null;
+    final matches = (_detail?['attachments'] as List? ?? const [])
+        .whereType<Map>()
+        .where((row) =>
+            row['filename']?.toString() == filename &&
+            (row['transaction_id'] == null ||
+                row['transaction_id']?.toString() == widget.transactionId))
+        .map((row) => Map<String, dynamic>.from(row))
+        .toList();
+    return matches.length == 1 ? matches.single : null;
+  }
+
+  Future<void> _openExpenseIqWithFallback(String uri) async {
+    if (uri.isNotEmpty &&
+        await _openLocalExpenseIqPhoto(uri, reportError: false)) {
+      return;
+    }
+    final attachment = _matchingLocalExpenseIqAttachment();
+    if (attachment != null) {
+      await _openAttachment(attachment);
+      return;
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('The original photo could not be opened. It may still '
+            'exist in ExpenseIQ/Photos, but folder permission may need renewing. '
+            'No photo or expense record has been deleted.'),
+        duration: Duration(seconds: 7),
+      ),
+    );
   }
 
   Widget _localExpenseIqReceiptCard() {
@@ -533,7 +591,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
               : 'Available locally · awaiting sync',
         ),
         trailing: const Icon(Icons.zoom_in_outlined),
-        onTap: uri.isEmpty ? null : () => _openLocalExpenseIqPhoto(uri),
+        onTap: () => _openExpenseIqWithFallback(uri),
       ),
     );
   }
