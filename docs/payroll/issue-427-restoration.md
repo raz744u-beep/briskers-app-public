@@ -36,3 +36,7 @@ The current changes are a draft on the b2567 baseline. Remaining gates include c
 - `test/payroll_overview_restoration_test.dart`: restored employee card routes the actual employee and selected week to review; checks the original carried-balance row and fixed footer.
 
 Synthetic records only. No production financial records, phone storage or general synchronization were changed. Android compile is not install-over testing. Local/loopback tests do not establish physical Android/iOS or shop Wi-Fi acceptance. No consolidated release APK is certified by these intermediate checks.
+
+### Identity reconciliation still to verify
+
+Local estimate conversion is exercised through `OfflineDocumentDraftService` in `test/offline_estimate_to_invoice_create_test.dart`, including subsequent labor additions/edits. Syncing a provisional invoice later replaces document and line identities. The new task store does not yet carry proven source aliases through that remapping. That path must be finished before enabling payments on provisional invoice work; otherwise the permanent invoice could derive a second task for already credited labor. Existing frozen paid records must remain unchanged. This is unfinished application code, not a hosting or Owner credential dependency.

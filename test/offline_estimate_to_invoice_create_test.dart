@@ -5,6 +5,7 @@ import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/offline_document_draft_service.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_document_repository.dart';
+import 'package:briskers_app/services/local_payroll_repository.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -27,7 +28,13 @@ void main() {
       name: 'Oil filter', quantity: 1, unitPrice: 25, taxRate: 0,
       lineKind: 'part');
 
+    final payroll = LocalPayrollRepository(db, business: 'shop', owner: true);
+    expect(await payroll.tasks(), isEmpty);
     final invoiceId = await service.convertEstimateOffline('shop', estimateId);
+    final convertedTasks = await payroll.tasks();
+    expect(convertedTasks, hasLength(1));
+    expect(convertedTasks.single['invoice_id'], invoiceId);
+    expect(convertedTasks.single['planned'], 100);
     expect(invoiceId, startsWith('local-invoice-'));
     final invoice = await cache.load('shop', invoiceId);
     expect(invoice?['kind'], 'invoice');
@@ -49,6 +56,9 @@ void main() {
       (edited?['lines'] as List).last['id'].toString(),
       name: 'Additional labor', quantity: 2, unitPrice: 50,
       taxRate: 0, lineKind: 'labor');
+    final invoiceTasks = await payroll.tasks();
+    expect(invoiceTasks, hasLength(2));
+    expect(invoiceTasks.map((row) => row['planned']), containsAll([100, 200]));
     final afterEdit = await cache.load('shop', invoiceId);
     expect(afterEdit?['total_amount'], 225);
     await service.saveMemo('shop', invoiceId, 'Offline service note');
