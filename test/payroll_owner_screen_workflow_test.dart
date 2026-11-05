@@ -92,24 +92,32 @@ void main() {
       if (currentHolder) {
         // Owner bookkeeping must not require the employee to own a paired phone.
         await tester.tap(find.text('Payroll'));
-        await tester.pump(const Duration(milliseconds: 600));
+        await tester.pumpAndSettle();
         await until(find.text('Advances & Repayments'));
         await tester.ensureVisible(find.text('Advances & Repayments'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Advances & Repayments'));
-        await tester.pump();
+        await tester.pumpAndSettle();
         await tester.ensureVisible(find.byTooltip('Edit opening balance'));
+        await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Edit opening balance'));
         await tester.pump();
         await tester.enterText(find.widgetWithText(TextField, 'Original amount owed'), '5.00');
+        await tester.pump();
+        await tester.ensureVisible(find.byTooltip('Save opening balance'));
+        await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Save opening balance'));
         await until(find.text(r'Remaining balance: $5.00'));
+        await tester.ensureVisible(find.widgetWithText(TextField, 'Amount'));
+        await tester.pumpAndSettle();
         await tester.enterText(find.widgetWithText(TextField, 'Amount'), '5.00');
         await tester.pump();
         await tester.ensureVisible(find.widgetWithText(FilledButton, 'Save Repayment'));
+        await tester.pumpAndSettle();
         await tester.tap(find.widgetWithText(FilledButton, 'Save Repayment'));
         await until(find.text(r'Remaining balance: $0.00'));
         await tester.tap(find.text('Tasks'));
-        await tester.pump(const Duration(milliseconds: 600));
+        await tester.pumpAndSettle();
         await until(find.widgetWithText(FilledButton, 'Verify Payment'));
       }
       await tester.tap(find.widgetWithText(FilledButton, 'Verify Payment'));
