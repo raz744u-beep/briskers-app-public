@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+import 'package:flutter/services.dart';
 
 import '../../core/module_modal_theme.dart';
 
@@ -21,6 +22,15 @@ import '../../services/expenseiq_local_photo_sync.dart';
 import 'expense_entry_screen.dart';
 import 'transaction_recurring_dialog.dart';
 import '../../core/recurring_schedule_status.dart';
+
+/// True for Android SAF folder grants that can be restored by user selection.
+@visibleForTesting
+bool expensePhotoNeedsFolderPermission(Object error) {
+  final message = error.toString().toLowerCase();
+  return message.contains('safpermissionexception') ||
+      message.contains('permission denial') ||
+      message.contains('securityexception');
+}
 
 /// Bottom-sheet useSafeArea does not protect Android system navigation.
 @visibleForTesting
@@ -78,6 +88,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   Color get modalAccent => BriskersColors.expenses;
   BriskersApi get _api => widget.api;
   final _picker = ImagePicker();
+  static const _expenseIqChannel = MethodChannel('com.briskers/expenseiq');
   late LocalAttachmentCache _attachmentCache;
   late LocalFinancialCache _localFinancial;
   late ExpenseIqLocalPhotoSync _localExpenseIq;
@@ -87,6 +98,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   bool _loading = true;
   bool _canDeleteRecords = false;
   bool _uploading = false;
+  bool _reconnectingPhoto = false;
   String? _deletingAttachmentId;
   bool _busy = false;
   String? _error;
@@ -174,6 +186,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     _hasAuthoritativeDetail = false;
     _canDeleteRecords = false;
     _uploading = false;
+    _reconnectingPhoto = false;
     _deletingAttachmentId = null;
     _busy = false;
     _error = null;
@@ -447,6 +460,91 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     }
   }
 
+  void _showOriginalPhotoError(Object error) {
+    if (!mounted) return;
+    final needsGrant = expensePhotoNeedsFolderPermission(error);
+    final message = needsGrant
+        ? 'Android no longer allows Briskers to read the original photo. '
+          'The file may still be in ExpenseIQ/photos.'
+        : 'This original receipt could not be opened. '
+          'It may still be in your ExpenseIQ/photos folder.';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      action: Platform.isAndroid && _localExpenseIqPhoto != null
+          ? SnackBarAction(
+              label: 'Reconnect',
+              onPressed: () => unawaited(_reconnectOriginalPhotoFolder()),
+            )
+          : null,
+    ));
+  }
+
+  /// Ask Android to grant the original folder again. This intentionally does
+  /// NOT call the cloud importer, upload queue, or financial write API.
+  Future<void> _reconnectOriginalPhotoFolder() async {
+    if (!Platform.isAndroid || _reconnectingPhoto) return;
+    final photo = _localExpenseIqPhoto;
+    final filename = photo?['filename']?.toString() ?? '';
+    final previousUri = photo?['source_uri']?.toString() ?? '';
+    if (filename.isEmpty || previousUri.isEmpty) {
+      _showOriginalPhotoError(StateError('Original receipt reference missing.'));
+      return;
+    }
+    final generation = _loadGeneration;
+    setState(() => _reconnectingPhoto = true);
+    try {
+      final picked = await _expenseIqChannel.invokeMethod<Map<dynamic, dynamic>>(
+        'reconnectExpenseIqPhoto', {'filename': filename},
+      );
+      if (!_isCurrent(generation) || picked == null) return;
+      final newFilename = picked['name']?.toString() ?? '';
+      final verifiedUri = picked['uri']?.toString() ?? '';
+      if (newFilename != filename || verifiedUri.isEmpty) {
+        throw StateError(
+          'The selected folder does not contain this exact receipt photo.',
+        );
+      }
+      // A new URI must be readable before any saved reference changes.
+      final reader = widget.localPhotoReader ?? Saf().readFileBytes;
+      final bytes = await reader(verifiedUri);
+      if (!_isCurrent(generation)) return;
+      if (bytes.isEmpty) throw StateError('The selected photo is empty.');
+      await _localExpenseIq.reconnectOriginalPhoto(
+        businessId: widget.businessId,
+        transactionId: widget.transactionId,
+        expectedFilename: filename,
+        previousUri: previousUri,
+        verifiedUri: verifiedUri,
+      );
+      if (!_isCurrent(generation)) return;
+      _localPhotoBytes.remove(previousUri);
+      _localPhotoBytes.remove(verifiedUri);
+      setState(() => _localExpenseIqPhoto = {
+            ...photo!,
+            'source_uri': verifiedUri,
+          });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(
+          'Original receipt access restored on this phone.',
+        )),
+      );
+    } catch (error) {
+      if (_isCurrent(generation)) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+            'Could not reconnect this original receipt. '
+            'Select Internal storage / ExpenseIQ / photos. '
+            'No records were changed. $error',
+          ),
+        ));
+      }
+    } finally {
+      if (_isCurrent(generation)) {
+        setState(() => _reconnectingPhoto = false);
+      }
+    }
+  }
+
   Future<bool> _openLocalExpenseIqPhoto(String uri, {bool reportError = true}) async {
     final generation = _loadGeneration;
     try {
@@ -466,9 +564,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       return true;
     } catch (error) {
       if (reportError && mounted && _isCurrent(generation)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Original photo unavailable: $error')),
-        );
+        _showOriginalPhotoError(error);
       }
       return false;
     }
@@ -1763,6 +1859,19 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                 ),
             ],
           ),
+          if (Platform.isAndroid && _localExpenseIqPhoto != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _reconnectingPhoto
+                    ? null
+                    : _reconnectOriginalPhotoFolder,
+                icon: const Icon(Icons.folder_open_outlined),
+                label: Text(_reconnectingPhoto
+                    ? 'Reconnecting original folder...'
+                    : 'Reconnect original photo folder'),
+              ),
+            ),
           // Keep the local original visible after upload. A cloud row
           // replaces this card only when it can show the same local file.
           if (_localExpenseIqPhoto != null &&
