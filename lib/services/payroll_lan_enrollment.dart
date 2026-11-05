@@ -7,20 +7,30 @@ import 'local_owner_authorization.dart';
 import 'payroll_lan_identity.dart';
 import 'payroll_lan_peer.dart';
 
-/// A shop's first designation is an explicit in-person Owner action. Once
-/// pinned, a different device cannot take over using a pairing invitation.
+/// The signed distribution pins the shop's authorized writer. Local Owner
+/// approval activates that device, and pairing persists the same pin.
 class PayrollLanEnrollment {
   PayrollLanEnrollment(
     this.identity, {
+    String approvedWriter = const String.fromEnvironment(
+      'BRISKERS_PAYROLL_WRITER_DEVICE',
+    ),
     FlutterSecureStorage storage = const FlutterSecureStorage(
       iOptions: IOSOptions(
         accessibility: KeychainAccessibility.unlocked_this_device,
       ),
     ),
-  }) : _storage = storage;
+  }) : _storage = storage, _approvedWriter = approvedWriter;
 
   final PayrollLanIdentity identity;
   final FlutterSecureStorage _storage;
+  final String _approvedWriter;
+
+  void _assertApproved(String writer) {
+    if (_approvedWriter.isEmpty || writer != _approvedWriter) {
+      throw StateError('This shop has no matching approved payroll writer.');
+    }
+  }
   static Future<void> _writes = Future<void>.value();
 
   String _key(String business, String entry) =>
@@ -33,6 +43,7 @@ class PayrollLanEnrollment {
   }
 
   Future<void> _pin(String business, String owner) async {
+    _assertApproved(owner);
     final key = _key(business, 'writer');
     final current = await _storage.read(key: key);
     if (current != null && current != owner) {
@@ -49,6 +60,7 @@ class PayrollLanEnrollment {
       });
 
   Future<void> assertWriter(String business, LocalOwnerGrant grant) async {
+    _assertApproved(identity.deviceId);
     grant.assertValid(business, grant.actorId);
     if (await _storage.read(key: _key(business, 'writer')) !=
         identity.deviceId) {
@@ -138,6 +150,7 @@ class PayrollLanEnrollment {
     code ??= await _storage.read(key: _key(business, key));
     if (code == null) return null;
     final peer = await _decode(code);
+    _assertApproved(peer.ownerDevice);
     final localDevice = key == 'mechanic'
         ? peer.mechanicDevice : peer.ownerDevice;
     if (peer.business != business || localDevice != identity.deviceId ||

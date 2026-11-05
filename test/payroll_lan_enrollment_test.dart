@@ -32,7 +32,9 @@ void main() {
     final owner = await PayrollLanIdentity.fromSeed(List.filled(32, 1));
     final mechanic = await PayrollLanIdentity.fromSeed(List.filled(32, 2));
     final stranger = await PayrollLanIdentity.fromSeed(List.filled(32, 3));
-    final enroll = PayrollLanEnrollment(owner, storage: storage);
+    PayrollLanEnrollment installation(PayrollLanIdentity identity) =>
+        PayrollLanEnrollment(identity, storage: storage, approvedWriter: owner.deviceId);
+    final enroll = installation(owner);
     await expectLater(enroll.assertWriter('shop', grant), throwsStateError);
     await enroll.designate('shop', grant);
     final invitation = await enroll.invite(
@@ -43,20 +45,22 @@ void main() {
       business: 'shop', employee: 'b', mechanicDevice: mechanic.deviceId,
       grant: grant,
     ), throwsStateError);
-    final restored = PayrollLanEnrollment(owner, storage: storage);
+    final restored = installation(owner);
     await restored.assertWriter('shop', grant);
     expect((await restored.ownerPeer('shop', 'a'))?.mechanicDevice,
         mechanic.deviceId);
-    await expectLater(PayrollLanEnrollment(stranger, storage: storage)
+    await expectLater(installation(stranger)
         .designate('shop', grant), throwsStateError);
 
     // Simulate a separate installation's initially empty secure store.
     FlutterSecureStorage.setMockInitialValues({});
-    await expectLater(PayrollLanEnrollment(stranger, storage: storage).accept(
+    await expectLater(installation(stranger).designate('shop', grant),
+        throwsStateError);
+    await expectLater(installation(stranger).accept(
       code: invitation, business: 'shop', verifiedOwnerDevice: owner.deviceId,
       actor: 'mechanic',
     ), throwsStateError);
-    final receiver = PayrollLanEnrollment(mechanic, storage: storage);
+    final receiver = installation(mechanic);
     await expectLater(receiver.accept(
       code: invitation, business: 'other', verifiedOwnerDevice: owner.deviceId,
       actor: 'mechanic',
@@ -69,7 +73,7 @@ void main() {
       code: invitation, business: 'shop', verifiedOwnerDevice: owner.deviceId,
       actor: 'mechanic',
     );
-    final reopened = PayrollLanEnrollment(mechanic, storage: storage);
+    final reopened = installation(mechanic);
     expect((await reopened.mechanicPeer('shop', 'mechanic'))?.employee, 'a');
     await expectLater(reopened.mechanicPeer('shop', 'another'), throwsStateError);
     await expectLater(reopened.designate('shop', grant), throwsStateError);
