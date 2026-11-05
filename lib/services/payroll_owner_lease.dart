@@ -101,8 +101,8 @@ class PayrollOwnerLease {
       'holder': identity.deviceId, 'actor': grant.actorId, 'operation': 'migration',
       'issuer': identity.deviceId, 'previous': null, 'snapshot': null});
     grant.assertValid(business, grant.actorId);
-    await write('$key:epoch', '0');
     await _save({'certificate': certificate, 'lease': lease, 'status': 'active'});
+    await write('$key:epoch', '0');
   });
 
   Future<Map<String, dynamic>> verifyCertificate(Map<String, dynamic> certificate) async {

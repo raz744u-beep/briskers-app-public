@@ -8,6 +8,8 @@ import '../../core/briskers_colors.dart';
 import '../../core/employee_role_style.dart';
 
 import '../../local/local_database_provider.dart';
+import '../../local/briskers_local_database.dart';
+import '../../services/payroll_owner_lan.dart';
 import '../../services/device_owner_authorization.dart';
 import '../../services/invoice_labor_work_summary.dart';
 import '../../services/local_owner_authorization.dart';
@@ -48,6 +50,9 @@ class OwnerPayrollScreen extends StatefulWidget {
     this.globalTasks = false,
     this.initialWeek,
     this.initialTab = 0,
+    this.database,
+    this.unlockOwner,
+    this.ownerConnection,
   });
 
   static const enabled = bool.fromEnvironment('BRISKERS_ENABLE_OWNER_PAYROLL');
@@ -63,6 +68,10 @@ class OwnerPayrollScreen extends StatefulWidget {
   final bool globalTasks;
   final DateTime? initialWeek;
   final int initialTab;
+  // Optional integration-test dependencies; normal routes use the app services.
+  final BriskersLocalDatabase? database;
+  final Future<LocalOwnerGrant> Function(String)? unlockOwner;
+  final PayrollOwnerLan? ownerConnection;
   final String businessId;
   final String? jobId;
   final String? invoiceId;
@@ -74,6 +83,7 @@ class OwnerPayrollScreen extends StatefulWidget {
 }
 
 class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
+  BriskersLocalDatabase get _db => widget.database ?? localDatabase;
   LocalOwnerGrant? _grant;
   List<Map<String, dynamic>> _employees = [];
   List<Map<String, dynamic>> _work = [];
@@ -164,7 +174,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
 
   bool get _jobMode => widget.jobId != null;
   late final _repository = LocalPayrollRepository(
-        localDatabase,
+        _db,
         business: widget.businessId,
         owner: true,
         assertOwnerGrant: _assertOwner,
@@ -198,8 +208,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         needsUnlock = true;
       }
       if (needsUnlock) {
-        _grant = await DeviceOwnerAuthorization.instance.authority
-            .authorizeLocal(widget.businessId);
+        _grant = await (widget.unlockOwner?.call(widget.businessId) ??
+            DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId));
       }
       if (!mounted) {
         if (rethrowError) throw StateError('Payroll screen closed.');
@@ -227,14 +237,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
       );
     }
     if (!mounted) return;
-    final ownerConnection = await OwnerPayrollConnections.open(context, widget.businessId, _grant!);
+    final ownerConnection = widget.ownerConnection ?? await OwnerPayrollConnections.open(context, widget.businessId, _grant!);
     if (!_refreshingOwnerState) {
       _refreshingOwnerState = true;
       unawaited(ownerConnection.refresh(_grant!).then((_) async {
         if (mounted) await _load();
       }).catchError((Object _) {}).whenComplete(() => _refreshingOwnerState = false));
     }
-    final pendingPayments = await PayrollOwnerLedger(localDatabase, widget.businessId).pending();
+    final pendingPayments = await PayrollOwnerLedger(_db, widget.businessId).pending();
     await repository.refreshInvoiceTasks();
     final sources = await repository.tasks();
     final job = widget.jobId;
@@ -313,7 +323,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     if (peer == null) throw StateError('Pair this employee device first.');
     _assertOwner();
     final workflow = PayrollLanWorkflow(
-      database: localDatabase, identity: identity, peer: peer,
+      database: _db, identity: identity, peer: peer,
       assertLink: _assertOwner, assertOwner: _assertOwner,
       assertWriter: () => enrollment.assertWriter(widget.businessId, _grant!),
       ownerProof: ownerProof,
@@ -531,7 +541,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
     if (employee == null || (selected.isEmpty && base <= 0)) {
       throw StateError('Select payable work for this employee.');
     }
-    final pending = PayrollOwnerLedger(localDatabase, widget.businessId);
+    final pending = PayrollOwnerLedger(_db, widget.businessId);
     final request = {'employee': employee, 'week': _date(week), 'date': _date(date),
       'method': method, 'selected': selected, 'adjustment': adjustment,
       'repayment': repayment, 'net': net, 'reason': reason, 'base': base};
@@ -571,10 +581,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
 
   Future<LocalPayrollRepository> _localPaymentLedger({String? operation}) async {
     _assertOwner();
-    final connection = await OwnerPayrollConnections.open(context, widget.businessId, _grant!);
+    final connection = widget.ownerConnection ?? await OwnerPayrollConnections.open(context, widget.businessId, _grant!);
     final proof = await connection.acquire(_grant!, operation ?? _operationId());
     return LocalPayrollRepository(
-      localDatabase, business: widget.businessId, owner: true,
+      _db, business: widget.businessId, owner: true,
       deviceId: connection.lease.identity.deviceId, assertOwnerGrant: _assertOwner,
       ownerProof: proof,
     );
@@ -1474,7 +1484,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> {
         businessId: widget.businessId, employeeId: id, employeeName: _employeeLabel(id),
         employeeRole: (row['position'] ?? row['position_name'])?.toString(),
         employeePayType: row['payment_type']?.toString(),
-        initialWeek: week, initialTab: tab,
+        initialWeek: week, initialTab: tab, database: widget.database,
+        unlockOwner: widget.unlockOwner, ownerConnection: widget.ownerConnection,
         openEmployeeDetails: () => Navigator.of(context).push<bool>(MaterialPageRoute(
           builder: (_) => EmployeeEditScreen(
             businessId: widget.businessId, isOwner: true, employeeId: id,
