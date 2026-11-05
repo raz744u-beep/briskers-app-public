@@ -128,4 +128,55 @@ void main() {
     expect(photo?['state'], 'pending');
     await database.close();
   });
+  test('verified folder reconnect updates only matching original locator', () async {
+    final database = BriskersLocalDatabase(NativeDatabase.memory());
+    final service = ExpenseIqLocalPhotoSync(database: database);
+    await service.indexPhotos(
+      'business-1',
+      candidates: [
+        {'transaction_id': 'expense-a', 'photo_id': 'receipt-a'},
+        {'transaction_id': 'expense-b', 'photo_id': 'receipt-b'},
+      ],
+      files: [
+        {'name': 'receipt-a.jpg', 'uri': 'content://test/old-a'},
+        {'name': 'receipt-b.jpg', 'uri': 'content://test/old-b'},
+      ],
+    );
+    await database.customStatement(
+      "UPDATE local_expense_iq_photos SET state='uploaded' "
+      "WHERE business_id='business-1' AND transaction_id='expense-a'",
+    );
+    expect(await service.reconnectOriginalPhoto(
+      businessId: 'business-1',
+      transactionId: 'expense-a',
+      expectedFilename: 'receipt-b.jpg',
+      verifiedUri: 'content://test/incorrect',
+    ), false);
+    expect(await service.reconnectOriginalPhoto(
+      businessId: 'business-2',
+      transactionId: 'expense-a',
+      expectedFilename: 'receipt-a.jpg',
+      verifiedUri: 'content://test/incorrect',
+    ), false);
+    expect(await service.reconnectOriginalPhoto(
+      businessId: 'business-1',
+      transactionId: 'expense-a',
+      expectedFilename: 'receipt-a.jpg',
+      verifiedUri: 'https://example.com/not-local',
+    ), false);
+    expect(await service.reconnectOriginalPhoto(
+      businessId: 'business-1',
+      transactionId: 'expense-a',
+      expectedFilename: 'receipt-a.jpg',
+      verifiedUri: 'content://test/renewed-a',
+    ), true);
+    final updated = await service.localForExpense('business-1', 'expense-a');
+    final untouched = await service.localForExpense('business-1', 'expense-b');
+    expect(updated?['source_uri'], 'content://test/renewed-a');
+    expect(updated?['state'], 'uploaded');
+    expect(untouched?['source_uri'], 'content://test/old-b');
+    expect((await service.counts('business-1')).indexed, 2);
+    await database.close();
+  });
+
 }
