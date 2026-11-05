@@ -192,7 +192,7 @@ class LocalPayrollRepository {
   }
 
   Future<List<Map<String, dynamic>>> mechanicWork({
-    required String job,
+    required String? job,
     required String employee,
     required void Function() assertSession,
   }) async {
@@ -202,15 +202,15 @@ class LocalPayrollRepository {
     }
     await prepare();
     final rows = await _read(
-      'SELECT c.allocation_id AS id,t.description,p.state,c.actual_minutes,c.revision '
+      'SELECT c.allocation_id AS id,c.job_id,t.description,p.state,c.actual_minutes,c.revision '
       'FROM local_mechanic_work_credits_v1 c '
       'JOIN regular_payroll_portions p ON p.business_id=c.business_id AND p.id=c.allocation_id '
       'JOIN regular_payroll_tasks t ON t.business_id=p.business_id AND t.id=p.task_id '
-      'WHERE c.business_id=? AND c.job_id=? AND c.employee_id=? '
+      "WHERE c.business_id=? AND (?='' OR c.job_id=?) AND c.employee_id=? "
       'AND (?=1 OR EXISTS (SELECT 1 FROM local_job_assignments a WHERE a.business_id=c.business_id '
       'AND a.job_id=c.job_id AND a.employee_id=c.employee_id AND a.active=1)) '
       'ORDER BY c.allocation_id',
-      [business, job, employee, pairedEmployee == employee ? 1 : 0],
+      [business, job ?? '', job ?? '', employee, pairedEmployee == employee ? 1 : 0],
     );
     assertSession();
     return rows;

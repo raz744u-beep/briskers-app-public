@@ -51,7 +51,7 @@ class PayrollLanWorkflow {
   late final PayrollLanDelivery delivery;
   late final void Function() _assertLink;
 
-  Future<List<Map<String, dynamic>>> mechanicWork(String job) =>
+  Future<List<Map<String, dynamic>>> mechanicWork(String? job) =>
       repository.mechanicWork(
         job: job, employee: peer.employee, assertSession: _assertLink,
       );

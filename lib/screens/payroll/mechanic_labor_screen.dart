@@ -9,11 +9,11 @@ import 'payroll_lan_controls.dart';
 
 class MechanicLaborScreen extends StatefulWidget {
   const MechanicLaborScreen({
-    super.key, required this.businessId, required this.jobId,
+    super.key, required this.businessId, this.jobId,
   });
 
   final String businessId;
-  final String jobId;
+  final String? jobId;
 
   @override
   State<MechanicLaborScreen> createState() => _MechanicLaborScreenState();
@@ -91,7 +91,7 @@ class _MechanicLaborScreenState extends State<MechanicLaborScreen> {
       final workflow = await _workflow();
       if (update != null && minutes != null) {
         await workflow.progress(
-          job: widget.jobId, id: update['id'] as String,
+          job: update['job_id'] as String, id: update['id'] as String,
           state: update['state'] == 'Open' ? 'In Progress' : 'Done',
           minutes: minutes, date: DateTime.now().toIso8601String().substring(0, 10),
           revision: update['revision'] as int,
@@ -99,10 +99,12 @@ class _MechanicLaborScreenState extends State<MechanicLaborScreen> {
       }
       final rows = await workflow.mechanicWork(widget.jobId);
       final report = await workflow.mechanicReport();
-      if (mounted) setState(() {
-        _rows = rows;
-        _report = report;
-      });
+      if (mounted) {
+        setState(() {
+          _rows = rows;
+          _report = report;
+        });
+      }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {

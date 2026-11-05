@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
+import 'package:briskers_app/services/local_payroll_repository.dart';
 import 'package:briskers_app/services/payroll_lan_identity.dart';
 import 'package:briskers_app/services/payroll_lan_peer.dart';
 import 'package:briskers_app/services/payroll_lan_workflow.dart';
@@ -129,6 +130,15 @@ void main() {
       operation: 'forbidden', week: '2026-11-02', date: '2026-11-04',
       method: 'Cash', selected: [], net: 0, reason: '',
     ), throwsStateError);
+    final wrongDevice = LocalPayrollRepository(
+      owner, business: 'shop', owner: true, deviceId: identities[1].deviceId,
+    );
+    await expectLater(wrongDevice.verify(
+      operation: 'unauthorized', employee: 'a', week: '2026-11-02',
+      date: '2026-11-04', method: 'Cash', selected: await ledger.work(employee: 'a'),
+      base: 0, hourlyAdjustment: 0, adjustmentReason: '', repayment: 0,
+      confirmedNet: 4000,
+    ), throwsStateError);
     expect(await ownerLinks[0].pay(
       operation: 'receipt-a', week: '2026-11-02', date: '2026-11-04',
       method: 'Cash', selected: await ledger.work(employee: 'a'),
@@ -170,7 +180,14 @@ void main() {
     final retryPort = await mechanicLinks[0].listen(loopback);
     expect(await ownerLinks[0].delivery.deliver(loopback, retryPort), 1);
     expect(await ownerLinks[0].delivery.deliver(loopback, retryPort), 0);
-    expect(await ownerLinks[0].repository.history('a'), hasLength(1));
+    final ownerHistory = await ownerLinks[0].repository.history('a');
+    expect(ownerHistory, hasLength(1));
+    expect(ownerHistory.single['reconciliation_state'], 'reconciled');
+    await expectLater(ownerLinks[0].pay(
+      operation: 'duplicate-receipt', week: '2026-11-02', date: '2026-11-04',
+      method: 'Cash', selected: await ownerLinks[0].repository.work(employee: 'a'),
+      net: 4000, reason: '',
+    ), throwsStateError);
     expect(await ownerLinks[1].repository.history('b'), isEmpty);
     final first = await mechanicLinks[0].repository.mechanicReport('a', authorize);
     final second = await mechanicLinks[1].repository.mechanicReport('b', authorize);
