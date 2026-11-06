@@ -3,14 +3,15 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Owner expense financial summary reserves height across async status', () {
+  test('Owner expense status sizes to content and Search fills former blank area', () {
     final source = File('lib/screens/expenses_screen.dart').readAsStringSync();
-    final status = source.indexOf('if (_showFinancialSummary)\n                    SizedBox(');
+    final status = source.indexOf('if (_showFinancialSummary)\n                    Padding(');
     expect(status, greaterThan(0));
     final recurring = source.indexOf('if (_allowRecurring)', status);
     expect(recurring, greaterThan(status));
     final block = source.substring(status, recurring);
-    expect(block, contains('height: 54'));
+    expect(block, isNot(contains('height: 54')));
+    expect(block, contains("hintText: 'Search transactions…'"));
     expect(block, contains('maxLines: 3'));
     expect(block, contains('TextOverflow.ellipsis'));
     expect(block, contains('_periodError ??'));
