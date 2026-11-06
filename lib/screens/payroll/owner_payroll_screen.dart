@@ -360,7 +360,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       for (final row in roster) row['id']: row,
       for (final row in persistedEmployees)
         row['id'] ?? row['employee_id']: {...row, ...?roster.where((candidate) =>
-          candidate['id'] == row['id']).firstOrNull, 'rate':row['rate'],'base_enabled':row['base_enabled']},
+          candidate['id'] == (row['id']??row['employee_id'])).firstOrNull,
+          'id':row['id']??row['employee_id'],'rate':row['rate'],'base_enabled':row['base_enabled']},
     }.values.toList();
     final employees=await EmployeeNicknameStore(database:_db).decorate(widget.businessId,combined);
     final overview = !widget.globalTasks && !widget.reportsOnly &&
@@ -1731,7 +1732,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       if(_grant!=null && _loadingLocal && _employees.isEmpty)const Text('Loading saved employees…'),
       if(_grant!=null && _hasLocalData && !_loadingLocal && _employees.isEmpty)const Padding(padding:EdgeInsets.all(12),child:Text('No saved employees are available. Review the offline employee roster.')),
       if (_grant != null)
-        Expanded(child: PayrollOverview(
+        Expanded(child: !_reportsLoaded ? Center(child:Text(_loadingLocal?'Loading saved payroll totals…':'Saved payroll totals are unavailable. Use Retry above.')) : PayrollOverview(
           employees: _employees, work: _work, payments: _overviewPayments,
           onOpenProfile: (id, week) => _openEmployeeProfile(id, week, 0),
           onReviewWeek: (id, week) => _openEmployeeProfile(id, week, 0),

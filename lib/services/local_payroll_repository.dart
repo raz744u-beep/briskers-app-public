@@ -406,14 +406,6 @@ class LocalPayrollRepository {
         [business, task, jobId, laborId,
           description.isEmpty ? 'Invoice labor' : description],
       );
-      final existing = await _read(
-        'SELECT id FROM regular_payroll_portions WHERE business_id=? AND task_id=? AND employee_id=?',
-        [business, task, employeeId],
-      );
-      if (existing.isNotEmpty) {
-        await queueChange?.call();
-        return;
-      }
       await db.customStatement(
         'INSERT INTO regular_payroll_employees VALUES(?,?,?,?,0) '
         'ON CONFLICT(business_id,id) DO UPDATE SET name=excluded.name,rate=excluded.rate',
@@ -423,7 +415,7 @@ class LocalPayrollRepository {
         'INSERT OR IGNORE INTO regular_payroll_advances VALUES(?,?,0)',
         [business, employeeId],
       );
-      await _assign(task, employeeId);
+      await LocalTaskAssignmentStore(db).allocate(business,task,employeeId,inherited:false);
       await queueChange?.call();
       _authorize();
     });

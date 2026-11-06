@@ -47,8 +47,13 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
           'WHERE s.business_id=? AND s.invoice_id=? AND s.line_id=? AND s.active=1 ${meta?'AND COALESCE(m.active,1)=1 ':''}ORDER BY e.name',
           variables:[widget.business,widget.invoice!,widget.line!].map(Variable<String>.new).toList()).get();
         if(rows.isNotEmpty){
-          final people=rows.map((r)=>{'id':r.data['id'],'name':r.data['legal_name'],'nickname':r.data['name']}).toList();
-          caption='Assigned: ${people.map((p)=>EmployeeNicknameStore.displayLabel(p,people)).join(' + ')}';
+          final cached=await OfflineJobAdminService(database:db).cachedEmployees(widget.business);
+          final people=rows.map((r){
+            final saved=cached.where((p)=>p['id']==r.data['id']).firstOrNull;
+            return <String,dynamic>{'id':r.data['id'],'name':saved?['name']??r.data['legal_name'],'nickname':saved?['nickname']??r.data['name']};
+          }).toList();
+          final known={for(final p in cached)p['id']:p,for(final p in people)p['id']:p}.values.toList();
+          caption='Assigned: ${people.map((p)=>EmployeeNicknameStore.displayLabel(p,known)).join(' + ')}';
         }
       }
       if(mounted){setState(()=>lineAssignment=caption);}

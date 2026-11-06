@@ -9,6 +9,11 @@ which contains PR #430 `bc79769905ffd6ef6b82fa580d573715d0704397`.
 **Status terminology:** restored in source is not phone acceptance. Automated
 results and signed retention evidence must refer to the final exact commit.
 No TEST fixture, TEST employee mapping, TEST payment or TEST database is imported.
+Roster totals ignore employees with no records in the selected week, rather than
+blanking other employees’ known totals. An explicit labor override now stays
+manual when the same inherited mechanic is chosen; an Owner-confirmed missing
+hourly rate applies only to unstarted, unearned, uncovered work. Paid rates and
+historical snapshots remain unchanged.
 
 | Original screen/workflow | Regular-app implementation and restoration | Evidence / remaining acceptance |
 | --- | --- | --- |

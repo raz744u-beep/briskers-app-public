@@ -45,6 +45,15 @@ class LocalTaskAssignmentStore {
         jobId:t['job_id'] as String,laborLineId:t['labor_id'] as String,taskId:task,employeeId:employee,
         actualMinutes:0,rateCents:e['rate'] as int);
     }
+    // Explicit Owner assignment can confirm a previously unknown rate before
+    // work starts. Earned work and every covered/paid credit keep their rate.
+    if(!inherited && (e['rate'] as int)>0) {
+      await db.customStatement('UPDATE local_mechanic_work_credits_v1 SET rate_cents=?,revision=revision+1 '
+        'WHERE business_id=? AND allocation_id=? AND rate_cents=0 AND actual_minutes=0 AND completed=0 AND paid_operation_id IS NULL '
+        "AND EXISTS(SELECT 1 FROM regular_payroll_portions p WHERE p.business_id=? AND p.id=? AND p.state='Open') "
+        'AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage w WHERE w.business_id=? AND w.credit_id=?)',
+        [e['rate'],business,id,business,id,business,id]);
+    }
     await db.customStatement('INSERT OR IGNORE INTO regular_payroll_estimates VALUES(?,?,?,?)',[business,task,employee,((t['planned'] as int)*60+50)~/100]);
     await db.customStatement('INSERT INTO regular_payroll_assignment_meta(business_id,task_id,employee_id,inherited,active) VALUES(?,?,?,?,1) '
       'ON CONFLICT(business_id,task_id,employee_id) DO UPDATE SET inherited=excluded.inherited,active=1,revision=revision+1 WHERE inherited<>excluded.inherited OR active<>1',[business,task,employee,inherited?1:0]);

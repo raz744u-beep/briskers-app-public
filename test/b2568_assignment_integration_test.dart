@@ -153,6 +153,28 @@ void main(){
     expect((await repo.tasks()).where((r)=>r['source_kind']=='invoice').every((r)=>r['source_active']==0),isTrue);
     expect(await repo.history('b'),hasLength(2));
 
+    await repo.saveEmployeeCompensation(employee:'d',name:'Synthetic new mechanic',rate:0,weeklyBase:false);
+    await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status) VALUES('rate-job','shop','owner','Synthetic rate confirmation','open')");
+    await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind) VALUES('rate-invoice','shop','rate-job','invoice')");
+    await LocalDocumentDetailCache(database:db).save('shop','rate-invoice',{'id':'rate-invoice','kind':'invoice','job_id':'rate-job',
+      'lines':[{'id':'labor','line_kind':'labor','description':'Confirm missing hourly rate','quantity':1}]});
+    await repo.setMainMechanic('rate-job','d','Synthetic new mechanic');
+    final inherited=(await repo.work(employee:'d')).single;
+    expect(inherited['rate_cents'],0);
+    await repo.registerAssignedLabor(jobId:'rate-job',invoiceId:'rate-invoice',lineId:'labor',employeeId:'d',employeeName:'Synthetic new mechanic',rateCents:3500);
+    var confirmed=(await repo.work(employee:'d')).single;
+    expect(confirmed['id'],inherited['id']);expect(confirmed['rate_cents'],3500);
+    await repo.setMainMechanic('rate-job','c','Mechanic c');
+    expect((await repo.work(job:'rate-job')).single['employee_id'],'d');
+    await repo.updateWork(confirmed['id'] as String,'In Progress',0,'2026-11-05');
+    await repo.updateWork(confirmed['id'] as String,'Done',100,'2026-11-05');
+    confirmed=(await repo.work(employee:'d')).single;
+    expect(await payer.verify(operation:'confirmed-rate-pay',employee:'d',week:'2026-11-02',date:'2026-11-05',method:'Cash',selected:[confirmed],
+      base:0,hourlyAdjustment:0,adjustmentReason:'',repayment:0,confirmedNet:3500),isTrue);
+    await repo.registerAssignedLabor(jobId:'rate-job',invoiceId:'rate-invoice',lineId:'labor',employeeId:'d',employeeName:'Synthetic new mechanic',rateCents:9999);
+    final frozen=(await repo.work(employee:'d')).single;
+    expect(frozen['rate_cents'],3500);expect(frozen['remaining_minutes'],0);expect(await repo.history('d'),hasLength(1));
+
 
   });
 }

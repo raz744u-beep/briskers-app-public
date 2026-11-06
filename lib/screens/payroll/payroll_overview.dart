@@ -40,7 +40,7 @@ class _PayrollOverviewState extends State<PayrollOverview> {
     work: widget.work.where((row) => row['employee_id'] == employee),
     payments: widget.payments.where((row) => row['employee_id'] == employee),
     from: DateTime(2000), until: _monday,
-  ).balanceCents;
+  ).balanceCents ?? 0;
 
   int _taskCount(String employee) => _monday.isAfter(DateTime.now()) ? 0 :
     widget.work.where((row) => row['employee_id'] == employee &&
@@ -210,7 +210,10 @@ class _PayrollOverviewState extends State<PayrollOverview> {
     double hours = 0;
     int gross = 0, paid = 0, balance = 0;
     var complete = true;
+    var hasRecords=false;
     for (final s in summaries) {
+      if(!s.hasRecords) continue;
+      hasRecords=true;
       hours += s.hours;
       if (s.grossCents == null) complete = false;
       gross += s.grossCents ?? 0;
@@ -233,13 +236,13 @@ class _PayrollOverviewState extends State<PayrollOverview> {
         color: Color(0xFFF2F7F8),
         border: Border(top: BorderSide(color: Color(0xFFDDE6E8)))),
       child: Row(children: [
-        total('Total Hours', complete ? hours.toStringAsFixed(1) : '—',
+        total('Total Hours', complete && hasRecords ? hours.toStringAsFixed(1) : '—',
           const Color(0xFF18212C)),
-        total('Total Gross', complete ? _money(gross) : '—',
+        total('Total Gross', complete && hasRecords ? _money(gross) : '—',
           const Color(0xFF18212C)),
         total('Total Paid', _money(paid),
           const Color(0xFF18212C)),
-        total('Total Balance', complete ? _money(balance) : '—',
+        total('Total Balance', complete && hasRecords ? _money(balance) : '—',
           const Color(0xFFCE6321)),
       ]),
     );
