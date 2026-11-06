@@ -49,9 +49,11 @@ class DeviceOwnerAuthorization with WidgetsBindingObserver {
   );
 
   OwnerSessionIdentity? currentIdentity() {
-    final session = supabase.auth.currentSession;
-    if (session == null) return null;
     try {
+      // Test and cold-start screens may run before Supabase initialization.
+      // Missing sign-in must deny access, never throw from the widget lifecycle.
+      final session = supabase.auth.currentSession;
+      if (session == null) return null;
       final token = session.accessToken.split('.');
       final claims = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(token[1])))) as Map;
       final sessionId = claims['session_id'];
