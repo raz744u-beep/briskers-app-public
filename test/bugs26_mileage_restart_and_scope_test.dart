@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   test('Miles In and each exact invoice Miles Out survive SQLite close/reopen and PDF projection', () async {
     final root = await Directory.systemTemp.createTemp('mileage-restart-');
     final file = File('${root.path}/shop.sqlite');
