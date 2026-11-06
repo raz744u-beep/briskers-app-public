@@ -314,10 +314,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     try{
       final more=await _viewRepository.backfillInvoiceTasks(job:widget.jobId,
         maxInvoices:25,onProgress:(checked,recovered,unavailable){
-          if(mounted && _canView)setState((){
-            _checkedInvoices=checked;_recoveredTasks=recovered;
-            _unavailableInvoices=unavailable;
-          });
+          if(mounted && _canView){
+            setState((){
+              _checkedInvoices=checked;_recoveredTasks=recovered;
+              _unavailableInvoices=unavailable;
+            });
+          }
         });
       if(mounted && _canView){
         _backfillDone=!more;
@@ -1539,7 +1541,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           ? 'Checking up to 25 invoices: $_checkedInvoices'
           : _backfillDone ? 'Historical invoice recovery complete'
           : _checkedInvoices>0
-            ? 'Last batch: $_checkedInvoices checked · $_recoveredTasks newly linked'
+            ? 'Last batch: $_checkedInvoices checked · $_recoveredTasks newly linked · $_unavailableInvoices unavailable'
             : 'Historical invoice recovery (optional)',
           style:const TextStyle(fontSize:11))),
         if(!_backfillActive && !_backfillDone)
