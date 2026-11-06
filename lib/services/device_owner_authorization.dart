@@ -62,6 +62,13 @@ class DeviceOwnerAuthorization with WidgetsBindingObserver {
     } catch (_) { return null; }
   }
 
+  /// Read-only Owner view, checked against locally saved account membership.
+  /// Never issues a payment/adjustment authorization grant.
+  Future<bool> canViewSavedOwnerPayroll(String business) async {
+    try { await _verifyLocalOwner(business); return true; }
+    catch (_) { return false; }
+  }
+
   // Uses the same account-bound local business context as the regular app.
   // The OS device challenge is mandatory; callers cannot supply a role map.
   Future<VerifiedOwnerEnrollment> _verifyLocalOwner(String business) async {
