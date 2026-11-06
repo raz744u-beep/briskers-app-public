@@ -154,8 +154,9 @@ void main() {
       var calls = 0;
       Future<String> send() async {
         calls++;
-        if (calls == 1)
+        if (calls == 1) {
           throw const PostgrestException(message: 'busy', code: 'PGRST003');
+        }
         return 'same-operation-receipt';
       }
 
@@ -207,8 +208,9 @@ void main() {
       var version = 1, writes = 0, attempts = 0;
       Future<void> send(int expected) async {
         attempts++;
-        if (expected != version)
+        if (expected != version) {
           throw const PostgrestException(message: 'changed', code: 'PT409');
+        }
         version++;
         writes++;
       }

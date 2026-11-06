@@ -13,6 +13,7 @@ import 'local_document_detail_cache.dart';
 import 'local_job_retirement.dart';
 import 'local_sync_status_repository.dart';
 import 'test_job_cleanup_policy.dart';
+import 'sync_replay_fence.dart';
 
 const ownerRetirementProtocol = 'owner-retirement-2.1';
 final _uuid = RegExp(
@@ -77,14 +78,18 @@ class OwnerJobRetirementGateway {
       throw OwnerJobRetirementNotSent(error.message);
     }
     return Map<String, dynamic>.from(
-      await client.rpc(
-        'briskers_job_retirement_execute_v2',
-        params: {
-          'p_business_id': businessId,
-          'p_job_id': jobId,
-          'p_operation_id': operationId,
-          'p_expected_snapshot': snapshot,
-        },
+      await SyncReplayFence(localDatabase).run(
+        businessId,
+        'retirement:$operationId',
+        () => client.rpc(
+          'briskers_job_retirement_execute_v2',
+          params: {
+            'p_business_id': businessId,
+            'p_job_id': jobId,
+            'p_operation_id': operationId,
+            'p_expected_snapshot': snapshot,
+          },
+        ),
       ) as Map,
     );
   }
@@ -1031,4 +1036,3 @@ class OwnerJobRetirementService {
     }
   }
 }
-

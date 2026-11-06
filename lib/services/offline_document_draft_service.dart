@@ -1,3 +1,4 @@
+import 'sync_replay_fence.dart';
 import 'dart:convert';
 import 'local_number_allocator.dart';
 import 'local_invoice_task_store.dart';
@@ -1555,7 +1556,8 @@ class OfflineDocumentDraftService {
                 ),
                 outboxId: outboxId,
               );
-            } catch (_) {
+            } catch (error) {
+              if (error is SyncReplayDeferred) rethrow;
               // A lost acknowledgment may follow a committed write.
               // Never retry this mutation with a new guessed revision.
               final proof = await _api.documentDetail(

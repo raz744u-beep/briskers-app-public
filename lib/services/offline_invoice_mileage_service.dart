@@ -172,6 +172,7 @@ class OfflineInvoiceMileageService {
             outboxId:id,
           );
         } catch (error) {
+          if (error is SyncReplayDeferred) rethrow;
           // The response may have been lost after a successful commit. Only
           // authoritative v5 document data can prove that exact write.
           final server=await _api.documentDetail(businessId,invoiceId);

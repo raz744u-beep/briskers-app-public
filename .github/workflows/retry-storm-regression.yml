@@ -40,9 +40,11 @@ jobs:
           dart run build_runner build --delete-conflicting-outputs
           flutter analyze
       - name: Retry bounds and restart regressions (synthetic local transports)
+        if: ${{ !cancelled() }}
         working-directory: generated
-        run: flutter test --reporter expanded test/sync_replay_fence_test.dart
+        run: flutter test --reporter expanded test/sync_replay_fence_test.dart test/recurring_recovery_sync_test.dart
       - name: Isolated PostgreSQL conflict regression
+        if: ${{ !cancelled() }}
         run: |
           npm ci --prefix tools/tests/customer_payment_category --ignore-scripts --no-audit --no-fund
           node tools/tests/retry_storm_server_test.mjs
