@@ -10,6 +10,7 @@ import 'package:briskers_app/services/offline_preinspection_service.dart';
 import 'package:drift/native.dart';
 import 'package:drift/drift.dart' show Variable;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   test('Miles In and each exact invoice Miles Out survive SQLite close/reopen and PDF projection', () async {
@@ -135,6 +136,7 @@ void main() {
     }
   });
   test('local numbered draft saves Miles Out despite missing schema marker, preserving invoice fields and restart', () async {
+    SharedPreferences.setMockInitialValues({});
     final root=await Directory.systemTemp.createTemp('gloria-mileage-draft-');
     final file=File('${root.path}/shop.sqlite');
     var db=BriskersLocalDatabase(NativeDatabase(file));
