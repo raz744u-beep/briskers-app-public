@@ -143,10 +143,10 @@ class LocalPayrollRepository {
         "${job==null?'':'AND job_id=? '}ORDER BY id LIMIT $limit",
         [business,after,?job]);
       if(rows.isEmpty){
-        if(resume)await db.customStatement(
+        if(resume){await db.customStatement(
           'INSERT INTO regular_payroll_recovery_cursor VALUES(?,?,?,1) '
           'ON CONFLICT(business_id,job_id) DO UPDATE SET complete=1',
-          [business,scope,after]);
+          [business,scope,after]);}
         return false;
       }
       for(final row in rows){
@@ -175,10 +175,10 @@ class LocalPayrollRepository {
       }
       // A resumable UI scan checkpoints; explicit reconciliation can always
       // re-read an edited invoice from the beginning without a stale cursor.
-      if(resume)await db.customStatement(
+      if(resume){await db.customStatement(
         'INSERT INTO regular_payroll_recovery_cursor VALUES(?,?,?,0) '
         'ON CONFLICT(business_id,job_id) DO UPDATE SET cursor=excluded.cursor,complete=0',
-        [business,scope,after]);
+        [business,scope,after]);}
       await onBatch?.call();
       await Future<void>.delayed(const Duration(milliseconds:10));
     }
