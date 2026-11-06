@@ -1,0 +1,101 @@
+name: Direct b2568 signed update verification
+on:
+  push:
+    branches: [verification/direct-b2572-20261106]
+permissions:
+  contents: read
+  actions: read
+env:
+  CI: 'true'
+  FLUTTER_SUPPRESS_ANALYTICS: 'true'
+  DASH__SUPPRESS_ANALYTICS: 'true'
+jobs:
+  direct-update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 5cc77de8dd744c288e71b05646f165d751907759
+          persist-credentials: false
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate fixture using original b2568 source
+        run: |
+          git fetch --depth=1 origin 51d214a1593c7a73c9091cf930fa920a928b7c69
+          mkdir upgrade-source
+          git archive 51d214a1593c7a73c9091cf930fa920a928b7c69 lib assets pubspec.yaml pubspec.lock analysis_options.yaml | tar -x -C upgrade-source
+          cd upgrade-source
+          mkdir test
+          cp ../test/release_upgrade_fixture_test.dart test/
+          flutter pub get
+          dart run build_runner build --delete-conflicting-outputs
+          BRISKERS_UPGRADE_FIXTURE="$GITHUB_WORKSPACE/upgrade-fixture/shop.sqlite" flutter test test/release_upgrade_fixture_test.dart --reporter expanded
+      - name: Wait for verified exact-source signed artifact
+        uses: actions/github-script@v7
+        with:
+          script: |
+            for (let attempt = 0; attempt < 40; attempt++) {
+              const {data: run} = await github.rest.actions.getWorkflowRun({...context.repo, run_id: 42188861216});
+              if (run.head_sha !== '5cc77de8dd744c288e71b05646f165d751907759') throw new Error('Unexpected APK source');
+              if (run.status === 'completed') {
+                if (run.conclusion !== 'success') throw new Error('Signed build failed: ' + run.conclusion);
+                return;
+              }
+              await new Promise(resolve => setTimeout(resolve, 30000));
+            }
+            throw new Error('Signed artifact timed out');
+      - uses: actions/download-artifact@v4
+        with:
+          name: briskers-android-debug
+          run-id: '41997297822'
+          github-token: ${{ github.token }}
+          path: upgrade-baseline
+      - uses: actions/download-artifact@v4
+        with:
+          name: briskers-android-debug
+          run-id: '42188861216'
+          github-token: ${{ github.token }}
+          path: signed-candidate
+      - name: Verify candidate identity
+        run: |
+          set -euo pipefail
+          APK=signed-candidate/Briskers-v0.10.9-b2572.apk
+          RECORD=signed-candidate/Briskers-v0.10.9-b2572.verification.txt
+          test -f "$APK"
+          grep -qx 'source_commit=5cc77de8dd744c288e71b05646f165d751907759' "$RECORD"
+          python3 - "$APK" "$RECORD" <<'PY'
+          import hashlib,re,sys
+          from pathlib import Path
+          apk,record=map(Path,sys.argv[1:])
+          digest=hashlib.sha256(apk.read_bytes()).hexdigest()
+          assert re.search(r'^'+digest+r'\s+',record.read_text(),re.M)
+          PY
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          "$APKSIGNER" verify --print-certs "$APK" | python3 tools/verify_apk_certificate.py --expected 82075a34ef748541a270af4172dd3ddc37f3e464d9ac9f20eeef7f40a029ff08
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Direct b2568 to b2572 normal Android update
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          script: >-
+            BRISKERS_UPGRADE_FIXTURE="$GITHUB_WORKSPACE/upgrade-fixture/shop.sqlite"
+            bash tools/verify_payroll_bootstrap_install.sh
+            upgrade-baseline/Briskers-v0.10.9-b2568.apk
+            signed-candidate/Briskers-v0.10.9-b2572.apk
+      - name: Upload direct update evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: briskers-direct-b2568-b2572-evidence
+          path: generated/build/app/outputs/flutter-apk/upgrade-evidence/
+          if-no-files-found: error
+          retention-days: 30
