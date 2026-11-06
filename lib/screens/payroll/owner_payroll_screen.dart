@@ -359,8 +359,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final combined = {
       for (final row in roster) row['id']: row,
       for (final row in persistedEmployees)
-        row['id'] ?? row['employee_id']: {...?roster.where((candidate) =>
-          candidate['id'] == row['id']).firstOrNull, ...row},
+        row['id'] ?? row['employee_id']: {...row, ...?roster.where((candidate) =>
+          candidate['id'] == row['id']).firstOrNull, 'rate':row['rate'],'base_enabled':row['base_enabled']},
     }.values.toList();
     final employees=await EmployeeNicknameStore(database:_db).decorate(widget.businessId,combined);
     final overview = !widget.globalTasks && !widget.reportsOnly &&
