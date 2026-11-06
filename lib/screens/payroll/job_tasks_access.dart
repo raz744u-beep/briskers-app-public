@@ -85,7 +85,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
             'id':id,'name':saved?['name']??data['legal_name'],
             'nickname':saved?['nickname']??data['nickname'],
           };
-          final others=[...known,identity];
+          final others={for(final person in known)person['id']:person,id:identity}.values;
           people.add({
             ...identity,
             'label':EmployeeNicknameStore.displayLabel(identity,others),
