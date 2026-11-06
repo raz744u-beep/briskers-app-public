@@ -185,7 +185,6 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   @override
-  void dispose()  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _loadGeneration++;
@@ -223,7 +222,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if(state==AppLifecycleState.resumed)unawaited(_openSavedOwnerView());
   }
 
-  Future<void> _run(  Future<void> _run(
+  Future<void> _run(
     Future<void> Function() action, {
     bool verifyPayment = false,
     bool rethrowError = false,
@@ -749,7 +748,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
   void _openRecordedWork(String id, {required bool invoice}) {
     if(!_canView)return;
-    Navigator.of(context).push<void>(MaterialPageRoute(    Navigator.of(context).push<void>(MaterialPageRoute(
+    Navigator.of(context).push<void>(MaterialPageRoute(
       builder: (_) => invoice
           ? JobDocumentScreen(
               businessId: widget.businessId, documentId: id, isOwner: true,
@@ -1543,7 +1542,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       ]));
   }
 
-  Widget _workspace()  Widget _workspace() {
+  Widget _workspace() {
     final byTask = <String, List<Map<String, dynamic>>>{};
     for (final row in _work) {
       (byTask[row['task_id'] as String] ??= []).add(row);
