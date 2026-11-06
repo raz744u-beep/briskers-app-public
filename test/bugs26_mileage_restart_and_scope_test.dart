@@ -166,7 +166,8 @@ void main() {
       }..remove('mileage_schema_version')..remove('mileage_out'));
       await draft.updatePendingInvoiceDetails('shop',id,
         documentDate:DateTime(2026,11,6),
-        mileageOut:'50,024');
+        mileageOut:'50,024',
+        updateWarrantyIdentifiers:false);
       final saved=(await cache.load('shop',id))!;
       expect(saved['mileage_schema_version'],2);
       expect(saved['mileage_out'],50024);
