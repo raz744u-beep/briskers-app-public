@@ -62,6 +62,32 @@ void main() {
       final projected = await out.project('shop-a', 'invoice-a', first);
       expect(projected['mileage_out'], 50015);
       expect(projected['mileage_in'], 50000);
+      // An older cached invoice may have the explicit Miles Out field
+      // without a numeric v2 marker. The header and saved queue must agree.
+      final typedMarker = await out.project('shop-a', 'invoice-a', {
+        ...first,
+        'mileage_schema_version': '2',
+      });
+      expect(typedMarker['mileage_out'], 50015);
+      final explicitDeparture = await out.project('shop-a', 'invoice-a', {
+        ...first,
+        'mileage_schema_version': null,
+      });
+      expect(explicitDeparture['mileage_out'], 50015);
+      final missingMarker = await out.project('shop-a', 'invoice-a', {
+        ...first,
+      }..remove('mileage_schema_version'));
+      expect(missingMarker['mileage_out'], 50015);
+      final purelyLegacy = await out.project('shop-a', 'invoice-a', {
+        'id': 'invoice-a',
+        'kind': 'invoice',
+        'business_id': 'shop-a',
+        'job_id': 'job-a',
+        'vehicle_id': 'car-a',
+        'odometer_in': 50000,
+      });
+      expect(purelyLegacy.containsKey('mileage_out'), isFalse,
+        reason: 'Never reinterpret a legacy Miles In value as departure');
       final second = await out.project('shop-a', 'invoice-b', {
         ...first,
         'id': 'invoice-b',
@@ -73,6 +99,12 @@ void main() {
         visibleDetail: projected,
       );
       expect(pdf['mileage_out'], 50015);
+      final pdfTyped = InvoicePdfMileageProjection.reconcile(
+        documentId: 'invoice-a',
+        pdfDetail: {...first, 'mileage_schema_version': '2', 'mileage_out': null},
+        visibleDetail: explicitDeparture,
+      );
+      expect(pdfTyped['mileage_out'], 50015);
       expect(pdf['total_amount'], 73.51);
       expect(pdf['paid_amount'], 0);
       expect(
