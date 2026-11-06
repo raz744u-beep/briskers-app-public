@@ -501,18 +501,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if (employee == null || !mounted) return;
     final employeeId = employee['employee_id'] as String;
     final name = (employee['name'] ?? employee['employee_name'] ?? employeeId).toString();
-    var cents = employee['rate'] as int?;
-    if (cents == null || cents <= 0) {
-      final input = await payrollLanInput(context, 'Set hourly labor rate', 'Dollars per hour');
-      if (input == null || !mounted) return;
-      final amount = double.tryParse(input);
-      if (amount == null || !amount.isFinite || amount < 0 || amount > 100000) {
-        setState(() => _error = 'Enter a valid hourly labor rate.');
-        return;
-      }
-      cents = (amount * 100).round();
-    }
-    final rate = cents;
+    // Allocating work is not setting wages. Zero is an unconfigured pay
+    // basis, NOT an automatic rate; actual payment remains unavailable until
+    // the Owner configures and reviews compensation in Employee Details.
+    final rate = employee['rate'] as int? ?? 0;
     await _run(() async {
       final assignments=LocalTaskAssignmentStore(_db);
       await assignments.linkEmployee(widget.businessId,job,employeeId,name);
