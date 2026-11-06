@@ -318,7 +318,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     setState(()=>_backfillActive=true);
     try{
       final more=await _viewRepository.backfillInvoiceTasks(job:widget.jobId,
-        maxInvoices:25,onProgress:(checked,recovered,unavailable){
+        maxInvoices:25,resume:true,onProgress:(checked,recovered,unavailable){
           if(mounted && _canView){
             setState((){
               _checkedInvoices=checked;_recoveredTasks=recovered;
