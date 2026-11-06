@@ -55,10 +55,11 @@ void main() {
     expect(jobs, contains('onPressed: _createNewJob'));
     expect(documents, contains("ValueKey('documents-inline-new')"));
     expect(documents, contains('onPressed: _showCloseInvoices'));
-    expect(expenses, contains("ValueKey('expenses-inline-new')"));
+    expect(expenses, contains("ValueKey('expenses-new-floating')"));
     expect(expenses, contains('onPressed: _importing ? null : _showAddMenu'));
     expect(expenses, isNot(contains('onPressed: _importing || _loading ? null : _showAddMenu')));
-    expect(expenses, isNot(contains('FloatingActionButton.extended(')));
+    expect(expenses, contains('FloatingActionButton.extended('));
+    expect(expenses, contains('FloatingActionButtonLocation.endFloat'));
     expect(jobs, contains('shape: RoundedRectangleBorder('));
     expect(documents, contains('shape: RoundedRectangleBorder('));
     expect(expenses, isNot(contains('_importing || _showingLocal ? null : _showAddMenu')));
@@ -83,10 +84,11 @@ void main() {
 
   test('expenses search has matching elevated pill style', () async {
     final expenses = await File('lib/screens/expenses_screen.dart').readAsString();
-    expect(expenses, contains('child: SearchBar('));
+    expect(expenses, contains('SearchBar('));
+    expect(expenses, contains("hintText: 'Search transactions…'"));
     expect(expenses, contains('WidgetStatePropertyAll<double>(3)'));
     expect(expenses, contains('WidgetStatePropertyAll<Color>('));
-    expect(expenses, contains("ValueKey('expenses-inline-new')"));
+    expect(expenses, contains("ValueKey('expenses-new-floating')"));
   });
 
   test('offline New Job routes to durable create queue', () async {
