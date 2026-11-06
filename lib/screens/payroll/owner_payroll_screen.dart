@@ -1476,7 +1476,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   Future<void> _updateEmployeeGeneralTask(int id, String status) =>
       _run(() => _repository.setShopTaskStatus(widget.employeeId!, id, status));
 
-  Widget _tasksTab() => _PayrollViewport(minHeight:_currentJobsExpanded?600:440,child:Column(children:[
+  Widget _tasksTab() => _PayrollViewport(minHeight:_currentJobsExpanded?600:360,child:Column(children:[
     Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),
       child:Row(children:[
         for(final general in [false,true])
