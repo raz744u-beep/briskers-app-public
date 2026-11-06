@@ -5,6 +5,13 @@ class InvoicePartyVehicleProjection {
 
   static String _text(Object? value) => value?.toString().trim() ?? '';
 
+  static bool _populated(Object? value) {
+    if(value==null)return false;
+    if(value is String)return value.trim().isNotEmpty;
+    if(value is Map)return value.values.any(_populated);
+    return _text(value).isNotEmpty;
+  }
+
   static Map<String, dynamic> apply({
     required Map<String, dynamic> invoice,
     required Map<String, dynamic>? savedCustomerDetail,
@@ -21,9 +28,7 @@ class InvoicePartyVehicleProjection {
     if(_text(customer['id'])!=customerId)return result;
 
     void fill(String field,Object? value) {
-      if(_text(result[field]).isNotEmpty)return;
-      if(value==null || (value is String && value.trim().isEmpty) ||
-          (value is Map && value.isEmpty))return;
+      if(_populated(result[field]) || !_populated(value))return;
       result[field]=value;
     }
 
