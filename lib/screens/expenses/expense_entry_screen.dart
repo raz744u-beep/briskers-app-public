@@ -13,11 +13,48 @@ import 'receipt_review_sheet.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
 import '../../core/briskers_i18n.dart';
-import '../../core/supabase_config.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/offline_financial_write_service.dart';
 import 'expense_receipt_attachments.dart';
+
+// Never display raw HTTP exception bodies, access tokens or receipt data.
+// Classify failures next to the scanner so the Owner can act without
+// scrolling to an unrelated Save Transaction error.
+@visibleForTesting
+String receiptAiFailureMessage(Object error) {
+  final message = error.toString().toLowerCase();
+  if (message.contains('active briskers sign-in') ||
+      message.contains('authorization is not configured') ||
+      message.contains('http 401') || message.contains('http 403')) {
+    return 'Receipt AI sign-in is unavailable or expired. The receipt photo '
+        'is still attached. Keep shop synchronization offline; use manual '
+        'entry until receipt-only authorization is restored.';
+  }
+  if (message.contains('http 429')) {
+    return 'Receipt AI reached its request limit. Your photo is safe. '
+        'Use manual entry or retry the scan later.';
+  }
+  if (message.contains('timeout') ||
+      message.contains('socketexception') ||
+      message.contains('connection') ||
+      message.contains('http 502') ||
+      message.contains('http 503') ||
+      message.contains('http 504')) {
+    return 'Receipt AI service or internet connection is unavailable. '
+        'The photo remains attached and manual entry still works.';
+  }
+  if (message.contains('no extraction') ||
+      message.contains('unexpected receipt') ||
+      message.contains('format') ||
+      message.contains('http 200')) {
+    return 'Receipt AI did not return readable receipt details. '
+        'You can retry with a clearer photo or enter it manually.';
+  }
+  return 'Receipt AI could not complete the scan. The photo is still '
+      'attached; retry or use manual entry. Shop sync stays unchanged.';
+}
+
 
 class ExpenseEntryScreen extends StatefulWidget {
   const ExpenseEntryScreen({
@@ -465,11 +502,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
 
   Future<void> _readReceipt(XFile file) async {
     if (_readingReceipt) return;
-    const independent = IndependentReceiptAiGateway();
-    final useExisting = independent.endpoint.isEmpty;
-    final gateway = useExisting
-        ? const IndependentReceiptAiGateway.existingService()
-        : independent;
+    // Receipt AI is independent of the Supabase sync connection. Never
+    // silently fall back to the Supabase Edge Function.
+    const gateway = IndependentReceiptAiGateway();
     if (!gateway.configured) {
       setState(() {
         _receiptReadMessage = 'Online receipt AI is not configured. Photo attached; use Quick Transaction or Full Manual.';
@@ -505,11 +540,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
 
     try {
       const storage = FlutterSecureStorage();
-      final token = useExisting
-          ? supabase.auth.currentSession?.accessToken
-          : await storage.read(
-              key: 'receipt_ai_gateway_token:${widget.businessId}',
-            );
+      final token = await storage.read(
+        key: 'receipt_ai_gateway_token:${widget.businessId}',
+      );
       final suggestion = await gateway.enhance(
         receipt: file,
         businessId: widget.businessId,
@@ -576,8 +609,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _receiptReadMessage = 'Could not read this receipt automatically. You can still enter it manually.';
-        _error = error.toString();
+        _receiptReadMessage = receiptAiFailureMessage(error);
+        // The cause is shown at the scanner, not as an unrelated save error.
+        _error = null;
       });
     } finally {
       if (mounted) setState(() => _readingReceipt = false);
@@ -1490,6 +1524,23 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                if ((_receiptReadMessage ?? '').isNotEmpty &&
+                    (_receiptReadMessage!.contains('could not') ||
+                     _receiptReadMessage!.contains('unavailable') ||
+                     _receiptReadMessage!.contains('expired') ||
+                     _receiptReadMessage!.contains('limit') ||
+                     _receiptReadMessage!.contains('did not return')))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'No expense has been submitted by this failed scan. '
+                      'The attached receipt can be saved with manual details.',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 12,
                       ),
                     ),
                   ),

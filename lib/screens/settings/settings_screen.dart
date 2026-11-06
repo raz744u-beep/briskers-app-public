@@ -19,6 +19,7 @@ import 'local_sync_status_screen.dart';
 import 'item_categories_settings_screen.dart';
 import 'payment_methods_settings_screen.dart';
 import 'receipt_training_samples_screen.dart';
+import 'receipt_ai_gateway_settings_screen.dart';
 import 'shop_info_settings_screen.dart';
 import 'tax_invoicing_settings_screen.dart';
 import 'warranty_payment_calculator_screen.dart';
@@ -440,6 +441,29 @@ class SettingsScreen extends StatelessWidget {
               );
             },
           ),
+          if (roleCode == 'owner')
+            ListTile(
+              leading: const Icon(
+                Icons.lock_outline,
+                color: BriskersColors.expenses,
+              ),
+              title: const Text('Receipt AI connection'),
+              subtitle: const Text(
+                'Set up the secure online receipt reader on this device.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ReceiptAiGatewaySettingsScreen(
+                      businessId: businessId,
+                      isOwner: roleCode == 'owner',
+                    ),
+                  ),
+                );
+              },
+            ),
           ListTile(
             leading: const Icon(
               Icons.psychology_outlined,
