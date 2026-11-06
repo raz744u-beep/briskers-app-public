@@ -308,24 +308,24 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     }
   }
 
-  Future<void> _backfillTasks()async{
-    if(_backfillActive || !mounted){return;}
+  Future<void> _backfillTasks() async {
+    if(_backfillActive || !mounted || !_canView)return;
     setState(()=>_backfillActive=true);
     try{
-      final clock=Stopwatch()..start();
-      await _repository.backfillInvoiceTasks(job:widget.jobId,onProgress:(checked,recovered,unavailable){
-        if(mounted)setState((){_checkedInvoices=checked;_recoveredTasks=recovered;_unavailableInvoices=unavailable;});
-      },onBatch:()async{
-        if(!mounted){throw StateError('Tasks view closed');}
-        if(clock.elapsedMilliseconds>400 && !_loadingLocal && _localRead==null){await _load();clock.reset();}
-      });
-      _backfillDone=true;
-      if(mounted && _localRead==null)await _load();
+      final more=await _viewRepository.backfillInvoiceTasks(job:widget.jobId,
+        maxInvoices:25,onProgress:(checked,recovered,unavailable){
+          if(mounted && _canView)setState((){
+            _checkedInvoices=checked;_recoveredTasks=recovered;
+            _unavailableInvoices=unavailable;
+          });
+        });
+      if(mounted && _canView){
+        _backfillDone=!more;
+        if(_localRead==null)await _load();
+      }
     }catch(error){
-      if(mounted && _grant!=null){setState(()=>_error='Existing invoice tasks could not finish loading. Retry: $error');}
-    }finally{
-      if(mounted){setState(()=>_backfillActive=false);}
-    }
+      if(mounted && _canView)setState(()=>_error='Recovery paused: $error');
+    }finally{if(mounted)setState(()=>_backfillActive=false);}
   }
 
   Future<void> _readLocal(int generation) async {
@@ -1534,11 +1534,17 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   Widget _recoveryStatus() {
     if(!_canView)return const SizedBox.shrink();
     return Padding(padding:const EdgeInsets.symmetric(horizontal:12,vertical:3),
-      child:Row(children:[const Expanded(child:Text(
-        'Historical task recovery is paused to protect Payroll performance.',
-        style:TextStyle(fontSize:11))),
-        if(!_backfillActive)
-          TextButton(onPressed:()=>unawaited(_backfillTasks()),child:const Text('Recover')),
+      child:Row(children:[
+        Expanded(child:Text(_backfillActive
+          ? 'Checking up to 25 invoices: $_checkedInvoices'
+          : _backfillDone ? 'Historical invoice recovery complete'
+          : _checkedInvoices>0
+            ? 'Last batch: $_checkedInvoices checked · $_recoveredTasks newly linked'
+            : 'Historical invoice recovery (optional)',
+          style:const TextStyle(fontSize:11))),
+        if(!_backfillActive && !_backfillDone)
+          TextButton(onPressed:()=>unawaited(_backfillTasks()),
+            child:Text(_checkedInvoices==0?'Recover 25':'Continue')),
       ]));
   }
 
