@@ -39,6 +39,9 @@ void main() {
       rate:4000,weeklyBase:false);
     await repo.setMainMechanic('job','a','Mechanic Adam');
     final task=(await repo.tasks()).singleWhere((r)=>r['source_line_id']=='rear')['id'] as String;
+    // Convert inherited lead to an explicit allocation before adding Chris;
+    // a per-line override must never silently reassign the original lead.
+    await repo.assignTask(task,'a','Mechanic Adam',rate:3500);
     await repo.assignTask(task,'b','Mechanic Chris',rate:4000);
     await repo.setEstimatedMinutes(task,'a',180);
     await repo.setEstimatedMinutes(task,'b',60);
@@ -57,7 +60,8 @@ void main() {
         break;
       }
     }
-    expect(find.textContaining('Adam 3.0h'),findsOneWidget);
+    expect(find.textContaining('Adam 3.0h'),findsOneWidget,
+      reason:tester.allWidgets.whereType<Text>().map((t)=>t.data).join(' | '));
     expect(find.textContaining('Chris 1.0h'),findsOneWidget);
     expect(find.byTooltip('Edit Adam estimated mechanic hours'),findsOneWidget);
     expect(find.byTooltip('Edit Chris estimated mechanic hours'),findsOneWidget);
