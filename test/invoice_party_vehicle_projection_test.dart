@@ -76,7 +76,7 @@ void main() {
       savedCustomerDetail:saved,
     );
     expect(InvoicePartyVehicleProjection.readableAddress(
-      result['customer_address']),'12 Test Street\\nGretna, LA 70053');
+      result['customer_address']),'12 Test Street\nGretna, LA 70053');
   });
 
   test('existing authenticated invoice snapshots win over later local contact data', () {
@@ -108,6 +108,6 @@ void main() {
     }
     expect(InvoicePartyVehicleProjection.readableAddress(
       ((saved['customer'] as Map)['billing_address'] as Map)),
-      '12 Test Street\\nGretna, LA 70053');
+      '12 Test Street\nGretna, LA 70053');
   });
 }
