@@ -40,7 +40,7 @@ void main() {
       invoice:original,savedCustomerDetail:saved);
     expect(result['customer_phone'],'5045550119');
     expect(result['customer_email'],'gloria@example.test');
-    expect(result['customer_address'],saved['customer']!['billing_address']);
+    expect(result['customer_address'],(saved['customer'] as Map)['billing_address']);
     expect(result['vehicle_vin'],'WAUZZZ4H1GN000001');
     expect(result['vehicle_license_plate'],'GLO123');
     expect(result['vehicle_license_state'],'LA');
@@ -98,7 +98,7 @@ void main() {
       expect(result.containsKey('customer_phone'),isFalse);
     }
     expect(InvoicePartyVehicleProjection.readableAddress(
-      (saved['customer']!['billing_address'] as Map)),
+      ((saved['customer'] as Map)['billing_address'] as Map)),
       '12 Test Street\\nGretna, LA 70053');
   });
 }
