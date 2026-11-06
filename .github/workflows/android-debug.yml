@@ -108,6 +108,8 @@ jobs:
               private val channelName = "com.briskers/expenseiq"
               private val pickExpenseFolderRequestCode = 7441
               private val pickHistoricalFolderRequestCode = 7442
+              private val reconnectExpensePhotoRequestCode = 7443
+              private var pendingReceiptFilename: String? = null
               private var pendingFolderResult: MethodChannel.Result? = null
               private var pendingFolderRequestCode: Int? = null
 
@@ -119,6 +121,22 @@ jobs:
                   ).setMethodCallHandler { call, result ->
                       when (call.method) {
                           "pickExpenseIqFolder" -> openExpenseIqFolderPicker(result)
+                          "reconnectExpenseIqPhoto" -> {
+                              val filename = call.argument<String>("filename")?.trim().orEmpty()
+                              if (filename.isBlank() ||
+                                  filename.contains('/') || filename.contains('\\') ||
+                                  !(filename.endsWith(".jpg", true) ||
+                                    filename.endsWith(".jpeg", true))) {
+                                  result.error("invalid_filename", "Invalid receipt photo filename.", null)
+                              } else {
+                                  startPhotoFolderPicker(
+                                      result,
+                                      reconnectExpensePhotoRequestCode,
+                                      Uri.parse("content://com.android.externalstorage.documents/document/primary%3AExpenseIQ%2FPhotos"),
+                                      filename
+                                  )
+                              }
+                          }
                           "pickHistoricalPhotoFolder" -> openHistoricalPhotoFolderPicker(result)
                           "readExpenseIqFile", "readHistoricalPhotoFile" -> {
                               val uriText = call.argument<String>("uri")
@@ -291,7 +309,8 @@ jobs:
               private fun startPhotoFolderPicker(
                   result: MethodChannel.Result,
                   requestCode: Int,
-                  initialUri: Uri? = null
+                  initialUri: Uri? = null,
+                  targetFilename: String? = null
               ) {
                   if (pendingFolderResult != null) {
                       result.error(
@@ -304,6 +323,7 @@ jobs:
 
                   pendingFolderResult = result
                   pendingFolderRequestCode = requestCode
+                  pendingReceiptFilename = targetFilename
                   val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
                       addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                       addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
@@ -327,7 +347,7 @@ jobs:
                       result,
                       pickExpenseFolderRequestCode,
                       Uri.parse(
-                          "content://com.android.externalstorage.documents/document/primary%3AExpenseIQ%2Fphotos"
+                          "content://com.android.externalstorage.documents/document/primary%3AExpenseIQ%2FPhotos"
                       )
                   )
               }
@@ -349,13 +369,16 @@ jobs:
                   super.onActivityResult(requestCode, resultCode, data)
                   if (
                       requestCode != pickExpenseFolderRequestCode &&
-                      requestCode != pickHistoricalFolderRequestCode
+                      requestCode != pickHistoricalFolderRequestCode &&
+                      requestCode != reconnectExpensePhotoRequestCode
                   ) return
 
                   val pending = pendingFolderResult ?: return
                   val expectedRequestCode = pendingFolderRequestCode
+                  val targetFilename = pendingReceiptFilename
                   pendingFolderResult = null
                   pendingFolderRequestCode = null
+                  pendingReceiptFilename = null
 
                   if (expectedRequestCode != requestCode) {
                       pending.error(
@@ -384,6 +407,8 @@ jobs:
                   try {
                       if (requestCode == pickHistoricalFolderRequestCode) {
                           pending.success(listHistoricalPhotos(treeUri))
+                      } else if (requestCode == reconnectExpensePhotoRequestCode) {
+                          pending.success(findReceiptPhoto(treeUri, targetFilename.orEmpty()))
                       } else {
                           pending.success(listReceiptPhotos(treeUri))
                       }
@@ -497,6 +522,59 @@ jobs:
                           )
                       }
                   }
+              }
+
+              // A narrow offline regrant. Do not import, index, upload or reassign
+              // other receipts; match the exact filename in the chosen folder.
+              private fun findReceiptPhoto(
+                  treeUri: Uri,
+                  filename: String
+              ): Map<String, String>? {
+                  val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+                  if (!rootId.substringAfter(':', "").equals(
+                          "ExpenseIQ/Photos", ignoreCase = true
+                      )) {
+                      throw IllegalArgumentException(
+                          "Select Internal storage / ExpenseIQ / Photos."
+                      )
+                  }
+                  val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                      treeUri, rootId
+                  )
+                  val projection = arrayOf(
+                      DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                      DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                      DocumentsContract.Document.COLUMN_MIME_TYPE
+                  )
+                  var match: Map<String, String>? = null
+                  contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                      val idIndex = cursor.getColumnIndexOrThrow(
+                          DocumentsContract.Document.COLUMN_DOCUMENT_ID
+                      )
+                      val nameIndex = cursor.getColumnIndexOrThrow(
+                          DocumentsContract.Document.COLUMN_DISPLAY_NAME
+                      )
+                      val mimeIndex = cursor.getColumnIndexOrThrow(
+                          DocumentsContract.Document.COLUMN_MIME_TYPE
+                      )
+                      while (cursor.moveToNext()) {
+                          if (cursor.getString(nameIndex) != filename ||
+                              cursor.getString(mimeIndex) ==
+                                  DocumentsContract.Document.MIME_TYPE_DIR) {
+                              continue
+                          }
+                          if (match != null) {
+                              throw IllegalStateException(
+                                  "Ambiguous original receipt filename."
+                              )
+                          }
+                          val documentUri = DocumentsContract.buildDocumentUriUsingTree(
+                              treeUri, cursor.getString(idIndex)
+                          )
+                          match = mapOf("name" to filename, "uri" to documentUri.toString())
+                      }
+                  }
+                  return match
               }
 
               private fun listReceiptPhotos(treeUri: Uri): List<Map<String, String>> {
