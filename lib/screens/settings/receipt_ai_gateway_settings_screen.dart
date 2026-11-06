@@ -37,10 +37,12 @@ class _ReceiptAiGatewaySettingsScreenState
 
   Future<void> _load() async {
     if (!widget.isOwner) {
-      if (mounted) setState(() {
-        _busy = false;
-        _message = 'Only the Owner may enroll this device.';
-      });
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _message = 'Only the Owner may enroll this device.';
+        });
+      }
       return;
     }
     try {
@@ -51,10 +53,12 @@ class _ReceiptAiGatewaySettingsScreenState
         _busy = false;
       });
     } catch (_) {
-      if (mounted) setState(() {
-        _busy = false;
-        _message = 'Secure storage could not be opened on this device.';
-      });
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _message = 'Secure storage could not be opened on this device.';
+        });
+      }
     }
   }
 
