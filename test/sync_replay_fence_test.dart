@@ -13,6 +13,29 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class _LoopbackHttpOverrides extends HttpOverrides {}
 
 void main() {
+  test(
+    'typed transport and database codes take precedence over incidental text',
+    () {
+      expect(
+        isSyncVersionConflict(
+          http.ClientException('connection refused: port 40001'),
+        ),
+        isFalse,
+      );
+      expect(
+        isSyncVersionConflict(
+          const PostgrestException(message: 'record 40001', code: '23505'),
+        ),
+        isFalse,
+      );
+      expect(
+        isSyncVersionConflict(
+          const PostgrestException(message: 'changed', code: 'PT409'),
+        ),
+        isTrue,
+      );
+    },
+  );
   late BriskersLocalDatabase db;
   late DateTime now;
   late bool online;

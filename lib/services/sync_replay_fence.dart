@@ -19,10 +19,12 @@ class SyncReplayDeferred implements Exception {
 }
 
 bool isSyncVersionConflict(Object error) {
-  if (error is PostgrestException &&
-      const {'40001', 'PT409'}.contains(error.code)) {
-    return true;
+  if (error is PostgrestException) {
+    return const {'40001', 'PT409'}.contains(error.code);
   }
+  // Transport messages can contain incidental numbers (including a port
+  // numbered 40001). Their public type takes precedence over legacy text.
+  if (error is ClientException || error is TimeoutException) return false;
   final text = error.toString();
   return text.contains('40001') || text.contains('PT409');
 }
