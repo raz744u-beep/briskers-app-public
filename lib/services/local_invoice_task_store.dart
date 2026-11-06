@@ -111,10 +111,10 @@ class LocalInvoiceTaskStore {
 
   Future<void> reconcileCached(String business,String document,Map<String,dynamic> detail) async {
     final raw=detail['lines']??detail['items'];
-    if(raw is! List) return;
+    if(raw is! List) { return; }
     final rows=raw.whereType<Map>().map(Map<String,dynamic>.from).toList();
     if(rows.length!=raw.length || rows.any((r)=>r['id'] is! String || (r['id'] as String).isEmpty) ||
-      rows.map((r)=>r['id']).toSet().length!=rows.length) return;
+      rows.map((r)=>r['id']).toSet().length!=rows.length) { return; }
     await prepare();
     final documentRow=await db.customSelect('SELECT status FROM local_documents WHERE business_id=? AND id=?',variables:[Variable(business),Variable(document)]).getSingleOrNull();
     if(['void','voided','cancelled','canceled','deleted'].contains((documentRow?.data['status']??detail['status'])?.toString().toLowerCase())) { await save(business,document,detail);return; }

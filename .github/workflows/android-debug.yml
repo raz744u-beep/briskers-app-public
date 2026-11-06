@@ -893,6 +893,15 @@ jobs:
           github-token: ${{ github.token }}
           path: upgrade-baseline
 
+      - name: Download latest signed receipt baseline
+        if: github.ref_name == 'candidate/payroll-enabled'
+        uses: actions/download-artifact@v4
+        with:
+          name: briskers-android-debug
+          run-id: '42165351470'
+          github-token: ${{ github.token }}
+          path: upgrade-receipt-baseline
+
       - name: Enable emulator acceleration
         if: github.ref_name == 'candidate/payroll-bootstrap' || github.ref_name == 'candidate/payroll-enabled'
         run: |
@@ -909,6 +918,7 @@ jobs:
           target: google_apis
           script: >-
             BRISKERS_UPGRADE_FIXTURE="$GITHUB_WORKSPACE/upgrade-fixture/shop.sqlite"
+            BRISKERS_UPGRADE_INTERMEDIATE="$(find upgrade-receipt-baseline -name 'Briskers-v*.apk' -print -quit)"
             bash tools/verify_payroll_bootstrap_install.sh
             "$(find upgrade-baseline -name 'Briskers-v*.apk' -print -quit)"
             "$(find generated/build/app/outputs/flutter-apk -name 'Briskers-v*.apk' -print -quit)"

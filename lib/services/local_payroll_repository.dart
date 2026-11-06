@@ -8,6 +8,7 @@ import 'local_task_assignment_store.dart';
 import 'offline_job_admin_service.dart';
 import 'payroll_lan_peer.dart';
 import 'local_invoice_task_store.dart';
+import 'invoice_labor_work_summary.dart';
 import 'local_document_detail_cache.dart';
 
 /// Business-scoped local payroll ledger. Payment recording never sends money
@@ -134,7 +135,7 @@ class LocalPayrollRepository {
         final lines=raw is List ? raw.whereType<Map>().map(Map<String,dynamic>.from).toList() : null;
         final usable=lines!=null && lines.length==(raw as List).length &&
           lines.every((r)=>r['id'] is String && (r['id'] as String).isNotEmpty) && lines.map((r)=>r['id']).toSet().length==lines.length;
-        checked++;if(!usable || (lines??const <Map<String,dynamic>>[]).where(isInvoiceLaborLine).length!=afterCount){unavailable++;}if(afterCount>before){recovered+=afterCount-before;}
+        checked++;if(!usable || lines.where(isInvoiceLaborLine).length!=afterCount){unavailable++;}if(afterCount>before){recovered+=afterCount-before;}
         onProgress?.call(checked,recovered,unavailable);
       }
       after=rows.last['id'] as String;

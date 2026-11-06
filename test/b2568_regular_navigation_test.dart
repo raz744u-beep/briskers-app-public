@@ -139,7 +139,8 @@ void main(){
     });
     navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>const OwnerPayrollScreen(businessId:'shop')));
     await tester.pumpAndSettle();await click(find.text('Unlock Owner payroll'));
-    await until(find.byType(PayrollOverview));
+    await until(find.text('Review Weekly Labor (2 tasks)'));
+    expect(find.byType(PayrollOverview),findsOneWidget);
     expect(find.text('Alpha'),findsOneWidget);expect(find.text('Beta'),findsOneWidget);
     expect(find.text('Paid'),findsNWidgets(2));expect(find.text('Total Paid'),findsOneWidget);
     await tester.runAsync(()async{
@@ -174,7 +175,7 @@ void main(){
       businessId:'shop',roleCode:'owner',jobsCount:1,onCustomersTap:(){},onAppointmentsTap:(){},
       onJobsTap:(){},onInvoicesTap:(){},onMoreTap:(){})));
     await tester.pumpAndSettle();await click(find.text('Payroll'));
-    await click(find.text('Unlock Owner payroll'));await until(find.byType(PayrollOverview));
+    await click(find.text('Unlock Owner payroll'));await until(find.text('Review Weekly Labor (0 tasks)'));
     expect(find.text('Payroll reports'),findsNothing);
     expect(find.text('Review Weekly Labor (0 tasks)'),findsOneWidget);
     expect(find.text('Review Weekly Labor (1 tasks)'),findsOneWidget);

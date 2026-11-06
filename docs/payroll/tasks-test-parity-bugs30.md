@@ -45,7 +45,8 @@ receive separate identities. Full SSNs are never added to ordinary offline data.
 
 Analyzer/full suite, enabled normal navigation, Bugs 26, Gloria, Android/iOS
 compilation, signature/package/build inspection and signed b2568 install-over
-with representative SQLite records and preferences, plus restart retention.
+with representative SQLite records and preferences, an intermediate update to
+the checksum-pinned receipt build b2571, then candidate launch/restart retention.
 One regular-app APK only. No live shop financial change, Supabase migration,
 outbox replay, Force Offline change, uninstall or app-storage clearing.
 Physical Owner phone acceptance is reported separately, never inferred from CI.

@@ -1725,9 +1725,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           onPressed: _busy ? null : () => _run(() async {}),
           child: const Text('Unlock Owner payroll'),
         ),
-      if (_busy) const LinearProgressIndicator(),
+      if (_busy || _loadingLocal || _backfillActive) const LinearProgressIndicator(),
       if (_error != null) Text(_error!),
       _recoveryStatus(),
+      if(_grant!=null && _loadingLocal && _employees.isEmpty)const Text('Loading saved employees…'),
+      if(_grant!=null && _hasLocalData && !_loadingLocal && _employees.isEmpty)const Padding(padding:EdgeInsets.all(12),child:Text('No saved employees are available. Review the offline employee roster.')),
       if (_grant != null)
         Expanded(child: PayrollOverview(
           employees: _employees, work: _work, payments: _overviewPayments,
