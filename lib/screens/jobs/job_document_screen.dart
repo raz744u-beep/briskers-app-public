@@ -3896,7 +3896,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     // documents must keep the old neutral mileage field unchanged.
     final explicitMileageOut = !_estimate &&
         (_offlineDocumentDraft.isLocalDraftId(widget.documentId) ||
-            _detail!['mileage_schema_version'] == 2 ||
+            _detail!['mileage_schema_version']?.toString() == '2' ||
             _detail!.containsKey('mileage_out'));
     var mileageText = (explicitMileageOut
         ? _detail!['mileage_out']
@@ -5502,7 +5502,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   bool get _usesInvoiceMileageOut =>
       !_estimate && _detail != null &&
       (_offlineDocumentDraft.isLocalDraftId(widget.documentId) ||
-       _detail!['mileage_schema_version'] == 2 ||
+       _detail!['mileage_schema_version']?.toString() == '2' ||
        _detail!.containsKey('mileage_out'));
 
   String get _visibleInvoiceMileage {
@@ -5610,9 +5610,22 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       }
     });
     if (saved && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Miles saved.')),
-      );
+      // Confirm the exact invoice reading survived the post-save load.
+      // Never report successful mileage when the screen still shows blank.
+      final visible = MileageWorkflow.parse(_visibleInvoiceMileage);
+      if (visible != reading) {
+        setState(() => _error =
+            'Miles Out did not persist on this invoice. Do not finalize until it is visible.');
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Miles Out did not save. Please check this invoice.'),
+        ));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(BriskersConnectionModeController.instance.forceOffline
+              ? 'Miles saved locally. Sync pending.'
+              : 'Miles saved on this invoice.'),
+        ));
+      }
     }
   }
 
