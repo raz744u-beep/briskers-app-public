@@ -1789,6 +1789,18 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final unverifiedCount = _periodTotals?.unverifiedIncomeReceipts;
 
     return Scaffold(
+      // Keep the primary action anchored at lower-right, independent of
+      // the transaction search/filter row and above the regular navigation.
+      floatingActionButton: FloatingActionButton.extended(
+        key: const ValueKey('expenses-new-floating'),
+        onPressed: _importing ? null : _showAddMenu,
+        backgroundColor: BriskersColors.expenses,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add),
+        label: const Text('New',
+          style: TextStyle(fontWeight: FontWeight.w800)),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       appBar: widget.showAppBar
           ? AppBar(
               toolbarHeight: 68,
@@ -1925,6 +1937,44 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                           color: Color(0xFF667085),
                         ),
                       ),
+                    ),
+                  // Search uses the former blank area beneath the totals.
+                  // A full-width input makes transaction lookup practical.
+                  const SizedBox(height: 10),
+                  SearchBar(
+                    controller: _searchController,
+                    hintText: 'Search transactions…',
+                    leading: const Icon(Icons.search),
+                    elevation: const WidgetStatePropertyAll<double>(3),
+                    shadowColor: const WidgetStatePropertyAll<Color>(Colors.black26),
+                    onChanged: (value) {
+                      setState(() {});
+                      _searchChanged(value);
+                    },
+                    onSubmitted: (_) {
+                      _searchDebounce?.cancel();
+                      _load(showLoading: false);
+                    },
+                    trailing: [
+                      if (_searchController.text.isNotEmpty)
+                        IconButton(
+                          tooltip: 'Clear search',
+                          onPressed: () {
+                            _searchDebounce?.cancel();
+                            _searchController.clear();
+                            setState(() {});
+                            _load(showLoading: false);
+                          },
+                          icon: const Icon(Icons.close),
+                        ),
+                    ],
+                  ),
+                  if (_searchController.text.trim().isNotEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 5, left: 4),
+                      child: Text('Search checks all transaction history.',
+                        style: TextStyle(fontSize: 12,
+                          color: Color(0xFF667085))),
                     ),
                   if (_allowRecurring) ...[
                     const SizedBox(height: 10),
@@ -2144,73 +2194,6 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SearchBar(
-                          controller: _searchController,
-                          hintText: 'Search transactions…',
-                          leading: const Icon(Icons.search),
-                          elevation: const WidgetStatePropertyAll<double>(3),
-                          shadowColor: const WidgetStatePropertyAll<Color>(
-                            Colors.black26,
-                          ),
-                          onChanged: (value) {
-                            setState(() {});
-                            _searchChanged(value);
-                          },
-                          onSubmitted: (_) {
-                            _searchDebounce?.cancel();
-                            _load(showLoading: false);
-                          },
-                          trailing: [
-                            if (_searchController.text.isNotEmpty)
-                              IconButton(
-                                tooltip: 'Clear search',
-                                onPressed: () {
-                                  _searchDebounce?.cancel();
-                                  _searchController.clear();
-                                  setState(() {});
-                                  _load(showLoading: false);
-                                },
-                                icon: const Icon(Icons.close),
-                              ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton.icon(
-                        key: const ValueKey('expenses-inline-new'),
-                        // The independent local-first editor can open before
-                        // historical transaction and account lists refresh.
-                        onPressed: _importing ? null : _showAddMenu,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: BriskersColors.expenses,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          minimumSize: const Size(91, 52),
-                          padding: const EdgeInsets.symmetric(horizontal: 13),
-                        ),
-                        icon: const Icon(Icons.add, size: 20),
-                        label: const Text('New',
-                          style: TextStyle(fontWeight: FontWeight.w800)),
-                      ),
-                    ],
-                  ),
-                  if (_searchController.text.trim().isNotEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 5, left: 4),
-                      child: Text(
-                        'Search checks all transaction history.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF667085),
-                        ),
-                      ),
-                    ),
                   if (_error != null) ...[
                     const SizedBox(height: 10),
                     Text(
