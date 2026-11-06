@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:drift/drift.dart' show Variable;
 import '../../services/local_customer_repository.dart';
 import '../jobs/job_customer_picker_screen.dart';
@@ -96,9 +97,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   BriskersLocalDatabase get _db => widget.database ?? PayrollUiScope.of(context)?.database ?? localDatabase;
   LocalOwnerGrant? _grant;
   bool _viewAuthorized=false;
+  bool _debugOwnerView=false;
   OwnerSessionIdentity? _viewIdentity;
-  bool get _canView=>_viewAuthorized && _viewIdentity?.matches(
-    DeviceOwnerAuthorization.instance.currentIdentity())==true;
+  bool get _canView=>_viewAuthorized && (_debugOwnerView || _viewIdentity?.matches(
+    DeviceOwnerAuthorization.instance.currentIdentity())==true);
   late final _viewRepository=LocalPayrollRepository(_db,
     business:widget.businessId,owner:true);
   List<Map<String, dynamic>> _employees = [];
@@ -167,11 +169,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Future<void> _openSavedOwnerView() async {
+    // Debug-only injected owner fixture never bypasses release identity checks.
+    final debugOwner=kDebugMode && (PayrollUiScope.of(context)?.debugAllowOwnerView ?? false);
     final identity=DeviceOwnerAuthorization.instance.currentIdentity();
-    final allowed=await DeviceOwnerAuthorization.instance.canViewSavedOwnerPayroll(widget.businessId);
+    final allowed=debugOwner || await DeviceOwnerAuthorization.instance.canViewSavedOwnerPayroll(widget.businessId);
     if(!mounted)return;
-    final same=identity?.matches(DeviceOwnerAuthorization.instance.currentIdentity())==true;
+    final same=debugOwner || identity?.matches(DeviceOwnerAuthorization.instance.currentIdentity())==true;
     setState((){
+      _debugOwnerView=debugOwner;
       _viewAuthorized=allowed && same;
       _viewIdentity=_viewAuthorized?identity:null;
       if(!_viewAuthorized){
