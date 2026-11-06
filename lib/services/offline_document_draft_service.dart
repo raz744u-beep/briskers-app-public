@@ -1026,23 +1026,34 @@ class OfflineDocumentDraftService {
     String? mileageOut,
     String? claimNumber,
     String? authorizationNumber,
+    bool updateWarrantyIdentifiers = false,
   }) async {
     if (!documentId.startsWith('local-invoice-')) {
       throw StateError('This operation requires a pending local invoice.');
     }
     final detail = await _requireDraft(businessId, documentId);
     final date = documentDate.toIso8601String().split('T').first;
+    // The invoice editor always treats pending local invoices as Miles Out.
+    // Older drafts may lack the numeric v2 marker even though the editor
+    // clearly requests departure mileage. Persist the explicit field, never
+    // silently fall back to the ambiguous legacy odometer_in.
+    final departure = mileageOut != null ||
+        detail['mileage_schema_version']?.toString() == '2' ||
+        detail.containsKey('mileage_out');
     final updated = <String, dynamic>{
       ...detail,
       'document_date': date,
-      if (detail['mileage_schema_version'] == 2)
-        'mileage_out': mileageOut == null || mileageOut.isEmpty
-            ? null : MileageWorkflow.parse(mileageOut)
-      else
-        'odometer_in': mileage == null || mileage.isEmpty
-            ? null : num.tryParse(mileage),
-      'claim_number': claimNumber,
-      'authorization_number': authorizationNumber,
+      if (departure) ...{
+        'mileage_schema_version': 2,
+        if (mileageOut != null)
+          'mileage_out': mileageOut.isEmpty
+              ? null : MileageWorkflow.parse(mileageOut),
+      } else if (mileage != null)
+        'odometer_in': mileage.isEmpty ? null : num.tryParse(mileage),
+      if (updateWarrantyIdentifiers) ...{
+        'claim_number': claimNumber,
+        'authorization_number': authorizationNumber,
+      },
       'updated_at': DateTime.now().toUtc().toIso8601String(),
       'sync_state': 'pending',
     };
