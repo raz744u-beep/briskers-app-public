@@ -1026,7 +1026,7 @@ class OfflineDocumentDraftService {
     String? mileageOut,
     String? claimNumber,
     String? authorizationNumber,
-    bool updateWarrantyIdentifiers = false,
+    bool updateWarrantyIdentifiers = true,
   }) async {
     if (!documentId.startsWith('local-invoice-')) {
       throw StateError('This operation requires a pending local invoice.');
