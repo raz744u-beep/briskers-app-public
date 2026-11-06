@@ -4,8 +4,11 @@ import 'package:briskers_app/core/invoice_pdf_mileage_projection.dart';
 import 'package:briskers_app/core/job_mileage_summary.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/offline_invoice_mileage_service.dart';
+import 'package:briskers_app/services/offline_document_draft_service.dart';
+import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/offline_preinspection_service.dart';
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -131,4 +134,59 @@ void main() {
       await root.delete(recursive: true);
     }
   });
+  test('local numbered draft saves Miles Out despite missing schema marker, preserving invoice fields and restart', () async {
+    final root=await Directory.systemTemp.createTemp('gloria-mileage-draft-');
+    final file=File('${root.path}/shop.sqlite');
+    var db=BriskersLocalDatabase(NativeDatabase(file));
+    try {
+      await LocalDocumentDetailCache.initialize(db);
+      await db.customStatement(
+        "INSERT INTO local_customers(id,business_id,display_name) "
+        "VALUES('customer','shop','Synthetic customer')");
+      await db.customStatement(
+        "INSERT INTO local_vehicles(id,business_id,year,make,model) "
+        "VALUES('vehicle','shop',2016,'Audi','A8L')");
+      await db.customStatement(
+        "INSERT INTO local_customer_vehicles(business_id,customer_id,vehicle_id) "
+        "VALUES('shop','customer','vehicle')");
+      final draft=OfflineDocumentDraftService(database:db);
+      final id=await draft.createQuickInvoice('shop',
+        customerId:'customer',customerName:'Synthetic customer',
+        vehicleId:'vehicle',vehicleLabel:'2016 Audi A8L');
+      final cache=LocalDocumentDetailCache(database:db);
+      final current=(await cache.load('shop',id))!;
+      await cache.save('shop',id,{
+        ...current,
+        'odometer_in':50001,
+        'claim_number':'CLAIM-KEEP',
+        'authorization_number':'AUTH-KEEP',
+      }..remove('mileage_schema_version')..remove('mileage_out'));
+      await draft.updatePendingInvoiceDetails('shop',id,
+        documentDate:DateTime(2026,11,6),
+        mileageOut:'50,024');
+      final saved=(await cache.load('shop',id))!;
+      expect(saved['mileage_schema_version'],2);
+      expect(saved['mileage_out'],50024);
+      expect(saved['odometer_in'],50001,
+        reason:'Never overwrite legacy arrival reading to save departure');
+      expect(saved['claim_number'],'CLAIM-KEEP');
+      expect(saved['authorization_number'],'AUTH-KEEP');
+      await db.close();
+      db=BriskersLocalDatabase(NativeDatabase(file));
+      final reopened=await LocalDocumentDetailCache(database:db).load('shop',id);
+      expect(reopened?['mileage_out'],50024);
+      expect(reopened?['claim_number'],'CLAIM-KEEP');
+      final rows=await db.customSelect(
+        "SELECT COUNT(*) AS n FROM sync_outbox "
+        "WHERE business_id='shop' AND entity_id=? AND entity_type='document_draft_create'",
+        variables:[Variable<String>(id)]).getSingle();
+      expect(rows.read<int>('n'),1,
+        reason:'Do not create extra invoice or modify queued creation identity');
+    } finally {
+      await db.close();
+      LocalDocumentDetailCache.sqliteWritesEnabled=false;
+      await root.delete(recursive:true);
+    }
+  });
+
 }
