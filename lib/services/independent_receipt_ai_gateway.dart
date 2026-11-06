@@ -17,6 +17,8 @@ class IndependentReceiptAiGateway {
   const IndependentReceiptAiGateway({
     this.endpoint = const String.fromEnvironment(
       'BRISKERS_RECEIPT_AI_GATEWAY_URL',
+      defaultValue:
+          'https://briskers-receipt-ai.raz744u.workers.dev/extract',
     ),
     ReceiptAiTransport? transport,
   }) : _transport = transport, _existingService = false;
@@ -30,7 +32,7 @@ class IndependentReceiptAiGateway {
   final String endpoint;
   final ReceiptAiTransport? _transport;
   final bool _existingService;
-  static const maxImageBytes = 20 * 1024 * 1024;
+  static const maxImageBytes = 8 * 1024 * 1024;
   static const maxResponseBytes = 1024 * 1024;
 
   bool get configured {
@@ -59,7 +61,6 @@ class IndependentReceiptAiGateway {
     if (!const {
       'image/jpeg',
       'image/png',
-      'image/heic',
       'image/webp',
     }.contains(mimeType)) {
       throw const FormatException('Unsupported receipt photo type.');
@@ -67,7 +68,7 @@ class IndependentReceiptAiGateway {
     final size = await receipt.length();
     if (size == 0 || size > maxImageBytes) {
       throw const FormatException(
-        'Receipt photo must be between 1 byte and 20 MB.',
+        'Receipt photo must be between 1 byte and 8 MB.',
       );
     }
     final bytes = await receipt.readAsBytes();
