@@ -528,6 +528,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       final task=(await _repository.tasks()).where((r)=>r['invoice_id']==invoiceId && r['source_line_id']==line['id']).single;
       await assignments.allocate(widget.businessId,task['id'] as String,employeeId,inherited:false);
     });
+    if(mounted && _error==null && rate==0){
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content:Text('Labor assigned. Set the employee pay rate in Details before paying.'),
+      ));
+    }
   }
 
   Future<void> _recordTaskProgress(Map<String, dynamic> row) async {
