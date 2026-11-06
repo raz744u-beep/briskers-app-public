@@ -81,7 +81,7 @@ void main(){
           {'name':'Labor','description':'Shared diagnostic labor','line_kind':'labor','quantity':3,'unit_price':100}]);
     });
     final boundary=GlobalKey();final navigator=GlobalKey<NavigatorState>();
-    await tester.pumpWidget(PayrollUiScope(database:db,unlock:auth.authorizeLocal,connection:network,
+    await tester.pumpWidget(PayrollUiScope(database:db,unlock:auth.authorizeLocal,connection:network,debugAllowOwnerView:true,
       child:RepaintBoundary(key:boundary,child:MaterialApp(debugShowCheckedModeBanner:false,theme:BriskersApp.applicationTheme,navigatorKey:navigator,home:JobDocumentScreen(businessId:'shop',documentId:invoice,isOwner:true,roleCode:'owner')))));
     Future<void> until(Finder f)async{
       for(var i=0;i<180;i++){
@@ -105,7 +105,7 @@ void main(){
     await click(find.text('Alpha').last);
     await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:150)));await tester.pump();
     await click(find.text('Assign mechanics / task').first);
-    await click(find.text('Unlock Owner payroll'));
+    
     await click(find.text('Assign / split'));
     await click(find.text('Beta'));
     await until(find.textContaining('Beta · Open'));
@@ -122,7 +122,7 @@ void main(){
     });
     navigator.currentState!.pop();await tester.pumpAndSettle();
     await click(find.text('Assign mechanics / task').at(1));
-    await click(find.text('Unlock Owner payroll'));
+    
     // Keep Alpha explicitly assigned, then add Beta to the same task identity.
     for(final name in ['Alpha','Beta']){
       await click(find.text('Assign / split'));await click(find.text(name));
@@ -149,7 +149,7 @@ void main(){
       expect(split.map((r)=>r['actual_minutes']).toSet(),{60,120});
     });
     navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>const OwnerPayrollScreen(businessId:'shop')));
-    await tester.pumpAndSettle();await click(find.text('Unlock Owner payroll'));
+    await tester.pumpAndSettle();
     await until(find.text('Review Weekly Labor (2 tasks)'));
     expect(find.byType(PayrollOverview),findsOneWidget);
     expect(find.text('Alpha'),findsOneWidget);expect(find.text('Beta'),findsOneWidget);
@@ -162,7 +162,7 @@ void main(){
     });
     await click(find.text('Review Weekly Labor (2 tasks)'));
     await until(find.text('Employee Profile'));
-    await click(find.text('Unlock Owner payroll'));
+    
     expect(find.text('Tasks'),findsOneWidget);expect(find.text('General Tasks'),findsOneWidget);
     expect(find.widgetWithText(OutlinedButton,'Details'),findsOneWidget);
     await capture('bugs30-employee-unpaid-tasks');
@@ -193,19 +193,19 @@ void main(){
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('Payroll'),150,scrollable:find.descendant(of:find.byType(HomeScreen),matching:find.byType(Scrollable)).first);
     await click(find.text('Payroll'));
-    await click(find.text('Unlock Owner payroll'));await until(find.text('Review Weekly Labor (0 tasks)'));
+    await until(find.text('Review Weekly Labor (0 tasks)'));
     expect(find.text('Payroll reports'),findsNothing);
     expect(find.text('Review Weekly Labor (0 tasks)'),findsOneWidget);
     expect(find.text('Review Weekly Labor (1 tasks)'),findsOneWidget);
     await click(find.text('Review Weekly Labor (0 tasks)'));
-    await click(find.text('Unlock Owner payroll'));await until(find.text('Unpaid work · 0'));
+    await until(find.text('Unpaid work · 0'));
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Verify Payment')).onPressed,isNull);
     await capture('bugs30-employee-paid-tasks');
     await click(find.text('View Paid Tasks'));await until(find.text('Payroll History'));
     navigator.currentState!.pop();await tester.pumpAndSettle();
     navigator.currentState!.pop();await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('Tasks'),-100,scrollable:find.descendant(of:find.byType(HomeScreen),matching:find.byType(Scrollable)).first);
-    await click(find.text('Tasks'));await click(find.text('Unlock Owner tasks'));
+    await click(find.text('Tasks'));
     await until(find.byType(TasksWorkspace));
     await tester.tap(find.byTooltip('Status'));await tester.pumpAndSettle();
     await tester.tap(find.text('All').last);await tester.pumpAndSettle();
