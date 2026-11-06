@@ -13,7 +13,6 @@ import 'receipt_review_sheet.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
 import '../../core/briskers_i18n.dart';
-import '../../core/supabase_config.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/offline_financial_write_service.dart';
@@ -503,11 +502,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
 
   Future<void> _readReceipt(XFile file) async {
     if (_readingReceipt) return;
-    const independent = IndependentReceiptAiGateway();
-    final useExisting = independent.endpoint.isEmpty;
-    final gateway = useExisting
-        ? const IndependentReceiptAiGateway.existingService()
-        : independent;
+    // Receipt AI is independent of the Supabase sync connection. Never
+    // silently fall back to the Supabase Edge Function.
+    const gateway = IndependentReceiptAiGateway();
     if (!gateway.configured) {
       setState(() {
         _receiptReadMessage = 'Online receipt AI is not configured. Photo attached; use Quick Transaction or Full Manual.';
@@ -543,11 +540,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
 
     try {
       const storage = FlutterSecureStorage();
-      final token = useExisting
-          ? supabase.auth.currentSession?.accessToken
-          : await storage.read(
-              key: 'receipt_ai_gateway_token:${widget.businessId}',
-            );
+      final token = await storage.read(
+        key: 'receipt_ai_gateway_token:${widget.businessId}',
+      );
       final suggestion = await gateway.enhance(
         receipt: file,
         businessId: widget.businessId,
