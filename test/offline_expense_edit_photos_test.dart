@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'support/replay_cooldown.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -112,7 +114,7 @@ class _Api extends BriskersApi {
     uploaded.putIfAbsent(attachmentId, () => List<int>.of(bytes));
     if (failNextUploadAcknowledgement) {
       failNextUploadAcknowledgement = false;
-      throw StateError('Synthetic lost upload acknowledgement');
+      throw TimeoutException('Synthetic lost upload acknowledgement');
     }
   }
 }
@@ -238,6 +240,7 @@ void main() {
       final edited = await cache.loadTransactionDetail(_business, _transaction);
       expect(edited!['attachments'], attached);
 
+      await expireSyncReplayCooldown(database);
       await service().flush(_business);
       expect(await photoPayloads(), isEmpty);
       expect(api.registrations, hasLength(2));
@@ -253,6 +256,7 @@ void main() {
       expect(syncedPhotos.every((photo) => photo['upload_state'] == 'synced'), isTrue);
       expect(syncedPhotos, hasLength(3));
       final calls = api.uploadCalls;
+      await expireSyncReplayCooldown(database);
       await service().flush(_business);
       expect(api.uploadCalls, calls);
     });
@@ -264,12 +268,14 @@ void main() {
     await edit(service(), receipts: [_receipt(30)]);
     final queued = (await photoPayloads()).single;
     api.failNextUploadAcknowledgement = true;
+    await expireSyncReplayCooldown(database);
     await service().flush(_business);
     expect(await photoPayloads(), [queued]);
     final interrupted = await cache.loadTransactionDetail(_business, _transaction);
     expect((interrupted!['attachments'] as List).last['upload_state'], 'pending');
 
     await restart();
+    await expireSyncReplayCooldown(database);
     await service().flush(_business);
     expect(await photoPayloads(), isEmpty);
     expect(api.registrationCalls, [queued['operation_id'], queued['operation_id']]);
@@ -305,6 +311,7 @@ void main() {
       'financial_create', 'financial_photo', 'financial_photo',
     ]);
     await restart();
+    await expireSyncReplayCooldown(database);
     await service().flush(_business);
     expect(api.createCalls, 1);
     expect(api.updateCalls, 0);
@@ -338,6 +345,7 @@ void main() {
     final retried = await cache.loadTransactionDetail(_business, _transaction);
     expect(retried!['receipt_count'], 2);
     expect((retried['attachments'] as List).first, _existingAttachment);
+    await expireSyncReplayCooldown(database);
     await service().flush(_business);
     expect(api.uploaded, hasLength(1));
   });

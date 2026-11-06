@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'support/replay_cooldown.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -119,7 +121,7 @@ class _Api extends BriskersApi {
     uploads++;
     if (loseUploadReply) {
       loseUploadReply = false;
-      throw StateError('Synthetic lost upload reply');
+      throw TimeoutException('Synthetic lost upload reply');
     }
   }
 
@@ -346,6 +348,7 @@ void main() {
           api: api,
         );
         await customerWrites.flush(business);
+        await expireSyncReplayCooldown(db);
         await customerWrites.flush(business);
         expect(api.registrations, [
           'fixture-local-photo',

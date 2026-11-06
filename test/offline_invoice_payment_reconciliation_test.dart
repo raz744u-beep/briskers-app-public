@@ -1,3 +1,4 @@
+import 'support/replay_cooldown.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -294,6 +295,7 @@ void main() {
 
     test('capture rejects a stale dialog after its queued payment has reconciled', () async {
       final operation = await _record(ledger, amount: 100);
+      await expireSyncReplayCooldown(db);
       await ledger.flush('shop-test',
         submitPayment: (b, i, a, m, op) async => 'server-payment',
         fetchInvoice: (b, i) async => _detail(pending: 100,
@@ -315,6 +317,7 @@ void main() {
         expect(op, operationId);
         return 'server-payment';
       }
+      await expireSyncReplayCooldown(db);
       await ledger.flush('shop-test', submitPayment: submit,
         fetchInvoice: (b, i) async => _detail(), cacheInvoice: (b, i, d) async {});
       expect(submissions, 0);
@@ -325,6 +328,7 @@ void main() {
       expect(remapped, hasLength(1));
       expect(remapped.single['operation_id'], operationId);
       expect(remapped.single['invoice_id'], 'server-invoice');
+      await expireSyncReplayCooldown(db);
       await ledger.flush('shop-test', submitPayment: submit,
         fetchInvoice: (b, i) async => _detail(pending: 500,
           payments: [{'id': 'server-payment', 'amount': 500}]),
@@ -340,6 +344,7 @@ void main() {
         operations.add(op);
         return 'server-payment';
       }
+      await expireSyncReplayCooldown(db);
       await ledger.flush('shop-test', submitPayment: submit,
         fetchInvoice: (b, i) async {
           final queued = await ledger.pendingForInvoice(b, i);
@@ -355,6 +360,7 @@ void main() {
       expect(projected['pending_payment'], 500);
       expect(projected['payments'], hasLength(1));
       var cached = false;
+      await expireSyncReplayCooldown(db);
       await ledger.flush('shop-test', submitPayment: submit,
         fetchInvoice: (b, i) async => freshDetail,
         cacheInvoice: (b, i, d) async {
@@ -373,6 +379,7 @@ void main() {
         operations.add(op);
         return 'server-payment';
       }
+      await expireSyncReplayCooldown(db);
       await ledger.flush('shop-test', submitPayment: submit,
         fetchInvoice: (b, i) async => _detail(pending: 500,
           payments: [{'id': 'unrelated-same-amount', 'amount': 500}]),
@@ -380,6 +387,7 @@ void main() {
       expect(await ledger.pendingForInvoice('shop-test', 'invoice-test'), hasLength(1));
       final reconciled = _detail(pending: 500,
         payments: [{'id': 'server-payment', 'amount': 500}]);
+      await expireSyncReplayCooldown(db);
       await ledger.flush('shop-test', submitPayment: submit,
         fetchInvoice: (b, i) async => reconciled,
         cacheInvoice: (b, i, d) async => throw StateError('Disk failure'));
@@ -388,6 +396,7 @@ void main() {
       expect(pending.single['server_payment_id'], 'server-payment');
       expect(OfflineInvoicePaymentLedger.projectPendingPayments(reconciled, pending)
         ['pending_payment'], 500);
+      await expireSyncReplayCooldown(db);
       await ledger.flush('shop-test', submitPayment: submit,
         fetchInvoice: (b, i) async => reconciled, cacheInvoice: (b, i, d) async {});
       expect(operations, [operationId, operationId, operationId]);
@@ -410,6 +419,7 @@ void main() {
         if (includesWarranty) {
           authoritative['offline_warranty_detail'] = <String, dynamic>{};
         }
+        await expireSyncReplayCooldown(db);
         await ledger.flush('shop-test',
           submitPayment: (b, i, a, m, op) async => 'server-payment',
           fetchInvoice: (b, i) async => authoritative);
@@ -429,13 +439,14 @@ void main() {
       Future<String> submit(String b, String i, num a, String m, String op) async {
         submissions++;
         final id = accepted.putIfAbsent(op, () => 'server-payment');
-        if (submissions == 1) throw StateError('Response lost after acceptance');
+        if (submissions == 1) throw TimeoutException('Response lost after acceptance');
         return id;
       }
       Future<Map<String, dynamic>> fetch(String b, String i) async =>
         _detail(pending: 500, payments: [{
           'id': 'server-payment', 'amount': 500, 'client_operation_id': operationId,
         }]);
+      await expireSyncReplayCooldown(db);
       await ledger.flush('shop-test', submitPayment: submit,
         fetchInvoice: fetch, cacheInvoice: (b, i, d) async {});
       final queued = await ledger.pendingForInvoice('shop-test', 'invoice-test');
@@ -445,6 +456,7 @@ void main() {
         await fetch('shop-test', 'invoice-test'), queued);
       expect(projected['pending_payment'], 500);
       expect(projected['payments'], hasLength(1));
+      await expireSyncReplayCooldown(db);
       await ledger.flush('shop-test', submitPayment: submit,
         fetchInvoice: fetch, cacheInvoice: (b, i, d) async {});
       expect(submissions, 2);
@@ -461,7 +473,7 @@ void main() {
           final savedBeforeSubmit = await ledger.pendingForInvoice(b, i);
           expect(savedBeforeSubmit.single['replay_attempted'], isTrue);
           if (responseLost && operations.length == 1) {
-            throw StateError('Accepted payment response lost');
+            throw TimeoutException('Accepted payment response lost');
           }
           // The idempotent endpoint retains its original pending payment ID,
           // even after finalization deleted that row and created a posted ID.
@@ -471,6 +483,7 @@ void main() {
           'id': 'replacement-posted-payment', 'amount': 500, 'state': 'finalized',
         }]);
         for (var attempt = 0; attempt < 2; attempt++) {
+          await expireSyncReplayCooldown(db);
           await ledger.flush('shop-test', submitPayment: submit,
             fetchInvoice: (b, i) async => authoritative,
             cacheInvoice: (b, i, d) async => fail('Unknown identity cannot retire a receipt'));
@@ -500,6 +513,7 @@ void main() {
         remaining: 40000, expected: [first]);
       final submissions = <String>[];
       final cachedInvoices = <String>[];
+      await expireSyncReplayCooldown(db);
       await ledger.flush('shop-test',
         submitPayment: (b, i, a, m, op) async {
           submissions.add(op);
@@ -553,15 +567,17 @@ void main() {
       final api = _UnavailableIdempotentApi();
       final isolated = OfflineInvoicePaymentLedger(database: db, api: api);
       final operation = await _record(isolated);
+      await expireSyncReplayCooldown(db);
       await isolated.flush('shop-test');
+      await expireSyncReplayCooldown(db);
       await isolated.flush('shop-test');
-      expect(api.operations, [operation, operation]);
+      expect(api.operations, [operation]);
       expect(api.legacyCalls, 0);
       expect(await isolated.pendingForInvoice('shop-test', 'invoice-test'), hasLength(1));
       final row = await db.customSelect('SELECT attempt_count,last_error FROM sync_outbox')
           .getSingle();
       expect(row.read<int>('attempt_count'), 2);
-      expect(row.read<String>('last_error'), contains('Date-aware idempotent endpoint unavailable'));
+      expect(row.read<String>('last_error'), contains('Synchronization paused'));
     });
   });
 
@@ -580,6 +596,7 @@ void main() {
       expect(reopened.single['amount_cents'], 50000);
       expect(OfflineInvoicePaymentLedger.projectPendingPayments(_detail(), reopened)
         ['pending_payment'], 500);
+      await expireSyncReplayCooldown(db);
       await ledger.flush('shop-test',
         submitPayment: (b, i, a, m, op) async => 'server-payment',
         fetchInvoice: (b, i) async => throw StateError('Restart before refresh'),
@@ -595,6 +612,7 @@ void main() {
       final projected = OfflineInvoicePaymentLedger.projectPendingPayments(authoritative, retained);
       expect(projected['pending_payment'], 500);
       expect(projected['payments'], hasLength(1));
+      await expireSyncReplayCooldown(db);
       await ledger.flush('shop-test',
         submitPayment: (b, i, a, m, op) async {
           expect(op, operation);

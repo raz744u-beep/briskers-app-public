@@ -756,7 +756,8 @@ class LocalJobQuarantine {
     String businessId,
     Future<T> Function() request, {
     int? outboxId,
-  }) {
+  }) async {
+    await assertReplayAllowed(db, businessId, outboxId: outboxId);
     if (outboxId == null) {
       return _guardReplay(db, businessId, request);
     }

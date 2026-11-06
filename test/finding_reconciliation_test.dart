@@ -1,3 +1,4 @@
+import 'support/replay_cooldown.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -219,6 +220,7 @@ void main() {
     final staged = await stagePhoto(localId);
     var display = await local();
     api.loseCreateReply = true;
+    await expireSyncReplayCooldown(database);
     await service.flush(businessId);
     expect((await local()).single['sync_state'], 'pending');
     expect(api.findings, hasLength(1));
@@ -229,6 +231,7 @@ void main() {
     await service.updateLocalFinding(
       businessId, jobId, localId, body: 'Edited after lost reply',
     );
+    await expireSyncReplayCooldown(database);
     await service.flush(businessId);
     expect(api.createOperations, hasLength(2));
     expect(api.createOperations.toSet(), hasLength(1));
@@ -243,6 +246,7 @@ void main() {
       expect(display.single['include_on_invoice'], true);
       expect(display.single['attachments'], hasLength(1));
       await seed();
+      await expireSyncReplayCooldown(database);
       await service.flush(businessId);
     }
     final attachment = ((await local()).single['attachments'] as List).single as Map;
@@ -306,8 +310,10 @@ void main() {
     await seed();
     await service.updateLocalFinding(businessId, jobId, 'server-1', body: 'First edit');
     api.loseUpdateReply = true;
+    await expireSyncReplayCooldown(database);
     await service.flush(businessId);
     await service.updateLocalFinding(businessId, jobId, 'server-1', body: 'Latest edit');
+    await expireSyncReplayCooldown(database);
     await service.flush(businessId);
     expect(api.updateOperations, hasLength(3));
     expect(api.updateOperations[0], api.updateOperations[1]);
@@ -347,6 +353,7 @@ void main() {
       expect(rows['clean']!['resolved_at'], isNotNull);
     }
     expect(await File(staged['local_file_path'].toString()).exists(), true);
+    await expireSyncReplayCooldown(database);
     await service.flush(businessId);
     final dirty = (await local()).singleWhere((row) => row['id'] == 'dirty');
     expect(dirty['sync_state'], 'conflict');
@@ -361,11 +368,13 @@ void main() {
     );
     final staged = await stagePhoto(created['id'].toString());
     api.failedUploads = 1;
+    await expireSyncReplayCooldown(database);
     await service.flush(businessId);
     final before = (await local()).single;
     expect(before['id'], 'server-1');
     expect((before['attachments'] as List).single['upload_state'], 'pending');
     await seed();
+    await expireSyncReplayCooldown(database);
     await service.flush(businessId);
     final after = (await local()).single;
     final photos = after['attachments'] as List;
@@ -387,6 +396,7 @@ void main() {
     expect((await local()).single['body'], 'Latest acknowledged note');
     await service.updateLocalFinding(businessId, jobId, 'server-1', body: 'Pending note');
     api.wrongUpdateId = true;
+    await expireSyncReplayCooldown(database);
     await service.flush(businessId);
     final row = (await local()).single;
     expect(row['id'], 'server-1');
@@ -417,6 +427,7 @@ void main() {
       mimeType: 'image/jpeg', bytes: Uint8List.fromList([1, 2, 3, 4]),
     );
     await stagingStarted.future;
+    await expireSyncReplayCooldown(database);
     await service.flush(businessId);
     releaseStaging.complete();
     await photo;
@@ -427,6 +438,7 @@ void main() {
       "SELECT payload_json FROM sync_outbox WHERE entity_type='finding_photo'",
     ).getSingle();
     expect((jsonDecode(queued.read<String>('payload_json')) as Map)['finding_id'], 'server-1');
+    await expireSyncReplayCooldown(database);
     await service.flush(businessId);
     final finding = (await local()).single;
     expect(finding['id'], 'server-1');
@@ -449,6 +461,7 @@ void main() {
       final oldId = created['id'].toString();
       await stagePhoto(oldId);
       api.createAcknowledgement = invalid.value;
+      await expireSyncReplayCooldown(database);
       await service.flush(businessId);
       final finding = (await local()).single;
       expect(finding['id'], oldId);
@@ -469,6 +482,7 @@ void main() {
       await seed();
       await service.updateLocalFinding(businessId, jobId, 'server-1', body: 'Pending note');
       api.updateAcknowledgement = serverFinding('server-1')..remove(missing);
+      await expireSyncReplayCooldown(database);
       await service.flush(businessId);
       expect((await local()).single['body'], 'Pending note');
       expect((await local()).single['sync_state'], 'pending');
@@ -484,6 +498,7 @@ void main() {
     await seed();
     await service.updateLocalFinding(businessId, jobId, 'server-1', body: 'Updated note');
     api.updateAcknowledgement = {'id': 'server-1', 'body': 'Updated note', 'row_version': 2};
+    await expireSyncReplayCooldown(database);
     await service.flush(businessId);
     final finding = (await local()).single;
     expect(finding['status'], 'in_job');
@@ -535,6 +550,7 @@ void main() {
     final payload = jsonDecode(queued.read<String>('payload_json')) as Map;
     expect((payload['latest_server_finding'] as Map)['row_version'], 3);
     expect((payload['latest_server_finding'] as Map)['body'], 'Latest remote note');
+    await expireSyncReplayCooldown(database);
     await service.flush(businessId);
     expect(api.updateVersions, [1]);
     expect((await local()).single['sync_state'], 'conflict');
