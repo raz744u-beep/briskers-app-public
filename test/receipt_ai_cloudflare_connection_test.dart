@@ -10,6 +10,13 @@ void main() {
     expect(gateway.endpoint, isNot(contains('supabase')));
   });
 
+  test('receipt gateway never permits an insecure HTTP endpoint', () {
+    const gateway = IndependentReceiptAiGateway(
+      endpoint: 'http://briskers-receipt-ai.example.test/extract',
+    );
+    expect(gateway.configured, isFalse);
+  });
+
   test('receipt image size matches the deployed Worker limit', () {
     expect(IndependentReceiptAiGateway.maxImageBytes, 8 * 1024 * 1024);
   });
