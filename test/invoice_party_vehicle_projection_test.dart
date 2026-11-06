@@ -70,6 +70,15 @@ void main() {
     expect(wrongVehicle['vehicle'],'2016 Audi A8L');
   });
 
+  test('empty cached address map is replaced by saved linked customer address', () {
+    final result=InvoicePartyVehicleProjection.apply(
+      invoice:{...invoice,'customer_address':<String,dynamic>{'line1':''}},
+      savedCustomerDetail:saved,
+    );
+    expect(InvoicePartyVehicleProjection.readableAddress(
+      result['customer_address']),'12 Test Street\\nGretna, LA 70053');
+  });
+
   test('existing authenticated invoice snapshots win over later local contact data', () {
     final result=InvoicePartyVehicleProjection.apply(
       invoice:{
