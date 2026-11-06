@@ -109,6 +109,7 @@ class _EmployeesSettingsScreenState
           businessId: widget.businessId,
           employeeId: employeeId,
           employeeName: employee?['nickname']?.toString() ?? name,
+          employeeLegalName: name,
           employeeRole: position,
           employeePayType: employee?['payment_type']?.toString(),
           employeeHourlyCents: _hourlyCents(employee?['hourly_rate']),
@@ -444,7 +445,7 @@ class _EmployeesSettingsScreenState
             ),
           if (OwnerPayrollScreen.enabled && widget.isOwner)
             IconButton(
-              tooltip: 'Owner payroll',
+              tooltip: 'Payroll',
               icon: const Icon(Icons.payments_outlined),
               onPressed: () => Navigator.push<void>(
                 context,

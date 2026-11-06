@@ -13,6 +13,8 @@ class LocalInvoiceTaskStore {
   final BriskersLocalDatabase db;
 
   Future<void> prepare() async {
+    await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_task_order '
+      '(business_id TEXT NOT NULL,task_id TEXT NOT NULL,line_position INTEGER NOT NULL,PRIMARY KEY(business_id,task_id))');
     await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_estimates '
       '(business_id TEXT NOT NULL,task_id TEXT NOT NULL,employee_id TEXT NOT NULL,'
       'minutes INTEGER NOT NULL CHECK(minutes>=0),PRIMARY KEY(business_id,task_id,employee_id))');
@@ -36,7 +38,7 @@ class LocalInvoiceTaskStore {
     final job = detail['job_id'];
     if (job is! String || job.isEmpty) return;
     final source = await db.customSelect(
-      "SELECT j.title FROM local_documents d JOIN local_jobs j "
+      "SELECT j.title,d.status AS document_status FROM local_documents d JOIN local_jobs j "
       "ON j.business_id=d.business_id AND j.id=d.job_id "
       "WHERE d.business_id=? AND d.id=? AND d.job_id=? AND d.kind='invoice'",
       variables: [Variable(business), Variable(document), Variable(job)],
@@ -46,11 +48,15 @@ class LocalInvoiceTaskStore {
     if (raw is! List) return; // An omitted collection is not a deletion.
     final rows = raw.whereType<Map>().map(Map<String, dynamic>.from).toList();
     final ids = rows.map((row) => row['id']).whereType<String>().toList();
-    if (ids.length != rows.length || ids.any((id) => id.isEmpty) ||
+    if (rows.length != raw.length || ids.length != rows.length || ids.any((id) => id.isEmpty) ||
         ids.toSet().length != ids.length) {
       return;
     }
     await prepare();
+    if (['void','voided','cancelled','canceled','deleted'].contains((source.data['document_status'] ?? detail['status'])?.toString().toLowerCase())) {
+      await db.customStatement("UPDATE regular_payroll_task_sources SET active=0 WHERE business_id=? AND invoice_id=? AND source_kind='invoice'",[business,document]);
+      return;
+    }
     await db.transaction(() async {
       await db.customStatement(
         'INSERT INTO regular_payroll_jobs VALUES(?,?,?) '
@@ -70,8 +76,12 @@ class LocalInvoiceTaskStore {
           variables: [business, document, id].map(Variable<String>.new).toList(),
         ).get();
         if (retained.length > 1) { throw StateError('Conflicting invoice task identities.'); }
-        final task = retained.isEmpty ? jsonEncode([job, document, id])
-            : retained.single.read<String>('task_id');
+        final canonical = await db.customSelect(
+          'SELECT id FROM regular_payroll_tasks WHERE business_id=? AND job_id=? AND labor_id=?',
+          variables:[business,job,jsonEncode([document,id])].map(Variable<String>.new).toList()).get();
+        if(canonical.length>1) { throw StateError('Invoice labor identity needs review.'); }
+        final task = retained.isNotEmpty ? retained.single.read<String>('task_id')
+          : canonical.isNotEmpty ? canonical.single.read<String>('id') : jsonEncode([job, document, id]);
         final hours = invoiceLaborHours(line);
         final description = (line['description'] ?? line['name'] ?? 'Invoice labor').toString();
         await db.customStatement(
@@ -86,8 +96,36 @@ class LocalInvoiceTaskStore {
           [business, task, document, id],
         );
       }
+      for (var position=0;position<rows.length;position++) {
+        final line=rows[position];
+        if(!isInvoiceLaborLine(line)) continue;
+        await db.customStatement('INSERT INTO regular_payroll_task_order(business_id,task_id,line_position) '
+          'SELECT business_id,task_id,? FROM regular_payroll_task_sources WHERE business_id=? AND invoice_id=? AND line_id=? '
+          'ON CONFLICT(business_id,task_id) DO UPDATE SET line_position=excluded.line_position',
+          [position,business,document,line['id']]);
+      }
       await LocalTaskAssignmentStore(db).inherit(business, job);
     });
+  }
+
+
+  Future<void> reconcileCached(String business,String document,Map<String,dynamic> detail) async {
+    final raw=detail['lines']??detail['items'];
+    if(raw is! List) return;
+    final rows=raw.whereType<Map>().map(Map<String,dynamic>.from).toList();
+    if(rows.length!=raw.length || rows.any((r)=>r['id'] is! String || (r['id'] as String).isEmpty) ||
+      rows.map((r)=>r['id']).toSet().length!=rows.length) return;
+    await prepare();
+    final documentRow=await db.customSelect('SELECT status FROM local_documents WHERE business_id=? AND id=?',variables:[Variable(business),Variable(document)]).getSingleOrNull();
+    if(['void','voided','cancelled','canceled','deleted'].contains((documentRow?.data['status']??detail['status'])?.toString().toLowerCase())) { await save(business,document,detail);return; }
+    final actual=await db.customSelect('SELECT s.line_id,o.line_position FROM regular_payroll_task_sources s '
+      'LEFT JOIN regular_payroll_task_order o ON o.business_id=s.business_id AND o.task_id=s.task_id '
+      "WHERE s.business_id=? AND s.invoice_id=? AND s.source_kind='invoice' AND s.active=1",
+      variables:[Variable(business),Variable(document)]).get();
+    final expected={for(var i=0;i<rows.length;i++) if(isInvoiceLaborLine(rows[i])) rows[i]['id']:i};
+    if(actual.length!=expected.length || actual.any((r)=>expected[r.data['line_id']]!=r.data['line_position'])) {
+      await save(business,document,detail);
+    }
   }
 
   /// Called only by the existing successful draft replay transaction. Exact

@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/employee_role_style.dart';
 import '../../services/payroll_period_totals.dart';
+import '../../services/employee_nickname_store.dart';
 
 class PayrollOverview extends StatefulWidget {
   const PayrollOverview({
@@ -43,7 +44,8 @@ class _PayrollOverviewState extends State<PayrollOverview> {
 
   int _taskCount(String employee) => _monday.isAfter(DateTime.now()) ? 0 :
     widget.work.where((row) => row['employee_id'] == employee &&
-      row['paid'] != 1 && row['state'] == 'Done').length;
+      row['paid'] != 1 && row['state'] == 'Done' && row['assignment_conflict']!=1 &&
+      (DateTime.tryParse(row['completed_date']?.toString()??'')?.isBefore(_monday.add(const Duration(days:7)))??false)).length;
 
   Future<void> _pickWeek() async {
     final day = await showDatePicker(
@@ -102,7 +104,7 @@ class _PayrollOverviewState extends State<PayrollOverview> {
     final rate = employee['rate'] as int?;
     final rateLabel = rate == null || rate <= 0 ? 'Pay details'
       : _money(rate) + '/hr';
-    final name = (employee['nickname'] ?? employee['name'] ?? 'Employee').toString();
+    final name = EmployeeNicknameStore.displayLabel(employee,widget.employees);
     final icon = employeeRoleStyle(
       (employee['position'] ?? employee['position_name'] ?? employee['role'])?.toString(),
     ).icon;
@@ -141,7 +143,7 @@ class _PayrollOverviewState extends State<PayrollOverview> {
               _metric('Hours', summary.hasRecords
                 ? summary.hours.toStringAsFixed(1) : '—'),
               _metric('Gross', _money(summary.grossCents)),
-              _metric('Transferred', _money(summary.paidCents)),
+              _metric('Paid', _money(summary.paidCents)),
               _metric('Balance', _money(summary.balanceCents),
                 color: summary.balanceCents == null
                   ? null : summary.balanceCents! > 0
@@ -235,7 +237,7 @@ class _PayrollOverviewState extends State<PayrollOverview> {
           const Color(0xFF18212C)),
         total('Total Gross', complete ? _money(gross) : '—',
           const Color(0xFF18212C)),
-        total('Total Transferred', _money(paid),
+        total('Total Paid', _money(paid),
           const Color(0xFF18212C)),
         total('Total Balance', complete ? _money(balance) : '—',
           const Color(0xFFCE6321)),

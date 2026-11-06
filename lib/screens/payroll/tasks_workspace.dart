@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../services/service_task_order.dart';
 
 /// Tasks workspace. Only customer/job-linked records appear
 /// under Service Tasks; General Tasks have no job or invoice relationship.
@@ -129,10 +130,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
           widget.employeeName(task['employee_id']?.toString())
             .toLowerCase().contains(q));
     }).toList();
-    if (_sort == 'Oldest First') {
-      rows.sort((a,b) => (a['line_id']?.toString() ?? '')
-        .compareTo(b['line_id']?.toString() ?? ''));
-    }
+    rows.sort((a,b)=>ServiceTaskOrder.compareLines(a,b,newest:_sort!='Oldest First'));
     return rows;
   }
 
@@ -305,7 +303,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
       final id=task['job_id']?.toString()??'Unlinked Job';
       byJob.putIfAbsent(id,()=>[]).add(task);
     }
-    final entries=byJob.entries.toList();
+    final entries=byJob.entries.toList()..sort((a,b)=>ServiceTaskOrder.compareJobs(a.value.first,b.value.first,newest:_sort!='Oldest First'));
     return ListView(
       key:const Key('service-tasks-list'),
       padding:const EdgeInsets.fromLTRB(12,8,12,28),

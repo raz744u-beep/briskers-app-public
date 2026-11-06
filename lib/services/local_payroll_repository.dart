@@ -115,17 +115,27 @@ class LocalPayrollRepository {
 
   /// Incremental recovery of pre-existing cached invoices, after first paint.
   /// Missing photos/details remain unknown; never invokes cloud sync.
-  Future<void> backfillInvoiceTasks({String? job,Future<void> Function()? onBatch}) async {
+  Future<void> backfillInvoiceTasks({String? job,Future<void> Function()? onBatch,
+    void Function(int checked,int recovered,int unavailable)? onProgress}) async {
     _authorize();await prepare();
-    var after='';
+    var after='';var checked=0,recovered=0,unavailable=0;
     while(true){
       _authorize();
-      final rows=await _read("SELECT id FROM local_documents WHERE business_id=? AND kind='invoice' AND id>? AND NOT EXISTS(SELECT 1 FROM regular_payroll_task_sources s WHERE s.business_id=local_documents.business_id AND s.invoice_id=local_documents.id) "
+      final rows=await _read("SELECT id FROM local_documents WHERE business_id=? AND kind='invoice' AND id>? AND COALESCE(status,'') NOT IN ('void','voided','cancelled','canceled','deleted') "
         "${job==null?'':'AND job_id=? '}ORDER BY id LIMIT 10",[business,after,?job]);
       if(rows.isEmpty){return;}
       for(final row in rows){
         _authorize();
-        await LocalDocumentDetailCache(database:db).load(business,row['id'] as String);
+        final id=row['id'] as String;
+        final before=(await _read("SELECT COUNT(*) AS n FROM regular_payroll_task_sources WHERE business_id=? AND invoice_id=? AND active=1 AND source_kind='invoice'",[business,id])).single['n'] as int;
+        final detail=await LocalDocumentDetailCache(database:db).load(business,id);
+        final afterCount=(await _read("SELECT COUNT(*) AS n FROM regular_payroll_task_sources WHERE business_id=? AND invoice_id=? AND active=1 AND source_kind='invoice'",[business,id])).single['n'] as int;
+        final raw=detail?['lines']??detail?['items'];
+        final lines=raw is List ? raw.whereType<Map>().map(Map<String,dynamic>.from).toList() : null;
+        final usable=lines!=null && lines.length==(raw as List).length &&
+          lines.every((r)=>r['id'] is String && (r['id'] as String).isNotEmpty) && lines.map((r)=>r['id']).toSet().length==lines.length;
+        checked++;if(!usable || (lines??const <Map<String,dynamic>>[]).where(isInvoiceLaborLine).length!=afterCount){unavailable++;}if(afterCount>before){recovered+=afterCount-before;}
+        onProgress?.call(checked,recovered,unavailable);
       }
       after=rows.last['id'] as String;
       await onBatch?.call();
@@ -887,10 +897,14 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     return _read(
-      'SELECT t.*,j.job_number,j.customer_name,j.vehicle_label,s.source_kind,s.active AS source_active,'
+      'SELECT t.*,j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,'
+      '(SELECT MIN(document_date) FROM local_documents jd WHERE jd.business_id=t.business_id AND jd.job_id=t.job_id) AS job_document_date,'
+      'd.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,s.source_kind,CASE WHEN d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,'
       's.invoice_id,s.line_id AS source_line_id FROM regular_payroll_tasks t '
       'LEFT JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id '
       'LEFT JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id '
+      'LEFT JOIN local_documents d ON d.business_id=s.business_id AND d.id=s.invoice_id '
+      'LEFT JOIN regular_payroll_task_order o ON o.business_id=t.business_id AND o.task_id=t.id '
       'WHERE t.business_id=? ORDER BY t.id', [business],
     );
   }
@@ -901,8 +915,10 @@ class LocalPayrollRepository {
     final rows = await _read(
       "SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,"
       "p.state,p.completed_date,c.revision AS version,t.description,t.job_id,"
-      "j.job_number,j.customer_name,j.vehicle_label,c.completed AS credit_completed,"
-      "s.source_kind,CASE WHEN m.active=0 THEN 1 ELSE 0 END AS assignment_conflict,CASE WHEN m.active=0 THEN 0 ELSE s.active END AS source_active,s.invoice_id,s.line_id AS source_line_id,"
+      "j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,"
+      "(SELECT MIN(document_date) FROM local_documents jd WHERE jd.business_id=t.business_id AND jd.job_id=t.job_id) AS job_document_date,"
+      "d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,c.completed AS credit_completed,"
+      "s.source_kind,CASE WHEN m.active=0 THEN 1 ELSE 0 END AS assignment_conflict,CASE WHEN m.active=0 OR d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,s.invoice_id,s.line_id AS source_line_id,"
       "COALESCE(est.minutes,0) AS estimated_minutes,"
       "c.actual_minutes,c.rate_cents,COALESCE(at.minutes,c.actual_minutes) AS recorded_actual_minutes,"
       "COALESCE((SELECT SUM(x.minutes) FROM regular_payroll_work_coverage x "
@@ -919,6 +935,8 @@ class LocalPayrollRepository {
       "LEFT JOIN regular_payroll_actual_time at ON at.business_id=p.business_id AND at.credit_id=p.id "
       "LEFT JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id "
       "LEFT JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id "
+      "LEFT JOIN local_documents d ON d.business_id=s.business_id AND d.id=s.invoice_id "
+      "LEFT JOIN regular_payroll_task_order o ON o.business_id=t.business_id AND o.task_id=t.id "
       "LEFT JOIN regular_payroll_estimates est ON est.business_id=p.business_id "
       "AND est.task_id=p.task_id AND est.employee_id=p.employee_id "
       "WHERE (COALESCE(m.active,1)=1 OR p.state<>'Open' OR c.actual_minutes>0 OR c.paid_operation_id IS NOT NULL) AND p.business_id=? ${employee == null ? '' : 'AND p.employee_id=?'} "

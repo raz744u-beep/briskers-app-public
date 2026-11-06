@@ -17,6 +17,7 @@ import '../../services/device_owner_authorization.dart';
 import '../../services/invoice_labor_work_summary.dart';
 import '../../services/local_owner_authorization.dart';
 import '../../services/local_payroll_repository.dart';
+import '../../services/employee_nickname_store.dart';
 import '../../services/local_task_assignment_store.dart';
 import '../../services/payroll_period_totals.dart';
 import '../../services/offline_job_admin_service.dart';
@@ -48,6 +49,7 @@ class OwnerPayrollScreen extends StatefulWidget {
     this.reportsOnly = false,
     this.employeeId,
     this.employeeName,
+    this.employeeLegalName,
     this.employeeRole,
     this.employeePayType,
     this.employeeHourlyCents,
@@ -66,6 +68,7 @@ class OwnerPayrollScreen extends StatefulWidget {
   final bool reportsOnly;
   final String? employeeId;
   final String? employeeName;
+  final String? employeeLegalName;
   final String? employeeRole;
   final String? employeePayType;
   final int? employeeHourlyCents;
@@ -103,6 +106,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   bool _hasLocalData = false;
   bool _reportsLoaded = false;
   bool _backfillActive=false,_backfillDone=false;
+  int _checkedInvoices=0,_recoveredTasks=0,_unavailableInvoices=0;
   bool _authorizing = false;
   int _loadGeneration = 0;
   String _loadStage = 'saved payroll';
@@ -312,11 +316,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if(_backfillActive || !mounted){return;}
     setState(()=>_backfillActive=true);
     try{
-      await _repository.backfillInvoiceTasks(job:widget.jobId,onBatch:()async{
+      final clock=Stopwatch()..start();
+      await _repository.backfillInvoiceTasks(job:widget.jobId,onProgress:(checked,recovered,unavailable){
+        if(mounted)setState((){_checkedInvoices=checked;_recoveredTasks=recovered;_unavailableInvoices=unavailable;});
+      },onBatch:()async{
         if(!mounted){throw StateError('Tasks view closed');}
-        if(!_loadingLocal && _localRead==null){await _load();}
+        if(clock.elapsedMilliseconds>400 && !_loadingLocal && _localRead==null){await _load();clock.reset();}
       });
       _backfillDone=true;
+      if(mounted && _localRead==null)await _load();
     }catch(error){
       if(mounted && _grant!=null){setState(()=>_error='Existing invoice tasks could not finish loading. Retry: $error');}
     }finally{
@@ -327,10 +335,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   Future<void> _readLocal(int generation) async {
 
     final repository = _repository;
+    final cachedRoster=await OfflineJobAdminService(database:_db).cachedEmployees(widget.businessId);
     if (widget.employeeId != null && widget.employeeName != null &&
         widget.employeeHourlyCents != null) {
       await repository.saveEmployeeCompensation(
-        employee: widget.employeeId!, name: widget.employeeName!,
+        employee: widget.employeeId!, name: widget.employeeLegalName ??
+          cachedRoster.where((r)=>r['id']==widget.employeeId).firstOrNull?['name']?.toString() ??
+          (await repository.employees()).where((r)=>r['id']==widget.employeeId).firstOrNull?['name']?.toString() ?? widget.employeeName!,
         rate: widget.employeeHourlyCents!,
         weeklyBase: ['fixed_weekly', 'flexible_weekly'].contains(widget.employeePayType),
       );
@@ -344,15 +355,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final persistedEmployees = job == null
         ? await repository.employees()
         : await repository.assignedEmployees(job);
-    final roster = job == null
-        ? await OfflineJobAdminService(database: _db).cachedEmployees(widget.businessId)
-        : <Map<String, dynamic>>[];
-    final employees = {
+    final roster = cachedRoster;
+    final combined = {
       for (final row in roster) row['id']: row,
       for (final row in persistedEmployees)
         row['id'] ?? row['employee_id']: {...?roster.where((candidate) =>
           candidate['id'] == row['id']).firstOrNull, ...row},
     }.values.toList();
+    final employees=await EmployeeNicknameStore(database:_db).decorate(widget.businessId,combined);
     final overview = !widget.globalTasks && !widget.reportsOnly &&
         widget.employeeId == null && !_jobMode;
     final employee = widget.globalTasks || overview ? null :
@@ -441,7 +451,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           for (final row in _employees)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, row[_jobMode ? 'employee_id' : 'id']),
-              child: Text((row['employee_name'] ?? row['name'] ?? row['id']).toString()),
+              child: Text(_employeeLabel((row['id']??row['employee_id'])?.toString())),
             ),
         ],
       ),
@@ -488,7 +498,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           for (final employee in candidates)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, employee),
-              child: Text((employee['nickname'] ?? employee['name'] ?? employee['employee_name'] ?? employee['employee_id']).toString()),
+              child: Text(_employeeLabel((employee['id']??employee['employee_id'])?.toString())),
             ),
         ],
       ),
@@ -581,7 +591,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           {'id': row['source_line_id'], 'description': row['description']},
           jobId: row['job_id'] as String) : null,
     title: Text(row['description'] as String),
-    subtitle: Text('${row['employee_name']} · ${row['state']} · '
+    subtitle: Text('${_employeeLabel(row['employee_id']?.toString())} · ${row['state']} · '
       '${row['recorded_actual_minutes'] ?? row['actual_minutes']} actual min · ${row['actual_minutes']} credited min · ${row['estimated_minutes'] ?? 0} estimated min · '
       '${row['pay_status'] ?? (row['paid'] == 1 ? 'Paid' : 'Unpaid')}'
       '${row['assignment_conflict']==1?' · Assignment changed; Owner review required':row['source_active'] == 0 ? ' · Removed from invoice' : ''}'),
@@ -612,7 +622,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           for (final employee in _employees)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, employee),
-              child: Text((employee['employee_name'] ?? employee['name']).toString()),
+              child: Text(_employeeLabel((employee['id']??employee['employee_id'])?.toString())),
             ),
         ],
       ),
@@ -670,7 +680,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       await pending.intent(request);
       final ledger = await _localPaymentLedger(operation: operation);
       if (base > 0) {
-        await ledger.enableWeeklyBase(employee, widget.employeeName ?? _employeeLabel(employee));
+        await ledger.enableWeeklyBase(employee, _employeeLabel(employee));
       }
       final identity = await PayrollLanIdentity.load();
       final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, employee);
@@ -782,7 +792,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           value: _employee,
           items: [
             for (final row in _employees)
-              DropdownMenuItem(value: row['id'] as String, child: Text(row['name'].toString())),
+              DropdownMenuItem(value: row['id'] as String, child: Text(_employeeLabel(row['id'] as String))),
           ],
           onChanged: _busy ? null : (value) {
             setState(() {
@@ -830,7 +840,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     Expanded(child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(widget.employeeName ?? 'Employee', maxLines: 1, overflow: TextOverflow.ellipsis,
+        Text(_employeeLabel(widget.employeeId), maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
         Text('${widget.employeeRole ?? 'Employee'} · ${widget.employeeActive ? 'Active' : 'Inactive'}',
           style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
@@ -946,7 +956,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final additional = _laborAdditionalToBase;
     await Navigator.of(context).push<void>(MaterialPageRoute(
       builder: (_) => WeeklyLaborReview(
-        employeeId: employee, employeeName: widget.employeeName ?? _employeeLabel(employee),
+        employeeId: employee, employeeName: _employeeLabel(employee),
         tasks: _work, week: _week,
         weeklyBaseCents: (base * 100).round(),
         weeklyAdjustmentCents: (adjustment * 100).round(),
@@ -1318,11 +1328,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if(!mounted||_grant==null)return;
     final roster=await OfflineJobAdminService(database:_db).cachedEmployees(widget.businessId);
     final known=await _repository.employees();
-    final staff={for(final r in roster) r['id']:r,for(final r in known) r['id']:r};
+    final staff={for(final r in known) r['id']:r,for(final r in roster) r['id']:{...?known.where((k)=>k['id']==r['id']).firstOrNull,...r}};
     if(!mounted)return;
     String? employee=widget.employeeId;
     employee??=await showDialog<String>(context:context,builder:(c)=>SimpleDialog(title:const Text('Assign task'),children:[
-      for(final e in staff.entries)SimpleDialogOption(onPressed:()=>Navigator.pop(c,e.key),child:Text((e.value['nickname']??e.value['name']??e.key).toString()))]));
+      for(final e in staff.entries)SimpleDialogOption(onPressed:()=>Navigator.pop(c,e.key),child:Text(EmployeeNicknameStore.displayLabel(e.value,staff.values)))]));
     if(employee==null||!mounted)return;
     final description=await payrollLanInput(context,'New Service Task','Task description');
     if(description==null||description.trim().isEmpty||!mounted)return;
@@ -1410,7 +1420,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         child:SingleChildScrollView(child:Column(
           mainAxisSize:MainAxisSize.min,
           crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-          Text('New General Task · ${widget.employeeName ?? _employeeLabel(employee)}',
+          Text('New General Task · ${_employeeLabel(employee)}',
             style:const TextStyle(fontSize:19,fontWeight:FontWeight.w800)),
           const SizedBox(height:12),
           TextField(controller:description,minLines:1,maxLines:3,
@@ -1527,7 +1537,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       })
       : WeeklyLaborReview(
         employeeId: widget.employeeId!,
-        employeeName: widget.employeeName ?? 'Employee',
+        employeeName: _employeeLabel(widget.employeeId),
         tasks: _work, week: _week, embedded: true,
         advanceBalance: () => _repository.advance(widget.employeeId!),
         recordPayment: _recordWeekly,
@@ -1538,7 +1548,17 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
   String _employeeLabel(String? employee) {
     final row = _employees.where((row) => row['id'] == employee).firstOrNull;
-    return (row?['nickname'] ?? row?['name'] ?? employee ?? 'Unassigned').toString();
+    if(row!=null)return EmployeeNicknameStore.displayLabel(row,_employees);
+    return employee==widget.employeeId ? widget.employeeName??'Employee' : employee??'Unassigned';
+  }
+
+  Widget _recoveryStatus() {
+    if(!_backfillActive && !_backfillDone)return const SizedBox.shrink();
+    return Padding(padding:const EdgeInsets.symmetric(horizontal:12,vertical:3),child:Row(children:[
+      Expanded(child:Text('${_backfillActive?'Checking saved invoices':'Saved invoices checked'}: $_checkedInvoices · Recovered labor: $_recoveredTasks'
+        '${_unavailableInvoices>0?' · $_unavailableInvoices without usable local details':''}',style:const TextStyle(fontSize:11))),
+      if(!_backfillActive && _unavailableInvoices>0)TextButton(onPressed:()=>_run(()async{_backfillDone=false;}),child:const Text('Retry')),
+    ]));
   }
 
   Widget _workspace() {
@@ -1549,6 +1569,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final service = [
       for (final entry in byTask.entries)
         {...entry.value.first,
+          'source_missing': entry.value.every((r)=>r['source_active']==0 && r['state']=='Open')?1:0,
           'line_id': entry.key,
           'document_id': entry.value.first['invoice_id'],
           'source_description': entry.value.first['description'],
@@ -1574,6 +1595,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           ),
         if (_busy) const LinearProgressIndicator(),
         if (_error != null) Text(_error!),
+        _recoveryStatus(),
         if (_grant != null)
           Expanded(child: TasksWorkspace(
             serviceTasks: service,
@@ -1603,12 +1625,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               await _run(() => _repository.setShopTaskStatus(row['employee_id'] as String, id, status));
             },
             onOpenJob: (id) => _openRecordedWork(id, invoice: false),
-            onEmployeeTap: (id) => Navigator.of(context).push<void>(MaterialPageRoute(
-              builder: (_) => OwnerPayrollScreen(
-                businessId: widget.businessId, employeeId: id,
-                employeeName: _employeeLabel(id),
-              ),
-            )),
+            onEmployeeTap: (id) => _openEmployeeProfile(id,_week,0),
           )),
       ]),
     );
@@ -1641,7 +1658,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             child: Text(_authorizing ? 'Unlocking Owner payroll…' : 'Unlock Owner payroll'),
           ),
         if (_authorizing || _loadingLocal || _backfillActive) const LinearProgressIndicator(),
-        if(_backfillActive)const Text('Checking saved invoice tasks…'),
+        _recoveryStatus(),
         if (_error != null)
           ConstrainedBox(constraints:const BoxConstraints(maxHeight:96),child:SingleChildScrollView(child:ListTile(dense: true, title: Text(_error!), trailing: TextButton(
             onPressed: _authorizing ? null : () => _run(() async {}), child: const Text('Retry'))))),
@@ -1684,6 +1701,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       builder: (_) => OwnerPayrollScreen(
         businessId: widget.businessId, employeeId: id, employeeName: _employeeLabel(id),
         employeeRole: (row['position'] ?? row['position_name'])?.toString(),
+        employeeLegalName: row['name']?.toString(),
         employeePayType: row['payment_type']?.toString(),
         initialWeek: week, initialTab: tab, database: widget.database,
         unlockOwner: widget.unlockOwner, ownerConnection: widget.ownerConnection,
@@ -1709,10 +1727,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         ),
       if (_busy) const LinearProgressIndicator(),
       if (_error != null) Text(_error!),
+      _recoveryStatus(),
       if (_grant != null)
         Expanded(child: PayrollOverview(
           employees: _employees, work: _work, payments: _overviewPayments,
-          onOpenProfile: (id, week) => _openEmployeeProfile(id, week, 1),
+          onOpenProfile: (id, week) => _openEmployeeProfile(id, week, 0),
           onReviewWeek: (id, week) => _openEmployeeProfile(id, week, 0),
         )),
     ]),
@@ -1777,7 +1796,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                   value: _employee,
                   items: [
                     for (final employee in _employees)
-                      DropdownMenuItem(value: employee['id'] as String, child: Text(employee['name'].toString())),
+                      DropdownMenuItem(value: employee['id'] as String, child: Text(_employeeLabel(employee['id'] as String))),
                   ],
                   onChanged: _busy ? null : (value) {
                     setState(() {

@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
+import 'package:briskers_app/services/local_document_sql_store.dart';
+import 'dart:convert';
 import 'package:briskers_app/services/local_payroll_repository.dart';
 import 'package:briskers_app/services/local_owner_authorization.dart';
 import 'package:briskers_app/services/payroll_lan_identity.dart';
@@ -115,6 +117,42 @@ void main(){
       base:0,hourlyAdjustment:0,adjustmentReason:'',repayment:0,confirmedNet:8000),isTrue);
     final fullyPaid=(await repo.work(employee:'b')).singleWhere((r)=>r['id']==turbo['id']);
     expect(fullyPaid['paid'],1);expect(fullyPaid['remaining_minutes'],0);expect(await repo.history('b'),hasLength(2));
+    // Simulate the phone's partially indexed, still-unsynced invoice. Existing
+    // paid credits/payment payloads must survive recovery byte for byte.
+    final paymentsBefore=(await db.customSelect('SELECT * FROM regular_payroll_payments ORDER BY operation_id').get()).map((r)=>r.data).toList();
+    final coverageBefore=(await db.customSelect('SELECT * FROM regular_payroll_work_coverage ORDER BY operation_id').get()).map((r)=>r.data).toList();
+    final paidCreditBefore=(await db.customSelect('SELECT * FROM local_mechanic_work_credits_v1 WHERE allocation_id=?',variables:[Variable(turbo['id'] as String)]).getSingle()).data;
+    final secondId=task('second');
+    await db.customStatement("DELETE FROM regular_payroll_task_sources WHERE invoice_id='invoice' AND line_id='second'");
+    final detail=invoice(quantity:7,more:true);
+    (detail['lines'] as List).add({'id':'missing-labor','line_kind':'labor','description':'Previously unindexed labor','quantity':1});
+    await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','invoice'),jsonEncode(detail));
+    await db.customStatement("INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,payload_json,state) VALUES('shop','document_draft_create','invoice','create','{}','pending')");
+    await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind,document_number) VALUES('unavailable','shop','job','invoice','SYNTHETIC-NO-CACHE')");
+    final outboxBefore=(await db.customSelect('SELECT * FROM sync_outbox').get()).map((r)=>r.data).toList();
+    var recovered=0,unavailable=0;
+    await repo.backfillInvoiceTasks(onProgress:(checked,added,unknown){recovered=added;unavailable=unknown;});
+    expect(recovered,2);expect(unavailable,1);
+    final indexed=await repo.tasks();
+    expect(indexed.singleWhere((r)=>r['source_line_id']=='second')['id'],secondId);
+    expect(indexed.where((r)=>r['source_line_id']=='missing-labor'),hasLength(1));
+    await repo.backfillInvoiceTasks();
+    expect(await repo.tasks(),hasLength(indexed.length));
+    expect((await db.customSelect('SELECT * FROM regular_payroll_payments ORDER BY operation_id').get()).map((r)=>r.data).toList(),paymentsBefore);
+    expect((await db.customSelect('SELECT * FROM regular_payroll_work_coverage ORDER BY operation_id').get()).map((r)=>r.data).toList(),coverageBefore);
+    expect((await db.customSelect('SELECT * FROM local_mechanic_work_credits_v1 WHERE allocation_id=?',variables:[Variable(turbo['id'] as String)]).getSingle()).data,paidCreditBefore);
+    expect((await db.customSelect('SELECT * FROM sync_outbox').get()).map((r)=>r.data).toList(),outboxBefore);
+    expect((await repo.work(employee:'b')).singleWhere((r)=>r['id']==turbo['id'])['remaining_minutes'],0);
+    // Removing a line deactivates only its source, never its earned/paid work.
+    (detail['lines'] as List).removeWhere((r)=>r['id']=='missing-labor');
+    await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','invoice'),jsonEncode(detail));
+    await repo.backfillInvoiceTasks();
+    expect((await repo.tasks()).singleWhere((r)=>r['source_line_id']=='missing-labor')['source_active'],0);
+    await db.customStatement("UPDATE local_documents SET status='voided' WHERE id='invoice'");
+    await LocalDocumentDetailCache(database:db).load('shop','invoice');
+    expect((await repo.tasks()).where((r)=>r['source_kind']=='invoice').every((r)=>r['source_active']==0),isTrue);
+    expect(await repo.history('b'),hasLength(2));
+
 
   });
 }

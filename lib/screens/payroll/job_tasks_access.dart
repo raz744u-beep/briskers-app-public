@@ -5,6 +5,7 @@ import '../../local/briskers_local_database.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/device_owner_authorization.dart';
 import '../../services/local_payroll_repository.dart';
+import '../../services/employee_nickname_store.dart';
 import '../../services/offline_job_admin_service.dart';
 import 'owner_payroll_screen.dart';
 import 'payroll_ui_scope.dart';
@@ -38,14 +39,17 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
       if(names.containsAll({'regular_payroll_task_sources','regular_payroll_portions','regular_payroll_employees'})){
         final nicknames=names.contains('local_employee_nicknames');
         final meta=names.contains('regular_payroll_assignment_meta');
-        final rows=await db.customSelect('SELECT ${nicknames?"COALESCE(NULLIF(n.nickname,''),e.name)":"e.name"} AS name '
+        final rows=await db.customSelect('SELECT e.id,e.name AS legal_name,${nicknames?"COALESCE(NULLIF(n.nickname,''),e.name)":"e.name"} AS name '
           'FROM regular_payroll_task_sources s JOIN regular_payroll_portions p ON p.business_id=s.business_id AND p.task_id=s.task_id '
           'JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id '
           '${nicknames?'LEFT JOIN local_employee_nicknames n ON n.business_id=p.business_id AND n.employee_id=p.employee_id ':''}'
           '${meta?'LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id ':''}'
           'WHERE s.business_id=? AND s.invoice_id=? AND s.line_id=? AND s.active=1 ${meta?'AND COALESCE(m.active,1)=1 ':''}ORDER BY e.name',
           variables:[widget.business,widget.invoice!,widget.line!].map(Variable<String>.new).toList()).get();
-        if(rows.isNotEmpty){caption='Assigned: ${rows.map((r)=>r.read<String>('name')).join(' + ')}';}
+        if(rows.isNotEmpty){
+          final people=rows.map((r)=>{'id':r.data['id'],'name':r.data['legal_name'],'nickname':r.data['name']}).toList();
+          caption='Assigned: ${people.map((p)=>EmployeeNicknameStore.displayLabel(p,people)).join(' + ')}';
+        }
       }
       if(mounted){setState(()=>lineAssignment=caption);}
     }catch(_){if(mounted){setState(()=>lineAssignment='Assignment unavailable; open task to retry');}}
@@ -109,7 +113,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
           decoration:const InputDecoration(labelText:'Main Mechanic'),isExpanded:true,
           items:[const DropdownMenuItem<String>(value:null,child:Text('Unassigned')),
             for(final entry in values.entries) if(entry.key is String)
-              DropdownMenuItem(value:entry.key as String,child:Text((entry.value['nickname']??entry.value['name']??entry.key).toString()))],
+              DropdownMenuItem(value:entry.key as String,child:Text(EmployeeNicknameStore.displayLabel(entry.value,staff)))],
           onChanged:busy?null:chooseMain)),
         const SizedBox(width:8),OutlinedButton.icon(onPressed:open,icon:const Icon(Icons.task_alt),label:const Text('Tasks'))]),
       if(estimated!=null)Text('Estimated labor: ${(estimated!/60).toStringAsFixed(2)} h · Actual: ${(actual!/60).toStringAsFixed(2)} h',style:const TextStyle(fontSize:12)),
