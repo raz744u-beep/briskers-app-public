@@ -607,6 +607,35 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     );
   }
 
+  /// Consistent compact money styling approved for Customer Details.
+  Widget _customerDocumentAmount(String amount, {bool estimate = false}) {
+    final foreground = estimate
+        ? const Color(0xFF6550A2)
+        : const Color(0xFF167B43);
+    final background = estimate
+        ? const Color(0xFFF1EDFA)
+        : const Color(0xFFE7F5EB);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        child: Text(
+          amount,
+          textAlign: TextAlign.right,
+          maxLines: 1,
+          style: TextStyle(
+            fontSize: 16.5,
+            fontWeight: FontWeight.w800,
+            color: foreground,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _customerOverviewCard() => FutureBuilder<List<Map<String, dynamic>>>(
     key: ValueKey(('customer-overview', widget.customerId,
         _jobVisibility.epoch, _activityRevision)),
@@ -669,8 +698,13 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           if (balance > 0 || pending > 0) ...[
             const Divider(height: 12),
             if (balance > 0)
-              ListTile(dense: true, title: Text(tr('customerInvoiceBalanceDue')),
-                trailing: Text('\u0024${(balance/100).toStringAsFixed(2)}')),
+              ListTile(
+                dense: true,
+                title: Text(tr('customerInvoiceBalanceDue')),
+                trailing: _customerDocumentAmount(
+                  '\u0024${(balance / 100).toStringAsFixed(2)}',
+                ),
+              ),
             if (pending > 0)
               ListTile(dense: true, title: Text(tr('customerPendingReceipts')),
                 trailing: Text('\u0024${(pending/100).toStringAsFixed(2)}')),
@@ -697,7 +731,11 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 maxLines: 2, overflow: TextOverflow.ellipsis),
               trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                 if (item['total'] is num)
-                  Text('\u0024${(item['total'] as num).toStringAsFixed(2)}'),
+                  _customerDocumentAmount(
+                    '\u0024${(item['total'] as num).toStringAsFixed(2)}',
+                    estimate: item['type'] == 'estimate',
+                  ),
+                const SizedBox(width: 4),
                 const Icon(Icons.chevron_right, size: 18),
               ]),
               onTap: () => _openOverviewRecord(item),
