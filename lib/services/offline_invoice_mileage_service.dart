@@ -1,3 +1,4 @@
+import 'sync_replay_fence.dart';
 import 'dart:convert';
 
 import 'package:drift/drift.dart' show Variable;
@@ -195,7 +196,7 @@ class OfflineInvoiceMileageService {
         // queued operation for Owner review instead of re-sending it on every
         // Auto refresh and exhausting PostgREST connections.
         final message = error.toString();
-        final versionConflict = message.contains('40001') ||
+        final versionConflict = isSyncVersionConflict(error) ||
             message.contains('Invoice changed elsewhere');
         await _database.customStatement(
           """UPDATE sync_outbox SET state=?,last_attempt_at=?,last_error=?

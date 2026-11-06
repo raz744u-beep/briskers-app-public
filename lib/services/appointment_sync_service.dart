@@ -1,3 +1,4 @@
+import 'sync_replay_fence.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -1209,7 +1210,7 @@ class AppointmentSyncService {
       } catch (error) {
         if (error is LocalJobQuarantineException) rethrow;
         final message=error.toString();
-        final conflict=message.contains('40001') ||
+        final conflict=isSyncVersionConflict(error) ||
           message.contains('Appointment changed on another device') ||
           // A previously deleted appointment cannot be deleted again with
           // the stale local revision. Stop infinite replay; keep the local
@@ -1273,7 +1274,7 @@ class AppointmentSyncService {
       } catch (error) {
         if (error is LocalJobQuarantineException) rethrow;
         final message=error.toString();
-        final conflict=message.contains('40001') ||
+        final conflict=isSyncVersionConflict(error) ||
           message.contains('Appointment changed on another device');
         await _database.transaction(() async {
           await _database.customStatement(
@@ -1380,7 +1381,7 @@ class AppointmentSyncService {
       } catch (error) {
         if (error is LocalJobQuarantineException) rethrow;
         final message = error.toString();
-        final conflict = message.contains('40001') ||
+        final conflict = isSyncVersionConflict(error) ||
             message.contains('Appointment changed on another device');
         await _database.transaction(() async {
           await _database.customStatement(

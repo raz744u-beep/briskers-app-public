@@ -1,0 +1,48 @@
+name: Retry storm protection
+on:
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'test/**'
+      - 'tools/review/nonretryable_business_conflicts.sql'
+      - 'tools/tests/retry_storm*'
+      - '.github/workflows/retry-storm-regression.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  CI: 'true'
+  FLUTTER_SUPPRESS_ANALYTICS: 'true'
+  DASH__SUPPRESS_ANALYTICS: 'true'
+jobs:
+  retry-storm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Create isolated app shell
+        run: |
+          flutter create --platforms=android --org com.briskers --project-name briskers_app generated
+          rm -rf generated/lib generated/test
+          cp -R lib test generated/
+          cp pubspec.yaml analysis_options.yaml generated/
+          cp -R assets generated/
+      - name: Generate SQLite bindings and analyze
+        working-directory: generated
+        run: |
+          flutter pub get
+          dart run build_runner build --delete-conflicting-outputs
+          flutter analyze
+      - name: Retry bounds and restart regressions (synthetic local transports)
+        working-directory: generated
+        run: flutter test --reporter expanded test/sync_replay_fence_test.dart
+      - name: Isolated PostgreSQL conflict regression
+        run: |
+          npm ci --prefix tools/tests/customer_payment_category --ignore-scripts --no-audit --no-fund
+          node tools/tests/retry_storm_server_test.mjs

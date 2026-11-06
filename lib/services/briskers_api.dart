@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/supabase_config.dart';
+import '../local/local_database_provider.dart';
+import 'sync_replay_fence.dart';
 
 /// A queued replay can checkpoint each mutation within a multi-stage upload.
 /// Keeping the actual response inside the guard also preserves late receipts.
@@ -18,6 +20,16 @@ Future<T> runAttachmentMutation<T>(
 
 class BriskersApi {
   const BriskersApi();
+
+  Future<dynamic> _fencedRpc(String name,
+      {required Map<String, dynamic> params}) =>
+      SyncReplayFence(localDatabase).run(
+        params['p_business_id'].toString(),
+        // Full revision-bound request identity; no random retry IDs. This is
+        // local-only state, never a second server idempotency mechanism.
+        'rpc:$name:${jsonEncode(params)}',
+        () => networkSupabase.rpc(name, params: params),
+      );
 
   Future<List<Map<String, dynamic>>> myBusinesses() async {
     final result = await networkSupabase.rpc('briskers_my_businesses');
@@ -2730,7 +2742,7 @@ class BriskersApi {
     required String operationId,
     required int baseVersion,
   }) async {
-    final result = await networkSupabase.rpc(
+    final result = await _fencedRpc(
       'briskers_sync_offline_appointment_delete',
       params: {
         'p_business_id': businessId,
@@ -3720,7 +3732,7 @@ class BriskersApi {
     required int expectedVersion,
     required num? mileageOut,
   }) async {
-    final result = await networkSupabase.rpc(
+    final result = await _fencedRpc(
       'briskers_save_invoice_mileage_out_v1',
       params: {
         'p_business_id': businessId,
@@ -4441,7 +4453,7 @@ class BriskersApi {
     String documentId, {
     required int expectedVersion,
   }) async {
-    final result = await networkSupabase.rpc(
+    final result = await _fencedRpc(
       'briskers_issue_document',
       params: {
         'p_business_id': businessId,

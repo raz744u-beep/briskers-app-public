@@ -132,7 +132,6 @@ class _BusinessGateState extends State<BusinessGate> with WidgetsBindingObserver
     _inForeground = state == AppLifecycleState.resumed;
     if (_inForeground && mounted) {
       // Return to the app is an opportunity to recover an interrupted upload.
-      _nextRetryAt = null;
       unawaited(_retryPendingAutoSync());
     }
   }
