@@ -117,7 +117,7 @@ class LocalPayrollRepository {
   /// Explicit and bounded invoice-task recovery. Checkpoints are persisted
   /// in the local shop database, so a resumed batch does not restart at zero.
   /// This is a derived index only; no payroll payments are recorded.
-  Future<bool> backfillInvoiceTasks({String? job,int maxInvoices=25,
+  Future<bool> backfillInvoiceTasks({String? job,int maxInvoices=25,bool resume=false,
     Future<void> Function()? onBatch,
     void Function(int checked,int recovered,int unavailable)? onProgress}) async {
     _authorize();
@@ -130,8 +130,8 @@ class LocalPayrollRepository {
     final stored=await _read(
       'SELECT cursor,complete FROM regular_payroll_recovery_cursor '
       'WHERE business_id=? AND job_id=?',[business,scope]);
-    if(stored.isNotEmpty && stored.single['complete']==1)return false;
-    var after=stored.isEmpty?'':stored.single['cursor'] as String;
+    if(resume && stored.isNotEmpty && stored.single['complete']==1)return false;
+    var after=!resume || stored.isEmpty?'':stored.single['cursor'] as String;
     var checked=0,recovered=0,unavailable=0;
     while(checked<maxInvoices){
       _authorize();
@@ -143,7 +143,7 @@ class LocalPayrollRepository {
         "${job==null?'':'AND job_id=? '}ORDER BY id LIMIT $limit",
         [business,after,?job]);
       if(rows.isEmpty){
-        await db.customStatement(
+        if(resume)await db.customStatement(
           'INSERT INTO regular_payroll_recovery_cursor VALUES(?,?,?,1) '
           'ON CONFLICT(business_id,job_id) DO UPDATE SET complete=1',
           [business,scope,after]);
@@ -173,9 +173,9 @@ class LocalPayrollRepository {
         after=id;
         onProgress?.call(checked,recovered,unavailable);
       }
-      // Reprocessing a previously completed invoice is idempotent. Persist
-      // cursor only after this batch of invoice reads/derived saves completed.
-      await db.customStatement(
+      // A resumable UI scan checkpoints; explicit reconciliation can always
+      // re-read an edited invoice from the beginning without a stale cursor.
+      if(resume)await db.customStatement(
         'INSERT INTO regular_payroll_recovery_cursor VALUES(?,?,?,0) '
         'ON CONFLICT(business_id,job_id) DO UPDATE SET cursor=excluded.cursor,complete=0',
         [business,scope,after]);
