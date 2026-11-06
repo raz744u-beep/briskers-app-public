@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:drift/drift.dart' show Variable;
 import '../../services/local_customer_repository.dart';
 import '../jobs/job_customer_picker_screen.dart';
@@ -95,6 +96,13 @@ class OwnerPayrollScreen extends StatefulWidget {
 class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBindingObserver {
   BriskersLocalDatabase get _db => widget.database ?? PayrollUiScope.of(context)?.database ?? localDatabase;
   LocalOwnerGrant? _grant;
+  bool _viewAuthorized=false;
+  bool _debugOwnerView=false;
+  OwnerSessionIdentity? _viewIdentity;
+  bool get _canView=>_viewAuthorized && (_debugOwnerView || _viewIdentity?.matches(
+    DeviceOwnerAuthorization.instance.currentIdentity())==true);
+  late final _viewRepository=LocalPayrollRepository(_db,
+    business:widget.businessId,owner:true);
   List<Map<String, dynamic>> _employees = [];
   List<Map<String, dynamic>> _work = [];
   List<Map<String, dynamic>> _taskSources = [];
@@ -149,38 +157,36 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _week = widget.initialWeek ?? DateTime.now();
-    _lockCheck = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (_grant == null || _busy) return;
-      try {
-        _assertOwner();
-      } on StateError {
-        _historyUnlocked.value = false;
-        setState(() {
-          _loadGeneration++;
-          _hasLocalData = false;
-          _reportsLoaded = false;
-          _grant = null;
-          _employee = null;
-          _employees = [];
-          _work = [];
-          _taskSources = [];
-          _history = [];
-          _overviewPayments = [];
-          _pendingPayments = [];
-          _advanceBalance = null;
-          _repayments = [];
-          _openingAdvance = null;
-          _editingOpening = false;
-          _weeklyDefaultsLoaded = false;
-          _weeklyBasePreview.clear();
-          _hourlySupplementPreview.clear();
-          _approvedSupplementHours.clear();
-          _weeklyAdjustmentPreview.clear();
-          _laborAdditionalToBase = false;
-          _generalTasks = [];
-        });
+    WidgetsBinding.instance.addPostFrameCallback((_){
+      if(mounted)unawaited(_openSavedOwnerView());
+    });
+    _lockCheck=Timer.periodic(const Duration(seconds:5),(_){
+      if(_grant==null || _busy)return;
+      try{_assertOwner();}on StateError{
+        if(mounted)setState(()=>_grant=null);
       }
     });
+  }
+
+  Future<void> _openSavedOwnerView() async {
+    // Debug-only injected owner fixture never bypasses release identity checks.
+    final debugOwner=kDebugMode && (PayrollUiScope.of(context)?.debugAllowOwnerView ?? false);
+    final identity=DeviceOwnerAuthorization.instance.currentIdentity();
+    final allowed=debugOwner || await DeviceOwnerAuthorization.instance.canViewSavedOwnerPayroll(widget.businessId);
+    if(!mounted)return;
+    final same=debugOwner || identity?.matches(DeviceOwnerAuthorization.instance.currentIdentity())==true;
+    setState((){
+      _debugOwnerView=debugOwner;
+      _viewAuthorized=allowed && same;
+      _viewIdentity=_viewAuthorized?identity:null;
+      if(!_viewAuthorized){
+        _grant=null;_loadGeneration++;_hasLocalData=false;_reportsLoaded=false;
+        _employees=[];_work=[];_taskSources=[];_history=[];_overviewPayments=[];
+        _pendingPayments=[];_historyUnlocked.value=false;
+        _error='Sign in to the saved Owner account to view payroll.';
+      }else{_error=null;_historyUnlocked.value=true;}
+    });
+    if(_canView)await _load();
   }
 
   @override
@@ -216,15 +222,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if(state==AppLifecycleState.paused && !_authorizing && _grant!=null){
-      _historyUnlocked.value=false;
-      setState((){_grant=null;_hasLocalData=false;_reportsLoaded=false;_loadGeneration++;});
+      setState(()=>_grant=null);
     }
-    if (state == AppLifecycleState.resumed && _grant != null) {
-      try { _assertOwner(); } on StateError {
-        _historyUnlocked.value = false;
-        setState(() { _grant = null; _hasLocalData = false; _loadGeneration++; });
-      }
-    }
+    if(state==AppLifecycleState.resumed)unawaited(_openSavedOwnerView());
   }
 
   Future<void> _run(
@@ -282,6 +282,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Future<void> _load() async {
+    if(!_canView)return;
     if (_localRead != null) {
       if(mounted && !_loadingLocal)setState(()=>_error='Saved payroll database is still busy. Navigation remains available; retry shortly.');
       return;
@@ -307,45 +308,38 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       debugPrint('PAYROLL_LOCAL stage=$_loadStage elapsed_ms=${timer.elapsedMilliseconds}');
       if (mounted) {
         setState(() => _loadingLocal = false);
-        if(_hasLocalData && !_backfillDone && !_backfillActive){unawaited(_backfillTasks());}
+        // Do not launch 1,179-invoice recovery every time Payroll opens.
       }
     }
   }
 
-  Future<void> _backfillTasks()async{
-    if(_backfillActive || !mounted){return;}
+  Future<void> _backfillTasks() async {
+    if(_backfillActive || !mounted || !_canView)return;
     setState(()=>_backfillActive=true);
     try{
-      final clock=Stopwatch()..start();
-      await _repository.backfillInvoiceTasks(job:widget.jobId,onProgress:(checked,recovered,unavailable){
-        if(mounted)setState((){_checkedInvoices=checked;_recoveredTasks=recovered;_unavailableInvoices=unavailable;});
-      },onBatch:()async{
-        if(!mounted){throw StateError('Tasks view closed');}
-        if(clock.elapsedMilliseconds>400 && !_loadingLocal && _localRead==null){await _load();clock.reset();}
-      });
-      _backfillDone=true;
-      if(mounted && _localRead==null)await _load();
+      final more=await _viewRepository.backfillInvoiceTasks(job:widget.jobId,
+        maxInvoices:25,resume:true,onProgress:(checked,recovered,unavailable){
+          if(mounted && _canView){
+            setState((){
+              _checkedInvoices=checked;_recoveredTasks=recovered;
+              _unavailableInvoices=unavailable;
+            });
+          }
+        });
+      if(mounted && _canView){
+        _backfillDone=!more;
+        if(_localRead==null)await _load();
+      }
     }catch(error){
-      if(mounted && _grant!=null){setState(()=>_error='Existing invoice tasks could not finish loading. Retry: $error');}
-    }finally{
-      if(mounted){setState(()=>_backfillActive=false);}
-    }
+      if(mounted && _canView)setState(()=>_error='Recovery paused: $error');
+    }finally{if(mounted)setState(()=>_backfillActive=false);}
   }
 
   Future<void> _readLocal(int generation) async {
 
-    final repository = _repository;
+    if(!_canView)return;
+    final repository = _viewRepository;
     final cachedRoster=await OfflineJobAdminService(database:_db).cachedEmployees(widget.businessId);
-    if (widget.employeeId != null && widget.employeeName != null &&
-        widget.employeeHourlyCents != null) {
-      await repository.saveEmployeeCompensation(
-        employee: widget.employeeId!, name: widget.employeeLegalName ??
-          cachedRoster.where((r)=>r['id']==widget.employeeId).firstOrNull?['name']?.toString() ??
-          (await repository.employees()).where((r)=>r['id']==widget.employeeId).firstOrNull?['name']?.toString() ?? widget.employeeName!,
-        rate: widget.employeeHourlyCents!,
-        weeklyBase: ['fixed_weekly', 'flexible_weekly'].contains(widget.employeePayType),
-      );
-    }
     if (!mounted || generation != _loadGeneration) return;
     _loadStage = 'pending requests';
     final pendingPayments = await PayrollOwnerLedger(_db, widget.businessId).pending();
@@ -370,7 +364,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         widget.employeeId ?? _employee ?? (employees.firstOrNull?['id'] as String?);
     final work = await repository.work(employee: _jobMode ? null : employee, job: job);
     if(!mounted||generation!=_loadGeneration)return;
-    _assertOwner();
+    if(!_canView)return;
     setState((){_hasLocalData=true;_employees=employees;_employee=employee;_work=work;_taskSources=sources;});
     _loadStage = 'payment history';
     final history = employee == null || _jobMode
@@ -393,7 +387,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final generalTasks = widget.globalTasks ? await repository.shopTasks()
         : employee == null || widget.employeeId == null || widget.reportsOnly
             ? <Map<String, dynamic>>[] : await repository.shopTasks(employee);
-    _assertOwner();
+    if(!_canView)return;
     if (!mounted || generation != _loadGeneration) return;
     _historyUnlocked.value = true;
     setState(() {
@@ -760,12 +754,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   void _openRecordedWork(String id, {required bool invoice}) {
-    try {
-      _assertOwner();
-    } on StateError {
-      _run(() async {});
-      return;
-    }
+    if(!_canView)return;
     Navigator.of(context).push<void>(MaterialPageRoute(
       builder: (_) => invoice
           ? JobDocumentScreen(
@@ -781,14 +770,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   Widget _reports() => Scaffold(
     appBar: AppBar(title: Text(widget.employeeName ?? 'Payroll reports')),
     body: Column(children: [
-      if (_grant == null || _error != null)
-        FilledButton(
-          onPressed: _busy ? null : () => _run(() async {}),
-          child: const Text('Unlock Owner payroll'),
-        ),
+      if(!_canView)const Text('Sign in as Owner to view payroll.'),
       if (_busy) const LinearProgressIndicator(),
       if (_error != null) Text(_error!),
-      if (_grant != null && widget.employeeId == null && _employees.isNotEmpty)
+      if (_canView && widget.employeeId == null && _employees.isNotEmpty)
         DropdownButton<String>(
           value: _employee,
           items: [
@@ -800,10 +785,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               _employee = value;
               _history = [];
             });
-            _run(() async {});
+            unawaited(_load());
           },
         ),
-      if (_grant != null)
+      if (_canView)
         Expanded(child: _reportsPanel()),
     ]),
   );
@@ -966,7 +951,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         settlementReason: additional
             ? 'Owner-approved weekly base and supplemental labor at ${_currency.format(rate)} per hour.'
             : 'Labor included in the weekly base. Selected credits receive coverage without an added hourly component.',
-        advanceBalance: () => _repository.advance(employee),
+        advanceBalance: () => _viewRepository.advance(employee),
         recordPayment: _recordWeekly,
       ),
     ));
@@ -1540,7 +1525,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         employeeId: widget.employeeId!,
         employeeName: _employeeLabel(widget.employeeId),
         tasks: _work, week: _week, embedded: true,
-        advanceBalance: () => _repository.advance(widget.employeeId!),
+        advanceBalance: () => _viewRepository.advance(widget.employeeId!),
         recordPayment: _recordWeekly,
         onWeekChanged: (week) => _week = week,
         onCancel: () => Navigator.of(context).pop(),
@@ -1554,12 +1539,20 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Widget _recoveryStatus() {
-    if(!_backfillActive && !_backfillDone)return const SizedBox.shrink();
-    return Padding(padding:const EdgeInsets.symmetric(horizontal:12,vertical:3),child:Row(children:[
-      Expanded(child:Text('${_backfillActive?'Checking saved invoices':'Saved invoices checked'}: $_checkedInvoices · Recovered labor: $_recoveredTasks'
-        '${_unavailableInvoices>0?' · $_unavailableInvoices without usable local details':''}',style:const TextStyle(fontSize:11))),
-      if(!_backfillActive && _unavailableInvoices>0)TextButton(onPressed:()=>_run(()async{_backfillDone=false;}),child:const Text('Retry')),
-    ]));
+    if(!_canView)return const SizedBox.shrink();
+    return Padding(padding:const EdgeInsets.symmetric(horizontal:12,vertical:3),
+      child:Row(children:[
+        Expanded(child:Text(_backfillActive
+          ? 'Checking up to 25 invoices: $_checkedInvoices'
+          : _backfillDone ? 'Historical invoice recovery complete'
+          : _checkedInvoices>0
+            ? 'Last batch: $_checkedInvoices checked · $_recoveredTasks newly linked · $_unavailableInvoices unavailable'
+            : 'Historical invoice recovery (optional)',
+          style:const TextStyle(fontSize:11))),
+        if(!_backfillActive && !_backfillDone)
+          TextButton(onPressed:()=>unawaited(_backfillTasks()),
+            child:Text(_checkedInvoices==0?'Recover 25':'Continue')),
+      ]));
   }
 
   Widget _workspace() {
@@ -1589,15 +1582,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     return Scaffold(
       appBar: AppBar(title: const Text('Tasks')),
       body: Column(children: [
-        if (_grant == null || _error != null)
-          FilledButton(
-            onPressed: _busy ? null : () => _run(() async {}),
-            child: const Text('Unlock Owner tasks'),
-          ),
+        if(!_canView)const Text('Sign in as Owner to view tasks.'),
         if (_busy) const LinearProgressIndicator(),
         if (_error != null) Text(_error!),
         _recoveryStatus(),
-        if (_grant != null)
+        if (_canView)
           Expanded(child: TasksWorkspace(
             serviceTasks: service,
             generalTasks: _generalTasks,
@@ -1653,16 +1642,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             ],
           ),
         ),
-        if (_grant == null)
-          FilledButton(
-            onPressed: _authorizing ? null : () => _run(() async {}),
-            child: Text(_authorizing ? 'Unlocking Owner payroll…' : 'Unlock Owner payroll'),
-          ),
+        if(!_canView)const Text('Sign in as Owner to view profile.'),
         if (_authorizing || _loadingLocal || _backfillActive) const LinearProgressIndicator(),
         _recoveryStatus(),
         if (_error != null)
           ConstrainedBox(constraints:const BoxConstraints(maxHeight:96),child:SingleChildScrollView(child:ListTile(dense: true, title: Text(_error!), trailing: TextButton(
-            onPressed: _authorizing ? null : () => _run(() async {}), child: const Text('Retry'))))),
+            onPressed: _loadingLocal ? null : () => unawaited(_load()), child: const Text('Retry'))))),
         Expanded(child: TabBarView(children: [
           _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Tasks'),child:_safeTab(_tasksTab, 'Tasks')),
           _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Payroll'),child:_safeTab(_payrollTab, 'Payroll')),
@@ -1674,9 +1659,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   );
 
   Widget _safeTab(Widget Function() content, String name) {
-    if (_grant != null && _hasLocalData && (name=='Tasks'||_reportsLoaded)) return content();
+    if (_canView && _hasLocalData && (name=='Tasks'||_reportsLoaded)) return content();
     return Center(child: Padding(padding: const EdgeInsets.all(20), child: Text(
-      _grant == null ? '$name is locked. Unlock Owner payroll above to read saved records.'
+      !_canView ? '$name requires the saved Owner account.'
         : _loadingLocal ? 'Loading saved $name…' : 'Saved $name has not loaded. Use Retry above.')));
   }
 
@@ -1715,23 +1700,19 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         )),
       ),
     ));
-    if (mounted) await _run(() async {});
+    if (mounted) await _load();
   }
 
   Widget _overview() => Scaffold(
     appBar: AppBar(title: const Text('Payroll')),
     body: Column(children: [
-      if (_grant == null || _error != null)
-        FilledButton(
-          onPressed: _busy ? null : () => _run(() async {}),
-          child: const Text('Unlock Owner payroll'),
-        ),
+      if(!_canView)const Text('Sign in as Owner to view payroll.'),
       if (_busy || _loadingLocal || _backfillActive) const LinearProgressIndicator(),
       if (_error != null) Text(_error!),
       _recoveryStatus(),
-      if(_grant!=null && _loadingLocal && _employees.isEmpty)const Text('Loading saved employees…'),
-      if(_grant!=null && _hasLocalData && !_loadingLocal && _employees.isEmpty)const Padding(padding:EdgeInsets.all(12),child:Text('No saved employees are available. Review the offline employee roster.')),
-      if (_grant != null)
+      if(_canView && _loadingLocal && _employees.isEmpty)const Text('Loading saved employees…'),
+      if(_canView && _hasLocalData && !_loadingLocal && _employees.isEmpty)const Padding(padding:EdgeInsets.all(12),child:Text('No saved employees are available. Review the offline employee roster.')),
+      if (_canView)
         Expanded(child: !_reportsLoaded ? Center(child:Text(_loadingLocal?'Loading saved payroll totals…':'Saved payroll totals are unavailable. Use Retry above.')) : PayrollOverview(
           employees: _employees, work: _work, payments: _overviewPayments,
           onOpenProfile: (id, week) => _openEmployeeProfile(id, week, 0),
@@ -1749,8 +1730,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           padding: const EdgeInsets.all(16),
           children: [
             FilledButton(
-              onPressed: _busy ? null : () => _run(() async {}),
-              child: Text(_grant == null ? 'Unlock Owner payroll' : 'Refresh'),
+              onPressed: _loadingLocal ? null : () => unawaited(_load()),
+              child: const Text('Refresh'),
             ),
             if (_busy) const LinearProgressIndicator(),
             if (_error != null) Text(_error!),
@@ -1760,7 +1741,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               TextButton(onPressed: _busy || _employees.isEmpty ? null : () => _managePeer(pair: false),
                 child: const Text('Sync payroll over shop Wi-Fi')),
             ],
-            if (_grant != null && _jobMode) ...[
+            if (_canView && _jobMode) ...[
               const ListTile(title: Text('Invoice labor')),
               for (final invoice in <String, List<Map<String, dynamic>>>{
                 if (widget.invoiceId != null) widget.invoiceId!: widget.invoiceLines,
@@ -1792,7 +1773,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               ),
               for (final row in _work.where((r)=>widget.focusLineId==null || r['source_line_id']==widget.focusLineId)) _taskCard(row),
             ],
-            if (_grant != null && !_jobMode) ...[
+            if (_canView && !_jobMode) ...[
               if (_employees.isEmpty) const Text('No employee work has been recorded yet.'),
               if (_employees.isNotEmpty)
                 DropdownButton<String>(
@@ -1821,7 +1802,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                             .firstOrNull?['name']?.toString() ?? 'Weekly payroll',
                         tasks: _work,
                         week: DateTime.now(),
-                        advanceBalance: () => _repository.advance(employee),
+                        advanceBalance: () => _viewRepository.advance(employee),
                         recordPayment: _recordWeekly,
                       ),
                     ));

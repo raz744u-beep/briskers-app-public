@@ -13,6 +13,7 @@ import 'package:briskers_app/services/payroll_owner_lease.dart';
 import 'package:briskers_app/services/payroll_owner_ledger.dart';
 import 'package:briskers_app/services/payroll_owner_lan.dart';
 import 'package:briskers_app/screens/payroll/owner_payroll_screen.dart';
+import 'package:briskers_app/screens/payroll/payroll_ui_scope.dart';
 
 class _Unused implements OwnerEnrollmentStore {
   @override Future<String?> read() async => null;
@@ -80,11 +81,12 @@ void main() {
         }
         expect(finder, findsWidgets, reason: tester.allWidgets.whereType<Text>().map((w) => w.data).join(' | '));
       }
-      Widget screen({int tab = 0}) => MaterialApp(home: OwnerPayrollScreen(
-        businessId: 'shop', employeeId: 'a', employeeName: 'Alice', employeeRole: 'mechanic',
-        database: db, unlockOwner: unlock, ownerConnection: network, initialTab: tab));
+      Widget screen({int tab = 0}) => MaterialApp(home: PayrollUiScope(
+        database: db, unlock: unlock, connection: network, debugAllowOwnerView: true,
+        child: OwnerPayrollScreen(
+          businessId: 'shop', employeeId: 'a', employeeName: 'Alice', employeeRole: 'mechanic',
+          database: db, unlockOwner: unlock, ownerConnection: network, initialTab: tab)));
       await tester.pumpWidget(screen());
-      await tester.tap(find.text('Unlock Owner payroll'));
       await until(find.widgetWithText(FilledButton, 'Verify Payment'));
       expect(find.text('Tasks'), findsOneWidget);
       expect(find.text('Payroll'), findsOneWidget);
@@ -93,7 +95,8 @@ void main() {
         // Owner bookkeeping must not require the employee to own a paired phone.
         await tester.tap(find.text('Payroll'));
         await tester.pumpAndSettle();
-        await until(find.text('Advances & Repayments'));
+        await tester.scrollUntilVisible(find.text('Advances & Repayments'), 220,
+          scrollable: find.byType(Scrollable).last);
         await tester.ensureVisible(find.text('Advances & Repayments'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Advances & Repayments'));
@@ -151,7 +154,6 @@ void main() {
         network = PayrollOwnerLan(lease: authority, database: db, actor: 'owner', approve: (_) async => null);
       });
       await tester.pumpWidget(screen(tab: 2));
-      await tester.tap(find.text('Unlock Owner payroll'));
       await until(find.text(currentHolder ? 'Payroll History' : 'Connect'));
       if (currentHolder) {
         await tester.runAsync(() async {
