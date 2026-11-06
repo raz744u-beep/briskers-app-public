@@ -114,34 +114,75 @@ class LocalPayrollRepository {
     payload['minutes'], payload['date'], payload['revision'],
   ]);
 
-  /// Incremental recovery of pre-existing cached invoices, after first paint.
-  /// Missing photos/details remain unknown; never invokes cloud sync.
-  Future<void> backfillInvoiceTasks({String? job,Future<void> Function()? onBatch,
+  /// Explicit and bounded invoice-task recovery. Checkpoints are persisted
+  /// in the local shop database, so a resumed batch does not restart at zero.
+  /// This is a derived index only; no payroll payments are recorded.
+  Future<bool> backfillInvoiceTasks({String? job,int maxInvoices=25,
+    Future<void> Function()? onBatch,
     void Function(int checked,int recovered,int unavailable)? onProgress}) async {
-    _authorize();await prepare();
-    var after='';var checked=0,recovered=0,unavailable=0;
-    while(true){
+    _authorize();
+    await prepare();
+    await db.customStatement(
+      'CREATE TABLE IF NOT EXISTS regular_payroll_recovery_cursor '
+      '(business_id TEXT NOT NULL,job_id TEXT NOT NULL,cursor TEXT NOT NULL,'
+      'complete INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(business_id,job_id))');
+    final scope=job??'';
+    final stored=await _read(
+      'SELECT cursor,complete FROM regular_payroll_recovery_cursor '
+      'WHERE business_id=? AND job_id=?',[business,scope]);
+    if(stored.isNotEmpty && stored.single['complete']==1)return false;
+    var after=stored.isEmpty?'':stored.single['cursor'] as String;
+    var checked=0,recovered=0,unavailable=0;
+    while(checked<maxInvoices){
       _authorize();
-      final rows=await _read("SELECT id FROM local_documents WHERE business_id=? AND kind='invoice' AND id>? AND COALESCE(status,'') NOT IN ('void','voided','cancelled','canceled','deleted') "
-        "${job==null?'':'AND job_id=? '}ORDER BY id LIMIT 10",[business,after,?job]);
-      if(rows.isEmpty){return;}
+      final limit=(maxInvoices-checked)<10?(maxInvoices-checked):10;
+      final rows=await _read(
+        "SELECT id FROM local_documents WHERE business_id=? AND kind='invoice' "
+        "AND id>? AND COALESCE(status,'') NOT IN "
+        "('void','voided','cancelled','canceled','deleted') "
+        "${job==null?'':'AND job_id=? '}ORDER BY id LIMIT $limit",
+        [business,after,?job]);
+      if(rows.isEmpty){
+        await db.customStatement(
+          'INSERT INTO regular_payroll_recovery_cursor VALUES(?,?,?,1) '
+          'ON CONFLICT(business_id,job_id) DO UPDATE SET complete=1',
+          [business,scope,after]);
+        return false;
+      }
       for(final row in rows){
         _authorize();
         final id=row['id'] as String;
-        final before=(await _read("SELECT COUNT(*) AS n FROM regular_payroll_task_sources WHERE business_id=? AND invoice_id=? AND active=1 AND source_kind='invoice'",[business,id])).single['n'] as int;
+        final before=(await _read(
+          "SELECT COUNT(*) AS n FROM regular_payroll_task_sources "
+          "WHERE business_id=? AND invoice_id=? AND active=1 AND source_kind='invoice'",
+          [business,id])).single['n'] as int;
         final detail=await LocalDocumentDetailCache(database:db).load(business,id);
-        final afterCount=(await _read("SELECT COUNT(*) AS n FROM regular_payroll_task_sources WHERE business_id=? AND invoice_id=? AND active=1 AND source_kind='invoice'",[business,id])).single['n'] as int;
+        final afterCount=(await _read(
+          "SELECT COUNT(*) AS n FROM regular_payroll_task_sources "
+          "WHERE business_id=? AND invoice_id=? AND active=1 AND source_kind='invoice'",
+          [business,id])).single['n'] as int;
         final raw=detail?['lines']??detail?['items'];
-        final lines=raw is List ? raw.whereType<Map>().map(Map<String,dynamic>.from).toList() : null;
-        final usable=lines!=null && lines.length==(raw as List).length &&
-          lines.every((r)=>r['id'] is String && (r['id'] as String).isNotEmpty) && lines.map((r)=>r['id']).toSet().length==lines.length;
-        checked++;if(!usable || lines.where(isInvoiceLaborLine).length!=afterCount){unavailable++;}if(afterCount>before){recovered+=afterCount-before;}
+        final lines=raw is List?
+          raw.whereType<Map>().map(Map<String,dynamic>.from).toList():null;
+        final usable=lines!=null && lines.length==raw.length &&
+          lines.every((r)=>r['id'] is String && (r['id'] as String).isNotEmpty) &&
+          lines.map((r)=>r['id']).toSet().length==lines.length;
+        checked++;
+        if(!usable || lines.where(isInvoiceLaborLine).length!=afterCount)unavailable++;
+        if(afterCount>before)recovered+=afterCount-before;
+        after=id;
         onProgress?.call(checked,recovered,unavailable);
       }
-      after=rows.last['id'] as String;
+      // Reprocessing a previously completed invoice is idempotent. Persist
+      // cursor only after this batch of invoice reads/derived saves completed.
+      await db.customStatement(
+        'INSERT INTO regular_payroll_recovery_cursor VALUES(?,?,?,0) '
+        'ON CONFLICT(business_id,job_id) DO UPDATE SET cursor=excluded.cursor,complete=0',
+        [business,scope,after]);
       await onBatch?.call();
       await Future<void>.delayed(const Duration(milliseconds:10));
     }
+    return true;
   }
 
   Future<void> refreshInvoiceTasks() async {
