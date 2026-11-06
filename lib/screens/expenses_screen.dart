@@ -1902,17 +1902,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       ),
                     ),
                   if (_showFinancialSummary)
-                    SizedBox(
-                      // The accounting truth may arrive after the first local
-                      // frame or after returning from a transaction. Reserve
-                      // the same space for pending/verified/error states so
-                      // rows below never jump when status text changes.
-                      height: 54,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 4, 8, 2),
-                        child: Align(
-                          alignment: Alignment.topLeft,
-                          child: Text(
+                    Padding(
+                      // Size to the status message rather than reserving a
+                      // permanent blank block above Recurring Transactions.
+                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 2),
+                      child: Text(
                         _periodError ??
                             (_periodCalculating
                                 ? _periodTotals == null
@@ -1929,8 +1923,6 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                           fontSize: 12,
                           height: 1.25,
                           color: Color(0xFF667085),
-                        ),
-                          ),
                         ),
                       ),
                     ),
