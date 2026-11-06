@@ -58,7 +58,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
         final coverage=names.contains('regular_payroll_work_coverage');
         final rows=await db.customSelect(
           'SELECT p.task_id,p.employee_id,p.state,e.name AS legal_name,'
-          '${nick?"COALESCE(NULLIF(n.nickname,\'\'),e.name)":"e.name"} AS nickname,'
+          '${nick?"COALESCE(NULLIF(n.nickname,''),e.name)":"e.name"} AS nickname,'
           '${estimates?"COALESCE(t.minutes,0)":"0"} AS estimated_minutes,'
           '${credit?"c.paid_operation_id":"NULL"} AS paid_operation,'
           '${coverage?"(SELECT COALESCE(SUM(w.minutes),0) FROM regular_payroll_work_coverage w WHERE w.business_id=p.business_id AND w.credit_id=p.id)":"0"} AS paid_minutes '
@@ -70,7 +70,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
           '${estimates?"LEFT JOIN regular_payroll_estimates t ON t.business_id=p.business_id AND t.task_id=p.task_id AND t.employee_id=p.employee_id ": ""}'
           '${credit?"LEFT JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id ": ""}'
           'WHERE s.business_id=? AND s.invoice_id=? AND s.line_id=? AND s.active=1 '
-          '${meta?"AND (COALESCE(m.active,1)=1 OR p.state=\'Done\') ": ""}'
+          '${meta?"AND (COALESCE(m.active,1)=1 OR p.state='Done') ": ""}'
           'ORDER BY e.name',
           variables:[widget.business,invoice,line].map(Variable<String>.new).toList()).get();
         final cached=await OfflineJobAdminService(database:db)
@@ -103,10 +103,12 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
         });
       }
     }catch(_){
-      if(mounted)setState((){
-        linePeople=[];
-        lineAssignment='Assignments unavailable · Tap to retry';
-      });
+      if(mounted){
+        setState((){
+          linePeople=[];
+          lineAssignment='Assignments unavailable · Tap to retry';
+        });
+      }
     }
   }
 
