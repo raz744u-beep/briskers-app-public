@@ -5610,6 +5610,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         );
       }
     });
+    if (!saved && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Miles Out could not be saved. The invoice was not updated.'),
+      ));
+      return;
+    }
     if (saved && mounted) {
       // Confirm the exact invoice reading survived the post-save load.
       // Never report successful mileage when the screen still shows blank.
