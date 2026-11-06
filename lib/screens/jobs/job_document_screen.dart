@@ -6063,18 +6063,43 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              line['name']?.toString() ?? '',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFF0D1528),
+                            if (OwnerPayrollScreen.enabled && widget.isOwner &&
+                                !_estimate && isInvoiceLaborLine(line) &&
+                                line['id'] is String && _detail?['job_id'] is String)
+                              LayoutBuilder(builder:(context,limits) {
+                                final assignment=JobTasksAccess(
+                                  business:widget.businessId,
+                                  job:_detail!['job_id'] as String,
+                                  invoice:widget.documentId,
+                                  line:line['id'] as String,
+                                  revision:_loadGeneration,
+                                  onChanged:()=>unawaited(_load()),
+                                );
+                                final heading=Text(line['name']?.toString() ?? '',
+                                  style:const TextStyle(fontSize:16,
+                                    fontWeight:FontWeight.w800,
+                                    color:Color(0xFF0D1528)));
+                                // Retain the TEST inline presentation on wide
+                                // invoice rows; stack on narrow Samsung phones.
+                                return limits.maxWidth>=300
+                                  ? Row(crossAxisAlignment:CrossAxisAlignment.start,
+                                      children:[
+                                        Flexible(flex:2,child:heading),
+                                        const SizedBox(width:8),
+                                        Expanded(flex:5,child:assignment),
+                                      ])
+                                  : Column(crossAxisAlignment:CrossAxisAlignment.start,
+                                      children:[heading,assignment]);
+                              })
+                            else
+                              Text(
+                                line['name']?.toString() ?? '',
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF0D1528),
+                                ),
                               ),
-                            ),
-                            if (OwnerPayrollScreen.enabled && widget.isOwner && !_estimate &&
-                                isInvoiceLaborLine(line) && line['id'] is String && _detail?['job_id'] is String)
-                              JobTasksAccess(business:widget.businessId,job:_detail!['job_id'] as String,
-                                invoice:widget.documentId,line:line['id'] as String,revision:_loadGeneration,onChanged:()=>unawaited(_load())),
                             if (description.isNotEmpty) ...[
                               const SizedBox(height: 3),
                               Text(
