@@ -21,9 +21,13 @@ class InvoicePdfMileageProjection {
 
     // Legacy odometer_in does not distinguish arrival/departure. Never
     // relabel it as Miles Out or import unrelated Current Miles.
-    final visibleV2 = visibleDetail['mileage_schema_version'] == 2;
+    // Both explicit typed Miles Out and a numeric/string v2 marker are
+    // valid. A legacy odometer_in-only invoice stays neutral.
+    final visibleV2 = visibleDetail['mileage_schema_version']?.toString() == '2' ||
+        visibleDetail.containsKey('mileage_out');
     final pdfVersion = pdfDetail['mileage_schema_version'];
-    if (!visibleV2 || (pdfVersion != null && pdfVersion != 2)) {
+    if (!visibleV2 ||
+        (pdfVersion != null && pdfVersion.toString() != '2')) {
       return result;
     }
 
