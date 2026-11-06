@@ -144,15 +144,22 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
       final task=allocation['task_id']?.toString();
       final employee=allocation['id']?.toString();
       if(task==null || employee==null)return;
-      // A settled allocation cannot be silently edited, even with a stale UI.
+      // Revalidate paid coverage after the Owner challenge; partial payments
+      // are just as immutable as fully settled allocations.
+      await repo.prepare();
       final settled=await db.customSelect(
-        'SELECT c.paid_operation_id FROM regular_payroll_portions p '
+        'SELECT c.paid_operation_id,'
+        '(SELECT COALESCE(SUM(w.minutes),0) '
+        'FROM regular_payroll_work_coverage w '
+        'WHERE w.business_id=p.business_id AND w.credit_id=p.id) AS paid_minutes '
+        'FROM regular_payroll_portions p '
         'LEFT JOIN local_mechanic_work_credits_v1 c '
         'ON c.business_id=p.business_id AND c.allocation_id=p.id '
         'WHERE p.business_id=? AND p.task_id=? AND p.employee_id=?',
         variables:[widget.business,task,employee].map(Variable<String>.new).toList())
         .getSingleOrNull();
-      if(settled==null || settled.data['paid_operation_id']!=null){
+      if(settled==null || settled.data['paid_operation_id']!=null ||
+          (settled.data['paid_minutes'] as int? ?? 0)>0){
         throw StateError('Paid mechanic labor is locked.');
       }
       await repo.setEstimatedMinutes(task,employee,(hours*60).round());
