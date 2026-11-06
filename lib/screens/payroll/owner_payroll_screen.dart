@@ -1640,7 +1640,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         _recoveryStatus(),
         if (_error != null)
           ConstrainedBox(constraints:const BoxConstraints(maxHeight:96),child:SingleChildScrollView(child:ListTile(dense: true, title: Text(_error!), trailing: TextButton(
-            onPressed: _authorizing ? null : () => _run(() async {}), child: const Text('Retry'))))),
+            onPressed: _loadingLocal ? null : () => unawaited(_load()), child: const Text('Retry'))))),
         Expanded(child: TabBarView(children: [
           _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Tasks'),child:_safeTab(_tasksTab, 'Tasks')),
           _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Payroll'),child:_safeTab(_payrollTab, 'Payroll')),
@@ -1693,7 +1693,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         )),
       ),
     ));
-    if (mounted) await _run(() async {});
+    if (mounted) await _load();
   }
 
   Widget _overview() => Scaffold(
@@ -1723,8 +1723,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           padding: const EdgeInsets.all(16),
           children: [
             FilledButton(
-              onPressed: _busy ? null : () => _run(() async {}),
-              child: Text(_grant == null ? 'Unlock Owner payroll' : 'Refresh'),
+              onPressed: _loadingLocal ? null : () => unawaited(_load()),
+              child: const Text('Refresh'),
             ),
             if (_busy) const LinearProgressIndicator(),
             if (_error != null) Text(_error!),
