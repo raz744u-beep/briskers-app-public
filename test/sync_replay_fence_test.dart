@@ -274,4 +274,36 @@ void main() {
     await disk.close();
     await dir.delete(recursive: true);
   });
+
+  test(
+    'nested API protection shares the outbox budget and recovers once',
+    () async {
+      var calls = 0;
+      Future<String> replay() => fence().run(
+        'shop',
+        'outbox:1',
+        () => fence().run('shop', 'rpc:mileage', () async {
+          calls++;
+          if (calls == 1) {
+            throw const PostgrestException(message: 'busy', code: 'PGRST003');
+          }
+          return 'verified';
+        }),
+      );
+      await expectLater(replay(), throwsA(isA<PostgrestException>()));
+      final rows = await db
+          .customSelect('SELECT * FROM sync_replay_fences_v1')
+          .get();
+      expect(rows, hasLength(1));
+      expect(rows.single.read<String>('replay_key'), 'outbox:1');
+      await expectLater(replay(), throwsA(isA<SyncReplayDeferred>()));
+      now = now.add(const Duration(minutes: 1));
+      expect(await replay(), 'verified');
+      expect(calls, 2);
+      expect(
+        await db.customSelect('SELECT * FROM sync_replay_fences_v1').get(),
+        isEmpty,
+      );
+    },
+  );
 }

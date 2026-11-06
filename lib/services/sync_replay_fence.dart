@@ -47,6 +47,7 @@ class SyncReplayFence {
   final double Function() _random;
   final bool Function() _networkAllowed;
   static const maxAttempts = 5;
+  static final Object _activeFence = Object();
 
   Future<void> ensureSchema() => db.customStatement('''
     CREATE TABLE IF NOT EXISTS sync_replay_fences_v1 (
@@ -64,6 +65,10 @@ class SyncReplayFence {
     int? outboxId,
   }) async {
     if (!_networkAllowed()) throw const SyncReplayDeferred('Force Offline');
+    // An outbox mutation can call a directly protected API. The outer scope
+    // owns its durable budget: independent nested jitter deadlines could
+    // otherwise turn a legitimate delayed retry into another held failure.
+    if (Zone.current[_activeFence] == (db, businessId)) return request();
     await ensureSchema();
     final now = _now().millisecondsSinceEpoch;
     await db.transaction(() async {
@@ -116,7 +121,10 @@ class SyncReplayFence {
     try {
       // Recheck after SQLite awaits, including a mode change during a claim.
       if (!_networkAllowed()) throw const SyncReplayDeferred('Force Offline');
-      final result = await request();
+      final result = await runZoned(
+        request,
+        zoneValues: {_activeFence: (db, businessId)},
+      );
       await db.customStatement(
         'DELETE FROM sync_replay_fences_v1 WHERE business_id=? AND replay_key=?',
         [businessId, key],
