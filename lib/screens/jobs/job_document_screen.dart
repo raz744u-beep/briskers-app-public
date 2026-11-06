@@ -4164,6 +4164,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         claimNumber: newClaimNumber.isEmpty ? null : newClaimNumber,
         authorizationNumber: newAuthorizationNumber.isEmpty
             ? null : newAuthorizationNumber,
+        updateWarrantyIdentifiers: true,
       ));
       if (saved && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
