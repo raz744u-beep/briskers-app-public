@@ -5590,6 +5590,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             _detail?['document_date']?.toString() ?? '') ?? DateTime.now(),
           mileage: usesMileageOut ? null : changed,
           mileageOut: usesMileageOut ? changed : null,
+          // Only the dedicated mileage editor leaves unrelated identifiers unchanged.
+          updateWarrantyIdentifiers: false,
         );
       } else if (usesMileageOut) {
         // Only the v2 departure field may change: never overwrite arrival
