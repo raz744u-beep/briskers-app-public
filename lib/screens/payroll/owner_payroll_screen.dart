@@ -1741,7 +1741,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               TextButton(onPressed: _busy || _employees.isEmpty ? null : () => _managePeer(pair: false),
                 child: const Text('Sync payroll over shop Wi-Fi')),
             ],
-            if (_grant != null && _jobMode) ...[
+            if (_canView && _jobMode) ...[
               const ListTile(title: Text('Invoice labor')),
               for (final invoice in <String, List<Map<String, dynamic>>>{
                 if (widget.invoiceId != null) widget.invoiceId!: widget.invoiceLines,
@@ -1773,7 +1773,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               ),
               for (final row in _work.where((r)=>widget.focusLineId==null || r['source_line_id']==widget.focusLineId)) _taskCard(row),
             ],
-            if (_grant != null && !_jobMode) ...[
+            if (_canView && !_jobMode) ...[
               if (_employees.isEmpty) const Text('No employee work has been recorded yet.'),
               if (_employees.isNotEmpty)
                 DropdownButton<String>(
