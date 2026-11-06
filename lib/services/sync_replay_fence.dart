@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
+import 'package:http/http.dart' show ClientException;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/connection_mode.dart';
@@ -164,7 +165,7 @@ class SyncReplayFence {
   }
 
   static bool _isTransient(Object error) {
-    if (error is TimeoutException) return true;
+    if (error is TimeoutException || error is ClientException) return true;
     if (error is PostgrestException) {
       return const {
         'PGRST000',
@@ -184,6 +185,7 @@ class SyncReplayFence {
       'SocketException',
       'ClientException',
       'HandshakeException',
+      'HttpException',
     }.contains(error.runtimeType.toString());
   }
 }

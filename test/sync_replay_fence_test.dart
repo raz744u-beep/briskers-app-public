@@ -1,3 +1,6 @@
+import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart' show IOClient;
+
 import 'dart:async';
 import 'dart:io';
 
@@ -6,6 +9,8 @@ import 'package:briskers_app/services/sync_replay_fence.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+class _LoopbackHttpOverrides extends HttpOverrides {}
 
 void main() {
   late BriskersLocalDatabase db;
@@ -304,6 +309,49 @@ void main() {
         await db.customSelect('SELECT * FROM sync_replay_fences_v1').get(),
         isEmpty,
       );
+    },
+  );
+
+  test(
+    'real Dart wrapped socket failure uses cooldown and can recover',
+    () async {
+      // A local-only closed port exercises IOClient's actual exception subtype.
+      // No Supabase or other external network request is made.
+      final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final port = socket.port;
+      await socket.close();
+      final native = _LoopbackHttpOverrides().createHttpClient(null)
+        ..findProxy = (_) => 'DIRECT';
+      final client = IOClient(native);
+      addTearDown(client.close);
+      var calls = 0;
+      await expectLater(
+        fence().run('shop', 'wrapped-network', () async {
+          calls++;
+          return client.get(Uri.http('127.0.0.1:$port', '/synthetic'));
+        }),
+        throwsA(isA<http.ClientException>()),
+      );
+      final row = await db
+          .customSelect('SELECT * FROM sync_replay_fences_v1')
+          .getSingle();
+      expect(row.read<String>('status'), 'ready');
+      await expectLater(
+        fence().run('shop', 'wrapped-network', () async {
+          calls++;
+        }),
+        throwsA(isA<SyncReplayDeferred>()),
+      );
+      expect(calls, 1);
+      now = now.add(const Duration(minutes: 1));
+      expect(
+        await fence().run('shop', 'wrapped-network', () async {
+          calls++;
+          return 'healthy';
+        }),
+        'healthy',
+      );
+      expect(calls, 2);
     },
   );
 }
