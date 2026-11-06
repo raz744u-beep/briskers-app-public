@@ -53,7 +53,9 @@ void main() {
       await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:20)));
       await tester.pump(const Duration(milliseconds:20));
       if(find.textContaining('Adam 3.0h').evaluate().isNotEmpty &&
-          find.textContaining('Chris 1.0h').evaluate().isNotEmpty)break;
+          find.textContaining('Chris 1.0h').evaluate().isNotEmpty){
+        break;
+      }
     }
     expect(find.textContaining('Adam 3.0h'),findsOneWidget);
     expect(find.textContaining('Chris 1.0h'),findsOneWidget);
