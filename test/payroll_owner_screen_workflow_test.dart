@@ -95,7 +95,8 @@ void main() {
         // Owner bookkeeping must not require the employee to own a paired phone.
         await tester.tap(find.text('Payroll'));
         await tester.pumpAndSettle();
-        await until(find.text('Advances & Repayments'));
+        await tester.scrollUntilVisible(find.text('Advances & Repayments'), 220,
+          scrollable: find.byType(Scrollable).last);
         await tester.ensureVisible(find.text('Advances & Repayments'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Advances & Repayments'));
