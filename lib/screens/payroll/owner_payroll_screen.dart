@@ -951,7 +951,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         settlementReason: additional
             ? 'Owner-approved weekly base and supplemental labor at ${_currency.format(rate)} per hour.'
             : 'Labor included in the weekly base. Selected credits receive coverage without an added hourly component.',
-        advanceBalance: () => _repository.advance(employee),
+        advanceBalance: () => _viewRepository.advance(employee),
         recordPayment: _recordWeekly,
       ),
     ));
@@ -1525,7 +1525,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         employeeId: widget.employeeId!,
         employeeName: _employeeLabel(widget.employeeId),
         tasks: _work, week: _week, embedded: true,
-        advanceBalance: () => _repository.advance(widget.employeeId!),
+        advanceBalance: () => _viewRepository.advance(widget.employeeId!),
         recordPayment: _recordWeekly,
         onWeekChanged: (week) => _week = week,
         onCancel: () => Navigator.of(context).pop(),
@@ -1802,7 +1802,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                             .firstOrNull?['name']?.toString() ?? 'Weekly payroll',
                         tasks: _work,
                         week: DateTime.now(),
-                        advanceBalance: () => _repository.advance(employee),
+                        advanceBalance: () => _viewRepository.advance(employee),
                         recordPayment: _recordWeekly,
                       ),
                     ));
