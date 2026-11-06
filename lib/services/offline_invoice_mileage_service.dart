@@ -88,8 +88,9 @@ class OfflineInvoiceMileageService {
         (detail['id'] != null && detail['id']?.toString() != invoiceId) ||
         (detail['business_id'] != null &&
          detail['business_id']?.toString() != businessId) ||
-        detail['kind'] != 'invoice' ||
-        detail['mileage_schema_version'] != 2) {
+        detail['kind']?.toString() != 'invoice' ||
+        (detail['mileage_schema_version']?.toString() != '2' &&
+         !detail.containsKey('mileage_out'))) {
       return detail;
     }
     final queued = await _database.customSelect(
