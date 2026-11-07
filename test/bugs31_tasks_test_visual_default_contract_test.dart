@@ -30,6 +30,14 @@ void main() {
     expect(source, contains('_recordTaskProgress(row,markDone:true)'));
   });
 
+  test('approved small hour badges are prominent on task and mechanic rows', () {
+    final screen=File('lib/screens/payroll/owner_payroll_screen.dart').readAsStringSync();
+    expect(screen, contains('Widget _compactPlannedHours(double hours)'));
+    expect(screen, contains('fontSize: 13.5'));
+    expect(screen, contains('fontWeight: FontWeight.w800'));
+    expect(screen.split('_compactPlannedHours(planned)').length, 3);
+  });
+
   test('mechanic time default is planning, never earned on Start', () {
     final screen = File('lib/screens/payroll/owner_payroll_screen.dart').readAsStringSync();
     final start = screen.indexOf('Future<void> _recordTaskProgress(');
