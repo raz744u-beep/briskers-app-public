@@ -86,7 +86,15 @@ class IndependentReceiptAiGateway {
     ).timeout(const Duration(seconds: 30));
     // A proxy or provider sometimes returns HTTP 200 with an error object.
     // Never treat such a response as extracted receipt fields or persist it.
-    if (decoded['error'] != null || decoded['success'] == false) {
+    final gatewayError = decoded['error']?.toString().toLowerCase() ?? '';
+    if (gatewayError == 'unauthorized' || gatewayError == 'invalid_token' ||
+        gatewayError == 'invalid_gateway_token') {
+      throw StateError('Receipt AI unavailable (HTTP 401).');
+    }
+    if (gatewayError == 'invalid_business') {
+      throw StateError('Receipt AI rejected business identity.');
+    }
+    if (gatewayError.isNotEmpty || decoded['success'] == false) {
       throw const FormatException('Gateway returned no extraction.');
     }
     // The original Cloudflare Worker and the older receipt parser use
