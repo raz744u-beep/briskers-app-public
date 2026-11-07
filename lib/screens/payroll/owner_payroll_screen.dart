@@ -553,7 +553,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
     Future<void> assign({required bool pairedDevice}) async {
       final assignments = LocalTaskAssignmentStore(_db);
-      await _db.transaction(() async {
+      Future<void> apply() async {
         if (!_canView) throw StateError('Owner account changed during assignment.');
         await assignments.linkEmployee(widget.businessId, job, employeeId, name);
         final source = (await _taskEditRepository.tasks())
@@ -583,7 +583,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         await assignments.allocate(widget.businessId, task['id'] as String,
             employeeId, inherited: false);
         if (!_canView) throw StateError('Owner account changed during assignment.');
-      });
+      }
+      // Keep a local assignment atomic. The paired LAN workflow has its own
+      // durable writer protocol and must not run inside a SQLite transaction.
+      if (pairedDevice) {
+        await apply();
+      } else {
+        await _db.transaction(apply);
+      }
     }
 
     if (paired) {
