@@ -117,6 +117,17 @@ void main(){
     
     await click(find.text('Assign / split'));
     await click(find.text('Beta'));
+    // The second mechanic starts at zero allocated hours. The Owner sets
+    // the approved credit once, before completing the task.
+    await tester.runAsync(() async {
+      final repo=LocalPayrollRepository(db,business:'shop',owner:true);
+      final work=await repo.work(employee:'b');
+      final credit=work.singleWhere((r)=>
+        r['description']=='Replace turbocharger and gaskets');
+      await repo.setEstimatedMinutes(
+        credit['task_id'] as String,'b',180);
+    });
+    await tester.pumpAndSettle();
     final turboCard=await creditCard('b','Replace turbocharger and gaskets');
     await until(turboCard);
     await click(find.descendant(of:turboCard,matching:
@@ -124,12 +135,10 @@ void main(){
     await until(find.descendant(of:turboCard,matching:find.text('In Progress')));
     await click(find.descendant(of:turboCard,matching:
       find.widgetWithText(OutlinedButton,'Mark Done')));
-    await until(find.byType(AlertDialog));await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),'2');await click(find.text('Continue'));
-    await until(find.byType(AlertDialog));await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),'3');await click(find.text('Continue'));
-    await until(find.textContaining('Actual: 2.00h · Credited: 3.00h'));
+    await until(find.textContaining('Actual: 3.00h · Credited: 3.00h'));
     await tester.runAsync(()async{
       final repo=LocalPayrollRepository(db,business:'shop',owner:true);
-      final work=await repo.work(employee:'b');expect(work.single['actual_minutes'],180);expect(work.single['recorded_actual_minutes'],120);
+      final work=await repo.work(employee:'b');expect(work.single['actual_minutes'],180);expect(work.single['recorded_actual_minutes'],180);
       final saved=await LocalDocumentDetailCache(database:db).load('shop',invoice);expect((saved!['lines'] as List).first['quantity'],6);
     });
     navigator.currentState!.pop();await tester.pumpAndSettle();
@@ -140,6 +149,16 @@ void main(){
       await click(find.text('Assign / split').last);await click(find.text(name).last);
       await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:400)));await tester.pump();
     }
+    // Two independent assigned-hours choices on the shared labor line.
+    await tester.runAsync(() async {
+      final repo=LocalPayrollRepository(db,business:'shop',owner:true);
+      final split=(await repo.work()).where(
+        (r)=>r['description']=='Shared diagnostic labor').toList();
+      final task=split.first['task_id'] as String;
+      await repo.setEstimatedMinutes(task,'a',60);
+      await repo.setEstimatedMinutes(task,'b',120);
+    });
+    await tester.pumpAndSettle();
     for(final name in ['Alpha','Beta']){
       final card=await creditCard(name=='Alpha'?'a':'b','Shared diagnostic labor');
       await until(card);
@@ -148,11 +167,6 @@ void main(){
       await until(find.descendant(of:card,matching:find.text('In Progress')));
       await click(find.descendant(of:card,matching:
         find.widgetWithText(OutlinedButton,'Mark Done')));
-      for(var step=0;step<2;step++){
-        await until(find.byType(AlertDialog));
-        await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),name=='Alpha'?'1':'2');
-        await click(find.text('Continue'));
-      }
       await until(find.descendant(of:card,matching:find.text('Done')));
     }
     await tester.runAsync(()async{
