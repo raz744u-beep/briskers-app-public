@@ -172,6 +172,17 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     // Sign-out and account switching are checked by _canView / _assertOwner.
   }
 
+  Future<LocalOwnerGrant> _signedInOwnerGrant() {
+    // In widget tests, the explicit debug fixture supplies its simulated
+    // saved Owner session. Release code always verifies the real signed-in
+    // Owner identity and business role without a second OS challenge.
+    if (kDebugMode && _debugOwnerView && widget.unlockOwner != null) {
+      return widget.unlockOwner!(widget.businessId);
+    }
+    return DeviceOwnerAuthorization.instance.authority
+        .authorizeSession(widget.businessId);
+  }
+
   Future<void> _openSavedOwnerView() async {
     // Debug-only injected owner fixture never bypasses release identity checks.
     final debugOwner=kDebugMode && (PayrollUiScope.of(context)?.debugAllowOwnerView ?? false);
@@ -195,8 +206,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       // No device prompt; do not block the normal view if local role checks
       // cannot issue the grant.
       try {
-        final grant = await DeviceOwnerAuthorization.instance.authority
-            .authorizeSession(widget.businessId);
+        final grant = await _signedInOwnerGrant();
         if (mounted && _canView) setState(() => _grant = grant);
       } catch (_) { /* Saved Owner view remains available. */ }
       if (_canView) await _load();
@@ -252,8 +262,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       if (needsSessionGrant) {
         // Actual payments still use the signed ledger lease and idempotency
         // checks, but never demand another biometric/PIN authentication.
-        final grant = await DeviceOwnerAuthorization.instance.authority
-            .authorizeSession(widget.businessId);
+        final grant = await _signedInOwnerGrant();
         if (!mounted || !_canView) return;
         grant.assertValid(widget.businessId, grant.actorId);
         setState(() { _grant = grant; });
