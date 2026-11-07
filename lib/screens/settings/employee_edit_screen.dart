@@ -308,7 +308,9 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
                 onPressed: () {
                   final value = double.tryParse(amount.text.trim());
                   if (value == null || !value.isFinite ||
-                      value < 0 || value > 1000000) return;
+                      value < 0 || value > 1000000) {
+                    return;
+                  }
                   Navigator.pop(dialog,
                     (type: type, cents: (value * 100).round()));
                 },
@@ -332,8 +334,10 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
         amountCents: choice.cents,
       );
       await _hydrateLocalPayBasis(grant);
-      if (mounted) setState(() =>
-        _error = 'Local pay settings saved. Paid work was not changed.');
+      if (mounted) {
+        setState(() =>
+          _error = 'Local pay settings saved. Paid work was not changed.');
+      }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
