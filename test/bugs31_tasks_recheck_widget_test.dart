@@ -29,7 +29,7 @@ void main() {
           serviceTaskCard: (row) =>
               ListTile(title: Text(row['source_description'] as String)),
           onAddGeneral: () {},
-          onGeneralStatus: (_, __) async {},
+          onGeneralStatus: (_, _) async {},
           onOpenJob: (job) => openedJob = job,
           onEmployeeTap: (_) {},
           onAddRecheck: (job) => recheckJob = job,
