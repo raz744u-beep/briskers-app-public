@@ -176,8 +176,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     // In widget tests, the explicit debug fixture supplies its simulated
     // saved Owner session. Release code always verifies the real signed-in
     // Owner identity and business role without a second OS challenge.
-    if (kDebugMode && _debugOwnerView && widget.unlockOwner != null) {
-      return widget.unlockOwner!(widget.businessId);
+    if (kDebugMode && _debugOwnerView) {
+      final simulatedSession =
+          widget.unlockOwner ?? PayrollUiScope.of(context)?.unlock;
+      if (simulatedSession != null) {
+        return simulatedSession(widget.businessId);
+      }
     }
     return DeviceOwnerAuthorization.instance.authority
         .authorizeSession(widget.businessId);
