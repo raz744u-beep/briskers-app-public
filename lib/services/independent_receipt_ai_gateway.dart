@@ -116,7 +116,21 @@ class IndependentReceiptAiGateway {
     final amount = fields['receipt_total'];
     if (amount is String) {
       final parsed = num.tryParse(
-        amount.trim().replaceAll(RegExp(r'[,$\\s]'), '').replaceAll(r'
+        amount.trim().replaceAll(',', '').replaceAll('\u0024', ''),
+      );
+      if (parsed != null && parsed.isFinite && parsed > 0) {
+        fields['receipt_total'] = parsed;
+      }
+    }
+    const recognizedFields = <String>{
+      'vendor_name', 'receipt_total', 'receipt_date',
+      'vendor_invoice_number', 'items', 'subtotal',
+    };
+    if (!fields.keys.any((key) =>
+            recognizedFields.contains(key) && fields[key] != null) ||
+        fields.values.every((value) => value == null)) {
+      throw const FormatException('Gateway returned no extraction.');
+    }
     return <String, dynamic>{
       ...fields,
       'extraction_source': _existingService
