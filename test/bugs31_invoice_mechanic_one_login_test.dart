@@ -20,5 +20,10 @@ void main() {
     expect(source, contains(").join(' · ')"));
     expect(source, contains("fontSize:15,color:Color(0xFF00897E)"));
     expect(source, contains("'Edit or split mechanic labor'"));
+    // A single assigned mechanic must not trap the pencil in the
+    // estimated-hours-only dialog; it also needs Add/Split.
+    expect(source, isNot(contains('linePeople.length==1')));
+    expect(source, contains('? null : open,'));
+    expect(source, contains('focusLineId:widget.line'));
   });
 }
