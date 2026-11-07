@@ -24,12 +24,17 @@ import 'expense_receipt_attachments.dart';
 @visibleForTesting
 String receiptAiFailureMessage(Object error) {
   final message = error.toString().toLowerCase();
+  if (message.contains('saved owner account') ||
+      message.contains('owner account changed')) {
+    return 'Open the saved Briskers Owner account to pair receipt AI. '
+        'Your original photo remains attached and shop sync stays offline.';
+  }
   if (message.contains('active briskers sign-in') ||
       message.contains('authorization is not configured') ||
       message.contains('http 401') || message.contains('http 403')) {
-    return 'Receipt AI sign-in is unavailable or expired. The receipt photo '
-        'is still attached. Keep shop synchronization offline; use manual '
-        'entry until receipt-only authorization is restored.';
+    return 'Receipt AI authorization was rejected. Use Scan attached '
+        'receipt to reconnect the existing gateway. Your original photo '
+        'is safe; no expense was submitted. Shop sync stays offline.';
   }
   if (message.contains('http 429')) {
     return 'Receipt AI reached its request limit. Your photo is safe. '
@@ -530,8 +535,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                     'Enter its gateway token directly on this Owner phone.'),
               const SizedBox(height: 10),
               const Text(
-                'The token is never included in an invoice or sent to '
-                'ChatGPT. Shop synchronization stays offline.',
+                'Cloudflare hides stored secrets. Use the token you created '
+                'last night, or rotate BRISKERS_GATEWAY_TOKEN on your Mac '
+                'before entering the replacement here. Never paste it into '
+                'ChatGPT. Shop sync stays offline.',
                 style: TextStyle(fontSize: 12),
               ),
               const SizedBox(height: 12),
