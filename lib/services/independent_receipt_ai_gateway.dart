@@ -89,20 +89,97 @@ class IndependentReceiptAiGateway {
     if (decoded['error'] != null || decoded['success'] == false) {
       throw const FormatException('Gateway returned no extraction.');
     }
-    final result = decoded['extraction'] ?? decoded;
+    // The original Cloudflare Worker and the older receipt parser use
+    // slightly different successful JSON wrappers. Normalize only known
+    // receipt fields; never interpret an error or unrelated response as OCR.
+    final result = decoded['extraction'] ?? decoded['receipt'] ??
+        decoded['data'] ?? decoded['result'] ?? decoded;
     if (result is! Map || result.isEmpty) {
       throw const FormatException('Gateway returned no extraction.');
     }
     final fields = Map<String, dynamic>.from(result);
-    const recognizedFields = <String>{
-      'vendor_name',
-      'receipt_total',
-      'receipt_date',
-      'vendor_invoice_number',
-      'items',
-      'subtotal',
+    void alias(String canonical, List<String> keys) {
+      if (fields[canonical] != null) return;
+      for (final key in keys) {
+        if (fields[key] != null) {
+          fields[canonical] = fields[key];
+          return;
+        }
+      }
+    }
+    alias('vendor_name', const ['merchant_name', 'merchant', 'vendor', 'payee']);
+    alias('receipt_total', const ['total', 'total_amount', 'amount_paid']);
+    alias('receipt_date', const ['date', 'invoice_date']);
+    alias('vendor_invoice_number', const ['invoice_number', 'receipt_number']);
+    alias('items', const ['line_items', 'parts']);
+    alias('subtotal', const ['sub_total']);
+    final amount = fields['receipt_total'];
+    if (amount is String) {
+      final parsed = num.tryParse(
+        amount.trim().replaceAll(RegExp(r'[,$\\s]'), '').replaceAll(r'
+    return <String, dynamic>{
+      ...fields,
+      'extraction_source': _existingService
+          ? 'existing_online_receipt_ai'
+          : 'independent_online_ai',
+      'review_confirmed': false,
     };
-    if (!fields.keys.any(recognizedFields.contains) ||
+  }
+
+  Future<Map<String, dynamic>> _send(
+    Uri endpoint,
+    String token,
+    Map<String, dynamic> body,
+  ) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    try {
+      // Bound the entire exchange and close sockets on timeout. Never forward
+      // the device credential or receipt to a redirect destination.
+      return await (() async {
+        final request = await client.postUrl(endpoint);
+        request.followRedirects = false;
+        request.headers.contentType = ContentType.json;
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        if (_existingService) {
+          request.headers.set('apikey', supabasePublishableKey);
+        }
+        request.add(utf8.encode(jsonEncode(body)));
+        final response = await request.close();
+        if (response.statusCode != HttpStatus.ok) {
+          throw StateError(
+            'Receipt AI unavailable (HTTP ${response.statusCode}).',
+          );
+        }
+        final bytes = <int>[];
+        await for (final chunk in response) {
+          if (bytes.length + chunk.length > maxResponseBytes) {
+            throw const FormatException('Receipt AI response exceeds limit.');
+          }
+          bytes.addAll(chunk);
+        }
+        final decoded = jsonDecode(utf8.decode(bytes));
+        if (decoded is! Map) {
+          throw const FormatException('Unexpected receipt AI response.');
+        }
+        return Map<String, dynamic>.from(decoded);
+      })().timeout(const Duration(seconds: 30));
+    } finally {
+      client.close(force: true);
+    }
+  }
+}
+, ''),
+      );
+      if (parsed != null && parsed.isFinite && parsed > 0) {
+        fields['receipt_total'] = parsed;
+      }
+    }
+    const recognizedFields = <String>{
+      'vendor_name', 'receipt_total', 'receipt_date',
+      'vendor_invoice_number', 'items', 'subtotal',
+    };
+    if (!fields.keys.any((key) =>
+            recognizedFields.contains(key) && fields[key] != null) ||
         fields.values.every((value) => value == null)) {
       throw const FormatException('Gateway returned no extraction.');
     }
