@@ -2326,15 +2326,13 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                           ),
                                         ),
                                       if (invoiceReceipt) Text(
-                                        transaction['_receipt_state'] != 'posted'
-                                            ? 'Recorded • awaiting finalization'
-                                            : transaction['_payment_coverage'] == 'paid'
-                                                ? 'Paid' : 'Partial',
+                                        InvoicePaymentFeed.paymentLabel(transaction),
                                         style: TextStyle(
-                                          color: transaction['_receipt_state'] == 'posted' &&
-                                                  transaction['_payment_coverage'] == 'paid'
+                                          color: InvoicePaymentFeed.paymentLabel(transaction) == 'Paid'
                                               ? const Color(0xFF168A4B)
-                                              : const Color(0xFFD56D08),
+                                              : InvoicePaymentFeed.paymentLabel(transaction) == 'Partial'
+                                                ? const Color(0xFFD56D08)
+                                                : const Color(0xFF64748B),
                                           fontWeight: FontWeight.w800,
                                         ),
                                       ),
@@ -2371,7 +2369,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                     ),
                                     if (invoiceReceipt) ...[
                                       const SizedBox(height: 6),
-                                      Stack(alignment: Alignment.center, children: [
+                                      Tooltip(
+                                        message: InvoicePaymentFeed.syncLabel(transaction),
+                                        child: Stack(alignment: Alignment.center, children: [
                                         Icon(
                                           transaction['_receipt_state'] == 'posted'
                                               ? Icons.cloud : Icons.cloud_outlined,
@@ -2396,6 +2396,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                                   : const Color(0xFF667085),
                                         ),
                                       ]),
+                                      ),
                                     ],
                                     if (!invoiceReceipt) ...[
                                       const SizedBox(height: 6),
