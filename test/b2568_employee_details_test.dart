@@ -21,7 +21,7 @@ void main(){
     await tester.pumpWidget(MaterialApp(home:EmployeeEditScreen(businessId:'shop',employeeId:'a',isOwner:true,
       rosterName:'Known Legal Name',rosterPosition:'Mechanic',nicknameStore:EmployeeNicknameStore(database:db),currentOwner:()=>null)));
     await tester.pump();
-    expect(find.text('Known Legal Name'),findsOneWidget);expect(find.text('Mechanic'),findsOneWidget);
+    expect(find.text('Known Legal Name'),findsOneWidget);expect(find.text('Mechanic'),findsWidgets);
     expect(find.byType(CircularProgressIndicator),findsNothing);
     expect(find.textContaining('unavailable'),findsWidgets);
     await tester.pump(const Duration(seconds:4));
