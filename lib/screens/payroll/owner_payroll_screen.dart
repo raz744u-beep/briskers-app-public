@@ -1825,6 +1825,19 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final service = [
       for (final entry in byTask.entries)
         {...entry.value.first,
+          // Grouped task status must use ALL mechanic allocations. Paid
+          // history is not active work, and an unpaid completed split must
+          // remain visible under Unpaid until its coverage is settled.
+          'remaining_minutes': entry.value.fold<int>(0,(sum,r)=>
+            sum+(r['remaining_minutes'] as int? ?? 0)),
+          'paid': entry.value.every((r)=>r['state']=='Done') &&
+              entry.value.every((r)=>(r['remaining_minutes'] as int? ?? 0)==0) &&
+              entry.value.any((r)=>(r['actual_minutes'] as int? ?? 0)>0) ? 1 : 0,
+          'completed_date': ([
+            for(final r in entry.value)
+              if(r['completed_date']?.toString().isNotEmpty==true)
+                r['completed_date'].toString(),
+          ]..sort()).lastOrNull,
           'source_missing': entry.value.every((r)=>r['source_active']==0 && r['state']=='Open')?1:0,
           'line_id': entry.key,
           'document_id': entry.value.first['invoice_id'],
