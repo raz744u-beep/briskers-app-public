@@ -11,6 +11,16 @@ void main() {
     expect(source, contains('widget.onRecoverHistory!()'));
   });
 
+  test('both TEST task circles reflect saved In Progress and Done states', () {
+    final screen=File('lib/screens/payroll/owner_payroll_screen.dart').readAsStringSync();
+    expect(screen, contains("case 'In Progress':"));
+    expect(screen, contains('return Icons.timelapse;'));
+    expect(screen, contains('_workStatusIcon(state)'));
+    expect(screen, contains('_workStatusIcon(state, inner: true)'));
+    expect(screen, contains('_workStatusColor(state)'));
+    expect(screen, contains('case \'Done\':'));
+  });
+
   test('mechanic time default is planning, never earned on Start', () {
     final screen = File('lib/screens/payroll/owner_payroll_screen.dart').readAsStringSync();
     final start = screen.indexOf('Future<void> _recordTaskProgress(');
