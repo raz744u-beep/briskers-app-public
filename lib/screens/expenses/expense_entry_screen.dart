@@ -33,8 +33,9 @@ String receiptAiFailureMessage(Object error) {
       message.contains('authorization is not configured') ||
       message.contains('http 401') || message.contains('http 403')) {
     return 'Receipt AI sign-in authorization was rejected. Use Scan attached '
-        'receipt to reconnect the existing gateway. Your original photo '
-        'is safe; no expense was submitted. Shop sync stays offline.';
+        'receipt to reconnect the existing gateway or use manual entry. '
+        'Your photo is still attached; no expense was submitted. '
+        'Shop sync stays offline.';
   }
   if (message.contains('rejected business identity')) {
     return 'The receipt AI Worker did not recognize this Briskers business. '
