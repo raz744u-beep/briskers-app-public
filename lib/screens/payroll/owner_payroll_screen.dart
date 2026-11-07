@@ -1357,7 +1357,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   Future<void> _newServiceTask() async {
     if (!mounted || !_canView) return;
     final roster=await OfflineJobAdminService(database:_db).cachedEmployees(widget.businessId);
-    final known=await _repository.employees();
+    final known=await _viewRepository.employees();
+    if (!mounted || !_canView) return;
     final staff={for(final r in known) r['id']:r,for(final r in roster) r['id']:{...?known.where((k)=>k['id']==r['id']).firstOrNull,...r}};
     if(!mounted)return;
     String? employee=widget.employeeId;
@@ -1409,15 +1410,18 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       rate=(amount*100).round();
     }
     final operation=_operationId();
-    await _run(() async {
+    if (!_canView) return;
+    await _runOwnerTaskEdit(() async {
       await _db.transaction(() async {
+        if (!_canView) throw StateError('Owner account changed during task creation.');
         var jobId=selected;
         if(selected=='create'){jobId=await OfflineJobAdminService(database:_db).queueJobCreate(widget.businessId,
           customerId:customer!['id'] as String,customerName:(customer['display_name']??customer['name']??'Customer').toString(),
           vehicleId:vehicle?['id'] as String?,vehicleLabel:vehicle==null?null:'${vehicle['year']??''} ${vehicle['make']??''} ${vehicle['model']??''}',title:description);}
         await LocalTaskAssignmentStore(_db).linkEmployee(widget.businessId,jobId,id,name);
-        await _repository.createRecheck(operation:operation,job:jobId,description:description,employee:id,name:name,
+        await _taskEditRepository.createRecheck(operation:operation,job:jobId,description:description,employee:id,name:name,
           rate:rate,estimatedMinutes:(hours*60).round(),kind:'job');
+        if (!_canView) throw StateError('Owner account changed during task creation.');
       });
     });
   }
