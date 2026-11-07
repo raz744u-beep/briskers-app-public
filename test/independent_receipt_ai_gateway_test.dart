@@ -150,7 +150,7 @@ void main() {
     );
     await expectLater(gateway.enhance(receipt:photo(),
       businessId:'shop',accessToken:'synthetic-test-device-token',
-      mimeType:'image/jpeg'),throwsFormatException);
+      mimeType:'image/jpeg'),throwsStateError);
   });
 
   test('gateway failures retain original and do not silently retry', () async {
