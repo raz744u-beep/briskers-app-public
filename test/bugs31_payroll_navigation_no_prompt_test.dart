@@ -21,13 +21,27 @@ void main() {
     expect(start, greaterThanOrEqualTo(0));
     expect(end, greaterThan(start));
     final action = source.substring(start, end);
-    expect(action, contains('if (_busy || !_canView) return;'));
-    expect(action, contains('_taskStatusRepository.setShopTaskStatus'));
+    expect(action, contains('_runOwnerTaskEdit'));
+    expect(action, contains('_taskEditRepository.setShopTaskStatus'));
     expect(action, isNot(contains('authorizeLocal')));
     expect(action, isNot(contains('_run(')));
     expect(source, contains('_changeGeneralTaskStatus(widget.employeeId!, id, status)'));
     expect(source, contains("_changeGeneralTaskStatus(row['employee_id'] as String, id, status)"));
     expect(source, contains("if (!_canView) throw StateError('Sign in as Owner to edit tasks.')"));
+  });
+
+  test('editing mechanic hours and accepting unpaid work use Owner identity', () {
+    final editStart = source.indexOf('Future<void> _runOwnerTaskEdit(');
+    final editEnd = source.indexOf('Future<void> _changeGeneralTaskStatus(', editStart);
+    expect(editStart, greaterThanOrEqualTo(0));
+    expect(editEnd, greaterThan(editStart));
+    final guarded = source.substring(editStart, editEnd);
+    expect(guarded, contains('if (_busy || !_canView) return;'));
+    expect(guarded, isNot(contains('authorizeLocal')));
+    expect(source, contains("_taskEditRepository.recordAllocatedTime("));
+    expect(source, contains("_taskEditRepository.setEstimatedMinutes("));
+    expect(source, contains("_taskEditRepository.acceptChangedAssignment("));
+    expect(source, isNot(contains('_taskStatusRepository')));
   });
 
   test('opening mechanic assignment picker never requires payment unlock', () {
