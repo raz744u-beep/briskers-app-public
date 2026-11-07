@@ -29,15 +29,15 @@ void main() {
     expect(local, isNot(contains('authenticateDevice')));
   });
 
-  test('real payment authorization remains distinct from offline Owner view', () {
+  test('real payment is protected by Owner session without a device challenge', () {
     final auth = File('lib/services/device_owner_authorization.dart')
         .readAsStringSync();
     final payroll = File('lib/screens/payroll/owner_payroll_screen.dart')
         .readAsStringSync();
-    // Payment grant issuance is invoked from the Payroll screen; the
-    // device authority owns the OS challenge callback, not that call site.
-    expect(payroll, contains('authority.authorizeLocal(widget.businessId)'));
-    expect(auth, contains('authenticateDevice: () async {'));
+    // Owner session and business-role checks protect financial transactions.
+    // No second biometric/PIN challenge occurs during a signed-in session.
+    expect(payroll, contains('.authorizeSession(widget.businessId)'));
+    expect(auth, contains('Future<VerifiedOwnerEnrollment> _verifyLocalOwner('));
     expect(payroll, contains('verifyPayment: true, rethrowError: true'));
     expect(payroll, contains('assertOwnerGrant: _assertOwner'));
   });
