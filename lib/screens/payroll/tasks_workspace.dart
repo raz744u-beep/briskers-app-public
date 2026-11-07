@@ -22,6 +22,7 @@ class TasksWorkspace extends StatefulWidget {
     required this.onEmployeeTap,
     this.initialGeneral = false,
     this.onAddService,
+    this.onAddRecheck,
   });
 
   final List<Map<String, dynamic>> serviceTasks;
@@ -32,6 +33,7 @@ class TasksWorkspace extends StatefulWidget {
   final Widget Function(Map<String,dynamic>) serviceTaskCard;
   final VoidCallback onAddGeneral;
   final VoidCallback? onAddService;
+  final ValueChanged<String>? onAddRecheck;
   final Future<void> Function(int taskId, String status) onGeneralStatus;
   final ValueChanged<String> onOpenJob;
   final ValueChanged<String> onEmployeeTap;
@@ -340,6 +342,12 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                 TextButton.icon(onPressed:()=>widget.onOpenJob(entry.key),
                   icon:const Icon(Icons.open_in_new,size:17),
                   label:const Text('Open Job Details')),
+                if (widget.onAddRecheck != null)
+                  TextButton.icon(
+                    onPressed: () => widget.onAddRecheck!(entry.key),
+                    icon: const Icon(Icons.add_task_outlined, size: 17),
+                    label: const Text('Add Recheck'),
+                  ),
                 const SizedBox(height:5),
               ],
             ]),
