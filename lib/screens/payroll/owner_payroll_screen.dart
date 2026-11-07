@@ -773,31 +773,50 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                       style:const TextStyle(color:Color(0xFF64748B))),
                   ]),
                   const SizedBox(height: 5),
-                  Wrap(alignment: WrapAlignment.end,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 8,runSpacing: 2,children: [
-                      Text(state == 'Open' ? 'Not Started' : state,
-                        style:const TextStyle(color:Color(0xFF64748B),
-                          fontWeight:FontWeight.w600)),
-                      if (canProgress && state == 'Open')
-                        TextButton.icon(
-                          onPressed:()=>_recordTaskProgress(row),
-                          icon:const Icon(Icons.play_arrow,size:18),
-                          label:const Text('Start')),
-                      if (canProgress && state != 'Done')
+                  // Keep the completion control beside In Progress.
+                  // The previous Wrap placed Mark Done on its own bottom
+                  // line where the Android navigation area obscured it.
+                  if (state == 'In Progress')
+                    Row(children: [
+                      const Expanded(child: Text('In Progress',
+                        style:TextStyle(color:Color(0xFF64748B),
+                          fontWeight:FontWeight.w600))),
+                      if (canProgress)
                         OutlinedButton.icon(
                           onPressed:()=>_recordTaskProgress(row,markDone:true),
+                          style:OutlinedButton.styleFrom(
+                            visualDensity:VisualDensity.compact,
+                            padding:const EdgeInsets.symmetric(
+                              horizontal:12,vertical:6)),
                           icon:const Icon(Icons.done,size:17),
                           label:const Text('Mark Done')),
-                      if (conflict)
-                        TextButton(onPressed:_busy?null:()=>_runOwnerTaskEdit(
-                          ()=>_taskEditRepository.acceptChangedAssignment(
-                            row['id'] as String)),
-                          child:const Text('Accept work')),
-                      if (paid) const Text('Paid · Locked',
-                        style:TextStyle(fontWeight:FontWeight.w700,
-                          color:Color(0xFF64748B))),
-                    ]),
+                    ])
+                  else
+                    Wrap(alignment: WrapAlignment.end,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,runSpacing: 2,children: [
+                        Text(state == 'Open' ? 'Not Started' : state,
+                          style:const TextStyle(color:Color(0xFF64748B),
+                            fontWeight:FontWeight.w600)),
+                        if (canProgress && state == 'Open')
+                          TextButton.icon(
+                            onPressed:()=>_recordTaskProgress(row),
+                            icon:const Icon(Icons.play_arrow,size:18),
+                            label:const Text('Start')),
+                        if (canProgress && state == 'Open')
+                          OutlinedButton.icon(
+                            onPressed:()=>_recordTaskProgress(row,markDone:true),
+                            icon:const Icon(Icons.done,size:17),
+                            label:const Text('Mark Done')),
+                        if (conflict)
+                          TextButton(onPressed:_busy?null:()=>_runOwnerTaskEdit(
+                            ()=>_taskEditRepository.acceptChangedAssignment(
+                              row['id'] as String)),
+                            child:const Text('Accept work')),
+                        if (paid) const Text('Paid · Locked',
+                          style:TextStyle(fontWeight:FontWeight.w700,
+                            color:Color(0xFF64748B))),
+                      ]),
                   if (actual > 0 || credited > 0)
                     Text('Actual: ${(actual/60).toStringAsFixed(2)}h · '
                       'Credited: ${(credited/60).toStringAsFixed(2)}h',
@@ -1970,7 +1989,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             ? 'Payroll reports'
             : _jobMode ? 'Job labor tasks' : 'Owner payroll')),
         body: ListView(
-          padding: const EdgeInsets.all(16),
+          // Keep the last action clear of Android gesture/three-button nav.
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 112),
           children: [
             FilledButton(
               onPressed: _loadingLocal ? null : () => unawaited(_load()),
