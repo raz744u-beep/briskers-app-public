@@ -76,6 +76,21 @@ void main() {
     expect(action, contains('operation: operation'));
   });
 
+  test('New General Task saves under Owner identity, not payment grant', () {
+    final start = source.indexOf('Future<void> _createEmployeeGeneralTask()');
+    final end = source.indexOf('Future<void> _updateEmployeeGeneralTask(', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final action = source.substring(start, end);
+    expect(action, contains('if (!_canView) {'));
+    expect(action, contains('_taskEditRepository.addShopTask('));
+    expect(action, isNot(contains('_repository.addShopTask(')));
+    expect(action, isNot(contains('authorizeLocal(')));
+    expect(action, isNot(contains('await _run(')));
+    expect(source, contains('assertOwnerGrant: () {'));
+    expect(source, contains("if (!_canView) throw StateError('Sign in as Owner to edit tasks.')"));
+  });
+
   test('TEST New Service Task reads and creates locally without payment unlock', () {
     final start = source.indexOf('Future<void> _newServiceTask()');
     final end = source.indexOf('Future<void> _createEmployeeGeneralTask()', start);
