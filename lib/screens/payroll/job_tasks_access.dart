@@ -255,9 +255,12 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
                 tooltip:linePeople.every((p)=>p['paid']==true)
                   ? 'Paid mechanic labor locked'
                   : 'Edit or split mechanic labor',
+                // The single TEST pencil consistently opens per-line
+                // assignment management, whether one or multiple mechanics
+                // are currently shown. Existing paid allocations stay locked
+                // by the Owner Tasks/Payroll editor.
                 onPressed:busy || linePeople.every((p)=>p['paid']==true)
-                  ? null : linePeople.length==1
-                    ? ()=>editMechanicHours(linePeople.first) : open,
+                  ? null : open,
               ),
             ] else ...[
               Text(lineAssignment??'Loading assignments…',
