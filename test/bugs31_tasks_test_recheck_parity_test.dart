@@ -15,7 +15,8 @@ void main() {
     expect(payroll, contains('onAddRecheck: (jobId) => _addRecheck(jobId: jobId)'));
     expect(payroll, contains('final job = jobId ?? widget.jobId;'));
     expect(payroll, contains("(employee['employee_id'] ?? employee['id']) as String"));
-    expect(payroll, contains('await _repository.createRecheck('));
+    expect(payroll, contains('_runOwnerTaskEdit(() => _taskEditRepository.createRecheck('));
+    expect(payroll, contains('await _run(() async {'));
     expect(payroll, contains('await workflow.assignRecheck('));
   });
 }
