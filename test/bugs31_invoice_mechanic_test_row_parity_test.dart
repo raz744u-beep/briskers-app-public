@@ -19,9 +19,11 @@ void main() {
   test('saved mechanic name/hours and edit or lock keep TEST inline emphasis', () {
     final source=File('lib/screens/payroll/job_tasks_access.dart').readAsStringSync();
     expect(source,contains('alignment:WrapAlignment.end'));
-    expect(source,contains('fontSize:13.5,color:Color(0xFF00897E)'));
+    expect(source,contains('fontSize:15,color:Color(0xFF00897E)'));
     expect(source,contains('fontWeight:FontWeight.w800'));
-    expect(source,contains("p['paid']==true?Icons.lock_outline:Icons.edit_outlined"));
-    expect(source,contains("tooltip:'Assign or split mechanic labor'"));
+    expect(source,contains("? Icons.lock_outline : Icons.edit_outlined"));
+    expect(source,contains("'Edit or split mechanic labor'"));
+    expect(source,contains("linePeople.map((p) =>"));
+    expect(source,contains(").join(' · ')"));
   });
 }
