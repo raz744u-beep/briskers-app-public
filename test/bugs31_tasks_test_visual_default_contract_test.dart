@@ -21,6 +21,15 @@ void main() {
     expect(screen, contains('case \'Done\':'));
   });
 
+  test('Job labor completion stays next to In Progress and off nav bar', () {
+    final source=File('lib/screens/payroll/owner_payroll_screen.dart')
+        .readAsStringSync();
+    expect(source, contains("if (state == 'In Progress')"));
+    expect(source, contains("const Expanded(child: Text('In Progress'"));
+    expect(source, contains('padding: const EdgeInsets.fromLTRB(16, 16, 16, 112)'));
+    expect(source, contains('_recordTaskProgress(row,markDone:true)'));
+  });
+
   test('mechanic time default is planning, never earned on Start', () {
     final screen = File('lib/screens/payroll/owner_payroll_screen.dart').readAsStringSync();
     final start = screen.indexOf('Future<void> _recordTaskProgress(');
