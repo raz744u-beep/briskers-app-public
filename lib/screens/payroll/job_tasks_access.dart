@@ -230,38 +230,47 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
   @override Widget build(BuildContext context){
     if(widget.line!=null){
       return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        // Approved TEST invoice: one compact, bold teal mechanic label on
+        // the SAME header line as Labor, with one trailing edit/paid icon.
+        // Assignment identities and planned minutes remain unchanged.
         Wrap(spacing:4,runSpacing:2,
           alignment:WrapAlignment.end,
           crossAxisAlignment:WrapCrossAlignment.center,
           children:[
-            for(final p in linePeople) Row(mainAxisSize:MainAxisSize.min,children:[
-              const Icon(Icons.engineering_outlined,size:14,color:Color(0xFF00897E)),
-              const SizedBox(width:2),
-              Text('${p['label']} ${((p['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(1)}h',
-                style:const TextStyle(fontSize:13.5,color:Color(0xFF00897E),
+            if(linePeople.isNotEmpty) ...[
+              const Icon(Icons.engineering_outlined,size:16,
+                color:Color(0xFF00897E)),
+              Text(linePeople.map((p) =>
+                '${p['label']} ${((p['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(1)}h'
+              ).join(' · '),
+                style:const TextStyle(fontSize:15,color:Color(0xFF00897E),
                   fontWeight:FontWeight.w800)),
               IconButton(
-                constraints:const BoxConstraints(minWidth:29,minHeight:29),
+                constraints:const BoxConstraints(minWidth:28,minHeight:28),
                 padding:EdgeInsets.zero,
-                icon:Icon(p['paid']==true?Icons.lock_outline:Icons.edit_outlined,
-                  size:18,color:p['paid']==true?const Color(0xFF64748B):
-                    const Color(0xFF00897E)),
-                tooltip:p['paid']==true?'Paid mechanic labor locked':
-                  'Edit ${p['label']} estimated mechanic hours',
-                onPressed:busy || p['paid']==true?null:()=>editMechanicHours(p),
+                icon:Icon(linePeople.every((p)=>p['paid']==true)
+                    ? Icons.lock_outline : Icons.edit_outlined,
+                  size:18,color:linePeople.every((p)=>p['paid']==true)
+                    ? const Color(0xFF64748B):const Color(0xFF00897E)),
+                tooltip:linePeople.every((p)=>p['paid']==true)
+                  ? 'Paid mechanic labor locked'
+                  : 'Edit or split mechanic labor',
+                onPressed:busy || linePeople.every((p)=>p['paid']==true)
+                  ? null : linePeople.length==1
+                    ? ()=>editMechanicHours(linePeople.first) : open,
               ),
-            ]),
-            if(linePeople.isEmpty)
+            ] else ...[
               Text(lineAssignment??'Loading assignments…',
                 style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
-            IconButton(
-              tooltip:'Assign or split mechanic labor',
-              icon:const Icon(Icons.person_add_alt_1_outlined,
-                color:Color(0xFF00897E),size:20),
-              constraints:const BoxConstraints(minWidth:30,minHeight:30),
-              padding:EdgeInsets.zero,
-              onPressed:busy?null:open,
-            ),
+              IconButton(
+                tooltip:'Assign or split mechanic labor',
+                icon:const Icon(Icons.person_add_alt_1_outlined,
+                  color:Color(0xFF00897E),size:20),
+                constraints:const BoxConstraints(minWidth:30,minHeight:30),
+                padding:EdgeInsets.zero,
+                onPressed:busy?null:open,
+              ),
+            ],
           ]),
         if(warning!=null)Text(warning!,style:const TextStyle(fontSize:11)),
       ]);
