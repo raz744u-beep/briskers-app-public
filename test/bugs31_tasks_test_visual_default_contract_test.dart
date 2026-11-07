@@ -28,7 +28,9 @@ void main() {
         .readAsStringSync();
     expect(source, contains("label:const Text('Mark Done')"));
     expect(source, contains('_recordTaskProgress(row,markDone:true)'));
-    expect(source, contains("(row['paid_minutes'] as int? ?? 0)==0"));
+    expect(source, contains("final canProgress = !paid && !conflict && !removed && !_busy;"));
+    expect(source, contains("color: const Color(0xFFF0F5F8)"));
+    expect(source, contains("label:const Text('Mark Done')"));
     expect(source, contains('Credited mechanic labor'));
   });
 
