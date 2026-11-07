@@ -112,6 +112,47 @@ void main() {
     expect(calls, 0);
   });
 
+  test('existing deployed Worker response wrappers normalize receipt details for review', () async {
+    final gateway=IndependentReceiptAiGateway(
+      endpoint:'https://briskers-receipt-ai.example/extract',
+      transport:(_,token,body)async{
+        expect(token,'synthetic-test-device-token');
+        expect(body.keys,unorderedEquals([
+          'business_id','mime_type','image_base64',
+        ]));
+        return {
+          'success':true,
+          'data':{
+            'vendor':'Premier Volkswagen of Harvey',
+            'invoice_number':'089164',
+            'date':'2026-11-03',
+            'total':'\u0024714.80',
+            'line_items':[{'description':'VW turbo'}],
+          },
+        };
+      },
+    );
+    final result=await gateway.enhance(receipt:photo(),
+      businessId:'synthetic-shop',
+      accessToken:'synthetic-test-device-token',mimeType:'image/jpeg');
+    expect(result['vendor_name'],'Premier Volkswagen of Harvey');
+    expect(result['vendor_invoice_number'],'089164');
+    expect(result['receipt_total'],714.80);
+    expect(result['receipt_date'],'2026-11-03');
+    expect(result['items'],isA<List>());
+    expect(result['review_confirmed'],false);
+  });
+
+  test('Worker HTTP 200 error payload is rejected and never shown as recognized receipt', () async {
+    final gateway=IndependentReceiptAiGateway(
+      endpoint:'https://receipt.example/extract',
+      transport:(_, _, _) async => {'success':false,'error':'invalid_business'},
+    );
+    await expectLater(gateway.enhance(receipt:photo(),
+      businessId:'shop',accessToken:'synthetic-test-device-token',
+      mimeType:'image/jpeg'),throwsStateError);
+  });
+
   test('gateway failures retain original and do not silently retry', () async {
     var calls = 0;
     final original = photo();

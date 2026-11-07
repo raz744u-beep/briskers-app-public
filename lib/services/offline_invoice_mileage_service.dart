@@ -1,3 +1,4 @@
+import 'sync_replay_fence.dart';
 import 'dart:convert';
 
 import 'package:drift/drift.dart' show Variable;
@@ -87,8 +88,9 @@ class OfflineInvoiceMileageService {
         (detail['id'] != null && detail['id']?.toString() != invoiceId) ||
         (detail['business_id'] != null &&
          detail['business_id']?.toString() != businessId) ||
-        detail['kind'] != 'invoice' ||
-        detail['mileage_schema_version'] != 2) {
+        detail['kind']?.toString() != 'invoice' ||
+        (detail['mileage_schema_version']?.toString() != '2' &&
+         !detail.containsKey('mileage_out'))) {
       return detail;
     }
     final queued = await _database.customSelect(
@@ -171,6 +173,7 @@ class OfflineInvoiceMileageService {
             outboxId:id,
           );
         } catch (error) {
+          if (error is SyncReplayDeferred) rethrow;
           // The response may have been lost after a successful commit. Only
           // authoritative v5 document data can prove that exact write.
           final server=await _api.documentDetail(businessId,invoiceId);
@@ -195,7 +198,7 @@ class OfflineInvoiceMileageService {
         // queued operation for Owner review instead of re-sending it on every
         // Auto refresh and exhausting PostgREST connections.
         final message = error.toString();
-        final versionConflict = message.contains('40001') ||
+        final versionConflict = isSyncVersionConflict(error) ||
             message.contains('Invoice changed elsewhere');
         await _database.customStatement(
           """UPDATE sync_outbox SET state=?,last_attempt_at=?,last_error=?

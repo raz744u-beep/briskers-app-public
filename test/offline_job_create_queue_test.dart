@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'support/replay_cooldown.dart';
 import 'dart:convert';
 import 'package:drift/native.dart';
 import 'package:drift/drift.dart';
@@ -63,11 +65,13 @@ void main() {
       final legacy=await db.customSelect("SELECT id,payload_json FROM sync_outbox WHERE entity_type='job_create'").getSingle();
       final payload=Map<String,dynamic>.from(jsonDecode(legacy.read<String>('payload_json')) as Map)..remove('local_job_number');
       await db.customStatement('UPDATE sync_outbox SET payload_json=? WHERE id=?',[jsonEncode(payload),legacy.read<int>('id')]);
+      await expireSyncReplayCooldown(db);
       await service.flushCreates('shop-1');
       expect(api.createdIds,[jobId]);
       final retained=await db.customSelect(
         "SELECT id FROM sync_outbox WHERE entity_type='job_create'").get();
       expect(retained.length,1);
+      await expireSyncReplayCooldown(db);
       await service.flushCreates('shop-1');
       expect(api.createdIds,[jobId]);
       final pending=await db.customSelect(
@@ -114,7 +118,7 @@ class FakeJobApi extends BriskersApi {
   }) async {
     if(failUpdateOnce) {
       failUpdateOnce=false;
-      throw StateError('simulated transient network loss');
+      throw TimeoutException('simulated transient network loss');
     }
   }
   @override

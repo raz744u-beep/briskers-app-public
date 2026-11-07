@@ -60,6 +60,8 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
   String? _error;
   List<int> _availableInvoices = const [];
   List<int> _availableJobs = const [];
+  int? _nextInvoiceNumber;
+  int? _nextJobNumber;
   int? _reuseInvoice;
   int? _reuseJob;
 
@@ -72,12 +74,20 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
       final numbers = LocalNumberAllocator(localDatabase);
       final invoices = await numbers.availableNumbers(widget.businessId, 'invoice');
       final jobs = await numbers.availableNumbers(widget.businessId, 'job');
+      final nextInvoice = await numbers.nextNumber(widget.businessId, 'invoice');
+      final nextJob = await numbers.nextNumber(widget.businessId, 'job');
+      // A free suffix at the counter is automatically the next number.
+      // Do not ask Owner to approve that as an older pool reuse.
+      final reusableInvoices = invoices.where((n) => n != nextInvoice).toList();
+      final reusableJobs = jobs.where((n) => n != nextJob).toList();
       if (!mounted) return;
       setState(() {
-        _availableInvoices = invoices;
-        _availableJobs = jobs;
-        if (!invoices.contains(_reuseInvoice)) _reuseInvoice = null;
-        if (!jobs.contains(_reuseJob)) _reuseJob = null;
+        _nextInvoiceNumber = nextInvoice;
+        _nextJobNumber = nextJob;
+        _availableInvoices = reusableInvoices;
+        _availableJobs = reusableJobs;
+        if (!reusableInvoices.contains(_reuseInvoice)) _reuseInvoice = null;
+        if (!reusableJobs.contains(_reuseJob)) _reuseJob = null;
       });
     } catch (_) {
       // A pool lookup must not prevent ordinary invoice creation.
@@ -86,18 +96,37 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
 
   Widget _numberChoice(String label, List<int> numbers, int? selected,
       ValueChanged<int?> onChanged, {bool job = false}) {
-    return DropdownButtonFormField<int>(
-      key: ValueKey('$label-$selected'),
-      initialValue: selected,
-      isExpanded: true,
-      decoration: InputDecoration(labelText: label),
-      items: [
-        const DropdownMenuItem<int>(value: null, child: Text('Use next number')),
-        for (final number in numbers)
-          DropdownMenuItem<int>(value: number,
-            child: Text(job ? 'Reuse J-$number' : 'Reuse #$number')),
-      ],
-      onChanged: _saving ? null : onChanged,
+    final next = job ? _nextJobNumber : _nextInvoiceNumber;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: DropdownButtonFormField<int>(
+        key: ValueKey('$label-$selected'),
+        initialValue: selected,
+        isExpanded: true,
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14, vertical: 18,
+          ),
+        ),
+        items: [
+          DropdownMenuItem<int>(
+            value: null,
+            child: Text(next == null
+                ? 'Use next number'
+                : job ? 'Next: J-$next' : 'Next: #$next'),
+          ),
+          for (final number in numbers)
+            DropdownMenuItem<int>(
+              value: number,
+              child: Text(job
+                  ? 'Reuse from pool: J-$number'
+                  : 'Reuse from pool: #$number'),
+            ),
+        ],
+        onChanged: _saving ? null : onChanged,
+      ),
     );
   }
 
@@ -497,18 +526,16 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
             ),
           ],
           if (widget.kind == 'invoice' &&
-              BriskersConnectionModeController.instance.forceOffline &&
-              (_availableInvoices.isNotEmpty || _availableJobs.isNotEmpty)) ...[
-            const SizedBox(height: 16),
-            const Text('Unused numbers available',
+              BriskersConnectionModeController.instance.forceOffline) ...[
+            const SizedBox(height: 18),
+            const Text('Invoice and job numbers',
               style: TextStyle(fontWeight: FontWeight.w700)),
-            const Text('Choose released numbers to reuse, or keep the next numbers. Owner approval is required for reuse.'),
-            if (_availableInvoices.isNotEmpty)
-              _numberChoice('Invoice number', _availableInvoices, _reuseInvoice,
-                (value) => setState(() => _reuseInvoice = value)),
-            if (_availableJobs.isNotEmpty)
-              _numberChoice('Job number', _availableJobs, _reuseJob,
-                (value) => setState(() => _reuseJob = value), job: true),
+            const SizedBox(height: 4),
+            const Text('Next numbers are automatic. Only older released numbers require Owner approval for reuse.'),
+            _numberChoice('Invoice number', _availableInvoices, _reuseInvoice,
+              (value) => setState(() => _reuseInvoice = value)),
+            _numberChoice('Job number', _availableJobs, _reuseJob,
+              (value) => setState(() => _reuseJob = value), job: true),
           ],
           const SizedBox(height: 22),
           FilledButton.icon(

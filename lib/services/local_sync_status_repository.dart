@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_job_retirement.dart';
+import 'sync_replay_fence.dart';
 
 class LocalSyncStatusSnapshot {
   const LocalSyncStatusSnapshot({
@@ -97,6 +98,15 @@ class LocalSyncStatusRepository {
         .getSingle();
     final failed = uploads.readNullable<int>('failed') ?? 0;
     if (failed > 0) issues.add('$failed upload(s) need attention');
+    await SyncReplayFence(_database).ensureSchema();
+    final fenced = await _database.customSelect(
+      "SELECT COUNT(*) AS n FROM sync_replay_fences_v1 WHERE business_id=? "
+      "AND status IN ('conflict','review','inflight')",
+      variables: [Variable<String>(businessId)],
+    ).getSingle();
+    if (fenced.read<int>('n') > 0) {
+      issues.add('${fenced.read<int>('n')} sync request(s) held or awaiting acknowledgement; reconcile before retry');
+    }
     await LocalJobRetirement.ensureSchema(_database);
     final retirements = await _database
         .customSelect(

@@ -169,9 +169,7 @@ class LocalDocumentDetailCache {
         // Derive tasks in the same serialized snapshot read. No financial row
         // changes, and an older background read cannot revert a newer edit.
         if(detail['kind']=='invoice'){
-          final tables=await _database.customSelect("SELECT name FROM sqlite_master WHERE name='regular_payroll_task_sources'").get();
-          final existing=tables.isEmpty?[]:await _database.customSelect('SELECT task_id FROM regular_payroll_task_sources WHERE business_id=? AND invoice_id=? LIMIT 1',variables:[Variable(businessId),Variable(documentId)]).get();
-          if(existing.isEmpty){await LocalInvoiceTaskStore(_database).save(businessId,documentId,detail);}
+          await LocalInvoiceTaskStore(_database).reconcileCached(businessId,documentId,detail);
         }
         return _projectRetiredConversion(businessId, detail);
       }),

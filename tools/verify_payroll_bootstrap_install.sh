@@ -63,6 +63,17 @@ check_records() {
 }
 launch
 check_records baseline-launched
+# Keep the same synthetic app sandbox throughout both normal Android updates.
+# The intermediate is the latest receipt build, not another TEST application.
+intermediate=${BRISKERS_UPGRADE_INTERMEDIATE:-}
+if [ -n "$intermediate" ]; then
+  test "$(basename "$intermediate")" = Briskers-v0.10.9-b2571.apk
+  printf '%s  %s\n' '820845a388b63696525ccd7b2347a7690fec00690a227dd6ceb473f426572f2b' "$intermediate" | sha256sum -c
+  adb install -r "$intermediate" | tee "$evidence/intermediate-install-result.txt"
+  test "$(adb shell stat -c %u "$state" | tr -d '\r')" = "$uid"
+  launch
+  check_records receipt-baseline-launched
+fi
 adb install -r "$candidate" | tee "$evidence/install-result.txt"
 test "$(adb shell stat -c %u "$state" | tr -d '\r')" = "$uid"
 check_records after-install
@@ -76,7 +87,7 @@ adb logcat -d > "$evidence/emulator-logcat.txt"
 if grep -E 'FATAL EXCEPTION|Fatal signal [0-9]+.*briskers' "$evidence/emulator-logcat.txt"; then
   echo "Emulator app crashed" >&2; exit 1
 fi
-printf '%s\n' "baseline=$(basename "$baseline")" "candidate=$(basename "$candidate")" \
+printf '%s\n' "baseline=$(basename "$baseline")" "candidate=$(basename "$candidate")" "intermediate=${intermediate##*/}" \
   "app_id=$package" "uid=$uid" "database=$dbpath" \
   'physical_owner_phone_acceptance=NOT_PERFORMED' > "$evidence/identity.txt"
 echo "Verified actual signed update, two app launches, SQLite records, payroll, pending/conflict states and Force Offline preferences."

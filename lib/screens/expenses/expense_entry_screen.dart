@@ -5,7 +5,7 @@ import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
 import '../../core/module_modal_theme.dart';
 
 import 'package:image_picker/image_picker.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../../services/receipt_ai_gateway_access.dart';
 
 import '../../services/independent_receipt_ai_gateway.dart';
 import 'receipt_review_sheet.dart';
@@ -24,12 +24,23 @@ import 'expense_receipt_attachments.dart';
 @visibleForTesting
 String receiptAiFailureMessage(Object error) {
   final message = error.toString().toLowerCase();
+  if (message.contains('saved owner account') ||
+      message.contains('owner account changed')) {
+    return 'Open the saved Briskers Owner account to pair receipt AI. '
+        'Your original photo remains attached and shop sync stays offline.';
+  }
   if (message.contains('active briskers sign-in') ||
       message.contains('authorization is not configured') ||
       message.contains('http 401') || message.contains('http 403')) {
-    return 'Receipt AI sign-in is unavailable or expired. The receipt photo '
-        'is still attached. Keep shop synchronization offline; use manual '
-        'entry until receipt-only authorization is restored.';
+    return 'Receipt AI sign-in authorization was rejected. Use Scan attached '
+        'receipt to reconnect the existing gateway or use manual entry. '
+        'Your photo is still attached; no expense was submitted. '
+        'Shop sync stays offline.';
+  }
+  if (message.contains('rejected business identity')) {
+    return 'The receipt AI Worker did not recognize this Briskers business. '
+        'Check the gateway shop authorization. The photo is still attached; '
+        'no expense was submitted, and shop sync stays offline.';
   }
   if (message.contains('http 429')) {
     return 'Receipt AI reached its request limit. Your photo is safe. '
@@ -92,6 +103,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
   Color get modalAccent => BriskersColors.expenses;
   static const _api = BriskersApi();
   final _picker = ImagePicker();
+  final _receiptGatewayAccess = ReceiptAiGatewayAccess();
   final LocalFinancialCache _localFinancial = LocalFinancialCache();
   final OfflineFinancialWriteService _offlineFinancial =
       OfflineFinancialWriteService();
@@ -500,6 +512,85 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     }
   }
 
+  bool _receiptAiAuthorizationRejected(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('http 401') || message.contains('http 403');
+  }
+
+  /// Pair the deployed Cloudflare Worker without placing its shared secret
+  /// in the APK, local preferences, logs, or a support message.
+  Future<String?> _promptReceiptGatewayToken({bool expired = false}) async {
+    final controller = TextEditingController();
+    ModalRoute<dynamic>? route;
+    final token = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        route ??= ModalRoute.of(dialogContext);
+        return AlertDialog(
+          title: Text(expired
+              ? 'Reconnect receipt AI'
+              : 'Connect receipt AI'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(expired
+                  ? 'The saved gateway authorization was rejected. '
+                    'Enter the current token from your Briskers Cloudflare Worker.'
+                  : 'Connect the independent Briskers receipt AI Worker once. '
+                    'Enter its gateway token directly on this Owner phone.'),
+              const SizedBox(height: 10),
+              const Text(
+                'Cloudflare hides stored secrets. Use the token you created '
+                'last night, or rotate BRISKERS_GATEWAY_TOKEN on your Mac '
+                'before entering the replacement here. Never paste it into '
+                'ChatGPT. Shop sync stays offline.',
+                style: TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                obscureText: true,
+                enableSuggestions: false,
+                autocorrect: false,
+                textCapitalization: TextCapitalization.none,
+                decoration: const InputDecoration(
+                  labelText: 'Gateway token',
+                  hintText: 'Paste the current Worker token',
+                  helperText: 'At least 16 characters, no spaces',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                // Require a real random Worker secret, not a dummy or an
+                // accidentally pasted business identifier.
+                if (value.length < 16 || value.length > 4096 ||
+                    value.contains(RegExp(r'\s'))) {
+                  return;
+                }
+                Navigator.pop(dialogContext, value);
+              },
+              child: const Text('Connect and scan'),
+            ),
+          ],
+        );
+      },
+    );
+    await route?.completed;
+    controller.dispose();
+    return token;
+  }
+
   Future<void> _readReceipt(XFile file) async {
     if (_readingReceipt) return;
     // Receipt AI is independent of the Supabase sync connection. Never
@@ -539,16 +630,52 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     });
 
     try {
-      const storage = FlutterSecureStorage();
-      final token = await storage.read(
-        key: 'receipt_ai_gateway_token:${widget.businessId}',
-      );
-      final suggestion = await gateway.enhance(
-        receipt: file,
-        businessId: widget.businessId,
-        accessToken: token ?? '',
-        mimeType: _mimeType(file.name),
-      );
+      var token = await _receiptGatewayAccess.read(widget.businessId);
+      var newlyPaired = false;
+      if (token == null) {
+        token = await _promptReceiptGatewayToken();
+        if (!mounted || token == null) {
+          if (mounted) {
+            setState(() => _receiptReadMessage =
+                'Connect the existing receipt AI gateway to scan. '
+                'Your photo is attached; no transaction was submitted.');
+          }
+          return;
+        }
+        newlyPaired = true;
+      }
+      Map<String, dynamic> suggestion;
+      try {
+        suggestion = await gateway.enhance(
+          receipt: file,
+          businessId: widget.businessId,
+          accessToken: token,
+          mimeType: _mimeType(file.name),
+        );
+      } catch (error) {
+        // Do not loop on 401/403. Give the Owner one explicit opportunity to
+        // replace an expired token, then send exactly one more request.
+        if (!newlyPaired && _receiptAiAuthorizationRejected(error) && mounted) {
+          final updated = await _promptReceiptGatewayToken(expired: true);
+          if (updated == null || !mounted) rethrow;
+          suggestion = await gateway.enhance(
+            receipt: file,
+            businessId: widget.businessId,
+            accessToken: updated,
+            mimeType: _mimeType(file.name),
+          );
+          token = updated;
+          newlyPaired = true;
+        } else {
+          rethrow;
+        }
+      }
+      if (!mounted) return;
+      if (newlyPaired) {
+        // The token is written to device-protected storage only *after* a
+        // successful real receipt extraction, never after an HTTP 401/403.
+        await _receiptGatewayAccess.saveVerified(widget.businessId, token);
+      }
       if (!mounted) return;
       final extraction = await showModalBottomSheet<Map<String, dynamic>>(
         context: context,
@@ -1516,6 +1643,19 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                     ),
                   ],
                 ),
+                // Re-use the *already attached* photo after enrollment or
+                // a transient failure, without adding a duplicate attachment.
+                if (_receipts.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: _saving || _readingReceipt
+                          ? null
+                          : () => _readReceipt(_receipts.first),
+                      icon: const Icon(Icons.auto_fix_high_outlined, size: 17),
+                      label: const Text('Scan attached receipt'),
+                    ),
+                  ),
                 if ((_receiptReadMessage ?? '').isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),

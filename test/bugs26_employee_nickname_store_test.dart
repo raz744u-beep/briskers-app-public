@@ -7,6 +7,16 @@ import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/employee_nickname_store.dart';
 
 void main() {
+  test('nickname display disambiguates duplicates without changing IDs or legal names',(){
+    final rows=<Map<String,dynamic>>[
+      {'id':'immutable-a','name':'First Legal','nickname':'Sam'},
+      {'id':'immutable-b','name':'Second Legal','nickname':'Sam'},
+    ];
+    expect(EmployeeNicknameStore.displayLabel(rows.first,rows),'Sam (First Legal)');
+    expect(EmployeeNicknameStore.displayLabel(rows.last,rows),'Sam (Second Legal)');
+    expect(rows.first['id'],'immutable-a');expect(rows.first['name'],'First Legal');
+  });
+
   test('nickname survives store recreation in the same SQLite database',
       () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());

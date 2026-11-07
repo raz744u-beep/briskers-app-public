@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
+import 'package:briskers_app/services/local_document_sql_store.dart';
+import 'dart:convert';
 import 'package:briskers_app/services/local_payroll_repository.dart';
 import 'package:briskers_app/services/local_owner_authorization.dart';
 import 'package:briskers_app/services/payroll_lan_identity.dart';
@@ -115,6 +117,64 @@ void main(){
       base:0,hourlyAdjustment:0,adjustmentReason:'',repayment:0,confirmedNet:8000),isTrue);
     final fullyPaid=(await repo.work(employee:'b')).singleWhere((r)=>r['id']==turbo['id']);
     expect(fullyPaid['paid'],1);expect(fullyPaid['remaining_minutes'],0);expect(await repo.history('b'),hasLength(2));
+    // Simulate the phone's partially indexed, still-unsynced invoice. Existing
+    // paid credits/payment payloads must survive recovery byte for byte.
+    final paymentsBefore=(await db.customSelect('SELECT * FROM regular_payroll_payments ORDER BY operation_id').get()).map((r)=>r.data).toList();
+    final coverageBefore=(await db.customSelect('SELECT * FROM regular_payroll_work_coverage ORDER BY operation_id').get()).map((r)=>r.data).toList();
+    final paidCreditBefore=(await db.customSelect('SELECT * FROM local_mechanic_work_credits_v1 WHERE allocation_id=?',variables:[Variable(turbo['id'] as String)]).getSingle()).data;
+    final secondId=task('second');
+    await db.customStatement("DELETE FROM regular_payroll_task_sources WHERE invoice_id='invoice' AND line_id='second'");
+    final detail=invoice(quantity:7,more:true);
+    (detail['lines'] as List).add({'id':'missing-labor','line_kind':'labor','description':'Previously unindexed labor','quantity':1});
+    await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','invoice'),jsonEncode(detail));
+    await db.customStatement("INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,payload_json,state) VALUES('shop','document_draft_create','invoice','create','{}','pending')");
+    await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind,document_number) VALUES('unavailable','shop','job','invoice','SYNTHETIC-NO-CACHE')");
+    final outboxBefore=(await db.customSelect('SELECT * FROM sync_outbox').get()).map((r)=>r.data).toList();
+    var recovered=0,unavailable=0;
+    await repo.backfillInvoiceTasks(onProgress:(checked,added,unknown){recovered=added;unavailable=unknown;});
+    expect(recovered,2);expect(unavailable,1);
+    final indexed=await repo.tasks();
+    expect(indexed.singleWhere((r)=>r['source_line_id']=='second')['id'],secondId);
+    expect(indexed.where((r)=>r['source_line_id']=='missing-labor'),hasLength(1));
+    await repo.backfillInvoiceTasks();
+    expect(await repo.tasks(),hasLength(indexed.length));
+    expect((await db.customSelect('SELECT * FROM regular_payroll_payments ORDER BY operation_id').get()).map((r)=>r.data).toList(),paymentsBefore);
+    expect((await db.customSelect('SELECT * FROM regular_payroll_work_coverage ORDER BY operation_id').get()).map((r)=>r.data).toList(),coverageBefore);
+    expect((await db.customSelect('SELECT * FROM local_mechanic_work_credits_v1 WHERE allocation_id=?',variables:[Variable(turbo['id'] as String)]).getSingle()).data,paidCreditBefore);
+    expect((await db.customSelect('SELECT * FROM sync_outbox').get()).map((r)=>r.data).toList(),outboxBefore);
+    expect((await repo.work(employee:'b')).singleWhere((r)=>r['id']==turbo['id'])['remaining_minutes'],0);
+    // Removing a line deactivates only its source, never its earned/paid work.
+    (detail['lines'] as List).removeWhere((r)=>r['id']=='missing-labor');
+    await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','invoice'),jsonEncode(detail));
+    await repo.backfillInvoiceTasks();
+    expect((await repo.tasks()).singleWhere((r)=>r['source_line_id']=='missing-labor')['source_active'],0);
+    await db.customStatement("UPDATE local_documents SET status='voided' WHERE id='invoice'");
+    await LocalDocumentDetailCache(database:db).load('shop','invoice');
+    expect((await repo.tasks()).where((r)=>r['source_kind']=='invoice').every((r)=>r['source_active']==0),isTrue);
+    expect(await repo.history('b'),hasLength(2));
+
+    await repo.saveEmployeeCompensation(employee:'d',name:'Synthetic new mechanic',rate:0,weeklyBase:false);
+    await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status) VALUES('rate-job','shop','owner','Synthetic rate confirmation','open')");
+    await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind) VALUES('rate-invoice','shop','rate-job','invoice')");
+    await LocalDocumentDetailCache(database:db).save('shop','rate-invoice',{'id':'rate-invoice','kind':'invoice','job_id':'rate-job',
+      'lines':[{'id':'labor','line_kind':'labor','description':'Confirm missing hourly rate','quantity':1}]});
+    await repo.setMainMechanic('rate-job','d','Synthetic new mechanic');
+    final inherited=(await repo.work(employee:'d')).single;
+    expect(inherited['rate_cents'],0);
+    await repo.registerAssignedLabor(jobId:'rate-job',invoiceId:'rate-invoice',lineId:'labor',employeeId:'d',employeeName:'Synthetic new mechanic',rateCents:3500);
+    var confirmed=(await repo.work(employee:'d')).single;
+    expect(confirmed['id'],inherited['id']);expect(confirmed['rate_cents'],3500);
+    await repo.setMainMechanic('rate-job','c','Mechanic c');
+    expect((await repo.work(job:'rate-job')).single['employee_id'],'d');
+    await repo.updateWork(confirmed['id'] as String,'In Progress',0,'2026-11-05');
+    await repo.updateWork(confirmed['id'] as String,'Done',100,'2026-11-05');
+    confirmed=(await repo.work(employee:'d')).single;
+    expect(await payer.verify(operation:'confirmed-rate-pay',employee:'d',week:'2026-11-02',date:'2026-11-05',method:'Cash',selected:[confirmed],
+      base:0,hourlyAdjustment:0,adjustmentReason:'',repayment:0,confirmedNet:3500),isTrue);
+    await repo.registerAssignedLabor(jobId:'rate-job',invoiceId:'rate-invoice',lineId:'labor',employeeId:'d',employeeName:'Synthetic new mechanic',rateCents:9999);
+    final frozen=(await repo.work(employee:'d')).single;
+    expect(frozen['rate_cents'],3500);expect(frozen['remaining_minutes'],0);expect(await repo.history('d'),hasLength(1));
+
 
   });
 }
