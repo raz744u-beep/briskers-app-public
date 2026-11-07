@@ -32,7 +32,7 @@ String receiptAiFailureMessage(Object error) {
   if (message.contains('active briskers sign-in') ||
       message.contains('authorization is not configured') ||
       message.contains('http 401') || message.contains('http 403')) {
-    return 'Receipt AI authorization was rejected. Use Scan attached '
+    return 'Receipt AI sign-in authorization was rejected. Use Scan attached '
         'receipt to reconnect the existing gateway. Your original photo '
         'is safe; no expense was submitted. Shop sync stays offline.';
   }
