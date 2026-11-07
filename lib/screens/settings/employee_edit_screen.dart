@@ -164,7 +164,9 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
         // This Owner is already signed in to Briskers. Read only the existing
         // encrypted employee snapshot and locally configured pay information;
         // never require a second biometric/PIN or a Supabase round trip.
-        if (_editing && widget.isOwner) unawaited(_unlockOffline());
+        if (_editing && widget.isOwner) {
+          unawaited(_unlockOffline());
+        }
         return;
       }
       final positions = await _api.employeePositions(widget.businessId).timeout(const Duration(seconds:8));
