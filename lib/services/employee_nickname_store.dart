@@ -112,9 +112,19 @@ class EmployeeNicknameStore {
     ];
   }
 
+  static String displayLabel(Map<String,dynamic> employee,Iterable<Map<String,dynamic>> roster) {
+    final name=displayName(employee);
+    final duplicates=roster.where((r)=>displayName(r).toLowerCase()==name.toLowerCase()).toList();
+    if(duplicates.length<2) return name;
+    final legal=(employee['name']??employee['employee_name']??'Employee').toString();
+    final id=(employee['id']??employee['employee_id']??'').toString();
+    final sameLegal=duplicates.where((r)=>(r['name']??r['employee_name'])==legal).length>1;
+    return '$name ($legal${sameLegal?' · $id':''})';
+  }
+
   static String displayName(Map<String, dynamic> employee) {
     final nickname = employee['nickname']?.toString().trim() ?? '';
     if (nickname.isNotEmpty) return nickname;
-    return employee['name']?.toString().trim() ?? '';
+    return (employee['name'] ?? employee['employee_name'])?.toString().trim() ?? '';
   }
 }

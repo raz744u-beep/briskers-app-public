@@ -69,11 +69,11 @@ void main() {
 
     final expenses =
         File('lib/screens/expenses_screen.dart').readAsStringSync();
-    expect(expenses, contains("ValueKey('expenses-inline-new')"));
+    expect(expenses, contains("ValueKey('expenses-new-floating')"));
     expect(expenses, contains('backgroundColor: BriskersColors.expenses'));
-    expect(expenses, contains('shape: RoundedRectangleBorder('));
-    expect(expenses, contains('borderRadius: BorderRadius.circular(14)'));
-    expect(expenses, isNot(contains('FloatingActionButton.extended(')));
+    expect(expenses, contains('FloatingActionButton.extended('));
+    expect(expenses, contains('FloatingActionButtonLocation.endFloat'));
+    expect(expenses, contains('onPressed: _importing ? null : _showAddMenu'));
   });
 
   test('Finding Resolve explicitly selects the actual Job, including history', () {

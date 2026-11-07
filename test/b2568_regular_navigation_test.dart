@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
 import 'package:briskers_app/app.dart';
+import 'package:briskers_app/screens/home_screen.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -21,6 +22,8 @@ import 'package:briskers_app/services/payroll_owner_lease.dart';
 import 'package:briskers_app/services/payroll_owner_lan.dart';
 import 'package:briskers_app/screens/jobs/job_document_screen.dart';
 import 'package:briskers_app/screens/payroll/owner_payroll_screen.dart';
+import 'package:briskers_app/screens/payroll/payroll_overview.dart';
+import 'package:briskers_app/screens/payroll/tasks_workspace.dart';
 import 'package:briskers_app/screens/payroll/payroll_ui_scope.dart';
 class _Unused implements OwnerEnrollmentStore{
   @override Future<String?> read()async=>null;
@@ -37,6 +40,7 @@ void main(){
     addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
     await tester.runAsync(()async{
       final root=Platform.environment['FLUTTER_ROOT'];
+      if(root!=null){final icons=File('$root/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf');if(await icons.exists()){final loader=FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(await icons.readAsBytes())));await loader.load();}}
       final candidates=[if(root!=null)'$root/bin/cache/artifacts/material_fonts/Roboto-Regular.ttf','/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'];
       for(final path in candidates){final file=File(path);if(await file.exists()){
         final font=FontLoader('Roboto')..addFont(Future.value(ByteData.sublistView(await file.readAsBytes())));await font.load();break;
@@ -77,8 +81,8 @@ void main(){
           {'name':'Labor','description':'Shared diagnostic labor','line_kind':'labor','quantity':3,'unit_price':100}]);
     });
     final boundary=GlobalKey();final navigator=GlobalKey<NavigatorState>();
-    await tester.pumpWidget(PayrollUiScope(database:db,unlock:auth.authorizeLocal,connection:network,
-      child:RepaintBoundary(key:boundary,child:MaterialApp(theme:BriskersApp.applicationTheme,navigatorKey:navigator,home:JobDocumentScreen(businessId:'shop',documentId:invoice,isOwner:true,roleCode:'owner')))));
+    await tester.pumpWidget(PayrollUiScope(database:db,unlock:auth.authorizeLocal,connection:network,debugAllowOwnerView:true,
+      child:RepaintBoundary(key:boundary,child:MaterialApp(debugShowCheckedModeBanner:false,theme:BriskersApp.applicationTheme,navigatorKey:navigator,home:JobDocumentScreen(businessId:'shop',documentId:invoice,isOwner:true,roleCode:'owner')))));
     Future<void> until(Finder f)async{
       for(var i=0;i<180;i++){
         await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:20)));await tester.pump(const Duration(milliseconds:20));
@@ -87,15 +91,24 @@ void main(){
       expect(f,findsWidgets,reason:tester.allWidgets.whereType<Text>().map((t)=>t.data).join(' | '));
     }
     Future<void> click(Finder f)async{await until(f);await tester.ensureVisible(f);await tester.pumpAndSettle();await tester.tap(f);await tester.pumpAndSettle();}
+    Future<void> capture(String name)async{
+      await tester.pumpAndSettle();
+      await tester.runAsync(()async{
+        final shot=await (boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary).toImage(pixelRatio:1);
+        final bytes=await shot.toByteData(format:ui.ImageByteFormat.png);
+        final file=File('build/payroll-qa/$name.png');await file.parent.create(recursive:true);await file.writeAsBytes(bytes!.buffer.asUint8List());
+      });
+    }
+
     await until(find.text('Main Mechanic'));
     await click(find.byType(DropdownButtonFormField<String>).first);
     await click(find.text('Alpha').last);
     await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:150)));await tester.pump();
-    await click(find.text('Assign mechanics / task').first);
-    await click(find.text('Unlock Owner payroll'));
+    await click(find.byTooltip('Assign or split mechanic labor').first);
+    
     await click(find.text('Assign / split'));
     await click(find.text('Beta'));
-    await until(find.textContaining('Mechanic Beta · Open'));
+    await until(find.textContaining('Beta · Open'));
     await click(find.widgetWithText(TextButton,'Start'));
     await until(find.widgetWithText(TextButton,'Complete'));
     await click(find.widgetWithText(TextButton,'Complete'));
@@ -108,14 +121,14 @@ void main(){
       final saved=await LocalDocumentDetailCache(database:db).load('shop',invoice);expect((saved!['lines'] as List).first['quantity'],6);
     });
     navigator.currentState!.pop();await tester.pumpAndSettle();
-    await click(find.text('Assign mechanics / task').at(1));
-    await click(find.text('Unlock Owner payroll'));
+    await click(find.byTooltip('Assign or split mechanic labor').at(1));
+    
     // Keep Alpha explicitly assigned, then add Beta to the same task identity.
     for(final name in ['Alpha','Beta']){
       await click(find.text('Assign / split'));await click(find.text(name));
       await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:400)));await tester.pump();
     }
-    for(final name in ['Mechanic Alpha','Mechanic Beta']){
+    for(final name in ['Alpha','Beta']){
       await until(find.textContaining('$name · Open'));
       final card=find.ancestor(of:find.textContaining('$name · Open'),matching:find.byType(ListTile)).last;
       await click(find.descendant(of:card,matching:find.widgetWithText(TextButton,'Start')));
@@ -124,7 +137,7 @@ void main(){
       await click(find.descendant(of:started,matching:find.widgetWithText(TextButton,'Complete')));
       for(var step=0;step<2;step++){
         await until(find.byType(AlertDialog));
-        await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),name.endsWith('Alpha')?'1':'2');
+        await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),name=='Alpha'?'1':'2');
         await click(find.text('Continue'));
       }
       await until(find.textContaining('$name · Done'));
@@ -135,8 +148,25 @@ void main(){
       expect(split,hasLength(2));expect(split.map((r)=>r['task_id']).toSet(),hasLength(1));
       expect(split.map((r)=>r['actual_minutes']).toSet(),{60,120});
     });
-    navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>const OwnerPayrollScreen(businessId:'shop',employeeId:'b',employeeName:'Mechanic Beta',employeeRole:'Mechanic')));
-    await tester.pumpAndSettle();await click(find.text('Unlock Owner payroll'));
+    navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>const OwnerPayrollScreen(businessId:'shop')));
+    await tester.pumpAndSettle();
+    await until(find.text('Review Weekly Labor (2 tasks)'));
+    expect(find.byType(PayrollOverview),findsOneWidget);
+    expect(find.text('Alpha'),findsOneWidget);expect(find.text('Beta'),findsOneWidget);
+    expect(find.text('Paid'),findsNWidgets(2));expect(find.text('Total Paid'),findsOneWidget);
+    await tester.runAsync(()async{
+      final folder=Directory('build/payroll-qa');await folder.create(recursive:true);
+      final render=boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      final shot=await render.toImage(pixelRatio:1);final bytes=await shot.toByteData(format:ui.ImageByteFormat.png);
+      await File('${folder.path}/bugs30-payroll-roster.png').writeAsBytes(bytes!.buffer.asUint8List());
+    });
+    await click(find.text('Review Weekly Labor (2 tasks)'));
+    await until(find.text('Employee Profile'));
+    
+    expect(find.text('Tasks'),findsOneWidget);expect(find.text('General Tasks'),findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton,'Details'),findsOneWidget);
+    await capture('bugs30-employee-unpaid-tasks');
+
     await click(find.widgetWithText(FilledButton,'Verify Payment'));
     await until(find.text(r'Calculated labor: $200.00'));
     await click(find.widgetWithText(FilledButton,'Record payment'));
@@ -153,6 +183,35 @@ void main(){
       final bytes=await image.toByteData(format:ui.ImageByteFormat.png);
       final out=File('build/payroll-qa/regular-reports-source.png');await out.parent.create(recursive:true);await out.writeAsBytes(bytes!.buffer.asUint8List());
     });
+    navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>Scaffold(body:HomeScreen(
+      businessId:'shop',roleCode:'owner',jobsCount:1,onCustomersTap:(){},onAppointmentsTap:(){},
+      onJobsTap:(){},onInvoicesTap:(){},onMoreTap:(){}))));
+    await tester.pumpAndSettle();
+    // The full application supplies the Material host. No Supabase session is
+    // enrolled in this isolated fixture; dismiss its caught recurring notice.
+    ScaffoldMessenger.of(tester.element(find.byType(HomeScreen))).clearSnackBars();
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Payroll'),150,scrollable:find.descendant(of:find.byType(HomeScreen),matching:find.byType(Scrollable)).first);
+    await click(find.text('Payroll'));
+    await until(find.text('Review Weekly Labor (0 tasks)'));
+    expect(find.text('Payroll reports'),findsNothing);
+    expect(find.text('Review Weekly Labor (0 tasks)'),findsOneWidget);
+    expect(find.text('Review Weekly Labor (1 tasks)'),findsOneWidget);
+    await click(find.text('Review Weekly Labor (0 tasks)'));
+    await until(find.text('Unpaid work · 0'));
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Verify Payment')).onPressed,isNull);
+    await capture('bugs30-employee-paid-tasks');
+    await click(find.text('View Paid Tasks'));await until(find.text('Payroll History'));
+    navigator.currentState!.pop();await tester.pumpAndSettle();
+    navigator.currentState!.pop();await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Tasks'),-100,scrollable:find.descendant(of:find.byType(HomeScreen),matching:find.byType(Scrollable)).first);
+    await click(find.text('Tasks'));
+    await until(find.byType(TasksWorkspace));
+    await tester.tap(find.byTooltip('Status'));await tester.pumpAndSettle();
+    await tester.tap(find.text('All').last);await tester.pumpAndSettle();
+    await until(find.text('Jobs with Tasks · 1'));
+    expect(find.textContaining('2 tasks'),findsOneWidget);
+    await capture('bugs30-global-completed-tasks');
     await tester.pumpWidget(const SizedBox.shrink());await tester.pump(const Duration(milliseconds:500));expect(tester.takeException(),isNull);
   },skip:!OwnerPayrollScreen.enabled,timeout:const Timeout(Duration(minutes:3)));
 }

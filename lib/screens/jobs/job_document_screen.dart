@@ -37,6 +37,7 @@ import '../../core/formatters.dart';
 import '../../core/invoice_status_style.dart';
 import '../../core/mileage_workflow.dart';
 import '../../core/invoice_pdf_mileage_projection.dart';
+import '../../core/invoice_party_vehicle_projection.dart';
 import '../../core/document_presentation.dart';
 import '../../core/document_navigation_role.dart';
 import '../../core/standard_note_rules.dart';
@@ -508,7 +509,25 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         // Unavailable offline history stays blank; never invent mileage.
       }
     }
-    return withMileage;
+    return _projectSavedInvoiceIdentity(withMileage);
+  }
+
+  /// Restore missing invoice contact/VIN/plate presentation from the exact
+  /// locally linked customer and vehicle. No mutation or network request.
+  Future<Map<String,dynamic>> _projectSavedInvoiceIdentity(
+    Map<String,dynamic> detail,
+  ) async {
+    final customerId=detail['customer_id']?.toString().trim() ?? '';
+    if(customerId.isEmpty)return detail;
+    try {
+      final saved=await LocalCustomerRepository()
+        .customerDetail(widget.businessId,customerId);
+      return InvoicePartyVehicleProjection.apply(
+        invoice:detail,savedCustomerDetail:saved);
+    } catch (_) {
+      // A missing local customer cache must not prevent opening an invoice.
+      return detail;
+    }
   }
 
   Set<String> get _queuedPaymentOperationIds =>
@@ -2380,7 +2399,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
       final localDetail = _detail;
       if (localDetail == null) return null;
-      return _withPdfUnits(await _pendingMemoForPdf(localDetail));
+      return _withPdfUnits(await _pendingMemoForPdf(
+        await _projectSavedInvoiceIdentity(localDetail)));
     }
 
     try {
@@ -2505,7 +2525,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         );
         if (proceed == true && mounted && cached != null) {
           setState(() => _error = null);
-          return _withPdfUnits(await _pendingMemoForPdf(cached));
+          return _withPdfUnits(await _pendingMemoForPdf(
+            await _projectSavedInvoiceIdentity(cached)));
         }
       }
       if (mounted) {
@@ -3896,7 +3917,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     // documents must keep the old neutral mileage field unchanged.
     final explicitMileageOut = !_estimate &&
         (_offlineDocumentDraft.isLocalDraftId(widget.documentId) ||
-            _detail!['mileage_schema_version'] == 2 ||
+            _detail!['mileage_schema_version']?.toString() == '2' ||
             _detail!.containsKey('mileage_out'));
     var mileageText = (explicitMileageOut
         ? _detail!['mileage_out']
@@ -4164,6 +4185,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         claimNumber: newClaimNumber.isEmpty ? null : newClaimNumber,
         authorizationNumber: newAuthorizationNumber.isEmpty
             ? null : newAuthorizationNumber,
+        updateWarrantyIdentifiers: true,
       ));
       if (saved && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -5502,7 +5524,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   bool get _usesInvoiceMileageOut =>
       !_estimate && _detail != null &&
       (_offlineDocumentDraft.isLocalDraftId(widget.documentId) ||
-       _detail!['mileage_schema_version'] == 2 ||
+       _detail!['mileage_schema_version']?.toString() == '2' ||
        _detail!.containsKey('mileage_out'));
 
   String get _visibleInvoiceMileage {
@@ -5589,6 +5611,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             _detail?['document_date']?.toString() ?? '') ?? DateTime.now(),
           mileage: usesMileageOut ? null : changed,
           mileageOut: usesMileageOut ? changed : null,
+          // Only the dedicated mileage editor leaves unrelated identifiers unchanged.
+          updateWarrantyIdentifiers: false,
         );
       } else if (usesMileageOut) {
         // Only the v2 departure field may change: never overwrite arrival
@@ -5609,18 +5633,43 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         );
       }
     });
+    if (!saved && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Miles Out could not be saved. The invoice was not updated.'),
+      ));
+      return;
+    }
     if (saved && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Miles saved.')),
-      );
+      // Confirm the exact invoice reading survived the post-save load.
+      // Never report successful mileage when the screen still shows blank.
+      final visible = MileageWorkflow.parse(_visibleInvoiceMileage);
+      if (visible != reading) {
+        setState(() => _error =
+            'Miles Out did not persist on this invoice. Do not finalize until it is visible.');
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Miles Out did not save. Please check this invoice.'),
+        ));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(BriskersConnectionModeController.instance.forceOffline
+              ? 'Miles saved locally. Sync pending.'
+              : 'Miles saved on this invoice.'),
+        ));
+      }
     }
   }
 
   Widget _customerHeader() {
     final customer = _detail?['customer_name']?.toString().trim() ?? '';
     final phone = _detail?['customer_phone']?.toString().trim() ?? '';
+    final email = _detail?['customer_email']?.toString().trim() ?? '';
+    final address = InvoicePartyVehicleProjection.readableAddress(
+      _detail?['customer_address']);
     final vehicle = _detail?['vehicle']?.toString().trim() ?? '';
     final vin = _detail?['vehicle_vin']?.toString().trim() ?? '';
+    final plate = _detail?['vehicle_license_plate']?.toString().trim() ?? '';
+    final plateState = _detail?['vehicle_license_state']?.toString().trim() ?? '';
+    final license = [plateState,plate].where((s)=>s.isNotEmpty).join(' ');
     final mileage = _visibleInvoiceMileage;
     final mileageName = _usesInvoiceMileageOut ? 'Miles Out' : 'Miles';
     final documentDateRaw =
@@ -5743,27 +5792,44 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             maxLines: 1,
           ),
         ],
+        if (email.isNotEmpty) ...[
+          const SizedBox(height: 5),
+          infoLine(Icons.email_outlined,email,maxLines:2),
+        ],
+        if (address.isNotEmpty) ...[
+          const SizedBox(height: 5),
+          infoLine(Icons.location_on_outlined,address,maxLines:3),
+        ],
+        if (phone.isEmpty && email.isEmpty && address.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(left:30,top:4),
+            child: Text('Contact details not available on this device.',
+              style: TextStyle(fontSize:12,color:Color(0xFF64748B))),
+          ),
         const SizedBox(height: 8),
         infoLine(
           Icons.directions_car_outlined,
           vehicleMileage.isEmpty ? 'No vehicle' : vehicleMileage,
           maxLines: 2,
         ),
-        if (vin.isNotEmpty) ...[
-          const SizedBox(height: 5),
-          Padding(
-            padding: const EdgeInsets.only(left: 30),
-            child: Text(
-              'VIN: $vin',
-              softWrap: true,
-              style: const TextStyle(
-                fontSize: 12.5,
-                color: Color(0xFF405064),
-                height: 1.2,
-              ),
-            ),
+        Padding(
+          padding: const EdgeInsets.only(left:30,top:5),
+          child: Text(
+            vin.isNotEmpty?'VIN: $vin':'VIN: Not available locally',
+            style:const TextStyle(fontSize:12.5,
+              color:Color(0xFF405064),height:1.2),
+            softWrap:true,
           ),
-        ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left:30,top:3),
+          child: Text(
+            license.isNotEmpty?'Plate: $license':'Plate: Not available locally',
+            style:const TextStyle(fontSize:12.5,
+              color:Color(0xFF405064),height:1.2),
+            softWrap:true,
+          ),
+        ),
         if (!_estimate) mileageLine(),
       ],
     );
@@ -5818,6 +5884,25 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     maxLines: 1,
                   ),
                 ],
+                if (email.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  infoLine(Icons.email_outlined,email,maxLines:2),
+                ],
+                if (address.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Padding(
+                    padding:const EdgeInsets.only(left:30),
+                    child:Text(address,maxLines:3,overflow:TextOverflow.ellipsis,
+                      style:const TextStyle(fontSize:11.5,height:1.15,
+                        color:Color(0xFF405064))),
+                  ),
+                ],
+                if (phone.isEmpty && email.isEmpty && address.isEmpty)
+                  const Padding(
+                    padding:EdgeInsets.only(left:30,top:4),
+                    child:Text('Contact not cached',
+                      style:TextStyle(fontSize:11.5,color:Color(0xFF64748B))),
+                  ),
               ],
             );
 
@@ -5829,22 +5914,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   vehicleMileage.isEmpty ? 'No vehicle' : vehicleMileage,
                   maxLines: 2,
                 ),
-                if (vin.isNotEmpty) ...[
-                  const SizedBox(height: 5),
-                  Padding(
-                    padding: const EdgeInsets.only(left: 30),
-                    child: Text(
-                      'VIN: $vin',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: Color(0xFF405064),
-                        height: 1.15,
-                      ),
-                    ),
-                  ),
-                ],
+                Padding(
+                  padding:const EdgeInsets.only(left:30,top:5),
+                  child:Text(vin.isNotEmpty?'VIN: $vin':'VIN: Not available locally',
+                    maxLines:2,overflow:TextOverflow.ellipsis,
+                    style:const TextStyle(fontSize:11.5,
+                      color:Color(0xFF405064),height:1.15)),
+                ),
+                Padding(
+                  padding:const EdgeInsets.only(left:30,top:3),
+                  child:Text(license.isNotEmpty?'Plate: $license':
+                      'Plate: Not available locally',
+                    maxLines:2,overflow:TextOverflow.ellipsis,
+                    style:const TextStyle(fontSize:11.5,
+                      color:Color(0xFF405064),height:1.15)),
+                ),
                 if (!_estimate) mileageLine(),
               ],
             );
@@ -6063,18 +6147,43 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              line['name']?.toString() ?? '',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFF0D1528),
+                            if (OwnerPayrollScreen.enabled && widget.isOwner &&
+                                !_estimate && isInvoiceLaborLine(line) &&
+                                line['id'] is String && _detail?['job_id'] is String)
+                              LayoutBuilder(builder:(context,limits) {
+                                final assignment=JobTasksAccess(
+                                  business:widget.businessId,
+                                  job:_detail!['job_id'] as String,
+                                  invoice:widget.documentId,
+                                  line:line['id'] as String,
+                                  revision:_loadGeneration,
+                                  onChanged:()=>unawaited(_load()),
+                                );
+                                final heading=Text(line['name']?.toString() ?? '',
+                                  style:const TextStyle(fontSize:16,
+                                    fontWeight:FontWeight.w800,
+                                    color:Color(0xFF0D1528)));
+                                // Retain the TEST inline presentation on wide
+                                // invoice rows; stack on narrow Samsung phones.
+                                return limits.maxWidth>=300
+                                  ? Row(crossAxisAlignment:CrossAxisAlignment.start,
+                                      children:[
+                                        Flexible(flex:2,child:heading),
+                                        const SizedBox(width:8),
+                                        Expanded(flex:5,child:assignment),
+                                      ])
+                                  : Column(crossAxisAlignment:CrossAxisAlignment.start,
+                                      children:[heading,assignment]);
+                              })
+                            else
+                              Text(
+                                line['name']?.toString() ?? '',
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF0D1528),
+                                ),
                               ),
-                            ),
-                            if (OwnerPayrollScreen.enabled && widget.isOwner && !_estimate &&
-                                isInvoiceLaborLine(line) && line['id'] is String && _detail?['job_id'] is String)
-                              JobTasksAccess(business:widget.businessId,job:_detail!['job_id'] as String,
-                                invoice:widget.documentId,line:line['id'] as String,revision:_loadGeneration,onChanged:()=>unawaited(_load())),
                             if (description.isNotEmpty) ...[
                               const SizedBox(height: 3),
                               Text(

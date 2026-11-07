@@ -1,3 +1,5 @@
+import 'package:briskers_app/services/sync_replay_fence.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:briskers_app/local/briskers_local_database.dart' show BriskersLocalDatabase;
 import 'package:briskers_app/services/local_financial_cache.dart';
 import 'package:briskers_app/services/offline_recurring_repository.dart';
@@ -105,6 +107,25 @@ void main() {
     final sync=RecurringSyncService(database:db,repository:repo,synchronizationAllowed:()=>true,
       writeBundle:(b,id,r,rows) async=>{'business_id':b,'rule':{...r,'row_version':2},'occurrences':[]});
     await expectLater(sync.flush(),throwsStateError);
+    expect(await repo.pending(),hasLength(2));
+  });
+
+  test('recurring conflict is durable across worker recreation without losing pending rows', () async {
+    await repo.saveRule(rule);
+    await repo.generateThrough('2026-11-04');
+    var calls=0;
+    RecurringSyncService worker() => RecurringSyncService(
+      database:db, repository:repo, synchronizationAllowed:()=>true,
+      writeBundle:(b,id,r,rows) async {
+        calls++;
+        expect(id.length,64);
+        throw const PostgrestException(message:'changed',code:'PT409');
+      });
+    await expectLater(worker().flush(),throwsA(isA<PostgrestException>()));
+    for(var i=0;i<100;i++) {
+      await expectLater(worker().flush(),throwsA(isA<SyncReplayDeferred>()));
+    }
+    expect(calls,1);
     expect(await repo.pending(),hasLength(2));
   });
 }

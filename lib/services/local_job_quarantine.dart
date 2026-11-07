@@ -6,6 +6,7 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import 'local_cleanup_safety.dart';
 import 'local_job_retirement.dart';
+import 'sync_replay_fence.dart';
 
 class LocalJobQuarantineException implements Exception {
   const LocalJobQuarantineException(this.message);
@@ -751,6 +752,23 @@ class LocalJobQuarantine {
   }
 
   static Future<T> guardReplay<T>(
+    BriskersLocalDatabase db,
+    String businessId,
+    Future<T> Function() request, {
+    int? outboxId,
+  }) async {
+    await assertReplayAllowed(db, businessId, outboxId: outboxId);
+    if (outboxId == null) {
+      return _guardReplay(db, businessId, request);
+    }
+    return SyncReplayFence(db).run(
+      businessId, 'outbox:$outboxId',
+      () => _guardReplay(db, businessId, request, outboxId: outboxId),
+      outboxId: outboxId,
+    );
+  }
+
+  static Future<T> _guardReplay<T>(
     BriskersLocalDatabase db,
     String businessId,
     Future<T> Function() request, {

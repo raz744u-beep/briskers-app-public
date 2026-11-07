@@ -1,6 +1,7 @@
 // ignore_for_file: prefer_interpolation_to_compose_strings
 
 import 'dart:convert';
+import 'dart:async';
 
 import '../core/standard_note_rules.dart';
 import '../core/job_list_options.dart';
@@ -762,7 +763,7 @@ class BriskersFunctionalDiagnosticsService {
       _require(op == operationId, 'Retry changed payment operation ID.');
       final serverId = accepted.putIfAbsent(op, () => 'payment-server-1');
       if (networkCalls == 1) {
-        throw StateError('Simulated lost network response after acceptance');
+        throw TimeoutException('Simulated lost network response after acceptance');
       }
       return serverId;
     }
@@ -776,6 +777,11 @@ class BriskersFunctionalDiagnosticsService {
     );
     _require((await ledger.pendingForInvoice(businessId, invoiceId)).length == 1,
         'Lost response prematurely removed local payment.');
+    // This scenario owns a disposable sandbox database. Model the scheduled
+    // cooldown, preserving conflict holds and retry counts without waiting.
+    await database.customStatement(
+      "UPDATE sync_replay_fences_v1 SET not_before_ms=0 WHERE status='ready'",
+    );
     await ledger.flush(businessId,
       submitPayment: submit,
       fetchInvoice: fetch,

@@ -60,6 +60,9 @@ void main() {
       expect(guard, contains("projected.remove('$field')"));
     }
     expect(guard, contains("projected['signature_current'] = false"));
-    expect(source, contains('return _withPdfUnits(await _pendingMemoForPdf(localDetail))'));
+    expect(source, contains('await _pendingMemoForPdf('));
+    expect(source, contains('await _projectSavedInvoiceIdentity(localDetail)'));
+    expect(source, contains('await _projectSavedInvoiceIdentity(cached)'));
+    expect(source, contains('return _withPdfUnits('));
   });
 }

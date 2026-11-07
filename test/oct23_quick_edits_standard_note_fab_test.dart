@@ -50,17 +50,19 @@ void main() {
       expect(source, contains('MediaQuery.viewInsetsOf(context).bottom == 0'),
           reason: path);
     }
-    for (final item in const [
-      ('lib/screens/documents_screen.dart', 'documents-inline-new'),
-      ('lib/screens/expenses_screen.dart', 'expenses-inline-new'),
-    ]) {
-      final source = File(item.$1).readAsStringSync();
-      expect(source, contains("ValueKey('${item.$2}')"), reason: item.$1);
-      expect(source, contains('shape: RoundedRectangleBorder('), reason: item.$1);
-      expect(source, contains("label: const Text('New'"), reason: item.$1);
-      expect(source, isNot(contains('FloatingActionButton.extended(')),
-          reason: item.$1);
-    }
+    final documents=File('lib/screens/documents_screen.dart').readAsStringSync();
+    expect(documents, contains("ValueKey('documents-inline-new')"));
+    expect(documents, contains('shape: RoundedRectangleBorder('));
+    expect(documents, contains("label: const Text('New'"));
+    expect(documents, isNot(contains('FloatingActionButton.extended(')));
+
+    // Owner-approved Nov 6 Expenses change: dedicated full-width Search
+    // and the main New action floating at the lower right.
+    final expenses=File('lib/screens/expenses_screen.dart').readAsStringSync();
+    expect(expenses, contains("ValueKey('expenses-new-floating')"));
+    expect(expenses, contains("label: const Text('New'"));
+    expect(expenses, contains('FloatingActionButton.extended('));
+    expect(expenses, contains('FloatingActionButtonLocation.endFloat'));
   });
   test('Auto Jobs keeps initial list render separate from network refresh', () {
     final source = File('lib/screens/jobs_screen.dart').readAsStringSync();

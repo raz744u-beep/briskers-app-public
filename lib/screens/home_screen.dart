@@ -26,6 +26,7 @@ import 'jobs/job_document_screen.dart';
 import 'jobs/job_detail_screen.dart';
 import 'payroll/mechanic_labor_screen.dart';
 import 'payroll/owner_payroll_screen.dart';
+import 'settings/employees_settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -1260,6 +1261,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             const SizedBox(height: 8),
             _HomeTiles(
+              onPayrollTap: OwnerPayrollScreen.enabled && widget.roleCode == 'owner'
+                ? () => Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>OwnerPayrollScreen(businessId:widget.businessId))) : null,
+              onEmployeesTap: OwnerPayrollScreen.enabled && widget.roleCode == 'owner'
+                ? () => Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>EmployeesSettingsScreen(businessId:widget.businessId,isOwner:true))) : null,
               onTasksTap: OwnerPayrollScreen.enabled && widget.roleCode == 'owner'
                   ? () => Navigator.of(context).push<void>(MaterialPageRoute(
                       builder: (_) => OwnerPayrollScreen(
@@ -1582,6 +1587,8 @@ class _HomeTiles extends StatelessWidget {
     required this.onMoreTap,
     required this.onReportsTap,
     this.onTasksTap,
+    this.onPayrollTap,
+    this.onEmployeesTap,
     required this.jobsCount,
     required this.appointmentsCount,
     required this.customersNewCount,
@@ -1600,6 +1607,7 @@ class _HomeTiles extends StatelessWidget {
   final VoidCallback onMoreTap;
   final VoidCallback onReportsTap;
   final VoidCallback? onTasksTap;
+  final VoidCallback? onPayrollTap,onEmployeesTap;
   final int jobsCount;
   final int appointmentsCount;
   final int customersNewCount;
@@ -1750,6 +1758,13 @@ class _HomeTiles extends StatelessWidget {
             _tile('Tasks', 'Service & General Tasks', Icons.assignment_outlined,
               BriskersColors.jobs, onTasksTap!),
             const SizedBox(height: 5),
+          ],
+          if(onPayrollTap!=null && onEmployeesTap!=null) ...[
+            row(
+              _tile('Payroll','Weekly labor & balances',Icons.account_balance_wallet_outlined,BriskersColors.invoices,onPayrollTap!),
+              _tile('Employees','Profiles & details',Icons.badge_outlined,BriskersColors.estimates,onEmployeesTap!),
+            ),
+            const SizedBox(height:5),
           ],
           row(
             _tile(
