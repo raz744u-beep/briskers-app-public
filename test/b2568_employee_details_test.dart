@@ -23,7 +23,7 @@ void main(){
     await tester.pump();
     expect(find.text('Known Legal Name'),findsOneWidget);expect(find.text('Mechanic'),findsWidgets);
     expect(find.byType(CircularProgressIndicator),findsNothing);
-    expect(find.textContaining('unavailable'),findsWidgets);
+    expect(find.textContaining('Not saved locally'),findsWidgets);
     await tester.pump(const Duration(seconds:4));
     expect(find.text('Known Legal Name'),findsOneWidget);
     expect(find.textContaining('Nickname is not available'),findsOneWidget);
