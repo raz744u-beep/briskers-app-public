@@ -62,7 +62,7 @@ void main(){
     final identity=await PayrollLanIdentity.fromSeed(List.filled(32,3));
     final values=<String,String>{};
     final lease=PayrollOwnerLease(identity:identity,business:'shop',anchor:identity.deviceId,read:(k)async=>values[k],write:(k,v)async{values[k]=v;});
-    await lease.migrate(await auth.authorizeLocal('shop'));
+    await lease.migrate(await auth.authorizeSession('shop'));
     final network=PayrollOwnerLan(lease:lease,database:db,actor:'owner',approve:(_)async=>null);
     addTearDown(()async{await network.close();await db.close();debugUseLocalDatabase(null);
       LocalDocumentDetailCache.sqliteWritesEnabled=false;HttpOverrides.global=previous;
@@ -81,7 +81,7 @@ void main(){
           {'name':'Labor','description':'Shared diagnostic labor','line_kind':'labor','quantity':3,'unit_price':100}]);
     });
     final boundary=GlobalKey();final navigator=GlobalKey<NavigatorState>();
-    await tester.pumpWidget(PayrollUiScope(database:db,unlock:auth.authorizeLocal,connection:network,debugAllowOwnerView:true,
+    await tester.pumpWidget(PayrollUiScope(database:db,unlock:auth.authorizeSession,connection:network,debugAllowOwnerView:true,
       child:RepaintBoundary(key:boundary,child:MaterialApp(debugShowCheckedModeBanner:false,theme:BriskersApp.applicationTheme,navigatorKey:navigator,home:JobDocumentScreen(businessId:'shop',documentId:invoice,isOwner:true,roleCode:'owner')))));
     Future<void> until(Finder f)async{
       for(var i=0;i<180;i++){
