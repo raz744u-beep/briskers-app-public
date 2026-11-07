@@ -495,13 +495,21 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final job = jobId ?? widget.jobId;
     if (job == null) return;
     var candidates = <Map<String, dynamic>>[];
-    await _run(() async {
+    // Opening a picker is a read-only Owner action, not a payroll payment.
+    // Keep the actual assignment transaction on its protected write path.
+    if (!_canView) return;
+    try {
       final roster=await OfflineJobAdminService(database:_db).cachedEmployees(widget.businessId);
-      final known=await _repository.employees();
+      if (!mounted || !_canView) return;
+      final known=await _viewRepository.employees();
+      if (!mounted || !_canView) return;
       candidates={for(final r in roster) r['id']:{...r,'employee_id':r['id']},
         for(final r in known) r['id']:{...?roster.where((p)=>p['id']==r['id']).firstOrNull,...r,'employee_id':r['id']}}.values.toList();
-    });
-    if (!mounted || _error != null) return;
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    }
+    if (!mounted || !_canView || _error != null) return;
     if (candidates.isEmpty) {
       setState(() => _error = 'Assign mechanics to this Job first.');
       return;
