@@ -61,7 +61,7 @@ void main() {
 
   test('gateway 200 error is never mistaken for a scanned receipt', () async {
     final gateway = IndependentReceiptAiGateway(
-      transport: (_, __, ___) async => {
+      transport: (_, _, _) async => {
         'success': false, 'error': 'invalid_gateway_token',
         'data': {'merchant': 'Misleading Vendor'},
       },
@@ -78,7 +78,7 @@ void main() {
 
   test('garbage success response cannot create financial suggestions', () async {
     final gateway = IndependentReceiptAiGateway(
-      transport: (_, __, ___) async => {
+      transport: (_, _, _) async => {
         'success': true, 'data': {'unrelated': 'not a receipt'},
       },
     );
