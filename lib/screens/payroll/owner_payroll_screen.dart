@@ -695,6 +695,21 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
   // The approved Tasks TEST separates the job/task header from the mechanic's
   // progress controls. This is a view over the real immutable payroll credits.
+  // Approved compact TEST-style hours: readable without dominating the card.
+  Widget _compactPlannedHours(double hours) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: const Color(0xFFE1F6E9),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Text('${hours.toStringAsFixed(2)} hrs',
+      style: const TextStyle(
+        color: Color(0xFF126A46),
+        fontSize: 13.5,
+        fontWeight: FontWeight.w800,
+      )),
+  );
+
   Widget _taskCard(Map<String, dynamic> row) {
     final paid = (row['paid_minutes'] as int? ?? 0) > 0 ||
         row['paid'] == 1;
@@ -735,9 +750,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                 ],
               )),
               const SizedBox(width: 5),
-              Text('${planned.toStringAsFixed(2)} hrs',
-                style: const TextStyle(fontSize: 12.5,
-                  color: Color(0xFF64748B))),
+              _compactPlannedHours(planned),
               if (paid) const Padding(
                 padding: EdgeInsets.only(left: 6),
                 child: Icon(Icons.lock_outline,size:20,
@@ -769,8 +782,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                     Expanded(child: Text(
                       _employeeLabel(row['employee_id']?.toString()),
                       style:const TextStyle(fontWeight:FontWeight.w700))),
-                    Text('${planned.toStringAsFixed(2)} hrs',
-                      style:const TextStyle(color:Color(0xFF64748B))),
+                    _compactPlannedHours(planned),
                   ]),
                   const SizedBox(height: 5),
                   // Keep the completion control beside In Progress.
