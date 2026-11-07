@@ -638,7 +638,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     // credited mechanic hours. Actual work remains separately recorded and
     // the Owner may explicitly change the credit before completion.
     final plannedMinutes = row['estimated_minutes'] as int? ?? 0;
-    var credited = plannedMinutes > 0 ? plannedMinutes : minutes;
+    // Starting work is not completing or earning the planned labor time.
+    // The invoice estimate is suggested only at the Done transition.
+    var credited = next == 'Done' && plannedMinutes > 0
+        ? plannedMinutes : minutes;
     if(next=='Done') {
       final value=await payrollLanInput(context,'Credited mechanic labor','Credited hours (actual: ${minutes/60})',initialValue:(credited/60).toStringAsFixed(2));
       if(value==null||!mounted)return;
