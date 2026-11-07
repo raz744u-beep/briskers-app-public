@@ -74,11 +74,28 @@ class LocalTaskAssignmentStore {
     await prepare();
     final ready=await _read("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('regular_payroll_portions','regular_payroll_employees','regular_payroll_estimates','regular_payroll_work_coverage','local_mechanic_work_credits_v1')",[]);
     if(ready.length!=5)return;
-    final lead=await _read('SELECT CASE WHEN l.job_id IS NULL THEN j.assigned_employee_id ELSE l.employee_id END AS assigned_employee_id,e.name FROM local_jobs j '
+    final lead=await _read('SELECT CASE WHEN l.job_id IS NULL THEN j.assigned_employee_id ELSE l.employee_id END AS assigned_employee_id, '
+      'COALESCE(e.name,CASE WHEN l.job_id IS NULL THEN j.assigned_employee_name ELSE l.employee_name END) AS employee_name '
+      'FROM local_jobs j '
       'LEFT JOIN regular_payroll_job_lead l ON l.business_id=j.business_id AND l.job_id=j.id '
-      'JOIN regular_payroll_employees e ON e.business_id=j.business_id AND e.id=CASE WHEN l.job_id IS NULL THEN j.assigned_employee_id ELSE l.employee_id END WHERE j.business_id=? AND j.id=?',[business,job]);
-    if(lead.isEmpty)return;
+      'LEFT JOIN regular_payroll_employees e ON e.business_id=j.business_id AND e.id=CASE WHEN l.job_id IS NULL THEN j.assigned_employee_id ELSE l.employee_id END '
+      'WHERE j.business_id=? AND j.id=?',[business,job]);
+    if(lead.isEmpty || lead.single['assigned_employee_id'] is! String ||
+        (lead.single['assigned_employee_id'] as String).isEmpty)return;
     final employee=lead.single['assigned_employee_id'] as String;
+    // The mechanic's pay basis may legitimately be unconfigured. Do not
+    // suppress the labor allocation: initialize the employee with zero rate,
+    // retain any saved compensation and block actual payment until reviewed.
+    await db.customStatement(
+      'INSERT OR IGNORE INTO regular_payroll_employees VALUES(?,?,?,?,0)',
+      [business,employee,
+       (lead.single['employee_name']?.toString().trim().isNotEmpty ?? false)
+         ? lead.single['employee_name'] : employee,0],
+    );
+    await db.customStatement(
+      'INSERT OR IGNORE INTO regular_payroll_advances VALUES(?,?,0)',
+      [business,employee],
+    );
     final tasks=await _read("SELECT t.id FROM regular_payroll_tasks t JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id "
       "WHERE t.business_id=? AND t.job_id=? AND s.active=1 AND s.source_kind='invoice' "
       "AND NOT EXISTS(SELECT 1 FROM regular_payroll_task_policy o WHERE o.business_id=t.business_id AND o.task_id=t.id AND o.manual_override=1) "
