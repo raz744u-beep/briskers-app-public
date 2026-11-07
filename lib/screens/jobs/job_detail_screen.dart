@@ -3816,6 +3816,12 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                     ),
                   ),
                 ),
+                // In restored Owner Tasks/Payroll, one job can have several
+                // mechanics and independently assigned labor hours. Repeating
+                // the single Main Mechanic in the green Job summary falsely
+                // suggests it is the whole allocation. Keep the lead selector
+                // and per-mechanic work below in the dedicated Tasks section.
+                if (!(OwnerPayrollScreen.enabled && _owner)) ...[
                 const SizedBox(height: 2),
                 Row(
                   children: [
@@ -3845,6 +3851,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                     ),
                   ],
                 ),
+                ],
               ],
             ),
           ),
