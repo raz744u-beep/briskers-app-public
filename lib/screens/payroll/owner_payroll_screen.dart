@@ -105,7 +105,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     business:widget.businessId,owner:true);
   // Editing a task status is not a payroll disbursement. Guard against
   // sign-out and business identity changes throughout the local operation.
-  late final _taskStatusRepository = LocalPayrollRepository(
+  late final _taskEditRepository = LocalPayrollRepository(
     _db, business: widget.businessId, owner: true,
     assertOwnerGrant: () {
       if (!_canView) throw StateError('Sign in as Owner to edit tasks.');
@@ -274,11 +274,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     }
   }
 
-  Future<void> _changeGeneralTaskStatus(String employee, int id, String status) async {
+  Future<void> _runOwnerTaskEdit(Future<void> Function() action) async {
     if (_busy || !_canView) return;
     setState(() { _busy = true; _error = null; });
     try {
-      await _taskStatusRepository.setShopTaskStatus(employee, id, status);
+      await action();
       if (mounted && _canView) unawaited(_load());
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -286,6 +286,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       if (mounted) setState(() => _busy = false);
     }
   }
+
+  Future<void> _changeGeneralTaskStatus(String employee, int id, String status) =>
+      _runOwnerTaskEdit(() => _taskEditRepository.setShopTaskStatus(employee, id, status));
 
   Future<void> _refreshLan() async {
     if (_refreshingOwnerState || _grant == null) return;
@@ -586,7 +589,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       if(h==null||!h.isFinite||h<0||h>10000)return;
       credited=(h*60).round();
     }
-    await _run(() => _repository.recordAllocatedTime(row['id'] as String,next,minutes,credited,_date(DateTime.now())));
+    await _runOwnerTaskEdit(() => _taskEditRepository.recordAllocatedTime(row['id'] as String,next,minutes,credited,_date(DateTime.now())));
   }
 
   Future<void> _editEstimated(Map<String, dynamic> row) async {
@@ -600,7 +603,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       setState(() => _error = 'Enter valid estimated hours.');
       return;
     }
-    await _run(() => _repository.setEstimatedMinutes(
+    await _runOwnerTaskEdit(() => _taskEditRepository.setEstimatedMinutes(
       row['task_id'] as String, row['employee_id'] as String, (hours * 60).round(),
     ));
   }
@@ -622,7 +625,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         icon: const Icon(Icons.edit_outlined, size: 19),
         onPressed: _busy ? null : () => _editEstimated(row),
       ),
-      if(row['assignment_conflict']==1)TextButton(onPressed:_busy?null:()=>_run(()async{await _repository.acceptChangedAssignment(row['id'] as String);}),child:const Text('Accept work')),
+      if(row['assignment_conflict']==1)TextButton(onPressed:_busy?null:()=>_runOwnerTaskEdit(() => _taskEditRepository.acceptChangedAssignment(row['id'] as String)),child:const Text('Accept work')),
       if (row['assignment_conflict']!=1 && row['state'] != 'Done' && (row['paid_minutes'] as int? ?? 0) == 0 &&
           (row['source_active'] != 0 || row['state'] != 'Open'))
         TextButton(
