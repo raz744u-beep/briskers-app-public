@@ -168,12 +168,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     WidgetsBinding.instance.addPostFrameCallback((_){
       if(mounted)unawaited(_openSavedOwnerView());
     });
-    _lockCheck=Timer.periodic(const Duration(seconds:5),(_){
-      if(_grant==null || _busy)return;
-      try{_assertOwner();}on StateError{
-        if(mounted)setState(()=>_grant=null);
-      }
-    });
+    // An Owner session, not a two-minute device unlock, governs Payroll.
+    // Sign-out and account switching are checked by _canView / _assertOwner.
   }
 
   Future<void> _openSavedOwnerView() async {
@@ -194,7 +190,17 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         _error='Sign in to the saved Owner account to view payroll.';
       }else{_error=null;_historyUnlocked.value=true;}
     });
-    if(_canView)await _load();
+    if (_canView) {
+      // Acquire session authority once for Owner-only financial operations.
+      // No device prompt; do not block the normal view if local role checks
+      // cannot issue the grant.
+      try {
+        final grant = await DeviceOwnerAuthorization.instance.authority
+            .authorizeSession(widget.businessId);
+        if (mounted && _canView) setState(() => _grant = grant);
+      } catch (_) { /* Saved Owner view remains available. */ }
+      if (_canView) await _load();
+    }
   }
 
   @override
@@ -222,9 +228,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if(state==AppLifecycleState.paused && !_authorizing && _grant!=null){
-      setState(()=>_grant=null);
-    }
+    // Backgrounding Briskers is not signing out of the Owner account.
     if(state==AppLifecycleState.resumed)unawaited(_openSavedOwnerView());
   }
 
@@ -240,18 +244,21 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     setState(() { _busy = true; _error = null; });
     var actionCompleted = false;
     try {
-      var needsUnlock = verifyPayment;
-      try { _assertOwner(); } on StateError { needsUnlock = true; }
-      if (needsUnlock) {
-        setState(() => _authorizing = true);
-        final grant = await ((widget.unlockOwner ?? PayrollUiScope.of(context)?.unlock)?.call(widget.businessId) ??
-            DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId))
-            .timeout(const Duration(seconds: 45), onTimeout: () =>
-              throw StateError('Owner unlock did not finish. Cancel the device prompt and retry.'));
-        if (!mounted) return;
-        grant.assertValid(widget.businessId, grant.actorId);
-        setState(() { _grant = grant; _authorizing = false; });
+      if (!_canView) throw StateError('Sign in to Briskers as Owner.');
+      var needsSessionGrant = _grant == null;
+      if (!needsSessionGrant) {
+        try { _assertOwner(); } on StateError { needsSessionGrant = true; }
       }
+      if (needsSessionGrant) {
+        // Actual payments still use the signed ledger lease and idempotency
+        // checks, but never demand another biometric/PIN authentication.
+        final grant = await DeviceOwnerAuthorization.instance.authority
+            .authorizeSession(widget.businessId);
+        if (!mounted || !_canView) return;
+        grant.assertValid(widget.businessId, grant.actorId);
+        setState(() { _grant = grant; });
+      }
+      _assertOwner();
       if (!mounted) return;
       await action();
       actionCompleted = true;
