@@ -1,5 +1,7 @@
 import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_payroll_repository.dart';
@@ -10,16 +12,17 @@ void main() {
 
   test('local invoice labor allocation uses Owner identity, not payment grant',
       () async {
+    SharedPreferences.setMockInitialValues({});
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     addTearDown(() async {
       await db.close();
       LocalDocumentDetailCache.sqliteWritesEnabled = false;
     });
-    var currentOwner = true;
+    final currentOwner = ValueNotifier<bool>(true);
     final repo = LocalPayrollRepository(
       db, business: 'shop', owner: true,
       assertOwnerGrant: () {
-        if (!currentOwner) throw StateError('Owner account changed');
+        if (!currentOwner.value) throw StateError('Owner account changed');
       },
     );
     await repo.prepare();
@@ -71,6 +74,7 @@ void main() {
 
   test('Owner session revocation aborts invoice assignment without orphan work',
       () async {
+    SharedPreferences.setMockInitialValues({});
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     addTearDown(() async {
       await db.close();
