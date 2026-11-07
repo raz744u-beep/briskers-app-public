@@ -42,7 +42,7 @@ void main() {
       final auth = LocalOwnerAuthorization(store: _Unused(), currentIdentity: () => who,
         verifyOwner: (_) async => throw StateError('No Supabase required'), authenticateDevice: () async => true,
         verifyLocalOwner: (shop) async => VerifiedOwnerEnrollment(who, shop));
-      Future<LocalOwnerGrant> unlock(String shop) => auth.authorizeLocal(shop);
+      Future<LocalOwnerGrant> unlock(String shop) => auth.authorizeSession(shop);
       PayrollOwnerLease lease() => PayrollOwnerLease(identity: identity, business: 'shop', anchor: root.deviceId,
         read: (key) async => values[key], write: (key, value) async { values[key] = value; });
       var authority = lease();
