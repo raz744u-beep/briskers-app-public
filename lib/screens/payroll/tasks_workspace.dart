@@ -343,7 +343,19 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
               ),
               if(!_collapsedJobs.contains(entry.key)) ...[
                 const Divider(height:1),
-                for(final task in entry.value) widget.serviceTaskCard(task),
+                // Match the approved isolated Tasks TEST: a distinct white
+                // rounded work card sits inside each tinted Job group.
+                for(final task in entry.value)
+                  Card(
+                    color: Colors.white,
+                    elevation: 0,
+                    margin: const EdgeInsets.fromLTRB(10,8,10,5),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: const BorderSide(color: Color(0xFFD4DFE4)),
+                    ),
+                    child: widget.serviceTaskCard(task),
+                  ),
                 // A missing Job link is display-only. Never dispatch a
                 // fabricated label as a canonical Job ID for a recheck.
                 if (entry.key != 'Unlinked Job') ...[
@@ -551,6 +563,9 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
         ),
       ]),
     ),
-    Expanded(child:_general?_generalView():_serviceView()),
+    // Filters must never paint over the first Job count row at large
+    // Android text scales or on a small phone.
+    const SizedBox(height: 8),
+    Expanded(child:ClipRect(child:_general?_generalView():_serviceView())),
   ]);
 }
