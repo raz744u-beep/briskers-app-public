@@ -55,9 +55,17 @@ void main() {
     expect(picker, contains('_viewRepository.employees()'));
     expect(picker, isNot(contains('_run(')));
     expect(picker, isNot(contains('authorizeLocal')));
-    // The real assignment write still goes through the protected path.
-    expect(assign.substring(assign.indexOf('final employee = await showDialog')),
-        contains('await _run(() async {'));
+    // The original TEST's local assignment is an Owner task edit.
+    // Only the paired LAN writer uses the extra OS payment grant.
+    final write = assign.substring(assign.indexOf('final employee = await showDialog'));
+    expect(write, contains('await _runOwnerTaskEdit(() => assign(pairedDevice: false))'));
+    expect(write, contains('await _run(() => assign(pairedDevice: true))'));
+    expect(write, contains('_taskEditRepository.registerAssignedLabor('));
+    expect(write, contains('await _db.transaction(apply)'));
+    expect(write, contains('await workflow.assign('));
+    expect(write, contains('if (pairedDevice) {'));
+    expect(write, contains('await apply();'));
+    expect(write, contains("if (!_canView) throw StateError('Owner account changed during assignment.')"));
   });
 
   test('local recheck uses signed-in Owner task edit; paired LAN stays protected', () {
