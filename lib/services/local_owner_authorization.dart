@@ -65,6 +65,7 @@ class LocalOwnerAuthorization {
   final Future<VerifiedOwnerEnrollment> Function(String)? _verifyLocalOwner;
   final DateTime Function() _now;
   int _generation = 0;
+  final Map<String, LocalOwnerGrant> _sessionGrants = {};
   bool _busy = false;
   bool _storageFailed = false;
   Future<void> _writes = Future<void>.value();
@@ -81,12 +82,13 @@ class LocalOwnerAuthorization {
   /// Invalidates in-memory grants synchronously, even if secure storage fails.
   Future<void> revoke() {
     _generation++;
+    _sessionGrants.clear();
     return _write(_store.clear);
   }
 
   bool get isAuthenticating => _busy;
 
-  void lock() { _generation++; }
+  void lock() { _generation++; _sessionGrants.clear(); }
 
   void _check(OwnerSessionIdentity identity, int generation) {
     if (_storageFailed || generation != _generation ||
@@ -100,6 +102,15 @@ class LocalOwnerAuthorization {
   /// it never challenges the OS or reaches Supabase. Changing accounts or
   /// signing out invalidates it through currentIdentity / revoke.
   Future<LocalOwnerGrant> authorizeSession(String businessId) async {
+    final cached = _sessionGrants[businessId];
+    if (cached != null) {
+      try {
+        cached.assertValid(businessId, cached.actorId);
+        return cached;
+      } on StateError {
+        _sessionGrants.remove(businessId);
+      }
+    }
     if (_busy) throw StateError('Owner authorization is already running.');
     final verify = _verifyLocalOwner;
     if (verify == null) throw StateError('Local Owner role verification is unavailable.');
@@ -117,9 +128,11 @@ class LocalOwnerAuthorization {
       _lastVerifiedAt = now;
       // This is a session-bound capability, not a timed second login.
       // Its identity and generation checks remain mandatory on each write.
-      return LocalOwnerGrant._(
+      final grant = LocalOwnerGrant._(
         this, generation, identity, businessId, DateTime.utc(9999, 12, 31),
       );
+      _sessionGrants[businessId] = grant;
+      return grant;
     } finally { _busy = false; }
   }
 
