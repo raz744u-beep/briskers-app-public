@@ -102,6 +102,13 @@ void main(){
       });
     }
 
+    Future<Finder> creditCard(String employee,String description) async {
+      final work=(await tester.runAsync(()=>LocalPayrollRepository(
+        db,business:'shop',owner:true).work(employee:employee)))!;
+      final credit=work.singleWhere((r)=>r['description']==description);
+      return find.byKey(ValueKey('mechanic-work-${credit['id']}'));
+    }
+
     await until(find.text('Main Mechanic'));
     await click(find.byType(DropdownButtonFormField<String>).first);
     await click(find.text('Alpha').last);
@@ -110,13 +117,16 @@ void main(){
     
     await click(find.text('Assign / split'));
     await click(find.text('Beta'));
-    await until(find.textContaining('Beta · Open'));
-    await click(find.widgetWithText(TextButton,'Start'));
-    await until(find.widgetWithText(TextButton,'Complete'));
-    await click(find.widgetWithText(TextButton,'Complete'));
+    final turboCard=await creditCard('b','Replace turbocharger and gaskets');
+    await until(turboCard);
+    await click(find.descendant(of:turboCard,matching:
+      find.widgetWithText(TextButton,'Start')));
+    await until(find.descendant(of:turboCard,matching:find.text('In Progress')));
+    await click(find.descendant(of:turboCard,matching:
+      find.widgetWithText(OutlinedButton,'Mark Done')));
     await until(find.byType(AlertDialog));await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),'2');await click(find.text('Continue'));
     await until(find.byType(AlertDialog));await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),'3');await click(find.text('Continue'));
-    await until(find.textContaining('120 actual min · 180 credited min'));
+    await until(find.textContaining('Actual: 2.00h · Credited: 3.00h'));
     await tester.runAsync(()async{
       final repo=LocalPayrollRepository(db,business:'shop',owner:true);
       final work=await repo.work(employee:'b');expect(work.single['actual_minutes'],180);expect(work.single['recorded_actual_minutes'],120);
@@ -131,18 +141,19 @@ void main(){
       await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:400)));await tester.pump();
     }
     for(final name in ['Alpha','Beta']){
-      await until(find.textContaining('$name · Open'));
-      final card=find.ancestor(of:find.textContaining('$name · Open'),matching:find.byType(ListTile)).last;
-      await click(find.descendant(of:card,matching:find.widgetWithText(TextButton,'Start')));
-      await until(find.textContaining('$name · In Progress'));
-      final started=find.ancestor(of:find.textContaining('$name · In Progress'),matching:find.byType(ListTile)).last;
-      await click(find.descendant(of:started,matching:find.widgetWithText(TextButton,'Complete')));
+      final card=await creditCard(name=='Alpha'?'a':'b','Shared diagnostic labor');
+      await until(card);
+      await click(find.descendant(of:card,matching:
+        find.widgetWithText(TextButton,'Start')));
+      await until(find.descendant(of:card,matching:find.text('In Progress')));
+      await click(find.descendant(of:card,matching:
+        find.widgetWithText(OutlinedButton,'Mark Done')));
       for(var step=0;step<2;step++){
         await until(find.byType(AlertDialog));
         await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),name=='Alpha'?'1':'2');
         await click(find.text('Continue'));
       }
-      await until(find.textContaining('$name · Done'));
+      await until(find.descendant(of:card,matching:find.text('Done')));
     }
     await tester.runAsync(()async{
       final all=await LocalPayrollRepository(db,business:'shop',owner:true).work();
