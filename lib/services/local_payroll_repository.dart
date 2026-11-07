@@ -939,7 +939,7 @@ class LocalPayrollRepository {
     return _read(
       'SELECT t.*,j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,'
       '(SELECT MIN(document_date) FROM local_documents jd WHERE jd.business_id=t.business_id AND jd.job_id=t.job_id) AS job_document_date,'
-      "d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,s.source_kind,CASE WHEN d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,"
+      "d.document_number AS invoice_number,d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,s.source_kind,CASE WHEN d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,"
       's.invoice_id,s.line_id AS source_line_id FROM regular_payroll_tasks t '
       'LEFT JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id '
       'LEFT JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id '
@@ -957,7 +957,7 @@ class LocalPayrollRepository {
       "p.state,p.completed_date,c.revision AS version,t.description,t.job_id,"
       "j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,"
       "(SELECT MIN(document_date) FROM local_documents jd WHERE jd.business_id=t.business_id AND jd.job_id=t.job_id) AS job_document_date,"
-      "d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,c.completed AS credit_completed,"
+      "d.document_number AS invoice_number,d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,c.completed AS credit_completed,"
       "s.source_kind,CASE WHEN m.active=0 THEN 1 ELSE 0 END AS assignment_conflict,CASE WHEN m.active=0 OR d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,s.invoice_id,s.line_id AS source_line_id,"
       "COALESCE(est.minutes,0) AS estimated_minutes,"
       "c.actual_minutes,c.rate_cents,COALESCE(at.minutes,c.actual_minutes) AS recorded_actual_minutes,"
