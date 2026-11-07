@@ -103,6 +103,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     DeviceOwnerAuthorization.instance.currentIdentity())==true);
   late final _viewRepository=LocalPayrollRepository(_db,
     business:widget.businessId,owner:true);
+  // Editing a task status is not a payroll disbursement. Guard against
+  // sign-out and business identity changes throughout the local operation.
+  late final _taskStatusRepository = LocalPayrollRepository(
+    _db, business: widget.businessId, owner: true,
+    assertOwnerGrant: () {
+      if (!_canView) throw StateError('Sign in as Owner to edit tasks.');
+    },
+  );
   List<Map<String, dynamic>> _employees = [];
   List<Map<String, dynamic>> _work = [];
   List<Map<String, dynamic>> _taskSources = [];
@@ -263,6 +271,19 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       if (rethrowError && !actionCompleted) rethrow;
     } finally {
       if (mounted) setState(() { _busy = false; _authorizing = false; });
+    }
+  }
+
+  Future<void> _changeGeneralTaskStatus(String employee, int id, String status) async {
+    if (_busy || !_canView) return;
+    setState(() { _busy = true; _error = null; });
+    try {
+      await _taskStatusRepository.setShopTaskStatus(employee, id, status);
+      if (mounted && _canView) unawaited(_load());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -1455,7 +1476,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Future<void> _updateEmployeeGeneralTask(int id, String status) =>
-      _run(() => _repository.setShopTaskStatus(widget.employeeId!, id, status));
+      _changeGeneralTaskStatus(widget.employeeId!, id, status);
 
   Widget _tasksTab() => _PayrollViewport(minHeight:_currentJobsExpanded?600:360,child:Column(children:[
     Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),
@@ -1608,7 +1629,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             onGeneralStatus: (id, status) async {
               final row = _generalTasks.where((row) => row['id'] == id).firstOrNull;
               if (row == null) return;
-              await _run(() => _repository.setShopTaskStatus(row['employee_id'] as String, id, status));
+              await _changeGeneralTaskStatus(row['employee_id'] as String, id, status);
             },
             onOpenJob: (id) => _openRecordedWork(id, invoice: false),
             onEmployeeTap: (id) => _openEmployeeProfile(id,_week,0),
