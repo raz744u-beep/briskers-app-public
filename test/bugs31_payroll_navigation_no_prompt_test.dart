@@ -60,6 +60,22 @@ void main() {
         contains('await _run(() async {'));
   });
 
+  test('local recheck uses signed-in Owner task edit; paired LAN stays protected', () {
+    final begin = source.indexOf('Future<void> _addRecheck(');
+    final end = source.indexOf('Future<void> _recordWeekly(', begin);
+    expect(begin, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(begin));
+    final action = source.substring(begin, end);
+    expect(action, contains('if (!mounted || !_canView) return;'));
+    expect(action, contains('if (!paired) {'));
+    expect(action, contains('_runOwnerTaskEdit(() => _taskEditRepository.createRecheck('));
+    expect(action, contains('await _run(() async {'));
+    expect(action, contains('await workflow.assignRecheck('));
+    expect(action, contains('if (mounted) setState(() => _error = error.toString())'));
+    expect(action, contains('PayrollLanEnrollment(identity)'));
+    expect(action, contains('operation: operation'));
+  });
+
   test('payment, repayments and opening advances still require owner proof', () {
     final weeklyStart = source.indexOf('Future<void> _recordWeekly(');
     final weeklyEnd = source.indexOf('String _operationId()', weeklyStart);
