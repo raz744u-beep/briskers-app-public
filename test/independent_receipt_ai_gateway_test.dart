@@ -146,7 +146,7 @@ void main() {
   test('Worker HTTP 200 error payload is rejected and never shown as recognized receipt', () async {
     final gateway=IndependentReceiptAiGateway(
       endpoint:'https://receipt.example/extract',
-      transport:(_,__,___)async=>{'success':false,'error':'invalid_business'},
+      transport:(_, _, _) async => {'success':false,'error':'invalid_business'},
     );
     await expectLater(gateway.enhance(receipt:photo(),
       businessId:'shop',accessToken:'synthetic-test-device-token',
