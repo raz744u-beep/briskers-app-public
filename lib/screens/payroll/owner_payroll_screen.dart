@@ -667,12 +667,29 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       ? () => _assign(row['invoice_id'] as String,
           {'id': row['source_line_id'], 'description': row['description']},
           jobId: row['job_id'] as String) : null,
-    title: Text(row['description'] as String),
-    subtitle: Text('${_employeeLabel(row['employee_id']?.toString())} · ${row['state']} · '
-      '${row['recorded_actual_minutes'] ?? row['actual_minutes']} actual min · ${row['actual_minutes']} credited min · ${row['estimated_minutes'] ?? 0} estimated min · '
-      '${row['pay_status'] ?? (row['paid'] == 1 ? 'Paid' : 'Unpaid')}'
-      '${row['assignment_conflict']==1?' · Assignment changed; Owner review required':row['source_active'] == 0 ? ' · Removed from invoice' : ''}'),
+    title: Text(row['description'] as String,
+      style:const TextStyle(fontSize:15,fontWeight:FontWeight.w800)),
+    subtitle: Column(crossAxisAlignment:CrossAxisAlignment.start,
+      mainAxisSize:MainAxisSize.min,children:[
+      const SizedBox(height:4),
+      Text('${_employeeLabel(row['employee_id']?.toString())} · ${row['state']}',
+        style:const TextStyle(fontWeight:FontWeight.w600)),
+      Text('${((row['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(2)} hrs planned'
+        ' · ${row['pay_status'] ?? (row['paid'] == 1 ? 'Paid' : 'Unpaid')}'),
+      if ((row['recorded_actual_minutes'] as int? ?? row['actual_minutes'] as int? ?? 0)>0 ||
+          (row['actual_minutes'] as int? ?? 0)>0)
+        Text('${row['recorded_actual_minutes'] ?? row['actual_minutes']} actual min · '
+          '${row['actual_minutes']} credited min',
+          style:const TextStyle(fontSize:11,color:Color(0xFF64748B))),
+      if (row['assignment_conflict']==1)
+        const Text('Assignment changed; Owner review required',
+          style:TextStyle(fontSize:11)),
+      if (row['source_active']==0)
+        const Text('Removed from invoice',style:TextStyle(fontSize:11)),
+    ]),
     trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+      if ((row['paid_minutes'] as int? ?? 0)>0)
+        const Icon(Icons.lock_outline,size:19,color:Color(0xFF64748B)),
       IconButton(
         tooltip: 'Edit mechanic estimated hours',
         icon: const Icon(Icons.edit_outlined, size: 19),
