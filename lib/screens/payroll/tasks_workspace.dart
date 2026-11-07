@@ -23,6 +23,7 @@ class TasksWorkspace extends StatefulWidget {
     this.initialGeneral = false,
     this.onAddService,
     this.onAddRecheck,
+    this.onRecoverHistory,
   });
 
   final List<Map<String, dynamic>> serviceTasks;
@@ -34,6 +35,7 @@ class TasksWorkspace extends StatefulWidget {
   final VoidCallback onAddGeneral;
   final VoidCallback? onAddService;
   final ValueChanged<String>? onAddRecheck;
+  final VoidCallback? onRecoverHistory;
   final Future<void> Function(int taskId, String status) onGeneralStatus;
   final ValueChanged<String> onOpenJob;
   final ValueChanged<String> onEmployeeTap;
@@ -286,6 +288,17 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                 ['Newest First','Oldest First','Due Date']
                   .where((s)=>_general||s!='Due Date').toList(),
                 (v)=>sort=v),
+              if (widget.onRecoverHistory != null) ...[
+                const SizedBox(height:8),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    widget.onRecoverHistory!();
+                  },
+                  icon: const Icon(Icons.history),
+                  label: const Text('Recover missing historical invoice tasks'),
+                ),
+              ],
               const SizedBox(height:8),
               FilledButton(
                 onPressed:(){
