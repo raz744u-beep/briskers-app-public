@@ -76,6 +76,23 @@ void main() {
     expect(action, contains('operation: operation'));
   });
 
+  test('TEST New Service Task reads and creates locally without payment unlock', () {
+    final start = source.indexOf('Future<void> _newServiceTask()');
+    final end = source.indexOf('Future<void> _createEmployeeGeneralTask()', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final task = source.substring(start, end);
+    expect(task, contains('final known=await _viewRepository.employees()'));
+    expect(task, contains('await _runOwnerTaskEdit(() async {'));
+    expect(task, contains('_taskEditRepository.createRecheck('));
+    expect(task, contains("kind:'job'"));
+    expect(task, contains('queueJobCreate'));
+    expect(task, contains('LocalTaskAssignmentStore(_db).linkEmployee'));
+    expect(task, contains("if (!_canView) throw StateError('Owner account changed during task creation.')"));
+    expect(task, isNot(contains('await _repository.employees()')));
+    expect(task, isNot(contains('await _run(() async {')));
+  });
+
   test('payment, repayments and opening advances still require owner proof', () {
     final weeklyStart = source.indexOf('Future<void> _recordWeekly(');
     final weeklyEnd = source.indexOf('String _operationId()', weeklyStart);
