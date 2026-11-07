@@ -54,6 +54,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
   String _category = 'All Categories';
   String _job = 'All Jobs';
   String _date = 'Any';
+  String _servicePeriod = 'Any time';
   String _sort = 'Newest First';
   final Set<String> _collapsedJobs = <String>{};
 
@@ -83,6 +84,13 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
 
   bool _matchesStatus(Map<String,dynamic> row) {
     final status = _statusName(row['status']);
+    if (_status == 'Unpaid') {
+      return status == 'Done' &&
+          (row['remaining_minutes'] as int? ?? 0) > 0;
+    }
+    if (_status == 'Paid') {
+      return status == 'Done' && row['paid'] == 1;
+    }
     return _status == 'All' ||
       (_status == 'Active' && status != 'Done') ||
       status == _status;
@@ -117,6 +125,45 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
     return true;
   }
 
+  // Service periods use actual saved Job/invoice/completion dates—not
+  // list position or invoice number. Unknown dates stay visible only when
+  // the Owner chooses All time; this prevents fabricated recent activity.
+  bool _matchesServicePeriod(Map<String,dynamic> row) {
+    if (_servicePeriod == 'Any time') return true;
+    final isDone = _statusName(row['status']) == 'Done';
+    final completed = isDone
+        ? ServiceTaskOrder.timestamp(row['completed_date']) : 0;
+    final timestamp = completed > 0 ? completed :
+        ServiceTaskOrder.timestamp(row['invoice_date'] ??
+          row['invoice_created_at'] ?? row['job_created_at'] ??
+          row['job_document_date']);
+    if (timestamp <= 0) return false;
+    final event = DateTime.fromMillisecondsSinceEpoch(timestamp);
+    final date = DateTime(event.year,event.month,event.day);
+    final now=DateTime.now();
+    final day=DateTime(now.year,now.month,now.day);
+    final weekStart=day.subtract(Duration(days:day.weekday-1));
+    switch (_servicePeriod) {
+      case 'This week':
+        return !date.isBefore(weekStart) &&
+            date.isBefore(weekStart.add(const Duration(days:7)));
+      case 'Last week':
+        return !date.isBefore(weekStart.subtract(const Duration(days:7))) &&
+            date.isBefore(weekStart);
+      case 'Last 7 days':
+        return !date.isBefore(day.subtract(const Duration(days:6))) &&
+            !date.isAfter(day);
+      case 'Last 30 days':
+        return !date.isBefore(day.subtract(const Duration(days:29))) &&
+            !date.isAfter(day);
+      case 'Last 90 days':
+        return !date.isBefore(day.subtract(const Duration(days:89))) &&
+            !date.isAfter(day);
+      default:
+        return true;
+    }
+  }
+
   List<Map<String,dynamic>> get _service {
     final q = _search.text.toLowerCase().trim();
     final rows = widget.serviceTasks.where((task) {
@@ -134,6 +181,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
           task['job_id']?.toString() != _job) return false;
       return task['source_missing'] != 1 &&
         _matchesStatus(task) && _matchesEmployee(task,general:false) &&
+        _matchesServicePeriod(task) &&
         (q.isEmpty || desc.contains(q) ||
           (task['job_number']?.toString().toLowerCase().contains(q) ?? false) ||
           widget.employeeName(task['employee_id']?.toString())
@@ -186,19 +234,19 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
         constraints:const BoxConstraints(minHeight:37),
         padding:const EdgeInsets.symmetric(horizontal:9,vertical:4),
         decoration:BoxDecoration(
-          color: const Color(0xFFF3F7F8),
-          border: Border.all(color:const Color(0xFFCBD7DC)),
+          color: Colors.white,
+          border: Border.all(color:const Color(0xFF8A9CAA),width:1.2),
           borderRadius:BorderRadius.circular(18)),
         child:Row(children:[
           Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,
             mainAxisSize:MainAxisSize.min,children:[
             Text(title,maxLines:1,overflow:TextOverflow.ellipsis,
-              style:const TextStyle(fontSize:10,
-                color:Color(0xFF64748B))),
+              style:const TextStyle(fontSize:11,
+                fontWeight:FontWeight.w600,color:Color(0xFF475569))),
             const SizedBox(height:1),
             Text(chosen,maxLines:1,overflow:TextOverflow.ellipsis,
-              style:const TextStyle(fontSize:11.5,
-                fontWeight:FontWeight.w700)),
+              style:const TextStyle(fontSize:13,
+                color:Color(0xFF1E293B),fontWeight:FontWeight.w800)),
           ])),
           const SizedBox(width:5),
           const Icon(Icons.keyboard_arrow_down,size:16),
@@ -229,7 +277,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
   Future<void> _filters() async {
     var employee = _employee;
     var status = _status, type = _kind, category = _category;
-    var job = _job, date = _date, sort = _sort;
+    var job = _job, date = _date, sort = _sort, period = _servicePeriod;
     await showModalBottomSheet<void>(
       context:context,isScrollControlled:true,useSafeArea:true,
       showDragHandle:true,
@@ -260,7 +308,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                 TextButton(onPressed:()=>refresh((){
                   employee='';status='Active';type='All Types';
                   category='All Categories';job='All Jobs';
-                  date='Any';sort='Newest First';
+                  date='Any';sort='Newest First';period='Any time';
                 }),child:const Text('Reset')),
               ]),
               dropdown('Employee',employee.isEmpty ? 'All Employees' :
@@ -274,6 +322,9 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                   (v)=>job=v),
                 dropdown('Task Type',type,
                   ['All Types','Invoice Labor','Rechecks'],(v)=>type=v),
+                dropdown('Period',period,
+                  ['Any time','This week','Last week','Last 7 days',
+                   'Last 30 days','Last 90 days'],(v)=>period=v),
               ] else ...[
                 dropdown('Category',category,
                   ['All Categories','General','Cleaning','Inventory','Office',
@@ -282,7 +333,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                   ['Any','Today','This Week','Overdue'],(v)=>date=v),
               ],
               dropdown('Status',status,
-                ['Active','All','Not Started','In Progress','Done'],
+                ['Active','Unpaid','Paid','All','Not Started','In Progress','Done'],
                 (v)=>status=v),
               dropdown('Sort By',sort,
                 ['Newest First','Oldest First','Due Date']
@@ -305,6 +356,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                   setState((){
                     _employee=employee;_status=status;_kind=type;
                     _category=category;_job=job;_date=date;_sort=sort;
+                    _servicePeriod=period;
                   });
                   Navigator.pop(context);
                 },
@@ -516,7 +568,8 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                   FocusManager.instance.primaryFocus?.unfocus();
                   setState((){
                   _general=option;
-                  _status='Active';_employee='';_sort='Newest First';_search.clear();
+                  _status='Active';_employee='';_sort='Newest First';
+                  _servicePeriod='Any time';_search.clear();
                   });
                 },
                 child:Container(
@@ -559,7 +612,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                 (v)=>setState(()=>_employee=_employeeIdForName(v)))),
               const SizedBox(width:5),
               Expanded(child:_picker('Status',_status,
-                ['Active','All','Not Started','In Progress','Done'],
+                ['Active','Unpaid','Paid','All','Not Started','In Progress','Done'],
                 (v)=>setState(()=>_status=v))),
             ]),
             const SizedBox(height:5),
@@ -573,9 +626,14 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                   if(_general) {_category=v;} else {_kind=v;}
                 }))),
               const SizedBox(width:5),
-              Expanded(child:_picker('Sort',_sort,
-                ['Newest First','Oldest First',if(_general)'Due Date'],
-                (v)=>setState(()=>_sort=v))),
+              Expanded(child:_general
+                ? _picker('Sort',_sort,
+                    ['Newest First','Oldest First','Due Date'],
+                    (v)=>setState(()=>_sort=v))
+                : _picker('Period',_servicePeriod,
+                    ['Any time','This week','Last week','Last 7 days',
+                     'Last 30 days','Last 90 days'],
+                    (v)=>setState(()=>_servicePeriod=v))),
             ]),
           ]),
         ),
