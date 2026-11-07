@@ -22,6 +22,8 @@ class TasksWorkspace extends StatefulWidget {
     required this.onEmployeeTap,
     this.initialGeneral = false,
     this.onAddService,
+    this.onAddRecheck,
+    this.onRecoverHistory,
   });
 
   final List<Map<String, dynamic>> serviceTasks;
@@ -32,6 +34,8 @@ class TasksWorkspace extends StatefulWidget {
   final Widget Function(Map<String,dynamic>) serviceTaskCard;
   final VoidCallback onAddGeneral;
   final VoidCallback? onAddService;
+  final ValueChanged<String>? onAddRecheck;
+  final VoidCallback? onRecoverHistory;
   final Future<void> Function(int taskId, String status) onGeneralStatus;
   final ValueChanged<String> onOpenJob;
   final ValueChanged<String> onEmployeeTap;
@@ -118,9 +122,14 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
     final rows = widget.serviceTasks.where((task) {
       final desc = (task['custom_description'] ??
         task['source_description'] ?? '').toString().toLowerCase();
-      final isInvoice = task['document_id'] != null;
+      // Task-first Job work and rechecks both lack an invoice line. The
+      // saved source kind distinguishes them; absence of an invoice alone
+      // must not relabel ordinary Job work as a recheck.
+      final sourceKind = task['source_kind']?.toString();
+      final isInvoice = sourceKind == 'invoice' ||
+          (sourceKind == null && task['document_id'] != null);
       if (_kind == 'Invoice Labor' && !isInvoice) return false;
-      if (_kind == 'Rechecks' && isInvoice) return false;
+      if (_kind == 'Rechecks' && sourceKind != 'recheck') return false;
       if (_job != 'All Jobs' &&
           task['job_id']?.toString() != _job) return false;
       return task['source_missing'] != 1 &&
@@ -279,6 +288,17 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                 ['Newest First','Oldest First','Due Date']
                   .where((s)=>_general||s!='Due Date').toList(),
                 (v)=>sort=v),
+              if (widget.onRecoverHistory != null) ...[
+                const SizedBox(height:8),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    widget.onRecoverHistory!();
+                  },
+                  icon: const Icon(Icons.history),
+                  label: const Text('Recover missing historical invoice tasks'),
+                ),
+              ],
               const SizedBox(height:8),
               FilledButton(
                 onPressed:(){
@@ -324,8 +344,13 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                     _collapsedJobs.remove(entry.key);
                   }
                 }),
-                title:Text(entry.value.first['job_number']?.toString() ?? 'Job',
-                  style:const TextStyle(fontWeight:FontWeight.w800)),
+                title:Text(() {
+                  final jobNumber = entry.value.first['job_number']?.toString() ?? 'Job';
+                  final invoice = entry.value.map((row) =>
+                    row['invoice_number']?.toString().trim()).whereType<String>()
+                    .where((number) => number.isNotEmpty).firstOrNull;
+                  return invoice == null ? jobNumber : '$jobNumber · Invoice #$invoice';
+                }(),style:const TextStyle(fontWeight:FontWeight.w800)),
                 subtitle:Text([
                   if (entry.value.first['customer_name'] case final String customer) customer,
                   if (entry.value.first['vehicle_label'] case final String vehicle) vehicle,
@@ -336,10 +361,32 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
               ),
               if(!_collapsedJobs.contains(entry.key)) ...[
                 const Divider(height:1),
-                for(final task in entry.value) widget.serviceTaskCard(task),
-                TextButton.icon(onPressed:()=>widget.onOpenJob(entry.key),
-                  icon:const Icon(Icons.open_in_new,size:17),
-                  label:const Text('Open Job Details')),
+                // Match the approved isolated Tasks TEST: a distinct white
+                // rounded work card sits inside each tinted Job group.
+                for(final task in entry.value)
+                  Card(
+                    color: Colors.white,
+                    elevation: 0,
+                    margin: const EdgeInsets.fromLTRB(10,8,10,5),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: const BorderSide(color: Color(0xFFD4DFE4)),
+                    ),
+                    child: widget.serviceTaskCard(task),
+                  ),
+                // A missing Job link is display-only. Never dispatch a
+                // fabricated label as a canonical Job ID for a recheck.
+                if (entry.key != 'Unlinked Job') ...[
+                  TextButton.icon(onPressed:()=>widget.onOpenJob(entry.key),
+                    icon:const Icon(Icons.open_in_new,size:17),
+                    label:const Text('Open Job Details')),
+                  if (widget.onAddRecheck != null)
+                    TextButton.icon(
+                      onPressed: () => widget.onAddRecheck!(entry.key),
+                      icon: const Icon(Icons.add_task_outlined, size: 17),
+                      label: const Text('Add Recheck'),
+                    ),
+                ],
                 const SizedBox(height:5),
               ],
             ]),
@@ -534,6 +581,9 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
         ),
       ]),
     ),
-    Expanded(child:_general?_generalView():_serviceView()),
+    // Filters must never paint over the first Job count row at large
+    // Android text scales or on a small phone.
+    const SizedBox(height: 8),
+    Expanded(child:ClipRect(child:_general?_generalView():_serviceView())),
   ]);
 }

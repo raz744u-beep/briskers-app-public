@@ -243,6 +243,50 @@ class LocalPayrollRepository {
     });
   }
 
+  /// Set the locally effective compensation basis for future payroll review.
+  /// Saved receipts and existing paid labor allocations are immutable. This
+  /// does not pretend to update the server employee record while offline.
+  Future<void> saveLocalPayBasis({
+    required String employee,
+    required String name,
+    required String paymentType,
+    required int amountCents,
+  }) async {
+    _authorize();
+    if (employee.trim().isEmpty || name.trim().isEmpty ||
+        !const {'hourly', 'fixed_weekly'}.contains(paymentType) ||
+        amountCents < 0 || amountCents > 100000000) {
+      throw ArgumentError('Invalid employee payment settings.');
+    }
+    await prepare();
+    await db.transaction(() async {
+      _authorize();
+      final fixed = paymentType == 'fixed_weekly';
+      final prior = await weeklyDefaults(employee);
+      final adjustment = prior?['adjustment_cents'] as int? ?? 0;
+      await db.customStatement(
+        'INSERT INTO regular_payroll_employees VALUES(?,?,?,?,?) '
+        'ON CONFLICT(business_id,id) DO UPDATE SET '
+        'rate=excluded.rate,base_enabled=excluded.base_enabled',
+        [business, employee, name, fixed ? 0 : amountCents, fixed ? 1 : 0],
+      );
+      await db.customStatement(
+        'INSERT OR IGNORE INTO regular_payroll_advances VALUES(?,?,0)',
+        [business, employee],
+      );
+      await db.customStatement(
+        'INSERT INTO regular_payroll_weekly_defaults VALUES(?,?,?,?,?,?) '
+        'ON CONFLICT(business_id,employee_id) DO UPDATE SET '
+        'base_cents=excluded.base_cents,hourly_cents=excluded.hourly_cents,'
+        'adjustment_cents=excluded.adjustment_cents,'
+        'add_labor=excluded.add_labor',
+        [business, employee, fixed ? amountCents : 0,
+         fixed ? 0 : amountCents, adjustment, fixed ? 0 : 1],
+      );
+      _authorize();
+    });
+  }
+
   Future<void> createRecheck({
     required String operation, required String job, required String description,
     required String employee, required String name, required int rate,
@@ -442,10 +486,16 @@ class LocalPayrollRepository {
         'INSERT OR IGNORE INTO regular_payroll_jobs VALUES(?,?,?)',
         [business, jobId, job['title']],
       );
+      // Manual assignment may run before invoice-task projection finishes.
+      // Carry the customer-billable labor quantity into the initial *planned*
+      // mechanic estimate instead of creating a permanent zero-hour task.
+      // This does not mark work done or change credited/paid hours.
+      final billableHours = LocalInvoiceTaskStore.invoiceLaborHours(line);
       await db.customStatement(
-        'INSERT OR IGNORE INTO regular_payroll_tasks VALUES(?,?,?,?,?,0)',
+        'INSERT OR IGNORE INTO regular_payroll_tasks VALUES(?,?,?,?,?,?)',
         [business, task, jobId, laborId,
-          description.isEmpty ? 'Invoice labor' : description],
+          description.isEmpty ? 'Invoice labor' : description,
+          billableHours == null ? 0 : (billableHours * 100).round()],
       );
       await db.customStatement(
         'INSERT INTO regular_payroll_employees VALUES(?,?,?,?,0) '
@@ -933,7 +983,7 @@ class LocalPayrollRepository {
     return _read(
       'SELECT t.*,j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,'
       '(SELECT MIN(document_date) FROM local_documents jd WHERE jd.business_id=t.business_id AND jd.job_id=t.job_id) AS job_document_date,'
-      "d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,s.source_kind,CASE WHEN d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,"
+      "d.document_number AS invoice_number,d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,s.source_kind,CASE WHEN d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,"
       's.invoice_id,s.line_id AS source_line_id FROM regular_payroll_tasks t '
       'LEFT JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id '
       'LEFT JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id '
@@ -951,7 +1001,7 @@ class LocalPayrollRepository {
       "p.state,p.completed_date,c.revision AS version,t.description,t.job_id,"
       "j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,"
       "(SELECT MIN(document_date) FROM local_documents jd WHERE jd.business_id=t.business_id AND jd.job_id=t.job_id) AS job_document_date,"
-      "d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,c.completed AS credit_completed,"
+      "d.document_number AS invoice_number,d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,c.completed AS credit_completed,"
       "s.source_kind,CASE WHEN m.active=0 THEN 1 ELSE 0 END AS assignment_conflict,CASE WHEN m.active=0 OR d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,s.invoice_id,s.line_id AS source_line_id,"
       "COALESCE(est.minutes,0) AS estimated_minutes,"
       "c.actual_minutes,c.rate_cents,COALESCE(at.minutes,c.actual_minutes) AS recorded_actual_minutes,"

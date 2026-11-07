@@ -140,6 +140,34 @@ class LocalFinancialTotalsJournal {
     return true;
   }
 
+  /// Overlay locally committed edits and deletions onto the downloaded
+  /// transaction cache when no complete server baseline exists. This produces
+  /// an explicitly PARTIAL on-device subtotal, not a verified shop total.
+  /// Payment receipt previews must not be appended: they may already have a
+  /// corresponding financial transaction and would double count income.
+  Future<List<Map<String, dynamic>>> overlayCachedRows(
+    String businessId, List<Map<String, dynamic>> cached,
+  ) async {
+    final entries = await _read(businessId);
+    final byId = <String, Map<String, dynamic>>{};
+    for (final row in cached) {
+      final id = row['id']?.toString() ?? '';
+      if (id.isNotEmpty) byId[id] = Map<String, dynamic>.from(row);
+    }
+    for (final raw in entries.values) {
+      if (raw is! Map) continue;
+      final before = raw['before'];
+      final after = raw['after'];
+      final beforeId = before is Map ? before['id']?.toString() : null;
+      final afterId = after is Map ? after['id']?.toString() : null;
+      if (beforeId != null && beforeId.isNotEmpty) byId.remove(beforeId);
+      if (after is Map && afterId != null && afterId.isNotEmpty) {
+        byId[afterId] = Map<String, dynamic>.from(after);
+      }
+    }
+    return byId.values.toList();
+  }
+
   /// Adds the locally committed changes to an already complete, saved
   /// accounting baseline. Never upgrades a partial server page to 'verified'.
   static ExpensesPeriodTotals project(

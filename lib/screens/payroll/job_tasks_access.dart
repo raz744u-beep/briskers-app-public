@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import '../../local/briskers_local_database.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/device_owner_authorization.dart';
@@ -146,7 +147,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
       final task=allocation['task_id']?.toString();
       final employee=allocation['id']?.toString();
       if(task==null || employee==null)return;
-      // Revalidate paid coverage after the Owner challenge; partial payments
+      // Revalidate paid coverage after the Owner-session check; partial payments
       // are just as immutable as fully settled allocations.
       await repo.prepare();
       final settled=await db.customSelect(
@@ -195,7 +196,13 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
     }catch(_){if(mounted)setState(()=>warning='Saved mechanic list is not available yet. Retry.');}
   }
   Future<LocalPayrollRepository> unlock()async{
-    final grant=await (PayrollUiScope.of(context)?.unlock(widget.business) ?? DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.business));
+    final scope=PayrollUiScope.of(context);
+    // The already-signed-in Briskers Owner session is sufficient for
+    // Main Mechanic selection and per-line time editing. Only isolated
+    // debug fixtures may supply their synthetic Owner authority.
+    final grant=await (kDebugMode && scope?.debugAllowOwnerView==true
+      ? scope!.unlock(widget.business)
+      : DeviceOwnerAuthorization.instance.authority.authorizeSession(widget.business));
     void check()=>grant.assertValid(widget.business,grant.actorId);
     return LocalPayrollRepository(db,business:widget.business,owner:true,assertOwnerGrant:check);
   }

@@ -220,7 +220,9 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(14),
                   color: const Color(0xFFB6EDC5)),
-                child: Text('Recorded',
+                // This is a record of verified pay, not proof that every
+                // task in the week has been settled.
+                child: Text('Paid portion',
                   style: const TextStyle(fontSize: 11.5,
                     fontWeight: FontWeight.w700)),
               ),
@@ -236,8 +238,10 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
               _metric('Hours', (week.minutes / 60).toStringAsFixed(1),
                 const Color(0xFF101828)),
               _metric('Gross', _money(week.gross), const Color(0xFF101828)),
-              _metric('Debt repaid', _money(week.repaid), const Color(0xFF101828)),
-              _metric('Transferred', _money(week.net), const Color(0xFF117C56)),
+              // Recorded gross was settled through net transfer and any
+              // debt repayment. Remaining unrecorded tasks are not included.
+              _metric('Paid', _money(week.gross), const Color(0xFF117C56)),
+              _metric('Balance', '—', const Color(0xFF64748B)),
             ]),
           ]),
         ),
@@ -255,7 +259,9 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
     final weeks = grouped.entries.map((entry) =>
       _RecordedWeek(entry.key, entry.value)).toList()
       ..sort((a, b) => b.date.compareTo(a.date));
-    final paid = weeks.fold<int>(0, (sum, week) => sum + week.net);
+    // Paid denotes verified gross compensation, while net bank/cash
+    // transfer is separately visible in each week detail alongside debt repaid.
+    final paid = weeks.fold<int>(0, (sum, week) => sum + week.gross);
     final gross = weeks.fold<int>(0, (sum, week) => sum + week.gross);
     return Column(children: [
       Padding(
@@ -320,7 +326,7 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
           Expanded(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Total transferred · ' + _period, style: const TextStyle(
+              Text('Total paid · ' + _period, style: const TextStyle(
                 fontSize: 11, color: Color(0xFF64748B))),
               Text(_money(paid), style: const TextStyle(
                 fontSize: 17, fontWeight: FontWeight.w800,

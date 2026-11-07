@@ -56,13 +56,15 @@ void main(){
     final db=BriskersLocalDatabase(NativeDatabase(File('${directory.path}/shop.sqlite')));
     debugUseLocalDatabase(db);
     const who=OwnerSessionIdentity('owner','local');
+    var secondaryPrompts=0;
     final auth=LocalOwnerAuthorization(store:_Unused(),currentIdentity:()=>who,
-      verifyOwner:(_)async=>throw StateError('No cloud verification'),authenticateDevice:()async=>true,
+      verifyOwner:(_)async=>throw StateError('No cloud verification'),
+      authenticateDevice:()async{secondaryPrompts++;return true;},
       verifyLocalOwner:(s)async=>VerifiedOwnerEnrollment(who,s));
     final identity=await PayrollLanIdentity.fromSeed(List.filled(32,3));
     final values=<String,String>{};
     final lease=PayrollOwnerLease(identity:identity,business:'shop',anchor:identity.deviceId,read:(k)async=>values[k],write:(k,v)async{values[k]=v;});
-    await lease.migrate(await auth.authorizeLocal('shop'));
+    await lease.migrate(await auth.authorizeSession('shop'));
     final network=PayrollOwnerLan(lease:lease,database:db,actor:'owner',approve:(_)async=>null);
     addTearDown(()async{await network.close();await db.close();debugUseLocalDatabase(null);
       LocalDocumentDetailCache.sqliteWritesEnabled=false;HttpOverrides.global=previous;
@@ -81,7 +83,7 @@ void main(){
           {'name':'Labor','description':'Shared diagnostic labor','line_kind':'labor','quantity':3,'unit_price':100}]);
     });
     final boundary=GlobalKey();final navigator=GlobalKey<NavigatorState>();
-    await tester.pumpWidget(PayrollUiScope(database:db,unlock:auth.authorizeLocal,connection:network,debugAllowOwnerView:true,
+    await tester.pumpWidget(PayrollUiScope(database:db,unlock:auth.authorizeSession,connection:network,debugAllowOwnerView:true,
       child:RepaintBoundary(key:boundary,child:MaterialApp(debugShowCheckedModeBanner:false,theme:BriskersApp.applicationTheme,navigatorKey:navigator,home:JobDocumentScreen(businessId:'shop',documentId:invoice,isOwner:true,roleCode:'owner')))));
     Future<void> until(Finder f)async{
       for(var i=0;i<180;i++){
@@ -100,6 +102,13 @@ void main(){
       });
     }
 
+    Future<Finder> creditCard(String employee,String description) async {
+      final work=(await tester.runAsync(()=>LocalPayrollRepository(
+        db,business:'shop',owner:true).work(employee:employee)))!;
+      final credit=work.singleWhere((r)=>r['description']==description);
+      return find.byKey(ValueKey('mechanic-work-${credit['id']}'));
+    }
+
     await until(find.text('Main Mechanic'));
     await click(find.byType(DropdownButtonFormField<String>).first);
     await click(find.text('Alpha').last);
@@ -108,13 +117,16 @@ void main(){
     
     await click(find.text('Assign / split'));
     await click(find.text('Beta'));
-    await until(find.textContaining('Beta · Open'));
-    await click(find.widgetWithText(TextButton,'Start'));
-    await until(find.widgetWithText(TextButton,'Complete'));
-    await click(find.widgetWithText(TextButton,'Complete'));
+    final turboCard=await creditCard('b','Replace turbocharger and gaskets');
+    await until(turboCard);
+    await click(find.descendant(of:turboCard,matching:
+      find.widgetWithText(TextButton,'Start')));
+    await until(find.descendant(of:turboCard,matching:find.text('In Progress')));
+    await click(find.descendant(of:turboCard,matching:
+      find.widgetWithText(OutlinedButton,'Mark Done')));
     await until(find.byType(AlertDialog));await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),'2');await click(find.text('Continue'));
     await until(find.byType(AlertDialog));await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),'3');await click(find.text('Continue'));
-    await until(find.textContaining('120 actual min · 180 credited min'));
+    await until(find.textContaining('Actual: 2.00h · Credited: 3.00h'));
     await tester.runAsync(()async{
       final repo=LocalPayrollRepository(db,business:'shop',owner:true);
       final work=await repo.work(employee:'b');expect(work.single['actual_minutes'],180);expect(work.single['recorded_actual_minutes'],120);
@@ -129,18 +141,19 @@ void main(){
       await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:400)));await tester.pump();
     }
     for(final name in ['Alpha','Beta']){
-      await until(find.textContaining('$name · Open'));
-      final card=find.ancestor(of:find.textContaining('$name · Open'),matching:find.byType(ListTile)).last;
-      await click(find.descendant(of:card,matching:find.widgetWithText(TextButton,'Start')));
-      await until(find.textContaining('$name · In Progress'));
-      final started=find.ancestor(of:find.textContaining('$name · In Progress'),matching:find.byType(ListTile)).last;
-      await click(find.descendant(of:started,matching:find.widgetWithText(TextButton,'Complete')));
+      final card=await creditCard(name=='Alpha'?'a':'b','Shared diagnostic labor');
+      await until(card);
+      await click(find.descendant(of:card,matching:
+        find.widgetWithText(TextButton,'Start')));
+      await until(find.descendant(of:card,matching:find.text('In Progress')));
+      await click(find.descendant(of:card,matching:
+        find.widgetWithText(OutlinedButton,'Mark Done')));
       for(var step=0;step<2;step++){
         await until(find.byType(AlertDialog));
         await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),name=='Alpha'?'1':'2');
         await click(find.text('Continue'));
       }
-      await until(find.textContaining('$name · Done'));
+      await until(find.descendant(of:card,matching:find.text('Done')));
     }
     await tester.runAsync(()async{
       final all=await LocalPayrollRepository(db,business:'shop',owner:true).work();
@@ -212,6 +225,10 @@ void main(){
     await until(find.text('Jobs with Tasks · 1'));
     expect(find.textContaining('2 tasks'),findsOneWidget);
     await capture('bugs30-global-completed-tasks');
-    await tester.pumpWidget(const SizedBox.shrink());await tester.pump(const Duration(milliseconds:500));expect(tester.takeException(),isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds:500));
+    expect(secondaryPrompts,0,
+      reason:'The regular invoice-to-Payroll-to-Tasks flow must require only the initial Briskers login.');
+    expect(tester.takeException(),isNull);
   },skip:!OwnerPayrollScreen.enabled,timeout:const Timeout(Duration(minutes:3)));
 }

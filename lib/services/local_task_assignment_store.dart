@@ -54,7 +54,21 @@ class LocalTaskAssignmentStore {
         'AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage w WHERE w.business_id=? AND w.credit_id=?)',
         [e['rate'],business,id,business,id,business,id]);
     }
-    await db.customStatement('INSERT OR IGNORE INTO regular_payroll_estimates VALUES(?,?,?,?)',[business,task,employee,((t['planned'] as int)*60+50)~/100]);
+    // Splitting a billable invoice line must not hand each mechanic the
+    // entire customer labor quantity. First active assignment inherits the
+    // estimate; an additional mechanic starts at zero until the Owner
+    // explicitly redistributes the allocated hours.
+    final others=await _read(
+      'SELECT p.id FROM regular_payroll_portions p '
+      'LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id '
+      'AND m.task_id=p.task_id AND m.employee_id=p.employee_id '
+      'WHERE p.business_id=? AND p.task_id=? AND p.employee_id<>? '
+      'AND COALESCE(m.active,1)=1',
+      [business,task,employee],
+    );
+    final defaultMinutes=others.isEmpty?((t['planned'] as int)*60+50)~/100:0;
+    await db.customStatement('INSERT OR IGNORE INTO regular_payroll_estimates VALUES(?,?,?,?)',
+      [business,task,employee,defaultMinutes]);
     await db.customStatement('INSERT INTO regular_payroll_assignment_meta(business_id,task_id,employee_id,inherited,active) VALUES(?,?,?,?,1) '
       'ON CONFLICT(business_id,task_id,employee_id) DO UPDATE SET inherited=excluded.inherited,active=1,revision=revision+1 WHERE inherited<>excluded.inherited OR active<>1',[business,task,employee,inherited?1:0]);
     if(!inherited) { await db.customStatement('INSERT INTO regular_payroll_task_policy VALUES(?,?,1) '
@@ -74,11 +88,30 @@ class LocalTaskAssignmentStore {
     await prepare();
     final ready=await _read("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('regular_payroll_portions','regular_payroll_employees','regular_payroll_estimates','regular_payroll_work_coverage','local_mechanic_work_credits_v1')",[]);
     if(ready.length!=5)return;
-    final lead=await _read('SELECT CASE WHEN l.job_id IS NULL THEN j.assigned_employee_id ELSE l.employee_id END AS assigned_employee_id,e.name FROM local_jobs j '
+    final lead=await _read('SELECT CASE WHEN l.job_id IS NULL THEN j.assigned_employee_id ELSE l.employee_id END AS assigned_employee_id, '
+      'COALESCE(e.name,CASE WHEN l.job_id IS NULL THEN j.assigned_employee_name ELSE l.employee_name END) AS employee_name '
+      'FROM local_jobs j '
       'LEFT JOIN regular_payroll_job_lead l ON l.business_id=j.business_id AND l.job_id=j.id '
-      'JOIN regular_payroll_employees e ON e.business_id=j.business_id AND e.id=CASE WHEN l.job_id IS NULL THEN j.assigned_employee_id ELSE l.employee_id END WHERE j.business_id=? AND j.id=?',[business,job]);
-    if(lead.isEmpty)return;
+      'LEFT JOIN regular_payroll_employees e ON e.business_id=j.business_id AND e.id=CASE WHEN l.job_id IS NULL THEN j.assigned_employee_id ELSE l.employee_id END '
+      'WHERE j.business_id=? AND j.id=?',[business,job]);
+    if (lead.isEmpty || lead.single['assigned_employee_id'] is! String ||
+        (lead.single['assigned_employee_id'] as String).isEmpty) {
+      return;
+    }
     final employee=lead.single['assigned_employee_id'] as String;
+    // The mechanic's pay basis may legitimately be unconfigured. Do not
+    // suppress the labor allocation: initialize the employee with zero rate,
+    // retain any saved compensation and block actual payment until reviewed.
+    await db.customStatement(
+      'INSERT OR IGNORE INTO regular_payroll_employees VALUES(?,?,?,?,0)',
+      [business,employee,
+       (lead.single['employee_name']?.toString().trim().isNotEmpty ?? false)
+         ? lead.single['employee_name'] : employee,0],
+    );
+    await db.customStatement(
+      'INSERT OR IGNORE INTO regular_payroll_advances VALUES(?,?,0)',
+      [business,employee],
+    );
     final tasks=await _read("SELECT t.id FROM regular_payroll_tasks t JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id "
       "WHERE t.business_id=? AND t.job_id=? AND s.active=1 AND s.source_kind='invoice' "
       "AND NOT EXISTS(SELECT 1 FROM regular_payroll_task_policy o WHERE o.business_id=t.business_id AND o.task_id=t.id AND o.manual_override=1) "

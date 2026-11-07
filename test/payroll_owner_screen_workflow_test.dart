@@ -39,10 +39,12 @@ void main() {
       final root = await PayrollLanIdentity.fromSeed(List.filled(32, 1));
       final identity = currentHolder ? root : await PayrollLanIdentity.fromSeed(List.filled(32, 2));
       const who = OwnerSessionIdentity('owner', 'regular-app-session');
+      var devicePromptCount = 0;
       final auth = LocalOwnerAuthorization(store: _Unused(), currentIdentity: () => who,
-        verifyOwner: (_) async => throw StateError('No Supabase required'), authenticateDevice: () async => true,
+        verifyOwner: (_) async => throw StateError('No Supabase required'),
+        authenticateDevice: () async { devicePromptCount++; return true; },
         verifyLocalOwner: (shop) async => VerifiedOwnerEnrollment(who, shop));
-      Future<LocalOwnerGrant> unlock(String shop) => auth.authorizeLocal(shop);
+      Future<LocalOwnerGrant> unlock(String shop) => auth.authorizeSession(shop);
       PayrollOwnerLease lease() => PayrollOwnerLease(identity: identity, business: 'shop', anchor: root.deviceId,
         read: (key) async => values[key], write: (key, value) async { values[key] = value; });
       var authority = lease();
@@ -169,6 +171,8 @@ void main() {
       }
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(milliseconds: 500));
+      expect(devicePromptCount, 0,
+        reason: 'Payroll, advances, repayments, actual payment and restart should use only the existing Briskers Owner login');
       expect(tester.takeException(), isNull);
     }, timeout: const Timeout(Duration(minutes: 2)));
   }

@@ -65,6 +65,7 @@ class LocalOwnerAuthorization {
   final Future<VerifiedOwnerEnrollment> Function(String)? _verifyLocalOwner;
   final DateTime Function() _now;
   int _generation = 0;
+  final Map<String, LocalOwnerGrant> _sessionGrants = {};
   bool _busy = false;
   bool _storageFailed = false;
   Future<void> _writes = Future<void>.value();
@@ -81,18 +82,58 @@ class LocalOwnerAuthorization {
   /// Invalidates in-memory grants synchronously, even if secure storage fails.
   Future<void> revoke() {
     _generation++;
+    _sessionGrants.clear();
     return _write(_store.clear);
   }
 
   bool get isAuthenticating => _busy;
 
-  void lock() { _generation++; }
+  void lock() { _generation++; _sessionGrants.clear(); }
 
   void _check(OwnerSessionIdentity identity, int generation) {
     if (_storageFailed || generation != _generation ||
         !identity.matches(_currentIdentity())) {
       throw StateError('Owner account changed. Start authorization again.');
     }
+  }
+
+  /// A single Briskers sign-in is the Owner's authorization. This grant is
+  /// bound to the active signed-in account, session and saved Owner role;
+  /// it never challenges the OS or reaches Supabase. Changing accounts or
+  /// signing out invalidates it through currentIdentity / revoke.
+  Future<LocalOwnerGrant> authorizeSession(String businessId) async {
+    final cached = _sessionGrants[businessId];
+    if (cached != null) {
+      try {
+        cached.assertValid(businessId, cached.actorId);
+        return cached;
+      } on StateError {
+        _sessionGrants.remove(businessId);
+      }
+    }
+    if (_busy) throw StateError('Owner authorization is already running.');
+    final verify = _verifyLocalOwner;
+    if (verify == null) throw StateError('Local Owner role verification is unavailable.');
+    _busy = true;
+    try {
+      final identity = _currentIdentity();
+      if (identity == null) throw StateError('Sign in to Briskers as Owner.');
+      final generation = ++_generation;
+      final verified = await verify(businessId);
+      _check(identity, generation);
+      if (!verified.identity.matches(identity) || verified.businessId != businessId) {
+        throw StateError('Only the signed-in Owner can change payroll.');
+      }
+      final now = _now().toUtc();
+      _lastVerifiedAt = now;
+      // This is a session-bound capability, not a timed second login.
+      // Its identity and generation checks remain mandatory on each write.
+      final grant = LocalOwnerGrant._(
+        this, generation, identity, businessId, DateTime.utc(9999, 12, 31),
+      );
+      _sessionGrants[businessId] = grant;
+      return grant;
+    } finally { _busy = false; }
   }
 
   /// Local app account/role boundary plus a fresh OS device challenge. This
