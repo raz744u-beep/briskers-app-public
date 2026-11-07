@@ -331,8 +331,13 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                     _collapsedJobs.remove(entry.key);
                   }
                 }),
-                title:Text(entry.value.first['job_number']?.toString() ?? 'Job',
-                  style:const TextStyle(fontWeight:FontWeight.w800)),
+                title:Text(() {
+                  final jobNumber = entry.value.first['job_number']?.toString() ?? 'Job';
+                  final invoice = entry.value.map((row) =>
+                    row['invoice_number']?.toString().trim()).whereType<String>()
+                    .where((number) => number.isNotEmpty).firstOrNull;
+                  return invoice == null ? jobNumber : '$jobNumber · Invoice #$invoice';
+                }(),style:const TextStyle(fontWeight:FontWeight.w800)),
                 subtitle:Text([
                   if (entry.value.first['customer_name'] case final String customer) customer,
                   if (entry.value.first['vehicle_label'] case final String vehicle) vehicle,
