@@ -32,7 +32,7 @@ void main() {
       employeeName:(_)=>'Chris',
       serviceTaskCard:(row)=>ListTile(title:Text(row['description'].toString())),
       onAddGeneral:(){},
-      onGeneralStatus:(_,__)async{},
+      onGeneralStatus:(_,status)async{},
       onOpenJob:(_){},
       onEmployeeTap:(_){},
     ))));
