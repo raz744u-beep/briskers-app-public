@@ -115,7 +115,7 @@ void main() {
       );
     }), throwsStateError);
     final assignmentsLeft = await db.customSelect(
-      "SELECT id FROM local_job_assignments WHERE business_id='shop'",
+      "SELECT assignment_id FROM local_job_assignments WHERE business_id='shop'",
     ).get();
     final tasksLeft = await db.customSelect(
       "SELECT id FROM regular_payroll_tasks WHERE business_id='shop'",
