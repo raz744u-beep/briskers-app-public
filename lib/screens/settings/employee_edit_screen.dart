@@ -539,43 +539,76 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
     return null;
   }
 
-  Widget _cachedDetails() => ListView(
-    padding: const EdgeInsets.all(16),
-    children: [
-      if (_name.text.isNotEmpty)
-        ListTile(title: const Text('Full name'), subtitle: Text(_name.text)),
-      if (widget.rosterPosition case final String position)
-        ListTile(title: const Text('Position'), subtitle: Text(position)),
-      const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
-        child: Text('Contact, tax, and compensation details are unavailable '
-          'until the employee record can be loaded securely.'),
-      ),
-      if(widget.isOwner)OutlinedButton(onPressed:_unlockOffline,child:const Text('Unlock verified offline details')),
-      if(_secureOffline && _detailsGrant!=null)...[
-        ListTile(title:const Text('Phone'),subtitle:Text(_secureKeys.contains('phone')?(_phone.text.isEmpty?'Not recorded in verified copy':_phone.text):'Not cached')),
-        ListTile(title:const Text('Email'),subtitle:Text(_secureKeys.contains('email')?(_email.text.isEmpty?'Not recorded in verified copy':_email.text):'Not cached')),
-        ListTile(title:const Text('Address'),subtitle:Text(_secureKeys.contains('address')?(_address.text.isEmpty?'Not recorded in verified copy':_address.text):'Not cached')),
-        ListTile(title:const Text('Compensation'),subtitle:Text(_rate.text)),
-        if(_ssnLast4!=null)ListTile(title:const Text('SSN ending'),subtitle:Text(_ssnLast4!)),
-      ],
-      if (widget.isOwner) ...[
-        TextFormField(
-          controller: _nickname,
-          maxLength: 32,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(labelText: 'Nickname (optional)'),
+  Widget _cachedDetails() {
+    final verified = widget.isOwner && _secureOffline && _detailsGrant != null;
+    final rate = verified && _rate.text.trim().isNotEmpty
+        ? '\$\${_rate.text.trim()}/hr' : 'Not saved locally';
+    String cachedValue(String field, String value) {
+      if (!verified || !_secureKeys.contains(field)) return 'Not saved locally';
+      return value.trim().isEmpty ? 'Not recorded' : value.trim();
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 32),
+      children: [
+        ListTile(
+          leading: const Icon(Icons.build_outlined, size: 34),
+          title: Text(_name.text.isEmpty ? 'Employee' : _name.text,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
+          subtitle: Text(widget.rosterPosition ?? 'Position not saved'),
         ),
-        OutlinedButton.icon(
-          onPressed: _savingNickname ? null : _saveNicknameLocally,
-          icon: const Icon(Icons.save_outlined),
-          label: const Text('Save nickname on this device'),
+        const Divider(height: 24),
+        ListTile(
+          title: const Text('Hourly rate'),
+          trailing: Text(rate, style: const TextStyle(fontWeight: FontWeight.w600)),
         ),
+        ListTile(
+          title: const Text('Phone, email and address'),
+          subtitle: Text(verified
+            ? [cachedValue('phone',_phone.text), cachedValue('email',_email.text),
+                cachedValue('address',_address.text)].join(' · ')
+            : 'Not saved locally'),
+        ),
+        ListTile(
+          title: const Text('SSN and W-9'),
+          subtitle: Text(verified && _ssnLast4 != null
+            ? 'SSN ending in $_ssnLast4 · Full SSN remains protected'
+            : 'Protected information not saved locally'),
+        ),
+        const ListTile(
+          title: Text('Default payment method'),
+          subtitle: Text('Not saved locally'),
+        ),
+        ListTile(
+          title: const Text('Position icon'),
+          subtitle: Text(widget.rosterPosition ?? 'Role-based icon'),
+        ),
+        if (widget.isOwner) ...[
+          const Divider(height: 26),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: const Text('Nickname'),
+            subtitle: const Text('Optional display name on this device'),
+            children: [
+              TextFormField(
+                controller: _nickname,
+                maxLength: 32,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'Nickname (optional)'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _savingNickname ? null : _saveNicknameLocally,
+                icon: const Icon(Icons.save_outlined),
+                label: const Text('Save nickname on this device'),
+              ),
+            ],
+          ),
+        ],
+        if (_error != null)
+          Padding(padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(_error!,style:const TextStyle(fontSize:12))),
       ],
-      if (_error != null) Text(_error!),
-      TextButton(onPressed:()=>unawaited(_hydrateNickname()),child:const Text('Retry nickname')),
-    ],
-  );
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
