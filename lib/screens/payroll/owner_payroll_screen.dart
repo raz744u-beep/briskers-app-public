@@ -687,6 +687,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         row['invoice_id'] is String &&
         row['source_line_id'] is String;
     return InkWell(
+      key: ValueKey('mechanic-work-${row['id']}'),
       onLongPress: canReassign ? () => _assign(
         row['invoice_id'] as String,
         {'id': row['source_line_id'], 'description': row['description']},
