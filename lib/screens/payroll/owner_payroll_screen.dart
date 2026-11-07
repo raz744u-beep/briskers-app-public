@@ -635,8 +635,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     ]),
   );
 
-  Future<void> _addRecheck() async {
-    final job = widget.jobId;
+  Future<void> _addRecheck({String? jobId}) async {
+    final job = jobId ?? widget.jobId;
     if (job == null) return;
     final employee = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -665,8 +665,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     }
     final operation = _operationId();
     await _run(() async {
-      final id = employee['employee_id'] as String;
-      final name = (employee['name'] ?? employee['employee_name']).toString();
+      final id = (employee['employee_id'] ?? employee['id']) as String;
+      final name = (employee['name'] ?? employee['employee_name'] ?? _employeeLabel(id)).toString();
       final identity = await PayrollLanIdentity.load();
       final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, id);
       if (peer == null) {
@@ -1636,6 +1636,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                           jobId: row['job_id'] as String) : null,
                   ),
             onAddService: _newServiceTask,
+            onAddRecheck: (jobId) => _addRecheck(jobId: jobId),
             onAddGeneral: _createEmployeeGeneralTask,
             onGeneralStatus: (id, status) async {
               final row = _generalTasks.where((row) => row['id'] == id).firstOrNull;
