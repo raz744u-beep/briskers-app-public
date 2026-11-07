@@ -42,10 +42,10 @@ void main(){
       final network=PayrollOwnerLan(lease:lease,database:db,actor:'owner',approve:(_)async=>null);
       addTearDown(()async{if(!gate.isCompleted)gate.complete();await network.close();await db.close();});
       await tester.pumpWidget(MaterialApp(home:PayrollUiScope(database:db,
-        unlock:auth.authorizeLocal,connection:network,debugAllowOwnerView:true,
+        unlock:auth.authorizeSession,connection:network,debugAllowOwnerView:true,
         child:OwnerPayrollScreen(businessId:'shop',employeeId:'a',
           employeeName:'Known Employee',employeeRole:'Mechanic',
-          database:db,unlockOwner:auth.authorizeLocal,ownerConnection:network))));
+          database:db,unlockOwner:auth.authorizeSession,ownerConnection:network))));
       for(final name in ['Tasks','Payroll','Reports','Taxes']){expect(find.text(name),findsOneWidget);}
       final x=[for(final name in ['Tasks','Payroll','Reports','Taxes'])tester.getCenter(find.text(name)).dx];
       expect(x[1]-x[0],closeTo(x[2]-x[1],1));expect(x[2]-x[1],closeTo(x[3]-x[2],1));
