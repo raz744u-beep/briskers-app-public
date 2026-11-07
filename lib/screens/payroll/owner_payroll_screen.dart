@@ -537,29 +537,62 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     // basis, NOT an automatic rate; actual payment remains unavailable until
     // the Owner configures and reviews compensation in Employee Details.
     final rate = employee['rate'] as int? ?? 0;
-    await _run(() async {
-      final assignments=LocalTaskAssignmentStore(_db);
-      await assignments.linkEmployee(widget.businessId,job,employeeId,name);
-      final source=(await _repository.tasks()).where((r)=>r['invoice_id']==invoiceId && r['source_line_id']==line['id']).firstOrNull;
-      if(source!=null) await assignments.retireInherited(widget.businessId,source['id'] as String,except:employeeId);
+    if (!_canView) return;
+    // Detect the saved shop link before editing. A failed peer read must
+    // never be silently interpreted as an unpaired, local-only device.
+    bool paired;
+    try {
       final identity = await PayrollLanIdentity.load();
-      final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, employeeId);
-      if (peer == null) {
-        await _repository.registerAssignedLabor(
-          jobId: job, invoiceId: invoiceId, lineId: line['id'] as String,
-          employeeId: employeeId, employeeName: name, rateCents: rate,
-        );
-      } else {
-        final workflow = await _workflow(employeeId);
-        await workflow.assign(
-          job: job, invoice: invoiceId, line: line['id'] as String,
-          description: (line['description'] ?? line['name'] ?? 'Invoice labor').toString(),
-          employeeName: name, rate: rate,
-        );
-      }
-      final task=(await _repository.tasks()).where((r)=>r['invoice_id']==invoiceId && r['source_line_id']==line['id']).single;
-      await assignments.allocate(widget.businessId,task['id'] as String,employeeId,inherited:false);
-    });
+      paired = await PayrollLanEnrollment(identity)
+          .ownerPeer(widget.businessId, employeeId) != null;
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    }
+    if (!mounted || !_canView) return;
+
+    Future<void> assign({required bool pairedDevice}) async {
+      final assignments = LocalTaskAssignmentStore(_db);
+      await _db.transaction(() async {
+        if (!_canView) throw StateError('Owner account changed during assignment.');
+        await assignments.linkEmployee(widget.businessId, job, employeeId, name);
+        final source = (await _taskEditRepository.tasks())
+            .where((r) => r['invoice_id'] == invoiceId &&
+                r['source_line_id'] == line['id']).firstOrNull;
+        if (source != null) {
+          await assignments.retireInherited(widget.businessId,
+              source['id'] as String, except: employeeId);
+        }
+        if (!pairedDevice) {
+          await _taskEditRepository.registerAssignedLabor(
+            jobId: job, invoiceId: invoiceId, lineId: line['id'] as String,
+            employeeId: employeeId, employeeName: name, rateCents: rate,
+          );
+        } else {
+          final workflow = await _workflow(employeeId);
+          await workflow.assign(
+            job: job, invoice: invoiceId, line: line['id'] as String,
+            description: (line['description'] ?? line['name'] ?? 'Invoice labor')
+                .toString(),
+            employeeName: name, rate: rate,
+          );
+        }
+        final task = (await _taskEditRepository.tasks())
+            .where((r) => r['invoice_id'] == invoiceId &&
+                r['source_line_id'] == line['id']).single;
+        await assignments.allocate(widget.businessId, task['id'] as String,
+            employeeId, inherited: false);
+        if (!_canView) throw StateError('Owner account changed during assignment.');
+      });
+    }
+
+    if (paired) {
+      // A paired mechanic's LAN workflow retains the payment-grant protocol.
+      await _run(() => assign(pairedDevice: true));
+    } else {
+      // Normal local invoice labor assignment is not a payroll payment.
+      await _runOwnerTaskEdit(() => assign(pairedDevice: false));
+    }
     if(mounted && _error==null && rate==0){
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content:Text('Labor assigned. Set the employee pay rate in Details before paying.'),
