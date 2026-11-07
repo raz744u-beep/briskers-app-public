@@ -21,5 +21,15 @@ void main() {
     expect(progress, contains("next == 'Done' && plannedMinutes > 0"));
     expect(progress, contains("initialValue:(credited/60).toStringAsFixed(2)"));
     expect(progress, contains('_taskEditRepository.recordAllocatedTime('));
+    expect(progress, contains("final next = markDone ? 'Done'"));
   });
+  test('direct Mark Done from Open keeps paid labor locked', () {
+    final source = File('lib/screens/payroll/owner_payroll_screen.dart')
+        .readAsStringSync();
+    expect(source, contains("label:const Text('Mark Done')"));
+    expect(source, contains('_recordTaskProgress(row,markDone:true)'));
+    expect(source, contains("(row['paid_minutes'] as int? ?? 0)==0"));
+    expect(source, contains('Credited mechanic labor'));
+  });
+
 }
