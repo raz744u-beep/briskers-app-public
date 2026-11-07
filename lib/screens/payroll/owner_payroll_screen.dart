@@ -620,8 +620,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     }
   }
 
-  Future<void> _recordTaskProgress(Map<String, dynamic> row) async {
-    final next = row['state'] == 'Open' ? 'In Progress' : 'Done';
+  Future<void> _recordTaskProgress(Map<String, dynamic> row,
+      {bool markDone = false}) async {
+    final next = markDone ? 'Done' :
+        row['state'] == 'Open' ? 'In Progress' : 'Done';
     if (row['state'] == 'Done' || (row['paid_minutes'] as int? ?? 0) > 0) return;
     var minutes = row['actual_minutes'] as int;
     if (next == 'Done') {
@@ -693,6 +695,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           style:TextStyle(fontSize:11)),
       if (row['source_active']==0)
         const Text('Removed from invoice',style:TextStyle(fontSize:11)),
+      if (row['state']=='Open' && row['assignment_conflict']!=1 &&
+          (row['paid_minutes'] as int? ?? 0)==0 &&
+          row['source_active']!=0)
+        Align(alignment:Alignment.centerRight,
+          child:TextButton.icon(
+            onPressed:_busy?null:()=>_recordTaskProgress(row,markDone:true),
+            icon:const Icon(Icons.done_all,size:17),
+            label:const Text('Mark Done'),
+          )),
     ]),
     trailing: Row(mainAxisSize: MainAxisSize.min, children: [
       if ((row['paid_minutes'] as int? ?? 0)>0)
