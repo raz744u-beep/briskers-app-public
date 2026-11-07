@@ -42,7 +42,14 @@ void main(){
     await tester.tap(find.text('Apply Filters'));
     await tester.pumpAndSettle();
     expect(tester.getTopLeft(find.text('MB-6220')).dy,lessThan(tester.getTopLeft(find.text('MB-3335')).dy));
-    await pick('Sort','Newest First');
+    await tester.tap(find.byTooltip('Advanced task filters'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sort By').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Newest First').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Apply Filters'));
+    await tester.pumpAndSettle();
     expect(tester.getTopLeft(find.text('J-2')).dy,lessThan(tester.getTopLeft(find.text('MB-3335')).dy));
     expect(tester.takeException(),isNull);
   });
