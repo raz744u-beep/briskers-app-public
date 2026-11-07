@@ -623,45 +623,24 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       {bool markDone = false}) async {
     final next = markDone ? 'Done' :
         row['state'] == 'Open' ? 'In Progress' : 'Done';
+    // Paid work is immutable. Start never turns assigned time into payable
+    // time. Mark Done credits exactly the hours already assigned by the Owner.
     if (row['state'] == 'Done' || (row['paid_minutes'] as int? ?? 0) > 0) return;
-    var minutes = row['actual_minutes'] as int;
-    if (next == 'Done') {
-      // Assigned hours are a suggestion, NOT earned time. When no actual
-      // work has been entered yet, prefill the explicitly saved mechanic
-      // estimate rather than misleading the Owner with 0.00.
-      final priorActual = row['recorded_actual_minutes'] as int? ??
-          row['actual_minutes'] as int? ?? 0;
-      final estimated = row['estimated_minutes'] as int? ?? 0;
-      final suggestedActual = priorActual > 0 ? priorActual : estimated;
-      final value = await payrollLanInput(
-        context, 'Complete mechanic work',
-        'Actual hours worked (suggested from assigned hours; edit if different)',
-        initialValue:(suggestedActual/60).toStringAsFixed(2),
-      );
-      if (!mounted || value == null) return;
-      final hours = double.tryParse(value);
-      if (hours == null || !hours.isFinite || hours <= 0 || hours > 10000) {
-        setState(() => _error = 'Enter valid actual hours.');
-        return;
-      }
-      minutes = (hours * 60).round();
+    final assignedMinutes = row['estimated_minutes'] as int? ?? 0;
+    if (next == 'Done' && assignedMinutes <= 0) {
+      setState(() => _error =
+        'Assign mechanic hours with the pencil before marking Done.');
+      return;
     }
-    // Customer-billable invoice labor is the *initial suggestion* for
-    // credited mechanic hours. Actual work remains separately recorded and
-    // the Owner may explicitly change the credit before completion.
-    final plannedMinutes = row['estimated_minutes'] as int? ?? 0;
-    // Starting work is not completing or earning the planned labor time.
-    // The invoice estimate is suggested only at the Done transition.
-    var credited = next == 'Done' && plannedMinutes > 0
-        ? plannedMinutes : minutes;
-    if(next=='Done') {
-      final value=await payrollLanInput(context,'Credited mechanic labor','Credited hours (actual: ${minutes/60})',initialValue:(credited/60).toStringAsFixed(2));
-      if(value==null||!mounted)return;
-      final h=double.tryParse(value);
-      if(h==null||!h.isFinite||h<0||h>10000)return;
-      credited=(h*60).round();
-    }
-    await _runOwnerTaskEdit(() => _taskEditRepository.recordAllocatedTime(row['id'] as String,next,minutes,credited,_date(DateTime.now())));
+    final previousMinutes = row['recorded_actual_minutes'] as int? ??
+        row['actual_minutes'] as int? ?? 0;
+    final completedMinutes = next == 'Done' ? assignedMinutes : previousMinutes;
+    // No redundant dialogs: the assigned estimate is the Owner-approved
+    // time credit on completion. Recording payroll payment remains separate.
+    await _runOwnerTaskEdit(() => _taskEditRepository.recordAllocatedTime(
+      row['id'] as String, next, completedMinutes, completedMinutes,
+      _date(DateTime.now()),
+    ));
   }
 
   Future<void> _editEstimated(Map<String, dynamic> row) async {
