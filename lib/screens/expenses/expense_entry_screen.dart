@@ -36,6 +36,11 @@ String receiptAiFailureMessage(Object error) {
         'receipt to reconnect the existing gateway. Your original photo '
         'is safe; no expense was submitted. Shop sync stays offline.';
   }
+  if (message.contains('rejected business identity')) {
+    return 'The receipt AI Worker did not recognize this Briskers business. '
+        'Check the gateway shop authorization. The photo is still attached; '
+        'no expense was submitted, and shop sync stays offline.';
+  }
   if (message.contains('http 429')) {
     return 'Receipt AI reached its request limit. Your photo is safe. '
         'Use manual entry or retry the scan later.';
