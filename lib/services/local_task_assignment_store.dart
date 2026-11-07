@@ -94,8 +94,10 @@ class LocalTaskAssignmentStore {
       'LEFT JOIN regular_payroll_job_lead l ON l.business_id=j.business_id AND l.job_id=j.id '
       'LEFT JOIN regular_payroll_employees e ON e.business_id=j.business_id AND e.id=CASE WHEN l.job_id IS NULL THEN j.assigned_employee_id ELSE l.employee_id END '
       'WHERE j.business_id=? AND j.id=?',[business,job]);
-    if(lead.isEmpty || lead.single['assigned_employee_id'] is! String ||
-        (lead.single['assigned_employee_id'] as String).isEmpty)return;
+    if (lead.isEmpty || lead.single['assigned_employee_id'] is! String ||
+        (lead.single['assigned_employee_id'] as String).isEmpty) {
+      return;
+    }
     final employee=lead.single['assigned_employee_id'] as String;
     // The mechanic's pay basis may legitimately be unconfigured. Do not
     // suppress the labor allocation: initialize the employee with zero rate,
