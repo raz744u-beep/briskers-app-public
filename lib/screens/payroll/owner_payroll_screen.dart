@@ -670,58 +670,131 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     ));
   }
 
-  Widget _taskCard(Map<String, dynamic> row) => ListTile(
-    onLongPress: row['source_kind'] == 'invoice' && row['source_active'] != 0 &&
-        row['invoice_id'] is String && row['source_line_id'] is String
-      ? () => _assign(row['invoice_id'] as String,
-          {'id': row['source_line_id'], 'description': row['description']},
-          jobId: row['job_id'] as String) : null,
-    title: Text(row['description'] as String,
-      style:const TextStyle(fontSize:15,fontWeight:FontWeight.w800)),
-    subtitle: Column(crossAxisAlignment:CrossAxisAlignment.start,
-      mainAxisSize:MainAxisSize.min,children:[
-      const SizedBox(height:4),
-      Text('${_employeeLabel(row['employee_id']?.toString())} · ${row['state']}',
-        style:const TextStyle(fontWeight:FontWeight.w600)),
-      Text('${((row['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(2)} hrs planned'
-        ' · ${row['pay_status'] ?? (row['paid'] == 1 ? 'Paid' : 'Unpaid')}'),
-      if ((row['recorded_actual_minutes'] as int? ?? row['actual_minutes'] as int? ?? 0)>0 ||
-          (row['actual_minutes'] as int? ?? 0)>0)
-        Text('${row['recorded_actual_minutes'] ?? row['actual_minutes']} actual min · '
-          '${row['actual_minutes']} credited min',
-          style:const TextStyle(fontSize:11,color:Color(0xFF64748B))),
-      if (row['assignment_conflict']==1)
-        const Text('Assignment changed; Owner review required',
-          style:TextStyle(fontSize:11)),
-      if (row['source_active']==0)
-        const Text('Removed from invoice',style:TextStyle(fontSize:11)),
-      if (row['state']=='Open' && row['assignment_conflict']!=1 &&
-          (row['paid_minutes'] as int? ?? 0)==0 &&
-          row['source_active']!=0)
-        Align(alignment:Alignment.centerRight,
-          child:TextButton.icon(
-            onPressed:_busy?null:()=>_recordTaskProgress(row,markDone:true),
-            icon:const Icon(Icons.done_all,size:17),
-            label:const Text('Mark Done'),
-          )),
-    ]),
-    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-      if ((row['paid_minutes'] as int? ?? 0)>0)
-        const Icon(Icons.lock_outline,size:19,color:Color(0xFF64748B)),
-      IconButton(
-        tooltip: 'Edit mechanic estimated hours',
-        icon: const Icon(Icons.edit_outlined, size: 19),
-        onPressed: _busy ? null : () => _editEstimated(row),
-      ),
-      if(row['assignment_conflict']==1)TextButton(onPressed:_busy?null:()=>_runOwnerTaskEdit(() => _taskEditRepository.acceptChangedAssignment(row['id'] as String)),child:const Text('Accept work')),
-      if (row['assignment_conflict']!=1 && row['state'] != 'Done' && (row['paid_minutes'] as int? ?? 0) == 0 &&
-          (row['source_active'] != 0 || row['state'] != 'Open'))
-        TextButton(
-          onPressed: _busy ? null : () => _recordTaskProgress(row),
-          child: Text(row['state'] == 'Open' ? 'Start' : 'Complete'),
+  // The approved Tasks TEST separates the job/task header from the mechanic's
+  // progress controls. This is a view over the real immutable payroll credits.
+  Widget _taskCard(Map<String, dynamic> row) {
+    final paid = (row['paid_minutes'] as int? ?? 0) > 0 ||
+        row['paid'] == 1;
+    final conflict = row['assignment_conflict'] == 1;
+    final removed = row['source_active'] == 0;
+    final state = row['state']?.toString() ?? 'Open';
+    final canProgress = !paid && !conflict && !removed && !_busy;
+    final planned = (row['estimated_minutes'] as int? ?? 0) / 60;
+    final actual = row['recorded_actual_minutes'] as int? ??
+        row['actual_minutes'] as int? ?? 0;
+    final credited = row['actual_minutes'] as int? ?? 0;
+    final canReassign = row['source_kind'] == 'invoice' && !removed &&
+        row['invoice_id'] is String &&
+        row['source_line_id'] is String;
+    return InkWell(
+      onLongPress: canReassign ? () => _assign(
+        row['invoice_id'] as String,
+        {'id': row['source_line_id'], 'description': row['description']},
+        jobId: row['job_id'] as String,
+      ) : null,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(state == 'Done' ? Icons.check_circle :
+                Icons.radio_button_unchecked,
+                color: state == 'Done' ? const Color(0xFF00897E) :
+                  const Color(0xFF7C8A9D),size:22),
+              const SizedBox(width: 10),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(row['description']?.toString() ?? 'Task',
+                    style: const TextStyle(fontSize: 15.5,
+                      fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 3),
+                  Text(_employeeLabel(row['employee_id']?.toString()),
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                ],
+              )),
+              const SizedBox(width: 5),
+              Text('${planned.toStringAsFixed(2)} hrs',
+                style: const TextStyle(fontSize: 12.5,
+                  color: Color(0xFF64748B))),
+              if (paid) const Padding(
+                padding: EdgeInsets.only(left: 6),
+                child: Icon(Icons.lock_outline,size:20,
+                  color: Color(0xFF64748B))),
+              if (!paid) IconButton(
+                tooltip: 'Edit mechanic estimated hours',
+                icon: const Icon(Icons.edit_outlined,size:19,
+                  color: Color(0xFF00897E)),
+                onPressed: _busy || conflict || removed
+                  ? null : () => _editEstimated(row),
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth:34,minHeight:34),
+              ),
+            ]),
+            const SizedBox(height: 9),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10,vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F5F8),
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: const Color(0xFFDCE6EB)),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Icon(state == 'Done' ? Icons.check_circle_outline :
+                      Icons.radio_button_unchecked,size:19,
+                      color: const Color(0xFF64748B)),
+                    const SizedBox(width: 7),
+                    Expanded(child: Text(
+                      _employeeLabel(row['employee_id']?.toString()),
+                      style:const TextStyle(fontWeight:FontWeight.w700))),
+                    Text('${planned.toStringAsFixed(2)} hrs',
+                      style:const TextStyle(color:Color(0xFF64748B))),
+                  ]),
+                  const SizedBox(height: 5),
+                  Wrap(alignment: WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,runSpacing: 2,children: [
+                      Text(state == 'Open' ? 'Not Started' : state,
+                        style:const TextStyle(color:Color(0xFF64748B),
+                          fontWeight:FontWeight.w600)),
+                      if (canProgress && state == 'Open')
+                        TextButton.icon(
+                          onPressed:()=>_recordTaskProgress(row),
+                          icon:const Icon(Icons.play_arrow,size:18),
+                          label:const Text('Start')),
+                      if (canProgress && state != 'Done')
+                        OutlinedButton.icon(
+                          onPressed:()=>_recordTaskProgress(row,markDone:true),
+                          icon:const Icon(Icons.done,size:17),
+                          label:const Text('Mark Done')),
+                      if (conflict)
+                        TextButton(onPressed:_busy?null:()=>_runOwnerTaskEdit(
+                          ()=>_taskEditRepository.acceptChangedAssignment(
+                            row['id'] as String)),
+                          child:const Text('Accept work')),
+                      if (paid) const Text('Paid · Locked',
+                        style:TextStyle(fontWeight:FontWeight.w700,
+                          color:Color(0xFF64748B))),
+                    ]),
+                  if (actual > 0 || credited > 0)
+                    Text('Actual: ${(actual/60).toStringAsFixed(2)}h · '
+                      'Credited: ${(credited/60).toStringAsFixed(2)}h',
+                      style:const TextStyle(fontSize:11,
+                        color:Color(0xFF64748B))),
+                  if (removed) const Text('Removed from invoice',
+                    style:TextStyle(fontSize:11)),
+                  if (conflict) const Text(
+                    'Assignment changed; Owner review required',
+                    style:TextStyle(fontSize:11)),
+                ],
+              ),
+            ),
+          ],
         ),
-    ]),
-  );
+      ),
+    );
+  }
 
   Future<void> _addRecheck({String? jobId}) async {
     final job = jobId ?? widget.jobId;
