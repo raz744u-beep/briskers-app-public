@@ -626,7 +626,18 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if (row['state'] == 'Done' || (row['paid_minutes'] as int? ?? 0) > 0) return;
     var minutes = row['actual_minutes'] as int;
     if (next == 'Done') {
-      final value = await payrollLanInput(context, 'Complete mechanic work', 'Actual hours worked',initialValue:((row['recorded_actual_minutes'] as int? ?? row['actual_minutes'] as int)/60).toStringAsFixed(2));
+      // Assigned hours are a suggestion, NOT earned time. When no actual
+      // work has been entered yet, prefill the explicitly saved mechanic
+      // estimate rather than misleading the Owner with 0.00.
+      final priorActual = row['recorded_actual_minutes'] as int? ??
+          row['actual_minutes'] as int? ?? 0;
+      final estimated = row['estimated_minutes'] as int? ?? 0;
+      final suggestedActual = priorActual > 0 ? priorActual : estimated;
+      final value = await payrollLanInput(
+        context, 'Complete mechanic work',
+        'Actual hours worked (suggested from assigned hours; edit if different)',
+        initialValue:(suggestedActual/60).toStringAsFixed(2),
+      );
       if (!mounted || value == null) return;
       final hours = double.tryParse(value);
       if (hours == null || !hours.isFinite || hours <= 0 || hours > 10000) {
