@@ -1718,7 +1718,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         if(!_canView)const Text('Sign in as Owner to view tasks.'),
         if (_busy) const LinearProgressIndicator(),
         if (_error != null) Text(_error!),
-        _recoveryStatus(),
+        if (_backfillActive) _recoveryStatus(),
         if (_canView)
           Expanded(child: TasksWorkspace(
             serviceTasks: service,
@@ -1742,6 +1742,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                   ),
             onAddService: _newServiceTask,
             onAddRecheck: (jobId) => _addRecheck(jobId: jobId),
+            onRecoverHistory: () => unawaited(_backfillTasks()),
             onAddGeneral: _createEmployeeGeneralTask,
             onGeneralStatus: (id, status) async {
               final row = _generalTasks.where((row) => row['id'] == id).firstOrNull;
@@ -1778,7 +1779,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         ),
         if(!_canView)const Text('Sign in as Owner to view profile.'),
         if (_authorizing || _loadingLocal || _backfillActive) const LinearProgressIndicator(),
-        _recoveryStatus(),
+        if (_backfillActive) _recoveryStatus(),
         if (_error != null)
           ConstrainedBox(constraints:const BoxConstraints(maxHeight:96),child:SingleChildScrollView(child:ListTile(dense: true, title: Text(_error!), trailing: TextButton(
             onPressed: _loadingLocal ? null : () => unawaited(_load()), child: const Text('Retry'))))),
