@@ -230,14 +230,16 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
   @override Widget build(BuildContext context){
     if(widget.line!=null){
       return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-        Wrap(spacing:4,runSpacing:2,crossAxisAlignment:WrapCrossAlignment.center,
+        Wrap(spacing:4,runSpacing:2,
+          alignment:WrapAlignment.end,
+          crossAxisAlignment:WrapCrossAlignment.center,
           children:[
             for(final p in linePeople) Row(mainAxisSize:MainAxisSize.min,children:[
               const Icon(Icons.engineering_outlined,size:14,color:Color(0xFF00897E)),
               const SizedBox(width:2),
               Text('${p['label']} ${((p['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(1)}h',
-                style:const TextStyle(fontSize:12,color:Color(0xFF00897E),
-                  fontWeight:FontWeight.w700)),
+                style:const TextStyle(fontSize:13.5,color:Color(0xFF00897E),
+                  fontWeight:FontWeight.w800)),
               IconButton(
                 constraints:const BoxConstraints(minWidth:29,minHeight:29),
                 padding:EdgeInsets.zero,
