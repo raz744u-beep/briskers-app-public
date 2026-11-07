@@ -542,7 +542,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   Widget _cachedDetails() {
     final verified = widget.isOwner && _secureOffline && _detailsGrant != null;
     final rate = verified && _rate.text.trim().isNotEmpty
-        ? '\$\${_rate.text.trim()}/hr' : 'Not saved locally';
+        ? '\${_rate.text.trim()}/hr' : 'Not saved locally';
     String cachedValue(String field, String value) {
       if (!verified || !_secureKeys.contains(field)) return 'Not saved locally';
       return value.trim().isEmpty ? 'Not recorded' : value.trim();
