@@ -670,10 +670,19 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final operation = _operationId();
     final id = (employee['employee_id'] ?? employee['id']) as String;
     final name = (employee['name'] ?? employee['employee_name'] ?? _employeeLabel(id)).toString();
-    final identity = await PayrollLanIdentity.load();
-    final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, id);
+    // Do not turn a missing or unreadable pairing record into a silent
+    // unpaired write; show an error and preserve the saved task.
+    var paired = false;
+    try {
+      final identity = await PayrollLanIdentity.load();
+      paired = await PayrollLanEnrollment(identity)
+          .ownerPeer(widget.businessId, id) != null;
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    }
     if (!mounted || !_canView) return;
-    if (peer == null) {
+    if (!paired) {
       await _runOwnerTaskEdit(() => _taskEditRepository.createRecheck(
         operation: operation, job: job, description: description,
         employee: id, name: name, rate: rate,
