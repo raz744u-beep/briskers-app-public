@@ -22,10 +22,10 @@ void main() {
       authenticateDevice: () async { prompts++; return true; },
       verifyLocalOwner: (shop) async {
         roleChecks++;
-        if (shop != 'shop' || active == null || active!.actorId != 'owner') {
+        if (shop != 'shop' || active == null || active.actorId != 'owner') {
           throw StateError('Not Owner');
         }
-        return VerifiedOwnerEnrollment(active!, shop);
+        return VerifiedOwnerEnrollment(active, shop);
       },
     );
     final grant = await authority.authorizeSession('shop');
