@@ -15,6 +15,21 @@ void main() {
     expect(source, contains('if (_canView) unawaited(_load());'));
   });
 
+  test('General Task status changes use Owner identity rather than payment grant', () {
+    final start = source.indexOf('Future<void> _changeGeneralTaskStatus(');
+    final end = source.indexOf('Future<void> _refreshLan()', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final action = source.substring(start, end);
+    expect(action, contains('if (_busy || !_canView) return;'));
+    expect(action, contains('_taskStatusRepository.setShopTaskStatus'));
+    expect(action, isNot(contains('authorizeLocal')));
+    expect(action, isNot(contains('_run(')));
+    expect(source, contains('_changeGeneralTaskStatus(widget.employeeId!, id, status)'));
+    expect(source, contains("_changeGeneralTaskStatus(row['employee_id'] as String, id, status)"));
+    expect(source, contains("if (!_canView) throw StateError('Sign in as Owner to edit tasks.')"));
+  });
+
   test('payment, repayments and opening advances still require owner proof', () {
     final weeklyStart = source.indexOf('Future<void> _recordWeekly(');
     final weeklyEnd = source.indexOf('String _operationId()', weeklyStart);
