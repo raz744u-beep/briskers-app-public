@@ -1486,9 +1486,20 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           const SizedBox(height: 12),
           FilledButton(onPressed: saving ? null : () async {
             if (description.text.trim().isEmpty) return;
+            if (!_canView) {
+              if (sheet.mounted) {
+                ScaffoldMessenger.of(sheet).showSnackBar(const SnackBar(
+                  content: Text('Sign in as Owner to create tasks.'),
+                ));
+              }
+              return;
+            }
             update(() => saving = true);
             try {
-              await _repository.addShopTask(
+              // General Tasks are local operational work, not payroll
+              // disbursements. The repository rechecks Owner identity
+              // before and after its atomic SQLite write.
+              await _taskEditRepository.addShopTask(
                 employee, description.text, category, due: due,
               );
               if (sheet.mounted) Navigator.pop(sheet,true);
