@@ -113,7 +113,7 @@ void main(){
     await click(find.byType(DropdownButtonFormField<String>).first);
     await click(find.text('Alpha').last);
     await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:150)));await tester.pump();
-    await click(find.byTooltip('Assign or split mechanic labor').first);
+    await click(find.byTooltip('Edit or split mechanic labor').first);
     
     await click(find.text('Assign / split'));
     await click(find.text('Beta'));
@@ -133,7 +133,7 @@ void main(){
       final saved=await LocalDocumentDetailCache(database:db).load('shop',invoice);expect((saved!['lines'] as List).first['quantity'],6);
     });
     navigator.currentState!.pop();await tester.pumpAndSettle();
-    await click(find.byTooltip('Assign or split mechanic labor').at(1));
+    await click(find.byTooltip('Edit or split mechanic labor').last);
     
     // Keep Alpha explicitly assigned, then add Beta to the same task identity.
     for(final name in ['Alpha','Beta']){
