@@ -158,10 +158,13 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
         setState(() {
           _loading = false;
           _error = _editing
-              ? 'Other employee profile fields require a connection. '
-                  'You can save the nickname on this device.'
+              ? null
               : 'Creating employee records is not available in Force Offline.';
         });
+        // This Owner is already signed in to Briskers. Read only the existing
+        // encrypted employee snapshot and locally configured pay information;
+        // never require a second biometric/PIN or a Supabase round trip.
+        if (_editing && widget.isOwner) unawaited(_unlockOffline());
         return;
       }
       final positions = await _api.employeePositions(widget.businessId).timeout(const Duration(seconds:8));
@@ -227,7 +230,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   Future<void> _unlockOffline() async {
     if(!widget.isOwner||!_editing)return;
     try{
-      final grant=await (widget.unlockOwner?.call(widget.businessId) ?? DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId));
+      final grant=await (widget.unlockOwner?.call(widget.businessId) ?? DeviceOwnerAuthorization.instance.authority.authorizeSession(widget.businessId));
       final snapshot=await const SecureEmployeeDetailsCache().read(widget.businessId,widget.employeeId!,grant);
       if(!mounted)return;
       if(snapshot==null){
@@ -255,7 +258,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   Future<void> _saveSecureSnapshot() async {
     if(!widget.isOwner||!_detailLoaded||!_editing)return;
     try{
-      final grant=await (widget.unlockOwner?.call(widget.businessId) ?? DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId));
+      final grant=await (widget.unlockOwner?.call(widget.businessId) ?? DeviceOwnerAuthorization.instance.authority.authorizeSession(widget.businessId));
       await const SecureEmployeeDetailsCache().save(widget.businessId,widget.employeeId!,{
         'id':widget.employeeId,'name':_name.text,'phone':_phone.text,'email':_email.text,'address':_address.text,
         'position_id':_positionId,'payment_type':_paymentType,'hourly_rate':_paymentType=='hourly'?_rate.text:null,
