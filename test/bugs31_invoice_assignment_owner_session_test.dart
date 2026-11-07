@@ -128,8 +128,8 @@ void main() {
         queueChange: () async { active = false; },
       );
     }), throwsStateError);
-    expect(await snapshot('local_job_assignments', 'assignment_id'),
+    expect(await snapshot('local_job_assignments'),
         beforeAssignments);
-    expect(await snapshot('regular_payroll_tasks', 'id'), beforeTasks);
+    expect(await snapshot('regular_payroll_tasks'), beforeTasks);
   });
 }
