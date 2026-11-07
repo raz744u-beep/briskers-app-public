@@ -670,6 +670,30 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     ));
   }
 
+  // Match the saved mechanic progress state in both TEST-style indicators.
+  // This is presentational only: Starting does not credit payroll hours.
+  static IconData _workStatusIcon(String state, {bool inner = false}) {
+    switch (state) {
+      case 'Done':
+        return inner ? Icons.check_circle_outline : Icons.check_circle;
+      case 'In Progress':
+        return Icons.timelapse;
+      default:
+        return Icons.radio_button_unchecked;
+    }
+  }
+
+  static Color _workStatusColor(String state) {
+    switch (state) {
+      case 'Done':
+        return const Color(0xFF00897E);
+      case 'In Progress':
+        return const Color(0xFFD97706);
+      default:
+        return const Color(0xFF7C8A9D);
+    }
+  }
+
   // The approved Tasks TEST separates the job/task header from the mechanic's
   // progress controls. This is a view over the real immutable payroll credits.
   Widget _taskCard(Map<String, dynamic> row) {
@@ -698,10 +722,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Icon(state == 'Done' ? Icons.check_circle :
-                Icons.radio_button_unchecked,
-                color: state == 'Done' ? const Color(0xFF00897E) :
-                  const Color(0xFF7C8A9D),size:22),
+              Icon(_workStatusIcon(state),
+                color: _workStatusColor(state),size:22),
               const SizedBox(width: 10),
               Expanded(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -742,9 +764,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
-                    Icon(state == 'Done' ? Icons.check_circle_outline :
-                      Icons.radio_button_unchecked,size:19,
-                      color: const Color(0xFF64748B)),
+                    Icon(_workStatusIcon(state, inner: true),size:19,
+                      color: _workStatusColor(state)),
                     const SizedBox(width: 7),
                     Expanded(child: Text(
                       _employeeLabel(row['employee_id']?.toString()),
