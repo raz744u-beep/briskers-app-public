@@ -96,7 +96,7 @@ class ReceiptAiGatewayAccess {
   Future<void> saveVerified(String business, String candidate) async {
     final token = candidate.trim();
     if (token.length < 16 || token.length > 4096 ||
-        token.contains(RegExp(r'\\s'))) {
+        token.contains(RegExp(r'\s'))) {
       throw const FormatException('Receipt gateway token has an invalid format.');
     }
     final owner = await _requireOwner(business);
