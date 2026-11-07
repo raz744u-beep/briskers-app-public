@@ -120,9 +120,14 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
     final rows = widget.serviceTasks.where((task) {
       final desc = (task['custom_description'] ??
         task['source_description'] ?? '').toString().toLowerCase();
-      final isInvoice = task['document_id'] != null;
+      // Task-first Job work and rechecks both lack an invoice line. The
+      // saved source kind distinguishes them; absence of an invoice alone
+      // must not relabel ordinary Job work as a recheck.
+      final sourceKind = task['source_kind']?.toString();
+      final isInvoice = sourceKind == 'invoice' ||
+          (sourceKind == null && task['document_id'] != null);
       if (_kind == 'Invoice Labor' && !isInvoice) return false;
-      if (_kind == 'Rechecks' && isInvoice) return false;
+      if (_kind == 'Rechecks' && sourceKind != 'recheck') return false;
       if (_job != 'All Jobs' &&
           task['job_id']?.toString() != _job) return false;
       return task['source_missing'] != 1 &&
