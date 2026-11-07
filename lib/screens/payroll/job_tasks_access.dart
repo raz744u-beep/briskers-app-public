@@ -147,7 +147,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
       final task=allocation['task_id']?.toString();
       final employee=allocation['id']?.toString();
       if(task==null || employee==null)return;
-      // Revalidate paid coverage after the Owner challenge; partial payments
+      // Revalidate paid coverage after the Owner-session check; partial payments
       // are just as immutable as fully settled allocations.
       await repo.prepare();
       final settled=await db.customSelect(
