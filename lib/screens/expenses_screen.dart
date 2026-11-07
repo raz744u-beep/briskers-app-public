@@ -17,6 +17,7 @@ import '../services/warranty_receipt_reporting.dart';
 import '../services/local_financial_cache.dart';
 import '../services/invoice_payment_feed.dart';
 import '../services/expenses_period_totals.dart';
+import '../services/local_expense_subtotal.dart';
 import '../services/verified_expense_totals_cache.dart';
 import '../services/local_financial_totals_journal.dart';
 import '../services/expenseiq_local_photo_sync.dart';
@@ -690,15 +691,29 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final rolloverPending = rolling != null && endDate != null &&
         rolling.verifiedThrough.isBefore(endDate);
     ExpensesPeriodTotals? local;
+    bool usingPartialLocalSubtotal = false;
     int localChanges = 0;
     try {
-      local = baseline == null ? null : await journal.apply(
-        businessId, baseline,
-        startDate: startDate, endDate: endDate,
-        search: search.isEmpty ? null : search, direction: direction,
-        accountId: accountId, categoryId: categoryId,
-        counterpartyId: counterpartyId,
-      );
+      if (baseline != null) {
+        local = await journal.apply(
+          businessId, baseline,
+          startDate: startDate, endDate: endDate,
+          search: search.isEmpty ? null : search, direction: direction,
+          accountId: accountId, categoryId: categoryId,
+          counterpartyId: counterpartyId,
+        );
+      } else {
+        // Never present a cached first page as a verified COMPLETE history.
+        // It is still useful as a clearly marked on-device subtotal.
+        final cached = await _localFinancial.loadTransactions(businessId);
+        final effective = await journal.overlayCachedRows(businessId, cached);
+        local = await LocalExpenseSubtotal.calculate(effective,
+          startDate: startDate, endDate: endDate,
+          search: search.isEmpty ? null : search, direction: direction,
+          accountId: accountId, categoryId: categoryId,
+          counterpartyId: counterpartyId);
+        usingPartialLocalSubtotal = local != null;
+      }
       localChanges = await journal.pendingCount(businessId);
     } catch (_) {
       if (mounted && epoch == _periodEpoch) {
@@ -736,8 +751,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       _lastPeriodAt = lastVerified;
       _periodCalculating = false;
       _periodError = local == null
-          ? (offline ? 'Complete baseline not yet saved on this device.'
+          ? (offline ? 'No saved transactions for this period. Totals unavailable.'
               : 'Preparing first complete local baseline…')
+          : usingPartialLocalSubtotal
+              ? 'Local totals · saved transactions only; older records may be missing'
           : rolloverPending
               ? 'Saved local totals through ${DateFormat('MMM d').format(rolling.verifiedThrough)} · today not yet verified'
               : localChanges > 0
