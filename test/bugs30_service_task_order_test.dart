@@ -32,7 +32,15 @@ void main(){
     expect(find.text('Old job'),findsNothing);
     expect(tester.getTopLeft(find.text('J-2')).dy,lessThan(tester.getTopLeft(find.text('MB-3335')).dy));
     expect(tester.getTopLeft(find.text('First printed line')).dy,lessThan(tester.getTopLeft(find.text('Second printed line')).dy));
-    await pick('Status','All');await pick('Sort','Oldest First');
+    await pick('Status','All');
+    await tester.tap(find.byTooltip('Advanced task filters'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sort By').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Oldest First').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Apply Filters'));
+    await tester.pumpAndSettle();
     expect(tester.getTopLeft(find.text('MB-6220')).dy,lessThan(tester.getTopLeft(find.text('MB-3335')).dy));
     await pick('Sort','Newest First');
     expect(tester.getTopLeft(find.text('J-2')).dy,lessThan(tester.getTopLeft(find.text('MB-3335')).dy));
