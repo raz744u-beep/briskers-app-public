@@ -47,4 +47,39 @@ void main() {
     await tester.pump();
     expect(find.text('Add Recheck'), findsNothing);
   });
+  testWidgets('unlinked task placeholder cannot open or recheck a fake job',
+      (tester) async {
+    var callbacks = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: TasksWorkspace(
+          serviceTasks: [
+            {
+              'job_number': 'Unlinked Job',
+              'source_description': 'Unlinked legacy task',
+              'line_id': 'unlinked-line',
+              'status': 'planned',
+            },
+          ],
+          generalTasks: const [],
+          allocationsByLine: const {},
+          employeeName: (_) => 'Mechanic',
+          employeeIds: const [],
+          serviceTaskCard: (row) =>
+              ListTile(title: Text(row['source_description'] as String)),
+          onAddGeneral: () {},
+          onGeneralStatus: (_, _) async {},
+          onOpenJob: (_) => callbacks++,
+          onEmployeeTap: (_) {},
+          onAddRecheck: (_) => callbacks++,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Unlinked Job'), findsOneWidget);
+    expect(find.text('Add Recheck'), findsNothing);
+    expect(find.text('Open Job Details'), findsNothing);
+    expect(callbacks, 0);
+  });
+
 }
