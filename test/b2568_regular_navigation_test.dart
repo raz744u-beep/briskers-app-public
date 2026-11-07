@@ -137,7 +137,7 @@ void main(){
     
     // Keep Alpha explicitly assigned, then add Beta to the same task identity.
     for(final name in ['Alpha','Beta']){
-      await click(find.text('Assign / split'));await click(find.text(name));
+      await click(find.text('Assign / split').last);await click(find.text(name).last);
       await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:400)));await tester.pump();
     }
     for(final name in ['Alpha','Beta']){
