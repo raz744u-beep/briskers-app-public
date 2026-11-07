@@ -54,7 +54,21 @@ class LocalTaskAssignmentStore {
         'AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage w WHERE w.business_id=? AND w.credit_id=?)',
         [e['rate'],business,id,business,id,business,id]);
     }
-    await db.customStatement('INSERT OR IGNORE INTO regular_payroll_estimates VALUES(?,?,?,?)',[business,task,employee,((t['planned'] as int)*60+50)~/100]);
+    // Splitting a billable invoice line must not hand each mechanic the
+    // entire customer labor quantity. First active assignment inherits the
+    // estimate; an additional mechanic starts at zero until the Owner
+    // explicitly redistributes the allocated hours.
+    final others=await _read(
+      'SELECT p.id FROM regular_payroll_portions p '
+      'LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id '
+      'AND m.task_id=p.task_id AND m.employee_id=p.employee_id '
+      'WHERE p.business_id=? AND p.task_id=? AND p.employee_id<>? '
+      'AND COALESCE(m.active,1)=1',
+      [business,task,employee],
+    );
+    final defaultMinutes=others.isEmpty?((t['planned'] as int)*60+50)~/100:0;
+    await db.customStatement('INSERT OR IGNORE INTO regular_payroll_estimates VALUES(?,?,?,?)',
+      [business,task,employee,defaultMinutes]);
     await db.customStatement('INSERT INTO regular_payroll_assignment_meta(business_id,task_id,employee_id,inherited,active) VALUES(?,?,?,?,1) '
       'ON CONFLICT(business_id,task_id,employee_id) DO UPDATE SET inherited=excluded.inherited,active=1,revision=revision+1 WHERE inherited<>excluded.inherited OR active<>1',[business,task,employee,inherited?1:0]);
     if(!inherited) { await db.customStatement('INSERT INTO regular_payroll_task_policy VALUES(?,?,1) '
