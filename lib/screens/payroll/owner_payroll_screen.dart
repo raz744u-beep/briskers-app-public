@@ -214,13 +214,6 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   bool get _jobMode => widget.jobId != null;
-  late final _repository = LocalPayrollRepository(
-        _db,
-        business: widget.businessId,
-        owner: true,
-        assertOwnerGrant: _assertOwner,
-      );
-
   void _assertOwner() {
     final grant = _grant;
     if (grant == null) throw StateError('Unlock Owner payroll first.');
