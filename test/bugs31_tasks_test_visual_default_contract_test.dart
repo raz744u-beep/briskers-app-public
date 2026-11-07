@@ -38,6 +38,21 @@ void main() {
     expect(screen.split('_compactPlannedHours(planned)').length, 3);
   });
 
+  test('completion suggests assigned hours instead of zero actual time', () {
+    final source = File('lib/screens/payroll/owner_payroll_screen.dart')
+        .readAsStringSync();
+    final start = source.indexOf('Future<void> _recordTaskProgress(');
+    final end = source.indexOf('Future<void> _editEstimated(', start);
+    final progress = source.substring(start, end);
+    expect(progress, contains('final priorActual ='));
+    expect(progress, contains("row['estimated_minutes'] as int? ?? 0"));
+    expect(progress, contains('priorActual > 0 ? priorActual : estimated'));
+    expect(progress, contains('initialValue:(suggestedActual/60).toStringAsFixed(2)'));
+    expect(progress, contains('suggested from assigned hours; edit if different'));
+    expect(progress, contains('if (next == \'Done\')'));
+    expect(progress, contains('initialValue:(credited/60).toStringAsFixed(2)'));
+  });
+
   test('mechanic time default is planning, never earned on Start', () {
     final screen = File('lib/screens/payroll/owner_payroll_screen.dart').readAsStringSync();
     final start = screen.indexOf('Future<void> _recordTaskProgress(');
