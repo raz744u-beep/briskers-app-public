@@ -657,8 +657,10 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
 
   Widget _cachedDetails() {
     final verified = widget.isOwner && _secureOffline && _detailsGrant != null;
-    final rate = verified && _rate.text.trim().isNotEmpty
-        ? '\${_rate.text.trim()}/hr' : 'Not saved locally';
+    final rate = verified && _localPayCents != null
+        ? '${String.fromCharCode(36)}${(_localPayCents! / 100).toStringAsFixed(2)}'
+          '${_localPayType == 'fixed_weekly' ? '/week' : '/hr'}'
+        : 'Not saved locally';
     String cachedValue(String field, String value) {
       if (!verified || !_secureKeys.contains(field)) return 'Not saved locally';
       return value.trim().isEmpty ? 'Not recorded' : value.trim();
@@ -674,9 +676,22 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
         ),
         const Divider(height: 24),
         ListTile(
-          title: const Text('Hourly rate'),
+          title: const Text('Payment type'),
+          subtitle: Text(_localPayType == 'fixed_weekly'
+            ? 'Fixed weekly' : _localPayType == 'hourly'
+              ? 'Hourly' : 'Not saved locally'),
+        ),
+        ListTile(
+          title: Text(_localPayType == 'fixed_weekly'
+            ? 'Weekly pay' : 'Hourly rate'),
           trailing: Text(rate, style: const TextStyle(fontWeight: FontWeight.w600)),
         ),
+        if (widget.isOwner && _editing)
+          OutlinedButton.icon(
+            onPressed: _savingOfflinePay ? null : _editOfflinePayBasis,
+            icon: const Icon(Icons.edit_outlined),
+            label: const Text('Edit offline pay settings'),
+          ),
         ListTile(
           title: const Text('Phone, email and address'),
           subtitle: Text(verified
