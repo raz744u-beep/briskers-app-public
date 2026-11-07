@@ -339,15 +339,19 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
               if(!_collapsedJobs.contains(entry.key)) ...[
                 const Divider(height:1),
                 for(final task in entry.value) widget.serviceTaskCard(task),
-                TextButton.icon(onPressed:()=>widget.onOpenJob(entry.key),
-                  icon:const Icon(Icons.open_in_new,size:17),
-                  label:const Text('Open Job Details')),
-                if (widget.onAddRecheck != null)
-                  TextButton.icon(
-                    onPressed: () => widget.onAddRecheck!(entry.key),
-                    icon: const Icon(Icons.add_task_outlined, size: 17),
-                    label: const Text('Add Recheck'),
-                  ),
+                // A missing Job link is display-only. Never dispatch a
+                // fabricated label as a canonical Job ID for a recheck.
+                if (entry.key != 'Unlinked Job') ...[
+                  TextButton.icon(onPressed:()=>widget.onOpenJob(entry.key),
+                    icon:const Icon(Icons.open_in_new,size:17),
+                    label:const Text('Open Job Details')),
+                  if (widget.onAddRecheck != null)
+                    TextButton.icon(
+                      onPressed: () => widget.onAddRecheck!(entry.key),
+                      icon: const Icon(Icons.add_task_outlined, size: 17),
+                      label: const Text('Add Recheck'),
+                    ),
+                ],
                 const SizedBox(height:5),
               ],
             ]),
