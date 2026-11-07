@@ -109,6 +109,16 @@ void main() {
         ],
       },
     );
+    // Invoice cache hydration may create inherited assignments before this
+    // attempt. A rejected edit must restore that exact baseline, not erase it.
+    Future<List<Map<String, dynamic>>> snapshot(String table) async =>
+        (await db.customSelect(
+          "SELECT * FROM $table WHERE business_id='shop'",
+        ).get()).map((row) => row.data).toList();
+    final beforeAssignments =
+        await snapshot('local_job_assignments');
+    final beforeTasks =
+        await snapshot('regular_payroll_tasks');
     final assignments = LocalTaskAssignmentStore(db);
     await expectLater(db.transaction(() async {
       await assignments.linkEmployee('shop', 'job', 'mechanic', 'Chris');
@@ -118,13 +128,8 @@ void main() {
         queueChange: () async { active = false; },
       );
     }), throwsStateError);
-    final assignmentsLeft = await db.customSelect(
-      "SELECT assignment_id FROM local_job_assignments WHERE business_id='shop'",
-    ).get();
-    final tasksLeft = await db.customSelect(
-      "SELECT id FROM regular_payroll_tasks WHERE business_id='shop'",
-    ).get();
-    expect(assignmentsLeft, isEmpty);
-    expect(tasksLeft, isEmpty);
+    expect(await snapshot('local_job_assignments', 'assignment_id'),
+        beforeAssignments);
+    expect(await snapshot('regular_payroll_tasks', 'id'), beforeTasks);
   });
 }
