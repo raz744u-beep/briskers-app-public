@@ -18,7 +18,12 @@ void main() {
 
   test('saved mechanic name/hours and edit or lock keep TEST inline emphasis', () {
     final source=File('lib/screens/payroll/job_tasks_access.dart').readAsStringSync();
-    expect(source,contains('alignment:WrapAlignment.end'));
+    expect(source,contains('Row(mainAxisSize:MainAxisSize.max,children:['));
+    expect(source,contains('maxLines:1'));
+    expect(source,contains('softWrap:false'));
+    expect(source,contains('overflow:TextOverflow.ellipsis'));
+    expect(source,contains('textAlign:TextAlign.end'));
+    expect(source,isNot(contains('alignment:WrapAlignment.end')));
     expect(source,contains('fontSize:15,color:Color(0xFF00897E)'));
     expect(source,contains('fontWeight:FontWeight.w800'));
     expect(source,contains("? Icons.lock_outline : Icons.edit_outlined"));
