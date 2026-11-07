@@ -561,7 +561,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                 // Require a real random Worker secret, not a dummy or an
                 // accidentally pasted business identifier.
                 if (value.length < 16 || value.length > 4096 ||
-                    value.contains(RegExp(r'\s'))) return;
+                    value.contains(RegExp(r'\s'))) {
+                  return;
+                }
                 Navigator.pop(dialogContext, value);
               },
               child: const Text('Connect and scan'),
