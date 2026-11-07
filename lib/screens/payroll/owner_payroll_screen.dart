@@ -533,7 +533,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final employee = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => SimpleDialog(
-        title: const Text('Assign invoice labor'),
+        title: const Text('Add mechanic to invoice labor'),
+        // Adding another mechanic keeps all existing allocations and hours.
         children: [
           for (final employee in candidates)
             SimpleDialogOption(
@@ -569,13 +570,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       Future<void> apply() async {
         if (!_canView) throw StateError('Owner account changed during assignment.');
         await assignments.linkEmployee(widget.businessId, job, employeeId, name);
-        final source = (await _taskEditRepository.tasks())
-            .where((r) => r['invoice_id'] == invoiceId &&
-                r['source_line_id'] == line['id']).firstOrNull;
-        if (source != null) {
-          await assignments.retireInherited(widget.businessId,
-              source['id'] as String, except: employeeId);
-        }
+        // Add/split MUST be additive, including when the first mechanic
+        // inherited the assignment from Main Mechanic. Retiring inherited
+        // allocations here silently replaced the original mechanic.
+        // Explicit reassignment is a distinct Owner operation, never an
+        // accidental consequence of adding a second person.
         if (!pairedDevice) {
           await _taskEditRepository.registerAssignedLabor(
             jobId: job, invoiceId: invoiceId, lineId: line['id'] as String,
