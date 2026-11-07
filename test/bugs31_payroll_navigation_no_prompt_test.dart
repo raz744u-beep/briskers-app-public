@@ -30,6 +30,22 @@ void main() {
     expect(source, contains("if (!_canView) throw StateError('Sign in as Owner to edit tasks.')"));
   });
 
+  test('opening mechanic assignment picker never requires payment unlock', () {
+    final start = source.indexOf('Future<void> _assign(');
+    final end = source.indexOf('Future<void> _recordTaskProgress(', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final assign = source.substring(start, end);
+    final picker = assign.substring(0, assign.indexOf('final employee = await showDialog'));
+    expect(picker, contains('if (!_canView) return;'));
+    expect(picker, contains('_viewRepository.employees()'));
+    expect(picker, isNot(contains('_run(')));
+    expect(picker, isNot(contains('authorizeLocal')));
+    // The real assignment write still goes through the protected path.
+    expect(assign.substring(assign.indexOf('final employee = await showDialog')),
+        contains('await _run(() async {'));
+  });
+
   test('payment, repayments and opening advances still require owner proof', () {
     final weeklyStart = source.indexOf('Future<void> _recordWeekly(');
     final weeklyEnd = source.indexOf('String _operationId()', weeklyStart);
