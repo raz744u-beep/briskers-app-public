@@ -34,7 +34,9 @@ void main() {
         .readAsStringSync();
     final payroll = File('lib/screens/payroll/owner_payroll_screen.dart')
         .readAsStringSync();
-    expect(auth, contains('authorizeLocal'));
+    // Payment grant issuance is invoked from the Payroll screen; the
+    // device authority owns the OS challenge callback, not that call site.
+    expect(payroll, contains('authority.authorizeLocal(widget.businessId)'));
     expect(auth, contains('authenticateDevice: () async {'));
     expect(payroll, contains('verifyPayment: true, rethrowError: true'));
     expect(payroll, contains('assertOwnerGrant: _assertOwner'));
