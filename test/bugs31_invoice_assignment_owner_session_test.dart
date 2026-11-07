@@ -42,7 +42,7 @@ void main() {
         'lines': [
           {
             'id': 'labor-1', 'line_kind': 'labor',
-            'description': 'Inspect cooling system', 'quantity': 1,
+            'description': 'Inspect cooling system', 'quantity': 3.6,
           },
         ],
       },
@@ -66,6 +66,10 @@ void main() {
     expect(credits.single['source_line_id'], 'labor-1');
     expect(credits.single['employee_id'], 'mechanic');
     expect(credits.single['paid_minutes'], 0);
+    expect(credits.single['estimated_minutes'], 216,
+      reason: '3.6 customer-billable labor hours initialize 216 planned mechanic minutes');
+    expect(credits.single['actual_minutes'], 0,
+      reason: 'Billed time must not automatically become completed or paid labor');
     final outbox = await db.customSelect(
       "SELECT id FROM sync_outbox WHERE business_id='shop' AND entity_type='job_create'",
     ).get();
@@ -104,7 +108,7 @@ void main() {
         'lines': [
           {
             'id': 'labor-1', 'line_kind': 'labor',
-            'description': 'Inspect cooling system', 'quantity': 1,
+            'description': 'Inspect cooling system', 'quantity': 3.6,
           },
         ],
       },
