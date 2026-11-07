@@ -17,6 +17,30 @@ class InvoicePaymentFeed {
   })  : _db = database ?? localDatabase,
         _cache = cache ?? LocalFinancialCache(database: database);
 
+  /// Present accounting and connectivity as separate concepts. Never call
+  /// a pending or locally held receipt fully paid from a stale coverage hint.
+  static String paymentLabel(Map<String, dynamic> transaction) {
+    final state = transaction['_receipt_state']?.toString().toLowerCase();
+    final coverage = transaction['_payment_coverage']?.toString().toLowerCase();
+    if (state != 'posted') return 'Recorded';
+    if (coverage == 'paid') return 'Paid';
+    if (coverage == 'partial') return 'Partial';
+    return 'Recorded';
+  }
+
+  static String syncLabel(Map<String, dynamic> transaction) {
+    switch (transaction['_receipt_state']?.toString().toLowerCase()) {
+      case 'posted':
+        return 'Synced';
+      case 'local':
+        return 'Local · saved on this device';
+      case 'pending':
+        return 'Pending cloud sync';
+      default:
+        return 'Sync status needs verification';
+    }
+  }
+
   final BriskersLocalDatabase _db;
   final LocalFinancialCache _cache;
 
