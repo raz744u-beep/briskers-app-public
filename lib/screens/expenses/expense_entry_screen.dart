@@ -552,6 +552,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                 decoration: const InputDecoration(
                   labelText: 'Gateway token',
                   hintText: 'Paste the current Worker token',
+                  helperText: 'At least 16 characters, no spaces',
                   border: OutlineInputBorder(),
                 ),
               ),
