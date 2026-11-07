@@ -7,7 +7,7 @@ void main() {
     expect(source, contains('color: Colors.white'));
     expect(source, contains('child: widget.serviceTaskCard(task)'));
     expect(source, contains('Expanded(child:ClipRect(child:'));
-    expect(source, contains("Invoice #$invoice"));
+    expect(source, contains(r'Invoice #$invoice'));
     expect(source, contains('widget.onRecoverHistory!()'));
   });
 
