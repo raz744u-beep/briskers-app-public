@@ -663,25 +663,32 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       setState(() => _error = 'Save this employee’s hourly compensation first.');
       return;
     }
+    // This is a task creation, not a payroll payment. The local Owner
+    // repository checks session identity before and after the transaction.
+    // Paired-device writes retain their existing LAN Owner-grant protection.
+    if (!_canView) return;
     final operation = _operationId();
-    await _run(() async {
-      final id = (employee['employee_id'] ?? employee['id']) as String;
-      final name = (employee['name'] ?? employee['employee_name'] ?? _employeeLabel(id)).toString();
-      final identity = await PayrollLanIdentity.load();
-      final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, id);
-      if (peer == null) {
-        await _repository.createRecheck(
-          operation: operation, job: job, description: description,
-          employee: id, name: name, rate: rate, estimatedMinutes: (hours * 60).round(),
-        );
-      } else {
+    final id = (employee['employee_id'] ?? employee['id']) as String;
+    final name = (employee['name'] ?? employee['employee_name'] ?? _employeeLabel(id)).toString();
+    final identity = await PayrollLanIdentity.load();
+    final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, id);
+    if (!mounted || !_canView) return;
+    if (peer == null) {
+      await _runOwnerTaskEdit(() => _taskEditRepository.createRecheck(
+        operation: operation, job: job, description: description,
+        employee: id, name: name, rate: rate,
+        estimatedMinutes: (hours * 60).round(),
+      ));
+    } else {
+      await _run(() async {
         final workflow = await _workflow(id);
         await workflow.assignRecheck(
-          operation: operation, job: job, description: description, employeeName: name,
-          rate: rate, estimatedMinutes: (hours * 60).round(),
+          operation: operation, job: job, description: description,
+          employeeName: name, rate: rate,
+          estimatedMinutes: (hours * 60).round(),
         );
-      }
-    });
+      });
+    }
   }
 
   Future<void> _recordWeekly(
