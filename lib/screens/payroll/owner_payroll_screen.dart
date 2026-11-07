@@ -952,7 +952,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         recordPayment: _recordWeekly,
       ),
     ));
-    if (mounted) await _run(() async {});
+    if (mounted && _canView) await _load();
   }
 
   Widget _flexibleWeeklyPreview(double trackedHours) {
@@ -1307,8 +1307,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Future<void> _newServiceTask() async {
-    await _run(() async {});
-    if(!mounted||_grant==null)return;
+    if (!mounted || !_canView) return;
     final roster=await OfflineJobAdminService(database:_db).cachedEmployees(widget.businessId);
     final known=await _repository.employees();
     final staff={for(final r in known) r['id']:r,for(final r in roster) r['id']:{...?known.where((k)=>k['id']==r['id']).firstOrNull,...r}};
@@ -1452,7 +1451,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       )),
     );
     description.dispose();
-    if (created == true && mounted) await _run(() async {});
+    if (created == true && mounted && _canView) await _load();
   }
 
   Future<void> _updateEmployeeGeneralTask(int id, String status) =>
@@ -1785,7 +1784,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                       _work = [];
                       _history = [];
                                 });
-                    _run(() async {});
+                    if (_canView) unawaited(_load());
                   },
                 ),
               if (_employee != null)
