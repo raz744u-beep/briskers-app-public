@@ -104,4 +104,55 @@ void main() {
     final task = (await repo.tasks()).single;
     expect(task['job_id'], jobRow.read<String>('id'));
   });
+  test('Owner identity revocation rolls back task, Job and pending outbox',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    var ownerActive = true;
+    final repo = LocalPayrollRepository(
+      db, business: 'shop', owner: true,
+      assertOwnerGrant: () {
+        if (!ownerActive) throw StateError('Owner session changed');
+      },
+    );
+    await repo.prepare();
+
+    await expectLater(db.transaction(() async {
+      final job = await OfflineJobAdminService(database: db).queueJobCreate(
+        'shop',
+        customerId: 'synthetic-customer',
+        customerName: 'Test Customer',
+        title: 'Pending task',
+      );
+      await LocalTaskAssignmentStore(db)
+          .linkEmployee('shop', job, 'mechanic', 'Chris');
+      await repo.createRecheck(
+        operation: 'revoked-task',
+        job: job,
+        description: 'Inspect brakes',
+        employee: 'mechanic',
+        name: 'Chris',
+        rate: 3500,
+        estimatedMinutes: 45,
+        kind: 'job',
+        queueChange: () async {
+          ownerActive = false; // Identity changes before commit.
+        },
+      );
+    }), throwsStateError);
+
+    for (final table in [
+      'local_jobs',
+      'local_job_assignments',
+      'regular_payroll_tasks',
+      'sync_outbox',
+    ]) {
+      final rows = await db.customSelect(
+        'SELECT COUNT(*) AS n FROM $table WHERE business_id=?',
+        variables: [const Variable<String>('shop')],
+      ).getSingle();
+      expect(rows.read<int>('n'), 0, reason: table);
+    }
+  });
+
 }
