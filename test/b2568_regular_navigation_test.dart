@@ -56,8 +56,10 @@ void main(){
     final db=BriskersLocalDatabase(NativeDatabase(File('${directory.path}/shop.sqlite')));
     debugUseLocalDatabase(db);
     const who=OwnerSessionIdentity('owner','local');
+    var secondaryPrompts=0;
     final auth=LocalOwnerAuthorization(store:_Unused(),currentIdentity:()=>who,
-      verifyOwner:(_)async=>throw StateError('No cloud verification'),authenticateDevice:()async=>true,
+      verifyOwner:(_)async=>throw StateError('No cloud verification'),
+      authenticateDevice:()async{secondaryPrompts++;return true;},
       verifyLocalOwner:(s)async=>VerifiedOwnerEnrollment(who,s));
     final identity=await PayrollLanIdentity.fromSeed(List.filled(32,3));
     final values=<String,String>{};
@@ -212,6 +214,10 @@ void main(){
     await until(find.text('Jobs with Tasks · 1'));
     expect(find.textContaining('2 tasks'),findsOneWidget);
     await capture('bugs30-global-completed-tasks');
-    await tester.pumpWidget(const SizedBox.shrink());await tester.pump(const Duration(milliseconds:500));expect(tester.takeException(),isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds:500));
+    expect(secondaryPrompts,0,
+      reason:'The regular invoice-to-Payroll-to-Tasks flow must require only the initial Briskers login.');
+    expect(tester.takeException(),isNull);
   },skip:!OwnerPayrollScreen.enabled,timeout:const Timeout(Duration(minutes:3)));
 }
