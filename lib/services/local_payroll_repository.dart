@@ -243,6 +243,50 @@ class LocalPayrollRepository {
     });
   }
 
+  /// Set the locally effective compensation basis for future payroll review.
+  /// Saved receipts and existing paid labor allocations are immutable. This
+  /// does not pretend to update the server employee record while offline.
+  Future<void> saveLocalPayBasis({
+    required String employee,
+    required String name,
+    required String paymentType,
+    required int amountCents,
+  }) async {
+    _authorize();
+    if (employee.trim().isEmpty || name.trim().isEmpty ||
+        !const {'hourly', 'fixed_weekly'}.contains(paymentType) ||
+        amountCents < 0 || amountCents > 100000000) {
+      throw ArgumentError('Invalid employee payment settings.');
+    }
+    await prepare();
+    await db.transaction(() async {
+      _authorize();
+      final fixed = paymentType == 'fixed_weekly';
+      final prior = await weeklyDefaults(employee);
+      final adjustment = prior?['adjustment_cents'] as int? ?? 0;
+      await db.customStatement(
+        'INSERT INTO regular_payroll_employees VALUES(?,?,?,?,?) '
+        'ON CONFLICT(business_id,id) DO UPDATE SET '
+        'rate=excluded.rate,base_enabled=excluded.base_enabled',
+        [business, employee, name, fixed ? 0 : amountCents, fixed ? 1 : 0],
+      );
+      await db.customStatement(
+        'INSERT OR IGNORE INTO regular_payroll_advances VALUES(?,?,0)',
+        [business, employee],
+      );
+      await db.customStatement(
+        'INSERT INTO regular_payroll_weekly_defaults VALUES(?,?,?,?,?,?) '
+        'ON CONFLICT(business_id,employee_id) DO UPDATE SET '
+        'base_cents=excluded.base_cents,hourly_cents=excluded.hourly_cents,'
+        'adjustment_cents=excluded.adjustment_cents,'
+        'add_labor=excluded.add_labor',
+        [business, employee, fixed ? amountCents : 0,
+         fixed ? 0 : amountCents, adjustment, fixed ? 0 : 1],
+      );
+      _authorize();
+    });
+  }
+
   Future<void> createRecheck({
     required String operation, required String job, required String description,
     required String employee, required String name, required int rate,
