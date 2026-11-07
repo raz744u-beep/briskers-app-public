@@ -38,33 +38,33 @@ void main() {
     expect(screen.split('_compactPlannedHours(planned)').length, 3);
   });
 
-  test('completion suggests assigned hours instead of zero actual time', () {
-    final source = File('lib/screens/payroll/owner_payroll_screen.dart')
+  test('Mark Done uses assigned hours once, without additional dialogs', () {
+    final screen = File('lib/screens/payroll/owner_payroll_screen.dart')
         .readAsStringSync();
-    final start = source.indexOf('Future<void> _recordTaskProgress(');
-    final end = source.indexOf('Future<void> _editEstimated(', start);
-    final progress = source.substring(start, end);
-    expect(progress, contains('final priorActual ='));
-    expect(progress, contains("row['estimated_minutes'] as int? ?? 0"));
-    expect(progress, contains('priorActual > 0 ? priorActual : estimated'));
-    expect(progress, contains('initialValue:(suggestedActual/60).toStringAsFixed(2)'));
-    expect(progress, contains('suggested from assigned hours; edit if different'));
-    expect(progress, contains('if (next == \'Done\')'));
-    expect(progress, contains('initialValue:(credited/60).toStringAsFixed(2)'));
-  });
-
-  test('mechanic time default is planning, never earned on Start', () {
-    final screen = File('lib/screens/payroll/owner_payroll_screen.dart').readAsStringSync();
     final start = screen.indexOf('Future<void> _recordTaskProgress(');
     final end = screen.indexOf('Future<void> _editEstimated(', start);
-    expect(start, greaterThanOrEqualTo(0));
-    expect(end, greaterThan(start));
-    final progress = screen.substring(start, end);
-    expect(progress, contains("next == 'Done' && plannedMinutes > 0"));
-    expect(progress, contains("initialValue:(credited/60).toStringAsFixed(2)"));
-    expect(progress, contains('_taskEditRepository.recordAllocatedTime('));
-    expect(progress, contains("final next = markDone ? 'Done'"));
+    final action = screen.substring(start, end);
+    expect(action, contains("final assignedMinutes = row['estimated_minutes']"));
+    expect(action, contains("next == 'Done' && assignedMinutes <= 0"));
+    expect(action, contains("next == 'Done' ? assignedMinutes : previousMinutes"));
+    expect(action, contains('completedMinutes, completedMinutes'));
+    expect(action, contains('_taskEditRepository.recordAllocatedTime('));
+    expect(action, contains("final next = markDone ? 'Done'"));
+    expect(action, isNot(contains('payrollLanInput(')));
+    expect(action, isNot(contains('Credited mechanic labor')));
   });
+
+  test('starting work never earns the assigned hours', () {
+    final screen = File('lib/screens/payroll/owner_payroll_screen.dart')
+        .readAsStringSync();
+    final start = screen.indexOf('Future<void> _recordTaskProgress(');
+    final end = screen.indexOf('Future<void> _editEstimated(', start);
+    final action = screen.substring(start, end);
+    expect(action, contains("row['state'] == 'Open' ? 'In Progress' : 'Done'"));
+    expect(action, contains("next == 'Done' ? assignedMinutes : previousMinutes"));
+    expect(action, contains("if (row['state'] == 'Done' || (row['paid_minutes'] as int? ?? 0) > 0) return;"));
+  });
+
   test('direct Mark Done from Open keeps paid labor locked', () {
     final source = File('lib/screens/payroll/owner_payroll_screen.dart')
         .readAsStringSync();
@@ -73,7 +73,7 @@ void main() {
     expect(source, contains("final canProgress = !paid && !conflict && !removed && !_busy;"));
     expect(source, contains("color: const Color(0xFFF0F5F8)"));
     expect(source, contains("label:const Text('Mark Done')"));
-    expect(source, contains('Credited mechanic labor'));
+    expect(source, contains('Assign mechanic hours with the pencil before marking Done.'));
   });
 
 }
