@@ -95,6 +95,34 @@ class LocalOwnerAuthorization {
     }
   }
 
+  /// A single Briskers sign-in is the Owner's authorization. This grant is
+  /// bound to the active signed-in account, session and saved Owner role;
+  /// it never challenges the OS or reaches Supabase. Changing accounts or
+  /// signing out invalidates it through currentIdentity / revoke.
+  Future<LocalOwnerGrant> authorizeSession(String businessId) async {
+    if (_busy) throw StateError('Owner authorization is already running.');
+    final verify = _verifyLocalOwner;
+    if (verify == null) throw StateError('Local Owner role verification is unavailable.');
+    _busy = true;
+    try {
+      final identity = _currentIdentity();
+      if (identity == null) throw StateError('Sign in to Briskers as Owner.');
+      final generation = ++_generation;
+      final verified = await verify(businessId);
+      _check(identity, generation);
+      if (!verified.identity.matches(identity) || verified.businessId != businessId) {
+        throw StateError('Only the signed-in Owner can change payroll.');
+      }
+      final now = _now().toUtc();
+      _lastVerifiedAt = now;
+      // This is a session-bound capability, not a timed second login.
+      // Its identity and generation checks remain mandatory on each write.
+      return LocalOwnerGrant._(
+        this, generation, identity, businessId, DateTime.utc(9999, 12, 31),
+      );
+    } finally { _busy = false; }
+  }
+
   /// Local app account/role boundary plus a fresh OS device challenge. This
   /// path performs no enrollment RPC and never calls the online verifier.
   Future<LocalOwnerGrant> authorizeLocal(String businessId) async {
