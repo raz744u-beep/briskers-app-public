@@ -244,7 +244,8 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
     if (!mounted || employee == null) return;
     final fixed = employee['base_enabled'] == 1;
     final cents = fixed
-      ? defaults?['base_cents'] as int? : employee['rate'] as int?;
+        ? (defaults?['base_cents'] as int?)
+        : (employee['rate'] as int?);
     setState(() {
       _localPayType = fixed ? 'fixed_weekly' : 'hourly';
       _localPayCents = cents;
