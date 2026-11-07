@@ -10,7 +10,10 @@ void main() {
     expect(source, isNot(contains('authority.authorizeLocal(widget.businessId)')));
     expect(source, isNot(contains('Unlock verified offline details')));
     expect(source, contains('unawaited(_unlockOffline())'));
-    expect(source, contains("title: const Text('Hourly rate')"));
+    expect(source, contains("title: const Text('Payment type')"));
+    expect(source, contains("? 'Weekly pay' : 'Hourly rate'"));
+    expect(source, contains("label: const Text('Edit offline pay settings')"));
+    expect(source, contains('repo.saveLocalPayBasis('));
     expect(source, contains("title: const Text('Phone, email and address')"));
     expect(source, contains("title: const Text('SSN and W-9')"));
     expect(source, contains("title: Text('Default payment method')"));
