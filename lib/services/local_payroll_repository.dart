@@ -442,10 +442,16 @@ class LocalPayrollRepository {
         'INSERT OR IGNORE INTO regular_payroll_jobs VALUES(?,?,?)',
         [business, jobId, job['title']],
       );
+      // Manual assignment may run before invoice-task projection finishes.
+      // Carry the customer-billable labor quantity into the initial *planned*
+      // mechanic estimate instead of creating a permanent zero-hour task.
+      // This does not mark work done or change credited/paid hours.
+      final billableHours = LocalInvoiceTaskStore.invoiceLaborHours(line);
       await db.customStatement(
-        'INSERT OR IGNORE INTO regular_payroll_tasks VALUES(?,?,?,?,?,0)',
+        'INSERT OR IGNORE INTO regular_payroll_tasks VALUES(?,?,?,?,?,?)',
         [business, task, jobId, laborId,
-          description.isEmpty ? 'Invoice labor' : description],
+          description.isEmpty ? 'Invoice labor' : description,
+          billableHours == null ? 0 : (billableHours * 100).round()],
       );
       await db.customStatement(
         'INSERT INTO regular_payroll_employees VALUES(?,?,?,?,0) '
