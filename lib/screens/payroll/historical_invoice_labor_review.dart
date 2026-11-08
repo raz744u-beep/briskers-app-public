@@ -71,7 +71,7 @@ class _HistoricalInvoiceLaborReviewState
       if(date==null || date.isBefore(from) || !date.isBefore(end))continue;
       final id=document['id']?.toString();
       if(id==null || id.isEmpty)continue;
-      final detail=await cache.load(widget.businessId,id);
+      final detail=await cache.loadReadOnly(widget.businessId,id);
       if(detail==null)continue;
       lines.addAll(HistoricalInvoiceLaborReview.invoiceLaborLines(document,detail));
     }
