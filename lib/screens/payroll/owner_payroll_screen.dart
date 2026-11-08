@@ -2004,20 +2004,21 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             serviceTaskCard: (row) => byTask.containsKey(row['line_id'])
                 ? Column(children: [
                     for (final allocation in byTask[row['line_id']]!) _taskCard(allocation, manage:row['invoice_id'] is! String),
-                    if (row['invoice_id'] is String && row['source_line_id'] is String && row['source_active'] != 0)
+                    if (row['archived_labor']!=1 && row['invoice_id'] is String && row['source_line_id'] is String && row['source_active'] != 0)
                       IconButton(tooltip:'Manage Labor Assignments',icon:const Icon(Icons.edit_outlined),
                         onPressed:()=>_openAssignments(row)),
                   ])
                 : ListTile(
                     title: Text(row['description'] as String),
-                    subtitle: const Text('Unassigned · Planned'),
-                    trailing: const Icon(Icons.edit_outlined),
-                    onTap: row['invoice_id'] is String && row['source_line_id'] is String
+                    subtitle: Text(row['archived_labor']==1
+                      ? 'Historical invoice labor · view only' : 'Unassigned · Planned'),
+                    trailing: row['archived_labor']==1 ? const Icon(Icons.lock_outline)
+                      : const Icon(Icons.edit_outlined),
+                    onTap: row['archived_labor']!=1 && row['invoice_id'] is String && row['source_line_id'] is String
                       ? () => _openAssignments(row) : null,
                   ),
             onAddService: _jobMode ? _newJobLabor : _newServiceTask,
             onAddRecheck: (jobId) => _addRecheck(jobId: jobId),
-            onRecoverHistory: () => unawaited(_backfillTasks()),
             onAddGeneral: _createEmployeeGeneralTask,
             onGeneralStatus: (id, status) async {
               final row = _generalTasks.where((row) => row['id'] == id).firstOrNull;
