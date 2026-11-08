@@ -1837,7 +1837,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     );
   }
 
-  Widget _tasksTab() => _PayrollViewport(minHeight:_currentJobsExpanded?600:360,child:Column(children:[
+  Widget _tasksTab() => _PayrollViewport(minHeight:_currentJobsExpanded?680:480,child:Column(children:[
     Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),
       child:Row(children:[
         for(final general in [false,true])
