@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
 import 'package:briskers_app/app.dart';
 import 'package:briskers_app/screens/home_screen.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -110,10 +111,29 @@ void main(){
       return find.byKey(ValueKey('mechanic-work-${credit['id']}'));
     }
 
+    // Approved design: the job-wide Main Mechanic selector belongs on Job
+    // Details, never inside Invoice Items. Navigate to the real Job screen
+    // to set the lead, then return to the unchanged invoice labor pencil.
+    final jobId=(await tester.runAsync(()async{
+      final row=await db.customSelect(
+        'SELECT job_id FROM local_documents WHERE business_id=? AND id=?',
+        variables:[Variable<String>('shop'),Variable<String>(invoice)],
+      ).getSingle();
+      return row.read<String>('job_id');
+    }))!;
+    navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>
+      JobDetailScreen(businessId:'shop',jobId:jobId,roleCode:'owner')));
+    await tester.pumpAndSettle();
     await until(find.text('Main Mechanic'));
+    expect(find.text('Job Tasks'),findsWidgets);
     await click(find.byType(DropdownButtonFormField<String>).first);
     await click(find.text('Alpha').last);
-    await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:150)));await tester.pump();
+    await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:150)));
+    await tester.pump();
+    navigator.currentState!.pop();
+    await tester.pumpAndSettle();
+    expect(find.text('Main Mechanic'),findsNothing,
+      reason:'Invoice Items must not duplicate Job Details controls.');
     await click(find.byTooltip('Edit or split mechanic labor').first);
     
     await click(find.text('Add mechanic'));
