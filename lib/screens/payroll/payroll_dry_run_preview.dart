@@ -60,20 +60,20 @@ class PayrollDryRunPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final totals=PayrollDryRunTotals.fromSavedWork(rows);
     String hours(int minutes)=>(minutes/60).toStringAsFixed(2);
-    String usd(int cents)=>'\$\{(cents/100).toStringAsFixed(2)}';
+    String usd(int cents)=>'\${(cents/100).toStringAsFixed(2)}';
     final friday=weekStart.add(const Duration(days:4));
     final sunday=weekStart.add(const Duration(days:6));
     return Scaffold(
       appBar:AppBar(title:const Text('Payroll Test · Read only')),
       body:ListView(padding:const EdgeInsets.all(16),children:[
         Text(employeeName,style:Theme.of(context).textTheme.titleLarge),
-        Text('Week: \$\{weekStart.month}/\$\{weekStart.day}–\$\{sunday.month}/\$\{sunday.day}/\$\{sunday.year}'),
+        Text('Week: ${weekStart.month}/${weekStart.day}–${sunday.month}/${sunday.day}/${sunday.year}'),
         const SizedBox(height:12),
         const Text('TEST ONLY · No payment will be saved.',
           style:TextStyle(color:Colors.teal,fontWeight:FontWeight.w800)),
         const SizedBox(height:12),
         ListTile(title:const Text('Recorded mechanic labor lines'),
-          trailing:Text('\$\{totals.lines}')),
+          trailing:Text('${totals.lines}')),
         ListTile(title:const Text('Assigned hours'),
           trailing:Text(hours(totals.assignedMinutes))),
         ListTile(title:const Text('Recorded actual hours'),
@@ -81,20 +81,20 @@ class PayrollDryRunPreview extends StatelessWidget {
         ListTile(title:const Text('Recorded hourly labor value'),
           trailing:Text(usd(totals.laborCents))),
         if(totals.unknownRateLines>0)
-          Text('\$\{totals.unknownRateLines} line(s) have recorded hours without a verified hourly rate; their amounts are excluded.',
+          Text('${totals.unknownRateLines} line(s) have recorded hours without a verified hourly rate; their amounts are excluded.',
             style:const TextStyle(color:Colors.deepOrange)),
         if(totals.historicalLines>0)
-          Text('\$\{totals.historicalLines} historical line(s) are excluded from live payroll.'),
+          Text('${totals.historicalLines} historical line(s) are excluded from live payroll.'),
         const Divider(height:24),
         const Text('This is an hourly labor calculation from saved allocations, not the complete weekly paycheck. Weekly base, supplements, deductions, and previously paid expenses require separate reconciliation.'),
         const SizedBox(height:10),
-        Text('Compare with original Expenses for Friday \$\{friday.month}/\$\{friday.day}/\$\{friday.year}.'),
+        Text('Compare with original Expenses for Friday ${friday.month}/${friday.day}/${friday.year}.'),
         const SizedBox(height:14),
         if(rows.isEmpty)
           const Text('No dated mechanic allocations are linked to this week. Original invoice labor may still exist separately.'),
         for(final row in rows)
           ListTile(
-            title:Text('\$\{row['job_number']??'Job'} · \$\{row['description']??'Labor'}'),
+            title:Text('${row['job_number']??'Job'} · ${row['description']??'Labor'}'),
             subtitle:Text(row['archived_labor']==1
               ? 'Historical · not payable again'
               : 'Saved mechanic allocation · read only'),
