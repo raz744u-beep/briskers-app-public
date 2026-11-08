@@ -66,6 +66,16 @@ void main() {
     await payroll.setEstimatedMinutes(task,'kam',120);
     final split=await payroll.work();
     expect(split.map((row)=>row['estimated_minutes']).toSet(),{540,120});
+    await expectLater(payroll.editAllocation(task:task,previous:'chris',employee:'kam',name:'Kam',minutes:300),throwsStateError);
+    await payroll.editAllocation(task:task,previous:'kam',employee:'third',name:'Third',minutes:90);
+    final reassigned=await payroll.work();
+    expect(reassigned.where((r)=>r['employee_id']=='third').single['estimated_minutes'],90);
+    expect(reassigned.where((r)=>r['employee_id']=='chris').single['estimated_minutes'],540);
+    await payroll.addShopTask('chris','Clean lift','General',job:'job');
+    await payroll.addShopTask('chris','Sweep shop','General');
+    final shopTasks=await payroll.shopTasks('chris');
+    expect(shopTasks.singleWhere((r)=>r['description']=='Clean lift')['job_id'],'job');
+    expect(shopTasks.singleWhere((r)=>r['description']=='Sweep shop')['job_id'],isNull);
     final invoice=await LocalDocumentDetailCache(database:db).load('shop','invoice');
     expect((invoice!['lines'] as List).single['quantity'],8.5);
   });

@@ -38,6 +38,9 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.text('J-24'), findsOneWidget);
+    expect(find.text('Add Recheck'), findsNothing);
+    await tester.tap(find.text('J-24'));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Add Recheck'));
     await tester.tap(find.text('Add Recheck'));
     await tester.pump();

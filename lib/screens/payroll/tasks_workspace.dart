@@ -21,6 +21,7 @@ class TasksWorkspace extends StatefulWidget {
     required this.onOpenJob,
     required this.onEmployeeTap,
     this.initialGeneral = false,
+    this.scopedJob,
     this.onAddService,
     this.onAddRecheck,
     this.onRecoverHistory,
@@ -40,6 +41,7 @@ class TasksWorkspace extends StatefulWidget {
   final ValueChanged<String> onOpenJob;
   final ValueChanged<String> onEmployeeTap;
   final bool initialGeneral;
+  final String? scopedJob;
 
   @override
   State<TasksWorkspace> createState() => _TasksWorkspaceState();
@@ -56,7 +58,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
   String _date = 'Any';
   String _servicePeriod = 'Any time';
   String _sort = 'Newest First';
-  final Set<String> _collapsedJobs = <String>{};
+  final Set<String> _expandedJobs = <String>{};
 
   @override
   void initState() {
@@ -167,6 +169,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
   List<Map<String,dynamic>> get _service {
     final q = _search.text.toLowerCase().trim();
     final rows = widget.serviceTasks.where((task) {
+      if(widget.scopedJob != null && task['job_id'] != widget.scopedJob) return false;
       final desc = (task['custom_description'] ??
         task['source_description'] ?? '').toString().toLowerCase();
       // Task-first Job work and rechecks both lack an invoice line. The
@@ -194,6 +197,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
   List<Map<String,dynamic>> get _internal {
     final q = _search.text.toLowerCase().trim();
     final rows = widget.generalTasks.where((task) {
+      if(widget.scopedJob != null && task['job_id'] != widget.scopedJob) return false;
       final description = task['description']?.toString().toLowerCase() ?? '';
       return _matchesStatus(task) &&
         _matchesEmployee(task,general:true) &&
@@ -315,7 +319,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                 _employeeLabel(employee),_employeeChoices,
                 (v)=>employee=_employeeIdForName(v)),
               if(!_general) ...[
-                dropdown('Job',job,['All Jobs',
+                if(widget.scopedJob==null) dropdown('Job',job,['All Jobs',
                   for(final id in widget.serviceTasks
                     .map((t)=>t['job_id']?.toString()??'')
                     .where((e)=>e.isNotEmpty).toSet()) id],
@@ -382,7 +386,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
       children:[
         Row(children:[Expanded(child:Text('Jobs with Tasks · '+entries.length.toString(),
           style:const TextStyle(fontWeight:FontWeight.w800,fontSize:15))),
-          if(widget.onAddService!=null)TextButton.icon(onPressed:widget.onAddService,icon:const Icon(Icons.add),label:const Text('New Task'))]),
+          if(widget.scopedJob==null && widget.onAddService!=null)TextButton.icon(onPressed:widget.onAddService,icon:const Icon(Icons.add),label:const Text('New Task'))]),
         const SizedBox(height:9),
         if(entries.isEmpty)
           const Padding(padding:EdgeInsets.all(15),
@@ -392,8 +396,8 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
             child:Column(children:[
               ListTile(
                 onTap:()=>setState((){
-                  if(!_collapsedJobs.add(entry.key)) {
-                    _collapsedJobs.remove(entry.key);
+                  if(!_expandedJobs.add(entry.key)) {
+                    _expandedJobs.remove(entry.key);
                   }
                 }),
                 title:Text(() {
@@ -408,10 +412,10 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                   if (entry.value.first['vehicle_label'] case final String vehicle) vehicle,
                   '${entry.value.length} tasks',
                 ].join(' · ')),
-                trailing:Icon(_collapsedJobs.contains(entry.key)
-                  ? Icons.expand_more:Icons.expand_less),
+                trailing:Icon(_expandedJobs.contains(entry.key)
+                  ? Icons.expand_less:Icons.expand_more),
               ),
-              if(!_collapsedJobs.contains(entry.key)) ...[
+              if(_expandedJobs.contains(entry.key)) ...[
                 const Divider(height:1),
                 // Match the approved isolated Tasks TEST: a distinct white
                 // rounded work card sits inside each tinted Job group.
@@ -424,7 +428,11 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                       borderRadius: BorderRadius.circular(16),
                       side: const BorderSide(color: Color(0xFFD4DFE4)),
                     ),
-                    child: widget.serviceTaskCard(task),
+                    child: ExpansionTile(
+                      key: ValueKey(task['line_id']),
+                      title: Text((task['source_description'] ?? task['description'] ?? 'Labor task').toString()),
+                      children: [Builder(builder: (_) => widget.serviceTaskCard(task))],
+                    ),
                   ),
                 // A missing Job link is display-only. Never dispatch a
                 // fabricated label as a canonical Job ID for a recheck.
@@ -457,7 +465,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
         Row(children:[
           Expanded(child:Text('General Tasks · '+tasks.length.toString(),
             style:const TextStyle(fontSize:15,fontWeight:FontWeight.w800))),
-          TextButton.icon(onPressed:widget.onAddGeneral,
+          if(widget.scopedJob==null) TextButton.icon(onPressed:widget.onAddGeneral,
             icon:const Icon(Icons.add),label:const Text('New Task')),
         ]),
         if(tasks.isEmpty)
@@ -557,6 +565,11 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
             tooltip:'Advanced task filters',
             icon:const Icon(Icons.tune)),
         ]),
+        if(widget.scopedJob!=null)
+          Wrap(spacing:8,children:[
+            OutlinedButton.icon(onPressed:widget.onAddService,icon:const Icon(Icons.add),label:const Text('Labor Task')),
+            OutlinedButton.icon(onPressed:widget.onAddGeneral,icon:const Icon(Icons.add),label:const Text('General Task')),
+          ]),
         Container(
           decoration:BoxDecoration(color:const Color(0xFFF1F5F7),
             borderRadius:BorderRadius.circular(22)),

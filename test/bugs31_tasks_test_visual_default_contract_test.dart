@@ -5,7 +5,7 @@ void main() {
   test('TEST global Tasks preserves white job task cards and unclipped list', () {
     final source = File('lib/screens/payroll/tasks_workspace.dart').readAsStringSync();
     expect(source, contains('color: Colors.white'));
-    expect(source, contains('child: widget.serviceTaskCard(task)'));
+    expect(source, contains('widget.serviceTaskCard(task)'));
     expect(source, contains('Expanded(child:ClipRect(child:'));
     expect(source, contains(r'Invoice #$invoice'));
     expect(source, contains('widget.onRecoverHistory!()'));

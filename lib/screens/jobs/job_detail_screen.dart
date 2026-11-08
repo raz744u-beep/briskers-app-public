@@ -3816,6 +3816,20 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                     ),
                   ),
                 ),
+                if (_canSeeFinancial)
+                  for (final invoice in _documents.where((row) =>
+                      row['kind'] == 'invoice' && row['id'] is String))
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: ActionChip(
+                        avatar: const Icon(Icons.receipt_long_outlined, size: 17),
+                        label: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Text('Invoice ${invoice['document_number'] ?? ''}'),
+                          const Icon(Icons.chevron_right, size: 18),
+                        ]),
+                        onPressed: _busy ? null : () => _openDocument(invoice['id'] as String),
+                      ),
+                    ),
                 // In restored Owner Tasks/Payroll, one job can have several
                 // mechanics and independently assigned labor hours. Repeating
                 // the single Main Mechanic in the green Job summary falsely
@@ -5703,29 +5717,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
   Future<void> _openJobLaborTasks() async {
     if (!_owner || !OwnerPayrollScreen.enabled) return;
-    try {
-      final documents = await _localDocuments.listByJob(widget.businessId, widget.jobId);
-      final labor = <String, List<Map<String, dynamic>>>{};
-      for (final document in documents) {
-        final id = document['id'];
-        if (document['kind'] != 'invoice' || id is! String) continue;
-        final detail = await _documentDetailCache.load(widget.businessId, id);
-        final lines = detail?['lines'] ?? detail?['items'];
-        if (lines is List) {
-          labor[id] = lines.whereType<Map>().map(Map<String, dynamic>.from).toList();
-        }
-      }
-      if (!mounted) return;
-      await Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => OwnerPayrollScreen(
-          businessId: widget.businessId, jobId: widget.jobId, jobInvoiceLabor: labor,
-        ),
-      ));
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
-      }
-    }
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => OwnerPayrollScreen(businessId: widget.businessId, jobId: widget.jobId),
+    ));
+    if (mounted) await _load();
   }
 
   @override
@@ -5923,10 +5918,16 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           ),
         ],
       ),
-      bottomNavigationBar: widget.bottomNavigationBar,
-      floatingActionButton: (_canEditFindings || _canManage) ? FloatingActionButton.extended(
+      bottomNavigationBar: Column(mainAxisSize: MainAxisSize.min, children: [
+        if (_canEditFindings || _canManage)
+          SafeArea(top: false, bottom: widget.bottomNavigationBar == null,
+            child: Align(alignment: Alignment.centerRight,
+              child: Padding(padding: const EdgeInsets.fromLTRB(12,4,12,6),
+                child: FloatingActionButton.extended(
         onPressed: _busy ? null : _showNewMenu, backgroundColor: BriskersColors.jobs, foregroundColor: Colors.white, icon: const Icon(Icons.add), label: const Text('New', style: TextStyle(fontWeight: FontWeight.w800)),
-      ) : null,
+      )))),
+        if (widget.bottomNavigationBar != null) widget.bottomNavigationBar!,
+      ]),
       body: Stack(
         children: [
           RefreshIndicator(
@@ -5939,10 +5940,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
             jobTitle: jobTitle,
             assignment: assignment,
           ),
-          if (_canSeeFinancial)
-            CompletedWorkSection(business:widget.businessId,job:widget.jobId,revision:_loadEpoch),
           if (OwnerPayrollScreen.enabled && _owner)
             Padding(padding:const EdgeInsets.all(8),child:JobTasksAccess(business:widget.businessId,job:widget.jobId,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);})),
+          if (_canSeeFinancial)
+            CompletedWorkSection(business:widget.businessId,job:widget.jobId,revision:_loadEpoch),
           if (_canSeeFinancial &&
               _job?['status']?.toString() == 'completed') ...[
             const SizedBox(height: 8),

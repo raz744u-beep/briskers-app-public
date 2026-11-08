@@ -66,6 +66,7 @@ class LocalPayrollRepository {
       '''CREATE TABLE IF NOT EXISTS regular_payroll_progress_claims (business_id TEXT NOT NULL,employee_id TEXT NOT NULL,event_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(business_id,employee_id,event_id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_payment_authority (business_id TEXT PRIMARY KEY, device_id TEXT NOT NULL)''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_weekly_defaults (business_id TEXT NOT NULL, employee_id TEXT NOT NULL, base_cents INTEGER NOT NULL, hourly_cents INTEGER NOT NULL, adjustment_cents INTEGER NOT NULL, add_labor INTEGER NOT NULL, PRIMARY KEY(business_id,employee_id))''',
+      'CREATE TABLE IF NOT EXISTS regular_payroll_shop_task_jobs (business_id TEXT NOT NULL, task_id INTEGER NOT NULL, job_id TEXT NOT NULL, PRIMARY KEY (business_id,task_id))',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_shop_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, business_id TEXT NOT NULL, employee_id TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, due_at INTEGER, status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','in_progress','done')))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_jobs (business_id TEXT NOT NULL, id TEXT NOT NULL, label TEXT NOT NULL, PRIMARY KEY(business_id,id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_tasks (business_id TEXT NOT NULL, id TEXT NOT NULL, job_id TEXT NOT NULL, labor_id TEXT NOT NULL, description TEXT NOT NULL, planned INTEGER NOT NULL CHECK(planned>=0), PRIMARY KEY(business_id,id), UNIQUE(business_id,job_id,labor_id))''',
@@ -344,13 +345,49 @@ class LocalPayrollRepository {
     });
   }
 
+  Future<void> editAllocation({required String task, required String previous,
+    required String employee, required String name, required int minutes}) async {
+    _authorize();
+    await prepare();
+    await db.transaction(() async {
+      if (previous != employee) {
+        final open = await _read(
+          "SELECT p.id FROM regular_payroll_portions p "
+          "JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id "
+          "LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id "
+          "WHERE p.business_id=? AND p.task_id=? AND p.employee_id=? AND p.state='Open' AND COALESCE(m.active,1)=1 "
+          "AND c.actual_minutes=0 AND c.completed=0 AND c.paid_operation_id IS NULL "
+          "AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage w WHERE w.business_id=p.business_id AND w.credit_id=p.id)",
+          [business,task,previous]);
+        if (open.isEmpty) throw StateError('Only an unstarted assignment can change mechanic.');
+        final existing = await _read(
+          'SELECT id FROM regular_payroll_portions WHERE business_id=? AND task_id=? AND employee_id=?',
+          [business,task,employee]);
+        if (existing.isNotEmpty) throw StateError('This mechanic already has an allocation on this task.');
+        if ((await _read('SELECT id FROM regular_payroll_employees WHERE business_id=? AND id=?',[business,employee])).isEmpty) {
+          await saveEmployeeCompensation(employee:employee,name:name,rate:0,weeklyBase:false);
+        }
+        await LocalTaskAssignmentStore(db).allocate(business,task,employee,inherited:false);
+        await db.customStatement(
+          'INSERT INTO regular_payroll_assignment_meta(business_id,task_id,employee_id,inherited,active) VALUES(?,?,?,0,0) '
+          'ON CONFLICT(business_id,task_id,employee_id) DO UPDATE SET active=0,revision=revision+1',
+          [business,task,previous]);
+      }
+      await setEstimatedMinutes(task, employee, minutes);
+      _authorize();
+    });
+  }
+
   Future<void> setEstimatedMinutes(String task, String employee, int minutes) async {
     _authorize();
     if (minutes < 0 || minutes > 600000) throw ArgumentError('Invalid estimated minutes.');
     await prepare();
     await db.transaction(() async {
       final assignment = await _read(
-        'SELECT id FROM regular_payroll_portions WHERE business_id=? AND task_id=? AND employee_id=?',
+        'SELECT p.id FROM regular_payroll_portions p JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id '
+        'LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id '
+        "WHERE p.business_id=? AND p.task_id=? AND p.employee_id=? AND p.state!='Done' AND COALESCE(m.active,1)=1 AND c.paid_operation_id IS NULL "
+        'AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage w WHERE w.business_id=p.business_id AND w.credit_id=p.id)',
         [business, task, employee],
       );
       if (assignment.isEmpty) throw StateError('This mechanic is not assigned to the task.');
@@ -1103,8 +1140,8 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     final rows = await _read(
-      'SELECT id, employee_id, description, category, due_at, status FROM regular_payroll_shop_tasks '
-      'WHERE business_id=? ${employee == null ? '' : 'AND employee_id=?'} ORDER BY id DESC',
+      'SELECT t.*, j.job_id FROM regular_payroll_shop_tasks t LEFT JOIN regular_payroll_shop_task_jobs j ON j.business_id=t.business_id AND j.task_id=t.id '
+      'WHERE t.business_id=? ${employee == null ? '' : 'AND employee_id=?'} ORDER BY t.id DESC',
       [business, ?employee],
     );
     _authorize();
@@ -1112,7 +1149,7 @@ class LocalPayrollRepository {
   }
 
   Future<void> addShopTask(
-    String employee, String description, String category, {DateTime? due}
+    String employee, String description, String category, {DateTime? due, String? job}
   ) async {
     _authorize();
     if (employee.isEmpty || description.trim().isEmpty) {
@@ -1125,6 +1162,12 @@ class LocalPayrollRepository {
         'INSERT INTO regular_payroll_shop_tasks (business_id,employee_id,description,category,due_at) '
         'VALUES (?,?,?,?,?)', [business, employee, description.trim(), category, due?.millisecondsSinceEpoch],
       );
+      if (job != null) {
+        await db.customStatement(
+          'INSERT INTO regular_payroll_shop_task_jobs VALUES(?,last_insert_rowid(),?)',
+          [business, job],
+        );
+      }
       _authorize();
     });
   }

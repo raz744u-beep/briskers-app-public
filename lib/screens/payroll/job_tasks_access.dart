@@ -294,7 +294,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
               DropdownMenuItem(value:entry.key as String,child:Text(EmployeeNicknameStore.displayLabel(entry.value,staff)))],
           onChanged:busy?null:chooseMain)),
         const SizedBox(width:8),OutlinedButton.icon(onPressed:open,icon:const Icon(Icons.task_alt),label:const Text('Tasks'))]),
-      if(estimated!=null)Text('Estimated labor: ${(estimated!/60).toStringAsFixed(2)} h · Actual: ${(actual!/60).toStringAsFixed(2)} h',style:const TextStyle(fontSize:12)),
+      if(widget.invoice!=null && estimated!=null)Text('Estimated labor: ${(estimated!/60).toStringAsFixed(2)} h · Actual: ${(actual!/60).toStringAsFixed(2)} h',style:const TextStyle(fontSize:12)),
       if(warning!=null)Row(children:[Expanded(child:Text(warning!)),TextButton(onPressed:load,child:const Text('Retry'))]),
     ]);
   }

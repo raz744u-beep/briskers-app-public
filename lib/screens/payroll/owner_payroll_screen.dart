@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:drift/drift.dart' show Variable;
 import '../../services/local_customer_repository.dart';
+import '../../services/local_document_repository.dart';
 import '../jobs/job_customer_picker_screen.dart';
 import 'package:intl/intl.dart';
 
@@ -421,7 +422,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final weeklyDefaults = employee == null || widget.employeeId == null ||
         widget.reportsOnly || _weeklyDefaultsLoaded
         ? null : await repository.weeklyDefaults(employee);
-    final generalTasks = widget.globalTasks ? await repository.shopTasks()
+    final generalTasks = (widget.globalTasks || _jobMode) ? await repository.shopTasks()
         : employee == null || widget.employeeId == null || widget.reportsOnly
             ? <Map<String, dynamic>>[] : await repository.shopTasks(employee);
     if(!_canView)return;
@@ -443,7 +444,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       _repayments = repayments;
       _openingAdvance = opening;
       if (!_editingOpening) _opening.text = opening == null ? '' : (opening / 100).toStringAsFixed(2);
-      _generalTasks = generalTasks;
+      _generalTasks = job == null ? generalTasks : generalTasks.where((row) => row['job_id'] == job).toList();
       if (!_weeklyDefaultsLoaded) {
         _weeklyDefaultsLoaded = true;
         String amount(String key) =>
@@ -644,19 +645,38 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Future<void> _editEstimated(Map<String, dynamic> row) async {
-    final input = await payrollLanInput(
-      context, 'Mechanic estimated hours', 'Estimated hours for this mechanic',
-      initialValue: ((row['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(2),
-    );
-    if (input == null || !mounted) return;
-    final hours = double.tryParse(input);
-    if (hours == null || !hours.isFinite || hours < 0 || hours > 10000) {
-      setState(() => _error = 'Enter valid estimated hours.');
-      return;
-    }
-    await _runOwnerTaskEdit(() => _taskEditRepository.setEstimatedMinutes(
-      row['task_id'] as String, row['employee_id'] as String, (hours * 60).round(),
-    ));
+    final previous = row['employee_id'] as String;
+    var selected = previous;
+    final staff = {for (final person in _employees) if (person['id'] is String) person['id'] as String: person};
+    final input = TextEditingController(text: ((row['estimated_minutes'] as int? ?? 0) / 60).toStringAsFixed(2));
+    final hours = await showDialog<double>(context: context, builder: (dialog) =>
+      StatefulBuilder(builder: (context, update) {
+        final parsed = double.tryParse(input.text.trim());
+        return AlertDialog(title: const Text('Edit Assignment'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            DropdownButtonFormField<String>(initialValue: selected, isExpanded:true,
+              decoration:const InputDecoration(labelText:'Mechanic'),
+              items:[for(final id in {previous,...staff.keys})
+                DropdownMenuItem(value:id,child:Text(_employeeLabel(id)))],
+              onChanged: row['state'] != 'Open' ? null :
+                (id) { if(id!=null) update(()=>selected=id); }),
+            TextField(controller:input,keyboardType:const TextInputType.numberWithOptions(decimal:true),
+              decoration:const InputDecoration(labelText:'Assigned hours'),
+              onTapAlwaysCalled:true,
+              onTap:()=>input.selection=TextSelection(baseOffset:0,extentOffset:input.text.length),
+              onChanged:(_)=>update((){})),
+          ]),
+          actions:[
+            TextButton(onPressed:()=>Navigator.pop(dialog),child:const Text('Cancel')),
+            FilledButton(onPressed:parsed==null || !parsed.isFinite || parsed<0 || parsed>10000
+              ? null : ()=>Navigator.pop(dialog,parsed),child:const Text('Save')),
+          ]);
+      }));
+    Future<void>.delayed(const Duration(milliseconds:400),input.dispose);
+    if (hours == null || !mounted || !_canView) return;
+    await _runOwnerTaskEdit(() => _taskEditRepository.editAllocation(
+      task:row['task_id'] as String,previous:previous,employee:selected,
+      name:(staff[selected]?['name'] ?? _employeeLabel(selected)).toString(), minutes:(hours*60).round()));
   }
 
   // Match the saved mechanic progress state in both TEST-style indicators.
@@ -746,10 +766,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                 child: Icon(Icons.lock_outline,size:20,
                   color: Color(0xFF64748B))),
               if (!paid) IconButton(
-                tooltip: 'Edit mechanic estimated hours',
+                tooltip: 'Edit Assignment',
                 icon: const Icon(Icons.edit_outlined,size:19,
                   color: Color(0xFF00897E)),
-                onPressed: _busy || conflict || removed
+                onPressed: _busy || conflict || removed || state=='Done'
                   ? null : () => _editEstimated(row),
                 visualDensity: VisualDensity.compact,
                 constraints: const BoxConstraints(minWidth:34,minHeight:34),
@@ -1557,6 +1577,34 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     ));
   }
 
+  Future<void> _newJobLabor() async {
+    if (!_canView || widget.jobId == null) return;
+    try {
+      final documents = await LocalDocumentRepository(database: _db)
+          .listByJob(widget.businessId, widget.jobId!);
+      if (!mounted || !_canView) return;
+      final invoices = documents.where((row) => row['kind'] == 'invoice' && row['id'] is String).toList();
+      if (invoices.isEmpty) {
+        setState(() => _error = 'Create an invoice for this job before adding labor.');
+        return;
+      }
+      final id = invoices.length == 1 ? invoices.single['id'] as String :
+          await showDialog<String>(context: context, builder: (dialog) =>
+            SimpleDialog(title: const Text('Choose invoice'), children: [
+              for (final invoice in invoices)
+                SimpleDialogOption(onPressed: () => Navigator.pop(dialog, invoice['id']),
+                  child: Text('Invoice ${invoice['document_number'] ?? ''}')),
+            ]));
+      if (!mounted || !_canView || id == null) return;
+      await Navigator.push<void>(context, MaterialPageRoute(builder: (_) =>
+        JobDocumentScreen(businessId: widget.businessId, documentId: id,
+          isOwner: true, roleCode: 'owner', initialAction: 'add_labor')));
+      if (mounted && _canView) await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
   Future<void> _newServiceTask() async {
     if (!mounted || !_canView) return;
     final roster=await OfflineJobAdminService(database:_db).cachedEmployees(widget.businessId);
@@ -1703,7 +1751,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               // disbursements. The repository rechecks Owner identity
               // before and after its atomic SQLite write.
               await _taskEditRepository.addShopTask(
-                employee, description.text, category, due: due,
+                employee, description.text, category, due: due, job: widget.jobId,
               );
               if (sheet.mounted) Navigator.pop(sheet,true);
             } catch(error) {
@@ -1863,6 +1911,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         if (_backfillActive) _recoveryStatus(),
         if (_canView)
           Expanded(child: TasksWorkspace(
+            scopedJob: widget.jobId,
             serviceTasks: service,
             generalTasks: _generalTasks,
             allocationsByLine: byTask,
@@ -1882,7 +1931,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                           {'id': row['source_line_id'], 'description': row['description']},
                           jobId: row['job_id'] as String) : null,
                   ),
-            onAddService: _newServiceTask,
+            onAddService: _jobMode ? _newJobLabor : _newServiceTask,
             onAddRecheck: (jobId) => _addRecheck(jobId: jobId),
             onRecoverHistory: () => unawaited(_backfillTasks()),
             onAddGeneral: _createEmployeeGeneralTask,
@@ -1999,7 +2048,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   );
 
   @override
-  Widget build(BuildContext context) => widget.globalTasks ? _workspace() : widget.reportsOnly ? _reports() : widget.employeeId != null ? _profile() : !_jobMode ? _overview() : Scaffold(
+  Widget build(BuildContext context) => (widget.globalTasks || (_jobMode && widget.invoiceId == null)) ? _workspace() : widget.reportsOnly ? _reports() : widget.employeeId != null ? _profile() : !_jobMode ? _overview() : Scaffold(
         appBar: AppBar(title: Text(widget.reportsOnly
             ? 'Payroll reports'
             : _jobMode ? 'Job labor tasks' : 'Owner payroll')),

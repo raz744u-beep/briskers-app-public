@@ -1020,6 +1020,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Future<void> _runInitialAction(String action) async {
     switch (action) {
+      case 'add_labor':
+        if (!widget.isOwner || _detail == null || _estimate || _readOnly ||
+            _detail?['status'] != 'draft') {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('An editable draft invoice is required to add labor.')));
+          return;
+        }
+        await _addCustomLine(laborOnly: true);
+        break;
       case 'add_item':
         await _openAddItemChoices();
         break;
@@ -2100,7 +2108,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     });
   }
 
-  Future<void> _addCustomLine() async {
+  Future<void> _addCustomLine({bool laborOnly = false}) async {
     if (_readOnly) return;
 
     final result = await showModalBottomSheet<Map<String, dynamic>>(
@@ -2112,13 +2120,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         line: <String, dynamic>{
           'name': '',
           'description': '',
-          'line_kind': 'item',
+          'line_kind': laborOnly ? 'labor' : 'item',
           'quantity': 1,
           'unit_price': 0,
           'tax_rate': _defaultTaxRate,
         },
         accent: _documentActionColor,
-        title: 'Add custom line',
+        title: laborOnly ? 'Add Labor Task' : 'Add custom line',
+        lockLineKind: laborOnly,
         saveLabel: 'Add',
         clearNumericOnFirstTap: true,
       ),
@@ -8861,6 +8870,7 @@ class _EditLineDialog extends StatefulWidget {
     this.title = 'Edit item',
     this.saveLabel = 'Save',
     this.lockCatalogFields = false,
+    this.lockLineKind = false,
     this.clearNumericOnFirstTap = false,
   });
 
@@ -8869,6 +8879,7 @@ class _EditLineDialog extends StatefulWidget {
   final String title;
   final String saveLabel;
   final bool lockCatalogFields;
+  final bool lockLineKind;
   final bool clearNumericOnFirstTap;
 
   @override
@@ -9135,7 +9146,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                               child: Text(tr('shipping')),
                             ),
                           ],
-                          onChanged: (value) {
+                          onChanged: widget.lockLineKind ? null : (value) {
                             if (value != null) {
                               setState(() => _lineKind = value);
                             }

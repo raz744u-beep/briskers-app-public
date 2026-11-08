@@ -41,6 +41,9 @@ void main() {
       )),
     ));
     await tester.pumpAndSettle();
+    expect(find.text('Ordinary task-first job work'), findsNothing);
+    await tester.tap(find.text('J-10'));
+    await tester.pumpAndSettle();
     expect(find.text('Ordinary task-first job work'), findsOneWidget);
     expect(find.text('Separate recheck after repair'), findsOneWidget);
 
@@ -55,6 +58,8 @@ void main() {
     await tester.tap(find.text('Task Type'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Invoice Labor').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('J-11'));
     await tester.pumpAndSettle();
     expect(find.text('Invoice labor task'), findsOneWidget);
     expect(find.text('Separate recheck after repair'), findsNothing);
