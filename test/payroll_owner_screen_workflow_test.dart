@@ -66,7 +66,13 @@ void main() {
       }
       await LocalDocumentDetailCache(database: db).save('shop', 'invoice', {'id': 'invoice', 'kind': 'invoice',
         'job_id': 'job', 'lines': [{'id': 'labor', 'line_kind': 'labor', 'description': 'Shared repair', 'quantity': 1}]});
-      final today = DateTime.now().toIso8601String().split('T').first;
+      // Payroll workweek is Monday-Friday. A Sunday completion is outside
+      // the selected workweek and must not be offered for payment.
+      final now = DateTime.now();
+      final monday = DateTime(now.year, now.month, now.day)
+          .subtract(Duration(days: now.weekday - DateTime.monday));
+      final friday = monday.add(const Duration(days: 4));
+      final today = friday.toIso8601String().split('T').first;
       for (final employee in ['a', 'b']) {
         await fixture.registerAssignedLabor(jobId: 'job', invoiceId: 'invoice', lineId: 'labor',
           employeeId: employee, employeeName: employee == 'a' ? 'Alice' : 'Bob', rateCents: 4000);
@@ -125,7 +131,14 @@ void main() {
         await tester.pumpAndSettle();
         await until(find.widgetWithText(FilledButton, 'Verify Payment'));
       }
-      await tester.tap(find.widgetWithText(FilledButton, 'Verify Payment'));
+      // The recorded-labor review above WeeklyLaborReview makes the footer
+      // scrollable on short phones; bring the existing payment action into
+      // view before tapping it.
+      final verify = find.widgetWithText(FilledButton, 'Verify Payment');
+      await tester.ensureVisible(verify);
+      await tester.pumpAndSettle();
+      expect(tester.widget<FilledButton>(verify).onPressed, isNotNull);
+      await tester.tap(verify);
       await until(find.widgetWithText(FilledButton, 'Record payment'));
       expect(find.text(r'Calculated labor: $40.00'), findsOneWidget);
       await tester.ensureVisible(find.widgetWithText(FilledButton, 'Record payment'));
