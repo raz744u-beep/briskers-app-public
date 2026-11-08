@@ -117,6 +117,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   );
   List<Map<String, dynamic>> _employees = [];
   List<Map<String, dynamic>> _work = [];
+  // Display history can include pre-cutover work, but all new payroll
+  // calculations must explicitly exclude archived historical allocations.
+  List<Map<String,dynamic>> get _currentPayrollWork =>
+      _work.where((row)=>row['archived_labor']!=1).toList();
   List<Map<String, dynamic>> _taskSources = [];
   List<Map<String, dynamic>> _history = [];
   List<Map<String, dynamic>> _overviewPayments = [];
@@ -1168,7 +1172,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   PayrollPeriodTotals _projectPeriod(DateTime from, DateTime until) =>
-      PayrollPeriodTotals.calculate(work: _work, payments: _history, from: from, until: until);
+      PayrollPeriodTotals.calculate(work: _currentPayrollWork, payments: _history, from: from, until: until);
 
   void _selectAmount(TextEditingController controller) {
     controller.selection = TextSelection(baseOffset: 0, extentOffset: controller.text.length);
@@ -1427,8 +1431,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           ],
         )),
         if (['fixed_weekly', 'flexible_weekly'].contains(widget.employeePayType) ||
-            _work.every((row) => (row['rate_cents'] as int) <= 0))
-          _flexibleWeeklyPreview(_work.fold<double>(
+            _currentPayrollWork.every((row) => (row['rate_cents'] as int) <= 0))
+          _flexibleWeeklyPreview(_currentPayrollWork.fold<double>(
             0, (sum, row) => sum + (row['actual_minutes'] as int) / 60,
           )),
         _advancePanel(),
@@ -2170,7 +2174,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       if(_canView && _hasLocalData && !_loadingLocal && _employees.isEmpty)const Padding(padding:EdgeInsets.all(12),child:Text('No saved employees are available. Review the offline employee roster.')),
       if (_canView)
         Expanded(child: !_reportsLoaded ? Center(child:Text(_loadingLocal?'Loading saved payroll totals…':'Saved payroll totals are unavailable. Use Retry above.')) : PayrollOverview(
-          employees: _employees, work: _work, payments: _overviewPayments,
+          employees: _employees, work: _currentPayrollWork, payments: _overviewPayments,
           onOpenProfile: (id, week) => _openEmployeeProfile(id, week, 0),
           onReviewWeek: (id, week) => _openEmployeeProfile(id, week, 0),
         )),
