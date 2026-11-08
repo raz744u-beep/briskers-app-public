@@ -95,7 +95,7 @@ class _HistoricalInvoiceLaborReviewState
                 TextButton(onPressed:()=>setState(()=>_history=_read()),
                   child:const Text('Retry')),
               ]));
-            if(!snapshot.hasData)return const Center(child:CircularProgressIndicator());
+            if(!snapshot.hasData) { return const Center(child:CircularProgressIndicator()); }
             final rows=snapshot.data!;
             return ListView(padding:const EdgeInsets.all(14),children:[
               Text('Week ${widget.weekStart.month}/${widget.weekStart.day}–${end.month}/${end.day}/${end.year}',
