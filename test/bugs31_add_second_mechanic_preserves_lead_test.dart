@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:briskers_app/services/job_task_summary.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -76,6 +77,22 @@ void main() {
     final shopTasks=await payroll.shopTasks('chris');
     expect(shopTasks.singleWhere((r)=>r['description']=='Clean lift')['job_id'],'job');
     expect(shopTasks.singleWhere((r)=>r['description']=='Sweep shop')['job_id'],isNull);
+    final summary=JobTaskSummary(db);
+    expect((await summary.progress('shop','job')).total,2);
+    expect((await summary.progress('shop','job')).done,0);
+    expect((await summary.hours('shop',['job']))['job']!.values.toSet(),{540,90});
+    final third=reassigned.singleWhere((r)=>r['employee_id']=='third');
+    await payroll.recordAllocatedTime(third['id'] as String,'Done',90,90,'2026-11-08');
+    expect((await summary.progress('shop','job')).done,0);
+    final chris=reassigned.singleWhere((r)=>r['employee_id']=='chris');
+    await payroll.recordAllocatedTime(chris['id'] as String,'Done',540,540,'2026-11-08');
+    expect((await summary.progress('shop','job')).done,1);
+    await expectLater(payroll.removeOpenAllocation(task,'chris'),throwsStateError);
+    await db.customStatement("UPDATE local_documents SET document_date='2026-11-06' WHERE id='invoice'");
+    expect((await payroll.work()).every((r)=>r['archived_labor']==1),isTrue);
+    await payroll.reviewUnpaidCarry('third',third['id'] as String);
+    expect((await payroll.work(employee:'third')).single['archived_labor'],0);
+    expect((await payroll.work(employee:'chris')).single['archived_labor'],1);
     final invoice=await LocalDocumentDetailCache(database:db).load('shop','invoice');
     expect((invoice!['lines'] as List).single['quantity'],8.5);
   });
