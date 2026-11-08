@@ -50,9 +50,17 @@ adb push "$fixture" "$dbpath"
 adb shell "rm -f '$dbpath-wal' '$dbpath-shm'; mkdir -p '$state/shared_prefs'"
 adb push "$tmp/preferences.xml" "$state/shared_prefs/FlutterSharedPreferences.xml"
 adb shell "chown -R '$uid:$uid' '$state'; restorecon -R '$state'"
+# Preserve a real image payload alongside synthetic database and preference records.
+photo="$state/app_flutter/receipts/upgrade-fixture.png"
+adb exec-out screencap -p > "$tmp/photo.png"
+adb shell "mkdir -p '$state/app_flutter/receipts'"
+adb push "$tmp/photo.png" "$photo"
+adb shell "chown '$uid:$uid' '$photo'; restorecon '$photo'"
 check_records() {
   phase=$1
   adb shell am force-stop "$package"
+  adb pull "$photo" "$tmp/$phase-photo.png"
+  cmp "$tmp/photo.png" "$tmp/$phase-photo.png"
   adb pull "$dbpath" "$tmp/$phase.sqlite"
   if adb shell "test -f '$dbpath-wal'"; then
     adb pull "$dbpath-wal" "$tmp/$phase.sqlite-wal"
