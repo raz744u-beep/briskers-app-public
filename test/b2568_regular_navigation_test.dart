@@ -21,6 +21,7 @@ import 'package:briskers_app/services/payroll_lan_identity.dart';
 import 'package:briskers_app/services/payroll_owner_lease.dart';
 import 'package:briskers_app/services/payroll_owner_lan.dart';
 import 'package:briskers_app/screens/jobs/job_document_screen.dart';
+import 'package:briskers_app/screens/jobs/job_detail_screen.dart';
 import 'package:briskers_app/screens/payroll/owner_payroll_screen.dart';
 import 'package:briskers_app/screens/payroll/payroll_overview.dart';
 import 'package:briskers_app/screens/payroll/tasks_workspace.dart';
@@ -244,6 +245,24 @@ void main(){
     await until(find.text('Jobs with Tasks · 1'));
     expect(find.textContaining('2 tasks'),findsOneWidget);
     await capture('bugs30-global-completed-tasks');
+    final jobId=(await tester.runAsync(()async =>
+      (await LocalDocumentDetailCache(database:db).load('shop',invoice))!['job_id'] as String))!;
+    navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>
+      JobDetailScreen(businessId:'shop',jobId:jobId,roleCode:'owner')));
+    final jobPage = find.byType(JobDetailScreen);
+    final chip = find.descendant(of:jobPage,matching:find.widgetWithIcon(ActionChip,Icons.receipt_long_outlined));
+    await until(chip);
+    final list = find.descendant(of:jobPage,matching:find.byType(RefreshIndicator)).first;
+    final add = find.descendant(of:jobPage,matching:find.widgetWithText(FloatingActionButton,'New'));
+    expect(tester.getRect(list).bottom, lessThanOrEqualTo(tester.getRect(add).top));
+    await click(chip);
+    expect(tester.widget<JobDocumentScreen>(find.byType(JobDocumentScreen)).documentId,invoice);
+    navigator.currentState!.pop();await tester.pumpAndSettle();
+    await click(find.descendant(of:jobPage,matching:find.widgetWithText(OutlinedButton,'Tasks')));
+    await until(find.byType(TasksWorkspace));
+    expect(tester.widget<TasksWorkspace>(find.byType(TasksWorkspace)).scopedJob,jobId);
+    expect(find.text('Labor Task'),findsOneWidget);
+    expect(find.text('General Task'),findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds:500));
     expect(secondaryPrompts,0,

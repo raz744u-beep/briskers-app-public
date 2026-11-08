@@ -475,14 +475,14 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
           Card(
             key:ValueKey('general-task-'+task['id'].toString()),
             margin:const EdgeInsets.only(bottom:7),
-            child:ListTile(
+            child:ExpansionTile(
               leading: Icon(task['status']=='done'
                 ? Icons.check_circle: Icons.radio_button_unchecked,
                 color:task['status']=='done' ?
                   const Color(0xFF167A54):BriskersColors.jobs),
               title:Text(task['description']?.toString()??'',
                 style:const TextStyle(fontWeight:FontWeight.w700)),
-              subtitle:Column(
+              children:[ListTile(title:Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if ((task['employee_id']?.toString() ?? '').isNotEmpty)
@@ -547,7 +547,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                   PopupMenuItem(value:'in_progress',child:Text('In Progress')),
                   PopupMenuItem(value:'done',child:Text('Done')),
                 ],
-              ),
+              )),],
             ),
           ),
       ],
