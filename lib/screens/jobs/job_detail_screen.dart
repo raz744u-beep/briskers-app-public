@@ -157,14 +157,15 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     final progress = _taskProgress;
     final fraction = progress == null || progress.total == 0 ? 0.0 : progress.done / progress.total;
     final percent = '${(fraction * 100).round()}%';
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    return InkWell(onTap: _openJobLaborTasks, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Row(children: [
         const Expanded(child:Text('Job Progress',style:TextStyle(fontWeight:FontWeight.bold))),
         Flexible(child:Text(progress == null ? 'Progress unavailable' :
+            progress.total == 0 ? 'No tasks yet' :
             '${progress.done} of ${progress.total} tasks completed',textAlign:TextAlign.end)),
       ]),
       const SizedBox(height:6),
-      if (progress != null)
+      if (progress != null && progress.total > 0)
         ClipRRect(borderRadius: BorderRadius.circular(9), child: LayoutBuilder(
           builder: (context, box) => Stack(children: [
             LinearProgressIndicator(value: fraction, minHeight: 20,
@@ -178,7 +179,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         child:Row(children:[const Icon(Icons.checklist),const SizedBox(width:8),
           Expanded(child:Text(progress==null?'View Tasks':'View Tasks (${progress.total})')),
           const Icon(Icons.chevron_right)])),
-    ]);
+    ]));
   }
 
   bool _contentBlocked = false;
