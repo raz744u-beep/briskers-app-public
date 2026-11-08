@@ -117,7 +117,7 @@ void main(){
     final jobId=(await tester.runAsync(()async{
       final row=await db.customSelect(
         'SELECT job_id FROM local_documents WHERE business_id=? AND id=?',
-        variables:[Variable<String>('shop'),Variable<String>(invoice)],
+        variables:const [Variable<String>('shop'),Variable<String>(invoice)],
       ).getSingle();
       return row.read<String>('job_id');
     }))!;
@@ -265,8 +265,7 @@ void main(){
     await until(find.text('Jobs with Tasks · 1'));
     expect(find.textContaining('2 tasks'),findsOneWidget);
     await capture('bugs30-global-completed-tasks');
-    final jobId=(await tester.runAsync(()async =>
-      (await LocalDocumentDetailCache(database:db).load('shop',invoice))!['job_id'] as String))!;
+    // Reuse the Job identity already verified when navigating from Invoice.
     navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>
       JobDetailScreen(businessId:'shop',jobId:jobId,roleCode:'owner')));
     final jobPage = find.byType(JobDetailScreen);
