@@ -36,7 +36,7 @@ import '../settings/employee_edit_screen.dart';
 import '../jobs/job_document_screen.dart';
 import 'payroll_history_panel.dart';
 import 'historical_expense_review.dart';
-import '../../services/local_financial_cache.dart';
+import '../../services/local_financial_cache.dart' as expenses;
 import 'payroll_lan_controls.dart';
 import 'weekly_labor_review_screen.dart';
 import 'tasks_workspace.dart';
@@ -2005,7 +2005,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           businessId: widget.businessId,
           employeeName: _employeeLabel(widget.employeeId ?? _employee),
           access: _historyUnlocked, canView: () => mounted && _canView,
-          cache: LocalFinancialCache(database: _db))),
+          cache: expenses.LocalFinancialCache(database: _db))),
 
     if (_pendingPayments.isNotEmpty)
       MaterialBanner(content: Text(
