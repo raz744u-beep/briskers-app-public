@@ -236,9 +236,6 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
         // ellipsis instead of moving below the Labor heading.
         Row(mainAxisSize:MainAxisSize.max,children:[
           if(linePeople.isNotEmpty) ...[
-            const Icon(Icons.engineering_outlined,size:16,
-              color:Color(0xFF00897E)),
-            const SizedBox(width:4),
             Expanded(child: Tooltip(
               message:linePeople.map((p) =>
                 '${p['label']} ${((p['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(1)}h'
