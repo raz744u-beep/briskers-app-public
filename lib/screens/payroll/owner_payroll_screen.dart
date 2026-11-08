@@ -37,6 +37,7 @@ import '../jobs/job_document_screen.dart';
 import 'payroll_history_panel.dart';
 import 'historical_expense_review.dart';
 import 'payroll_dry_run_preview.dart';
+import 'historical_invoice_labor_review.dart';
 import '../../services/local_financial_cache.dart' as expenses;
 import 'payroll_lan_controls.dart';
 import 'weekly_labor_review_screen.dart';
@@ -2003,6 +2004,20 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         if (_busy) const LinearProgressIndicator(),
         if (_error != null) Text(_error!),
         if (_backfillActive) _recoveryStatus(),
+        if (_canView && widget.globalTasks)
+          Align(alignment:Alignment.centerLeft,child:TextButton.icon(
+            icon:const Icon(Icons.receipt_long_outlined),
+            label:const Text('View saved invoice labor history · read only'),
+            onPressed:()=>Navigator.of(context).push<void>(
+              MaterialPageRoute(builder:(_)=>HistoricalInvoiceLaborReview(
+                businessId:widget.businessId,
+                database:_db,
+                weekStart:DateTime(_week.year,_week.month,_week.day)
+                    .subtract(Duration(days:_week.weekday-1)),
+                canView:()=>mounted && _canView,
+              )),
+            ),
+          )),
         if (_canView)
           Expanded(child: TasksWorkspace(
             scopedJob: widget.jobId,
