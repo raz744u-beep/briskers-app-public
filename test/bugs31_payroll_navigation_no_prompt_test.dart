@@ -39,7 +39,7 @@ void main() {
     expect(guarded, contains('if (_busy || !_canView) return;'));
     expect(guarded, isNot(contains('authorizeLocal')));
     expect(source, contains("_taskEditRepository.recordAllocatedTime("));
-    expect(source, contains("_taskEditRepository.setEstimatedMinutes("));
+    expect(source, contains("await _runOwnerTaskEdit(() => _taskEditRepository.editAllocation("));
     expect(source, contains("_taskEditRepository.acceptChangedAssignment("));
     expect(source, isNot(contains('_taskStatusRepository')));
   });

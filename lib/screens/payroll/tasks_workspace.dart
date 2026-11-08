@@ -6,7 +6,7 @@ import '../../core/briskers_colors.dart';
 import '../../services/service_task_order.dart';
 
 /// Tasks workspace. Only customer/job-linked records appear
-/// under Service Tasks; General Tasks have no job or invoice relationship.
+/// under Service Tasks. General Tasks can reference a job without billing it.
 class TasksWorkspace extends StatefulWidget {
   const TasksWorkspace({
     super.key,
