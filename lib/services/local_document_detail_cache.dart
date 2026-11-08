@@ -176,6 +176,27 @@ class LocalDocumentDetailCache {
     );
   }
 
+  /// Read a saved invoice snapshot without reconciling or creating derived
+  /// Tasks/Payroll sources. Used by historical and already-paid reviews.
+  /// Retired/recovered identity fences still apply.
+  Future<Map<String,dynamic>?> loadReadOnly(String businessId,String documentId) {
+    final key=_key(businessId,documentId);
+    return _database.transaction(() => _serialized(key,() async {
+      if(await _blocked(businessId,documentId))return null;
+      if(await RecoveryCommitStore.isOriginal(_database,businessId,documentId))return null;
+      final durable=await RecoveryCommitStore.snapshot(
+        _database,businessId,documentId);
+      final prefs=await SharedPreferences.getInstance();
+      final detail=durable==null
+          ? _decode(sqliteWritesEnabled
+              ? await LocalDocumentSqlStore.read(_database,key)
+              : prefs.getString(key))
+          : _decode(durable.readNullable<String>('payload_json'));
+      if(detail==null || await _blocked(businessId,documentId,detail))return null;
+      return _projectRetiredConversion(businessId,detail);
+    }));
+  }
+
   /// Read existing local snapshots for exact payment-ID reporting links.
   /// Missing snapshots remain unknown; this never deletes or changes data.
   Future<List<Map<String, dynamic>>> loadAll(String businessId) {
