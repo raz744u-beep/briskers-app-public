@@ -538,6 +538,11 @@ class LocalPayrollRepository {
     }
     await prepare();
     await db.transaction(() async {
+      final invoice = await _read("SELECT document_date FROM local_documents WHERE business_id=? AND id=? AND job_id=? AND kind='invoice'",
+        [business,invoiceId,jobId]);
+      if(!LocalInvoiceTaskStore.currentPayrollDate(invoice.firstOrNull?['document_date'])) {
+        throw StateError('Review historical or undated invoice labor before carrying it forward.');
+      }
       final line = await LocalPayrollWorkSource(db).resolve(
         businessId: business,
         jobId: jobId,
@@ -585,6 +590,8 @@ class LocalPayrollRepository {
         'INSERT OR IGNORE INTO regular_payroll_advances VALUES(?,?,0)',
         [business, employeeId],
       );
+      await db.customStatement("INSERT OR IGNORE INTO regular_payroll_task_sources VALUES(?,?,?,?,'invoice',1)",
+        [business,task,invoiceId,lineId]);
       await LocalTaskAssignmentStore(db).allocate(business,task,employeeId,inherited:false);
       await queueChange?.call();
       _authorize();

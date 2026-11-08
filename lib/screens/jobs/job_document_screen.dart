@@ -8089,17 +8089,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             job is! String || job.isEmpty) {
           return;
         }
-        final raw = detail?['lines'] ?? detail?['items'];
         await Navigator.push<void>(
           context,
           MaterialPageRoute(
             builder: (_) => OwnerPayrollScreen(
               businessId: widget.businessId,
               jobId: job,
-              invoiceId: widget.documentId,
-              invoiceLines: raw is List
-                  ? raw.whereType<Map>().map(Map<String, dynamic>.from).toList()
-                  : const [],
             ),
           ),
         );

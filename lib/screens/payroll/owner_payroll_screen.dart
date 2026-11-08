@@ -529,7 +529,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       if (mounted) setState(() => _error = error.toString());
       return;
     }
-    if (!mounted || !_canView || _error != null) return;
+    if (!mounted || !_canView) return;
     if (candidates.isEmpty) {
       setState(() => _error = 'Assign mechanics to this Job first.');
       return;
@@ -738,16 +738,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final actual = row['recorded_actual_minutes'] as int? ??
         row['actual_minutes'] as int? ?? 0;
     final credited = row['actual_minutes'] as int? ?? 0;
-    final canReassign = row['source_kind'] == 'invoice' && !removed &&
-        row['invoice_id'] is String &&
-        row['source_line_id'] is String;
-    return InkWell(
+    return KeyedSubtree(
       key: ValueKey('mechanic-work-${row['id']}'),
-      onLongPress: canReassign ? () => _assign(
-        row['invoice_id'] as String,
-        {'id': row['source_line_id'], 'description': row['description']},
-        jobId: row['job_id'] as String,
-      ) : null,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1939,11 +1931,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                 : ListTile(
                     title: Text(row['description'] as String),
                     subtitle: const Text('Unassigned · Planned'),
-                    trailing: const Icon(Icons.person_add_alt_1_outlined),
+                    trailing: const Icon(Icons.edit_outlined),
                     onTap: row['invoice_id'] is String && row['source_line_id'] is String
-                      ? () => _assign(row['invoice_id'] as String,
-                          {'id': row['source_line_id'], 'description': row['description']},
-                          jobId: row['job_id'] as String) : null,
+                      ? () => _openAssignments(row) : null,
                   ),
             onAddService: _jobMode ? _newJobLabor : _newServiceTask,
             onAddRecheck: (jobId) => _addRecheck(jobId: jobId),
