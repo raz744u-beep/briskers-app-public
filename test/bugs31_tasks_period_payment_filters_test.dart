@@ -95,4 +95,19 @@ void main() {
     // not task-list position or an invented current-day timestamp.
     expect(service('dated',3)['job_created_at'],isA<int>());
   });
+  testWidgets('empty Active view offers read-only access to existing completed tasks',
+      (tester)async{
+    tester.view.physicalSize=const Size(390,844);
+    tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await showTasks(tester,[service('historical',10,status:'done',paid:1)]);
+    expect(find.text('Jobs with Tasks · 0'),findsOneWidget);
+    expect(find.byKey(const Key('show-all-service-task-statuses')),findsOneWidget);
+    await tester.tap(find.byKey(const Key('show-all-service-task-statuses')));
+    await tester.pumpAndSettle();
+    expect(find.text('Jobs with Tasks · 1'),findsOneWidget);
+    expect(find.text('J-historical'),findsOneWidget);
+  });
+
 }
