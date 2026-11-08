@@ -10,8 +10,11 @@ void main() {
     expect(end,greaterThan(start));
     final layout=source.substring(start,end);
     expect(layout,contains('crossAxisAlignment: CrossAxisAlignment.stretch'));
-    expect(layout,contains('alignment: Alignment.topRight'));
+    expect(layout,contains('alignment: Alignment.centerRight'));
     expect(layout,contains('child: JobTasksAccess('));
+    expect(layout,contains('crossAxisAlignment: CrossAxisAlignment.center'));
+    expect(source,isNot(contains("Padding(padding:const EdgeInsets.all(12),child:JobTasksAccess(")));
+
     expect(layout,contains('Qty and Amount occupy their own'));
     expect(layout,isNot(contains('limits.maxWidth>=300')));
   });
@@ -19,6 +22,7 @@ void main() {
   test('saved mechanic name/hours and edit or lock keep TEST inline emphasis', () {
     final source=File('lib/screens/payroll/job_tasks_access.dart').readAsStringSync();
     expect(source,contains('Row(mainAxisSize:MainAxisSize.max,children:['));
+    expect(source,isNot(contains('Icons.engineering_outlined')));
     expect(source,contains('maxLines:1'));
     expect(source,contains('softWrap:false'));
     expect(source,contains('overflow:TextOverflow.ellipsis'));
