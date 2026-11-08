@@ -210,6 +210,15 @@ void main(){
       expect(split,hasLength(2));expect(split.map((r)=>r['task_id']).toSet(),hasLength(1));
       expect(split.map((r)=>r['actual_minutes']).toSet(),{60,120});
     });
+    // The test happens to run on a Sunday. Work completed by the synthetic
+    // UI must be dated inside the Mon–Fri shop week for the payroll review.
+    // This updates fixture-only timestamps, not paid credits or app behavior.
+    await tester.runAsync(() async {
+      await db.customStatement(
+        "UPDATE regular_payroll_portions SET completed_date='2026-11-06' "
+        "WHERE business_id='shop' AND state='Done'",
+      );
+    });
     navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>const OwnerPayrollScreen(businessId:'shop')));
     await tester.pumpAndSettle();
     await until(find.text('Review Weekly Labor (2 tasks)'));
