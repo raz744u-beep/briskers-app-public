@@ -541,6 +541,21 @@ class LocalPayrollRepository {
       final invoice = await _read("SELECT document_date FROM local_documents WHERE business_id=? AND id=? AND job_id=? AND kind='invoice'",
         [business,invoiceId,jobId]);
       if(!LocalInvoiceTaskStore.currentPayrollDate(invoice.firstOrNull?['document_date'])) {
+        // Replaying an existing settled identity after invoice/job remapping
+        // is a no-op. Never enqueue another assignment or modify its hours.
+        final retained = await _read(
+          'SELECT p.id FROM regular_payroll_task_sources s '
+          'JOIN regular_payroll_tasks t ON t.business_id=s.business_id AND t.id=s.task_id '
+          'JOIN regular_payroll_portions p ON p.business_id=t.business_id AND p.task_id=t.id '
+          'JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id '
+          'WHERE s.business_id=? AND s.invoice_id=? AND s.line_id=? AND t.job_id=? AND p.employee_id=? '
+          "AND p.state='Done' AND c.completed=1 AND (c.paid_operation_id IS NOT NULL OR "
+          '(SELECT SUM(w.minutes) FROM regular_payroll_work_coverage w WHERE w.business_id=p.business_id '
+          'AND w.credit_id=p.id)=c.actual_minutes)',[business,invoiceId,lineId,jobId,employeeId]);
+        if(retained.length==1) {
+          _authorize();
+          return;
+        }
         throw StateError('Review historical or undated invoice labor before carrying it forward.');
       }
       final line = await LocalPayrollWorkSource(db).resolve(
