@@ -54,6 +54,7 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
 
   Future<void> _initialize() async {
     try {
+      validateBriskersEnvironment();
       await _runStep('Opening local database', initializeLocalDatabase);
       await _runStep('Opening offline document store', () => LocalDocumentDetailCache.initialize(localDatabase));
       // Preferences are non-financial UI settings. A stalled or unavailable
