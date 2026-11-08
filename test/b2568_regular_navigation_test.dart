@@ -111,6 +111,13 @@ void main(){
       return find.byKey(ValueKey('mechanic-work-${credit['id']}'));
     }
 
+    // Both tooltip states use the same approved single-pencil labor control.
+    // Before an allocation is loaded it says Assign; afterward it says Edit.
+    Finder laborPencils() => find.byWidgetPredicate((widget) =>
+      widget is IconButton &&
+      (widget.tooltip == 'Edit or split mechanic labor' ||
+       widget.tooltip == 'Assign or split mechanic labor'));
+
     // Approved design: the job-wide Main Mechanic selector belongs on Job
     // Details, never inside Invoice Items. Navigate to the real Job screen
     // to set the lead, then return to the unchanged invoice labor pencil.
@@ -134,7 +141,8 @@ void main(){
     await tester.pumpAndSettle();
     expect(find.text('Main Mechanic'),findsNothing,
       reason:'Invoice Items must not duplicate Job Details controls.');
-    await click(find.byTooltip('Edit or split mechanic labor').first);
+    await until(laborPencils());
+    await click(laborPencils().first);
     
     await click(find.text('Add mechanic'));
     await click(find.text('Beta'));
@@ -168,7 +176,8 @@ void main(){
       final saved=await LocalDocumentDetailCache(database:db).load('shop',invoice);expect((saved!['lines'] as List).first['quantity'],6);
     });
     navigator.currentState!.pop();await tester.pumpAndSettle();
-    await click(find.byTooltip('Edit or split mechanic labor').last);
+    await until(laborPencils());
+    await click(laborPencils().last);
     
     // Keep Alpha explicitly assigned, then add Beta to the same task identity.
     for(final name in ['Alpha','Beta']){
