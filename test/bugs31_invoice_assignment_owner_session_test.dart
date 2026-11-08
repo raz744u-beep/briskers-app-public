@@ -32,8 +32,8 @@ void main() {
       "VALUES('job','shop','owner','Synthetic repair','open','J-TEST')",
     );
     await db.customStatement(
-      "INSERT INTO local_documents(id,business_id,job_id,kind,document_number) "
-      "VALUES('invoice','shop','job','invoice','TEST-1')",
+      "INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) "
+      "VALUES('2026-11-07','invoice','shop','job','invoice','TEST-1')",
     );
     await LocalDocumentDetailCache(database: db).save(
       'shop', 'invoice',
@@ -98,8 +98,8 @@ void main() {
       "VALUES('job','shop','owner','Synthetic repair','open','J-TEST')",
     );
     await db.customStatement(
-      "INSERT INTO local_documents(id,business_id,job_id,kind,document_number) "
-      "VALUES('invoice','shop','job','invoice','TEST-1')",
+      "INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) "
+      "VALUES('2026-11-07','invoice','shop','job','invoice','TEST-1')",
     );
     await LocalDocumentDetailCache(database: db).save(
       'shop', 'invoice',

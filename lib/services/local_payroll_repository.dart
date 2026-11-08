@@ -139,7 +139,7 @@ class LocalPayrollRepository {
       final limit=(maxInvoices-checked)<10?(maxInvoices-checked):10;
       final rows=await _read(
         "SELECT id FROM local_documents WHERE business_id=? AND kind='invoice' "
-        "AND document_date>=? AND id>? AND COALESCE(status,'') NOT IN "
+        "AND date(document_date)=document_date AND document_date>=? AND id>? AND COALESCE(status,'') NOT IN "
         "('void','voided','cancelled','canceled','deleted') "
         "${job==null?'':'AND job_id=? '}ORDER BY id LIMIT $limit",
         [business,LocalInvoiceTaskStore.payrollCutover,after,?job]);
@@ -202,7 +202,7 @@ class LocalPayrollRepository {
       "JOIN local_job_assignments a ON a.business_id=j.business_id AND a.job_id=j.id AND a.active=1 "
       "JOIN regular_payroll_employees e ON e.business_id=a.business_id AND e.id=a.employee_id "
       "WHERE t.business_id=? AND s.active=1 AND s.source_kind='invoice' AND e.rate>0 "
-      "AND NOT EXISTS(SELECT 1 FROM local_documents d WHERE d.business_id=s.business_id AND d.id=s.invoice_id AND d.document_date < '${LocalInvoiceTaskStore.payrollCutover}') "
+      "AND EXISTS(SELECT 1 FROM local_documents d WHERE d.business_id=s.business_id AND d.id=s.invoice_id AND date(d.document_date)=d.document_date AND d.document_date >= '${LocalInvoiceTaskStore.payrollCutover}') "
       "AND (a.employee_id=j.assigned_employee_id OR (j.assigned_employee_id IS NULL AND "
       "(SELECT COUNT(*) FROM local_job_assignments a2 WHERE a2.business_id=j.business_id "
       "AND a2.job_id=j.id AND a2.active=1)=1)) "
@@ -1028,8 +1028,13 @@ class LocalPayrollRepository {
       if (expectedRevision != null && rows.single['revision'] != expectedRevision) {
         throw StateError('Work changed. Refresh before updating it.');
       }
-      if (state == 'Done' && rows.single['state'] == 'Open')
-        { throw StateError('Start work before completion'); }
+      if (state == 'Done' && rows.single['state'] == 'Open') {
+        final estimate = await _read('SELECT minutes FROM regular_payroll_estimates WHERE business_id=? AND task_id=? AND employee_id=?',
+          [business,rows.single['task_id'],rows.single['employee_id']]);
+        if (minutes<=0 || estimate.firstOrNull?['minutes']!=minutes) {
+          throw StateError('Mark Done requires the saved assigned hours.');
+        }
+      }
       await LocalMechanicWorkCreditRepository(database: db).recordWork(
         businessId: business, allocationId: id, employeeId: rows.single['employee_id'] as String,
         expectedRevision: rows.single['revision'] as int,
@@ -1077,7 +1082,7 @@ class LocalPayrollRepository {
     await prepare();
     final rows = await _read(
       "SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,"
-      "CASE WHEN d.document_date < '${LocalInvoiceTaskStore.payrollCutover}' AND NOT EXISTS "
+      "CASE WHEN s.source_kind='invoice' AND (date(d.document_date) IS NULL OR date(d.document_date)!=d.document_date OR d.document_date < '${LocalInvoiceTaskStore.payrollCutover}') AND NOT EXISTS "
       "(SELECT 1 FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id "
       "AND a.event='owner_reviewed_unpaid_carry') THEN 1 ELSE 0 END AS archived_labor,"
       "p.state,p.completed_date,c.revision AS version,t.description,t.job_id,"

@@ -3865,7 +3865,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   for (final invoice in _documents.where((row) => row['kind']=='invoice' && row['id'] is String))
                     Row(children: [
                       const Expanded(child: Text('Invoice')),
-                      Flexible(child: ActionChip(
+                      Flexible(child: Align(alignment:Alignment.centerRight,child:ActionChip(
                         backgroundColor: Colors.teal.shade50,
                         labelStyle: TextStyle(color: Colors.teal.shade900, fontWeight: FontWeight.bold),
                         avatar: Icon(Icons.receipt_long_outlined, size: 17, color: Colors.teal.shade800),
@@ -3874,7 +3874,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                           Icon(Icons.chevron_right, size: 18, color: Colors.teal.shade800),
                         ]),
                         onPressed: _busy ? null : () => _openDocument(invoice['id'] as String),
-                      )),
+                      ))),
                     ]),
                 ],
                 if (_owner && OwnerPayrollScreen.enabled) _progressRow(),
@@ -5999,7 +5999,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           if (OwnerPayrollScreen.enabled && _owner)
             Padding(padding:const EdgeInsets.all(8),child:JobTasksAccess(business:widget.businessId,job:widget.jobId,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);})),
           if (_canSeeFinancial)
-            CompletedWorkSection(business:widget.businessId,job:widget.jobId,revision:_loadEpoch),
+            CompletedWorkSection(business:widget.businessId,job:widget.jobId,revision:_loadEpoch,progress:_taskProgress),
           if (_canSeeFinancial &&
               _job?['status']?.toString() == 'completed') ...[
             const SizedBox(height: 8),

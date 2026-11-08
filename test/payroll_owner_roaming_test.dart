@@ -81,7 +81,7 @@ void main() {
       });
       await LocalDocumentDetailCache.initialize(a);
       await a.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status) VALUES('job','shop','owner','Shared repair','open')");
-      await a.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind) VALUES('invoice','shop','job','invoice')");
+      await a.customStatement("INSERT INTO local_documents(document_date,id,business_id,job_id,kind) VALUES('2026-11-07','invoice','shop','job','invoice')");
       for (final employee in ['mechanic-a', 'mechanic-b']) {
         await a.customStatement('INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id,employee_name) VALUES(?,?,?,?,?)',
           [employee, 'shop', 'job', employee, employee]);

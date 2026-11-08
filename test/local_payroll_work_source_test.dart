@@ -28,8 +28,8 @@ void main() {
       "VALUES ('job-a', 'shop-a', 'owner', 'Repair', 'open')",
     );
     await db.customStatement(
-      "INSERT INTO local_documents (id, business_id, job_id, kind) "
-      "VALUES ('invoice-a', 'shop-a', 'job-a', 'invoice')",
+      "INSERT INTO local_documents (document_date, id, business_id, job_id, kind) "
+      "VALUES ('2026-11-07', 'invoice-a', 'shop-a', 'job-a', 'invoice')",
     );
     await db.customStatement(
       "INSERT INTO local_job_assignments "

@@ -26,8 +26,8 @@ void main() {
       "INSERT INTO local_jobs(id,business_id,access_scope,title,status,job_number) "
       "VALUES('job','shop','owner','Supercharger replacement','open','J-TEST')");
     await db.customStatement(
-      "INSERT INTO local_documents(id,business_id,job_id,kind,document_number) "
-      "VALUES('invoice','shop','job','invoice','6365')");
+      "INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) "
+      "VALUES('2026-11-07','invoice','shop','job','invoice','6365')");
     await LocalDocumentDetailCache(database:db).save('shop','invoice',{
       'id':'invoice','kind':'invoice','job_id':'job',
       'lines':[{'id':'labor','name':'Labor','line_kind':'labor',
@@ -89,6 +89,8 @@ void main() {
     expect((await summary.progress('shop','job')).done,1);
     await expectLater(payroll.removeOpenAllocation(task,'chris'),throwsStateError);
     await db.customStatement("UPDATE local_documents SET document_date='2026-11-06' WHERE id='invoice'");
+    expect((await payroll.work()).every((r)=>r['archived_labor']==1),isTrue);
+    await db.customStatement("UPDATE local_documents SET document_date=NULL WHERE id='invoice'");
     expect((await payroll.work()).every((r)=>r['archived_labor']==1),isTrue);
     await payroll.reviewUnpaidCarry('third',third['id'] as String);
     expect((await payroll.work(employee:'third')).single['archived_labor'],0);

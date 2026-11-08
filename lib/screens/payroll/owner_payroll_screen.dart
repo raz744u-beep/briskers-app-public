@@ -385,7 +385,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     _loadStage = 'tasks'; // Invoice saves maintain task identities incrementally.
     final job = widget.jobId;
     final sources = (await repository.tasks()).where((r)=>job!=null ||
-      r['invoice_date'] is! String || (r['invoice_date'] as String).compareTo(LocalInvoiceTaskStore.payrollCutover)>=0).toList();
+      r['source_kind']!='invoice' || LocalInvoiceTaskStore.currentPayrollDate(r['invoice_date'])).toList();
     final persistedEmployees = job == null
         ? await repository.employees()
         : await repository.assignedEmployees(job);

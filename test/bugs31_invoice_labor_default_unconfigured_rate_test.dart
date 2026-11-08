@@ -26,8 +26,8 @@ void main() {
       "'J-DEFAULT','chris','Chris')",
     );
     await db.customStatement(
-      "INSERT INTO local_documents(id,business_id,job_id,kind,document_number) "
-      "VALUES('invoice','shop','job','invoice','TEST-DEFAULT')",
+      "INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) "
+      "VALUES('2026-11-07','invoice','shop','job','invoice','TEST-DEFAULT')",
     );
     await LocalDocumentDetailCache(database: db).save('shop', 'invoice', {
       'id': 'invoice', 'kind': 'invoice', 'job_id': 'job',

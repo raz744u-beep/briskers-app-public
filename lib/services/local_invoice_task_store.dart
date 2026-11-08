@@ -12,6 +12,12 @@ class LocalInvoiceTaskStore {
   LocalInvoiceTaskStore(this.db);
   final BriskersLocalDatabase db;
   static const payrollCutover = '2026-11-07';
+  static bool currentPayrollDate(Object? value) {
+    if (value is! String || !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) return false;
+    final parsed = DateTime.tryParse(value);
+    return parsed != null && parsed.toIso8601String().startsWith(value) &&
+        value.compareTo(payrollCutover) >= 0;
+  }
 
   Future<void> prepare() async {
     await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_task_order '
@@ -59,7 +65,7 @@ class LocalInvoiceTaskStore {
       return;
     }
     final date = source.readNullable<String>('document_date');
-    if (date != null && date.compareTo(payrollCutover) < 0) {
+    if (!currentPayrollDate(date)) {
       // Reading an archived invoice must never reconstruct its labor as new work.
       // Existing tasks, payments and invoice lines remain available as history.
       return;

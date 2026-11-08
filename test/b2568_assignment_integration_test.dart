@@ -42,7 +42,7 @@ void main(){
     await repo.prepare();
     await LocalDocumentDetailCache.initialize(db);
     await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status,job_number,customer_id,vehicle_label) VALUES('job','shop','owner','Turbo repair','open','J-44','customer','2021 Synthetic SUV')");
-    await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind,document_number) VALUES('invoice','shop','job','invoice','6363')");
+    await db.customStatement("INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) VALUES('2026-11-07','invoice','shop','job','invoice','6363')");
     for(final e in ['a','b','c']){await repo.saveEmployeeCompensation(employee:e,name:'Mechanic $e',rate:4000,weeklyBase:false);}
     Map<String,dynamic> invoice({num quantity=6,bool more=false})=>{'id':'invoice','kind':'invoice','job_id':'job','total_amount':quantity*100,
       'lines':[{'id':'turbo','line_kind':'labor','description':'Replace turbocharger and gaskets','quantity':quantity,'unit_price':100},
@@ -128,7 +128,7 @@ void main(){
     (detail['lines'] as List).add({'id':'missing-labor','line_kind':'labor','description':'Previously unindexed labor','quantity':1});
     await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','invoice'),jsonEncode(detail));
     await db.customStatement("INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,payload_json,state) VALUES('shop','document_draft_create','invoice','create','{}','pending')");
-    await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind,document_number) VALUES('unavailable','shop','job','invoice','SYNTHETIC-NO-CACHE')");
+    await db.customStatement("INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) VALUES('2026-11-07','unavailable','shop','job','invoice','SYNTHETIC-NO-CACHE')");
     await db.customStatement("UPDATE local_documents SET document_date='2026-11-07' WHERE id IN ('invoice','unavailable')");
     final outboxBefore=(await db.customSelect('SELECT * FROM sync_outbox').get()).map((r)=>r.data).toList();
     var recovered=0,unavailable=0;
@@ -156,7 +156,7 @@ void main(){
 
     await repo.saveEmployeeCompensation(employee:'d',name:'Synthetic new mechanic',rate:0,weeklyBase:false);
     await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status) VALUES('rate-job','shop','owner','Synthetic rate confirmation','open')");
-    await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind) VALUES('rate-invoice','shop','rate-job','invoice')");
+    await db.customStatement("INSERT INTO local_documents(document_date,id,business_id,job_id,kind) VALUES('2026-11-07','rate-invoice','shop','rate-job','invoice')");
     await LocalDocumentDetailCache(database:db).save('shop','rate-invoice',{'id':'rate-invoice','kind':'invoice','job_id':'rate-job',
       'lines':[{'id':'labor','line_kind':'labor','description':'Confirm missing hourly rate','quantity':1}]});
     await repo.setMainMechanic('rate-job','d','Synthetic new mechanic');

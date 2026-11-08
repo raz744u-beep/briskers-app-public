@@ -59,7 +59,7 @@ void main() {
       await tester.runAsync(() async {
       await LocalDocumentDetailCache.initialize(db);
       await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status,job_number) VALUES('job','shop','owner','Synthetic repair','open','J-TEST')");
-      await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind,document_number) VALUES('invoice','shop','job','invoice','TEST-100')");
+      await db.customStatement("INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) VALUES('2026-11-07','invoice','shop','job','invoice','TEST-100')");
       for (final employee in ['a', 'b']) {
         await db.customStatement('INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id,employee_name) VALUES(?,?,?,?,?)',
           [employee, 'shop', 'job', employee, employee == 'a' ? 'Alice' : 'Bob']);

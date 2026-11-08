@@ -25,8 +25,8 @@ void main() {
       "INSERT INTO local_jobs(id,business_id,access_scope,title,status,job_number) "
       "VALUES('job','shop','owner','Rear differential','open','J-24')");
     await db.customStatement(
-      "INSERT INTO local_documents(id,business_id,job_id,kind,document_number) "
-      "VALUES('invoice','shop','job','invoice','6342')");
+      "INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) "
+      "VALUES('2026-11-07','invoice','shop','job','invoice','6342')");
     final source={
       'id':'invoice','kind':'invoice','job_id':'job',
       'lines':[{'id':'rear','line_kind':'labor','description':'Replace rear differential fluid',
