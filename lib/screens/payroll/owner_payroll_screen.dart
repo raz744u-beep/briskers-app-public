@@ -36,6 +36,7 @@ import '../settings/employee_edit_screen.dart';
 import '../jobs/job_document_screen.dart';
 import 'payroll_history_panel.dart';
 import 'historical_expense_review.dart';
+import 'payroll_dry_run_preview.dart';
 import '../../services/local_financial_cache.dart' as expenses;
 import 'payroll_lan_controls.dart';
 import 'weekly_labor_review_screen.dart';
@@ -1816,6 +1817,18 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       subtitle:const Text('Assigned, completed and historical work · view only',
         style:TextStyle(fontSize:12)),
       children:[
+        ListTile(
+          title:const Text('Preview weekly payroll · TEST ONLY'),
+          subtitle:const Text('Read only · does not record a payment'),
+          trailing:const Icon(Icons.chevron_right),
+          onTap:()=>Navigator.of(context).push<void>(
+            MaterialPageRoute(builder:(_)=>PayrollDryRunPreview(
+              employeeName:_employeeLabel(widget.employeeId),
+              weekStart:monday,
+              rows:List<Map<String,dynamic>>.from(rows),
+            )),
+          ),
+        ),
         if(rows.isEmpty)const ListTile(
           dense:true,
           title:Text('No linked mechanic allocations dated this week.'),
