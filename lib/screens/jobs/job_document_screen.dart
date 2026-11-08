@@ -6116,9 +6116,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ],
             ),
           ),
-          if (OwnerPayrollScreen.enabled && widget.isOwner && !_estimate && _detail?['job_id'] is String)
-            Padding(padding:const EdgeInsets.all(12),child:JobTasksAccess(
-              business:widget.businessId,job:_detail!['job_id'] as String,invoice:widget.documentId,revision:_loadGeneration,onChanged:()=>unawaited(_load()))),
           if (lines.isEmpty)
             const Padding(
               padding: EdgeInsets.all(22),
@@ -6166,7 +6163,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           !_estimate && isInvoiceLaborLine(line) &&
                           line['id'] is String && _detail?['job_id'] is String)
                         Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
                             Text(line['name']?.toString() ?? '',
                               style: const TextStyle(
@@ -6176,7 +6173,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                               )),
                             const SizedBox(width: 10),
                             Expanded(child: Align(
-                              alignment: Alignment.topRight,
+                              alignment: Alignment.centerRight,
                               child: JobTasksAccess(
                                 business: widget.businessId,
                                 job: _detail!['job_id'] as String,
