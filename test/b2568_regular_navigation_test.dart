@@ -117,7 +117,7 @@ void main(){
     final jobId=(await tester.runAsync(()async{
       final row=await db.customSelect(
         'SELECT job_id FROM local_documents WHERE business_id=? AND id=?',
-        variables:const [Variable<String>('shop'),Variable<String>(invoice)],
+        variables:[const Variable<String>('shop'),Variable<String>(invoice)],
       ).getSingle();
       return row.read<String>('job_id');
     }))!;
