@@ -89,12 +89,12 @@ class _HistoricalInvoiceLaborReviewState
         : FutureBuilder<List<Map<String,dynamic>>>(
           future:_history,
           builder:(context,snapshot) {
-            if(snapshot.hasError)return Center(child:Column(
+            if(snapshot.hasError) { return Center(child:Column(
               mainAxisSize:MainAxisSize.min,children:[
                 const Text('Saved invoice labor could not be read.'),
                 TextButton(onPressed:()=>setState(()=>_history=_read()),
                   child:const Text('Retry')),
-              ]));
+              ])); }
             if(!snapshot.hasData) { return const Center(child:CircularProgressIndicator()); }
             final rows=snapshot.data!;
             return ListView(padding:const EdgeInsets.all(14),children:[
