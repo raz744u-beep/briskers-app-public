@@ -2,7 +2,6 @@ import '../../services/job_task_summary.dart';
 import '../payroll/mechanic_labor_screen.dart';
 import '../payroll/owner_payroll_screen.dart';
 import '../payroll/job_tasks_access.dart';
-import '../../widgets/completed_work_section.dart';
 import '../../services/owner_job_retirement_service.dart';
 import 'owner_local_delete_action.dart';
 import 'dart:async';
