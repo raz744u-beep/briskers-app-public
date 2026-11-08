@@ -386,8 +386,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final pendingPayments = await PayrollOwnerLedger(_db, widget.businessId).pending();
     _loadStage = 'tasks'; // Invoice saves maintain task identities incrementally.
     final job = widget.jobId;
-    final sources = (await repository.tasks()).where((r)=>job!=null ||
-      r['source_kind']!='invoice' || LocalInvoiceTaskStore.currentPayrollDate(r['invoice_date'])).toList();
+    // Keep historical invoice task sources visible in the Tasks UI.
+    // A pre-cutover source is read-only history, never a new payable credit.
+    final sources = (await repository.tasks()).map((r) => <String,dynamic>{
+      ...r,
+      'archived_labor': r['source_kind']=='invoice' &&
+          !LocalInvoiceTaskStore.currentPayrollDate(r['invoice_date']) ? 1 : 0,
+    }).toList();
     final persistedEmployees = job == null
         ? await repository.employees()
         : await repository.assignedEmployees(job);
@@ -404,8 +409,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         widget.employeeId == null && !_jobMode;
     final employee = widget.globalTasks || overview ? null :
         widget.employeeId ?? _employee ?? (employees.firstOrNull?['id'] as String?);
-    final work = (await repository.work(employee: _jobMode ? null : employee, job: job))
-      .where((r)=>job!=null || r['archived_labor']!=1).toList();
+    // Preserve historical allocations in read-only Tasks and Reports views.
+    // Payroll payment eligibility is guarded separately in WeeklyLaborReview.
+    final work = await repository.work(employee: _jobMode ? null : employee, job: job);
     if(!mounted||generation!=_loadGeneration)return;
     if(!_canView)return;
     setState((){_hasLocalData=true;_employees=employees;_employee=employee;_work=work;_taskSources=sources;});
