@@ -35,6 +35,8 @@ import '../jobs/job_detail_screen.dart';
 import '../settings/employee_edit_screen.dart';
 import '../jobs/job_document_screen.dart';
 import 'payroll_history_panel.dart';
+import 'historical_expense_review.dart';
+import '../../services/local_financial_cache.dart';
 import 'payroll_lan_controls.dart';
 import 'weekly_labor_review_screen.dart';
 import 'tasks_workspace.dart';
@@ -1996,6 +1998,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Widget _reportsPanel() => _PayrollViewport(minHeight:360,child:Column(children: [
+    if (_canView && (widget.employeeId ?? _employee) != null)
+      TextButton.icon(icon: const Icon(Icons.manage_search),
+        label: const Text('Review historical expenses'),
+        onPressed: () => HistoricalExpenseReview.open(context,
+          businessId: widget.businessId,
+          employeeName: _employeeLabel(widget.employeeId ?? _employee),
+          access: _historyUnlocked, canView: () => mounted && _canView,
+          cache: LocalFinancialCache(database: _db))),
+
     if (_pendingPayments.isNotEmpty)
       MaterialBanner(content: Text(
         "${_pendingPayments.length} payment request(s) pending — not recorded as paid. "
