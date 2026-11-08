@@ -11,7 +11,9 @@ import 'local_task_assignment_store.dart';
 class LocalInvoiceTaskStore {
   LocalInvoiceTaskStore(this.db);
   final BriskersLocalDatabase db;
-  static const payrollCutover = '2026-11-07';
+  // Owner confirmed work through Nov 8 was already paid in Expenses.
+  // New payable invoice labor starts with the week of Nov 9, 2026.
+  static const payrollCutover = '2026-11-09';
   static bool currentPayrollDate(Object? value) {
     if (value is! String || !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) return false;
     final parsed = DateTime.tryParse(value);
