@@ -1129,9 +1129,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final tomorrow = midnight.add(const Duration(days: 1));
     switch (_payrollPeriod) {
       case 'This Week':
-        return (from:monday,until:monday.add(const Duration(days: 7)));
+        return (from:monday,until:monday.add(const Duration(days: 5)));
       case 'Last Week':
-        return (from:monday.subtract(const Duration(days: 7)),until:monday);
+        return (from:monday.subtract(const Duration(days: 7)),until:monday.subtract(const Duration(days: 2)));
       case 'Last 30 Days':
         return (from:midnight.subtract(const Duration(days: 29)),until:tomorrow);
       case 'Last 3 Months':
@@ -1150,9 +1150,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               _customPeriod!.end.month,_customPeriod!.end.day)
               .add(const Duration(days: 1)));
         }
-        return (from:monday,until:monday.add(const Duration(days: 7)));
+        return (from:monday,until:monday.add(const Duration(days: 5)));
       default:
-        return (from:monday,until:monday.add(const Duration(days: 7)));
+        return (from:monday,until:monday.add(const Duration(days: 5)));
     }
   }
 
@@ -1791,7 +1791,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   Widget _recordedServiceLabor() {
     final monday = DateTime(_week.year,_week.month,_week.day)
         .subtract(Duration(days:_week.weekday-1));
-    final end = monday.add(const Duration(days:7));
+    final end = monday.add(const Duration(days:5));
     DateTime? recordedDate(Map<String,dynamic> row) {
       for (final field in const ['completed_date','invoice_date','job_document_date']) {
         final value = row[field]?.toString();
