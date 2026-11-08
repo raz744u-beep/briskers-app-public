@@ -1780,6 +1780,59 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   Future<void> _updateEmployeeGeneralTask(int id, String status) =>
       _changeGeneralTaskStatus(widget.employeeId!, id, status);
 
+  // Read-only weekly work history: Tasks must not masquerade as the
+  // unpaid-only payment selection panel. This never creates payroll credits.
+  Widget _recordedServiceLabor() {
+    final monday = DateTime(_week.year,_week.month,_week.day)
+        .subtract(Duration(days:_week.weekday-1));
+    final end = monday.add(const Duration(days:7));
+    DateTime? recordedDate(Map<String,dynamic> row) {
+      for (final field in const ['completed_date','invoice_date','job_document_date']) {
+        final value = row[field]?.toString();
+        if(value==null || value.isEmpty)continue;
+        final date=DateTime.tryParse(value);
+        if(date!=null)return date;
+      }
+      final created=row['job_created_at'];
+      if(created is int && created>0) {
+        return DateTime.fromMillisecondsSinceEpoch(
+          created<100000000000 ? created*1000 : created);
+      }
+      return null;
+    }
+    final rows = _work.where((row) {
+      final date = recordedDate(row);
+      return date!=null && !date.isBefore(monday) && date.isBefore(end);
+    }).toList();
+    return ExpansionTile(
+      key:ValueKey('employee-recorded-week-${widget.employeeId}-${monday.toIso8601String()}'),
+      initiallyExpanded:false,
+      title:Text('Recorded labor this week · ${rows.length}',
+        style:const TextStyle(fontWeight:FontWeight.w700)),
+      subtitle:const Text('Assigned, completed and historical work · view only',
+        style:TextStyle(fontSize:12)),
+      children:[
+        if(rows.isEmpty)const ListTile(
+          dense:true,
+          title:Text('No linked mechanic allocations dated this week.'),
+          subtitle:Text('Invoice labor and prior payments remain in their original records.')),
+        for(final row in rows)
+          ListTile(
+            dense:true,
+            title:Text('${row['job_number']??'Job'} · ${row['description']??'Labor'}',
+              maxLines:2,overflow:TextOverflow.ellipsis),
+            subtitle:Text(row['archived_labor']==1
+                ? 'Historical labor · excluded from new payroll'
+                : row['state']=='Done' ? 'Completed' :
+                    row['state']=='In Progress' ? 'In progress' : 'Assigned'),
+            trailing:Text(
+              '${((row['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(2)} h',
+              style:const TextStyle(fontWeight:FontWeight.w700)),
+          ),
+      ],
+    );
+  }
+
   Widget _tasksTab() => _PayrollViewport(minHeight:_currentJobsExpanded?600:360,child:Column(children:[
     Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),
       child:Row(children:[
@@ -1802,12 +1855,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if(!_showGeneralTasks)Row(children:[
       const Expanded(child:Text('Service Tasks',style:TextStyle(fontWeight:FontWeight.w700))),
       TextButton.icon(onPressed:_newServiceTask,icon:const Icon(Icons.add),label:const Text('New Task'))]),
-    if(!_showGeneralTasks && _work.any((r)=>r['state']!='Done'))
+    if(!_showGeneralTasks && _work.any((r)=>r['archived_labor']!=1 && r['state']!='Done'))
       ExpansionTile(key:PageStorageKey('employee-current-jobs-${widget.employeeId}'),
         initiallyExpanded:_currentJobsExpanded,onExpansionChanged:(v)=>setState(()=>_currentJobsExpanded=v),
         title:const Text('Current assigned Jobs'),children:[SizedBox(height:160,child:ListView(children:[
-          for(final row in _work.where((r)=>r['state']!='Done'))Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+          for(final row in _work.where((r)=>r['archived_labor']!=1 && r['state']!='Done'))Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
             Text('${row['job_number']??'Job'} · ${row['vehicle_label']??''}'),_taskCard(row)])]))]),
+    if(!_showGeneralTasks) _recordedServiceLabor(),
     Expanded(child:_showGeneralTasks
       ? Builder(builder:(context) {
         final rows = _generalTasks;
@@ -1846,7 +1900,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         tasks: _work, week: _week, embedded: true,
         advanceBalance: () => _viewRepository.advance(widget.employeeId!),
         recordPayment: _recordWeekly,
-        onWeekChanged: (week) => _week = week,
+        onWeekChanged: (week) => setState(()=>_week = week),
         onCancel: () => Navigator.of(context).pop(),
       )),
   ]));
