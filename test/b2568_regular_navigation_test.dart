@@ -214,9 +214,14 @@ void main(){
     // UI must be dated inside the Mon–Fri shop week for the payroll review.
     // This updates fixture-only timestamps, not paid credits or app behavior.
     await tester.runAsync(() async {
+      final now=DateTime.now();
+      final finished=now.weekday<=DateTime.friday
+          ? now : now.subtract(Duration(days:now.weekday-DateTime.friday));
+      final savedDate=finished.toIso8601String().split('T').first;
       await db.customStatement(
-        "UPDATE regular_payroll_portions SET completed_date='2026-11-06' "
+        "UPDATE regular_payroll_portions SET completed_date=? "
         "WHERE business_id='shop' AND state='Done'",
+        [savedDate],
       );
     });
     navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>const OwnerPayrollScreen(businessId:'shop')));
