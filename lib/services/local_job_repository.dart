@@ -7,6 +7,7 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_job_access_history.dart';
 import 'local_job_retirement.dart';
+import 'job_task_summary.dart';
 
 class LocalJobDetailSnapshot {
   const LocalJobDetailSnapshot({
@@ -27,6 +28,9 @@ class LocalJobRepository {
     : _database = database ?? localDatabase;
 
   final BriskersLocalDatabase _database;
+
+  Future<Map<String,Map<String,int>>> allocationHours(String business,List<String> jobs) =>
+      JobTaskSummary(_database).hours(business,jobs);
 
   // Shared device SQLite has one executor: avoid repeated DDL ahead of cards.
   // This is only an index/setup cache, not a bypass of retirement checks.

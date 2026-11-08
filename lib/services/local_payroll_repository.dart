@@ -345,6 +345,24 @@ class LocalPayrollRepository {
     });
   }
 
+  Future<void> removeOpenAllocation(String task,String employee) async {
+    _authorize();
+    await prepare();
+    await db.transaction(() async {
+      final open = await _read(
+        "SELECT p.id FROM regular_payroll_portions p JOIN local_mechanic_work_credits_v1 c "
+        "ON c.business_id=p.business_id AND c.allocation_id=p.id WHERE p.business_id=? AND p.task_id=? "
+        "AND p.employee_id=? AND p.state='Open' AND c.actual_minutes=0 AND c.completed=0 AND c.paid_operation_id IS NULL "
+        "AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage w WHERE w.business_id=p.business_id AND w.credit_id=p.id)",
+        [business,task,employee]);
+      if(open.isEmpty) throw StateError('Started, earned or paid work cannot be removed.');
+      await db.customStatement('INSERT INTO regular_payroll_assignment_meta(business_id,task_id,employee_id,inherited,active) VALUES(?,?,?,0,0) '
+        'ON CONFLICT(business_id,task_id,employee_id) DO UPDATE SET active=0,revision=revision+1 WHERE active=1',[business,task,employee]);
+      await db.customStatement('INSERT INTO regular_payroll_task_policy VALUES(?,?,1) ON CONFLICT(business_id,task_id) DO UPDATE SET manual_override=1',[business,task]);
+      _authorize();
+    });
+  }
+
   Future<void> editAllocation({required String task, required String previous,
     required String employee, required String name, required int minutes}) async {
     _authorize();

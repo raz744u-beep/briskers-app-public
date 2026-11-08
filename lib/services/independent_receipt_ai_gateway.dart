@@ -15,7 +15,11 @@ typedef ReceiptAiTransport = Future<Map<String, dynamic>> Function(
 /// uses a device token. The existing service uses the current app session.
 class IndependentReceiptAiGateway {
   const IndependentReceiptAiGateway({
-    this.endpoint = receiptGatewayUrl,
+    this.endpoint = const String.fromEnvironment(
+      'BRISKERS_RECEIPT_AI_GATEWAY_URL',
+      defaultValue:
+          'https://briskers-receipt-ai.raz744u.workers.dev/extract',
+    ),
     ReceiptAiTransport? transport,
   }) : _transport = transport, _existingService = false;
 

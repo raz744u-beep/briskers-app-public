@@ -273,7 +273,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
               style:const TextStyle(fontSize:12,color:Color(0xFF64748B)))),
             IconButton(
               tooltip:'Assign or split mechanic labor',
-              icon:const Icon(Icons.person_add_alt_1_outlined,
+              icon:const Icon(Icons.edit_outlined,
                 color:Color(0xFF00897E),size:20),
               constraints:const BoxConstraints(minWidth:30,minHeight:30),
               padding:EdgeInsets.zero,
@@ -288,12 +288,15 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
     return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
       Row(children:[
         Expanded(child:DropdownButtonFormField<String>(key:ValueKey(main),initialValue:values.containsKey(main)?main:null,
-          decoration:const InputDecoration(labelText:'Main Mechanic'),isExpanded:true,
+          decoration:const InputDecoration(labelText:'Main Mechanic', border:OutlineInputBorder(),enabledBorder:OutlineInputBorder(borderSide:BorderSide(color:Colors.teal)),contentPadding:EdgeInsets.symmetric(horizontal:10,vertical:14)),isExpanded:true,
           items:[const DropdownMenuItem<String>(value:null,child:Text('Unassigned')),
             for(final entry in values.entries) if(entry.key is String)
               DropdownMenuItem(value:entry.key as String,child:Text(EmployeeNicknameStore.displayLabel(entry.value,staff)))],
           onChanged:busy?null:chooseMain)),
-        const SizedBox(width:8),OutlinedButton.icon(onPressed:open,icon:const Icon(Icons.task_alt),label:const Text('Tasks'))]),
+        const SizedBox(width:8),Expanded(child:SizedBox(height:52,child:OutlinedButton.icon(
+          style:OutlinedButton.styleFrom(foregroundColor:Colors.teal.shade800,side:const BorderSide(color:Colors.teal),
+            shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(4))),
+          onPressed:open,icon:const Icon(Icons.task_alt),label:const Text('Job Tasks'))))]),
       if(widget.invoice!=null && estimated!=null)Text('Estimated labor: ${(estimated!/60).toStringAsFixed(2)} h · Actual: ${(actual!/60).toStringAsFixed(2)} h',style:const TextStyle(fontSize:12)),
       if(warning!=null)Row(children:[Expanded(child:Text(warning!)),TextButton(onPressed:load,child:const Text('Retry'))]),
     ]);

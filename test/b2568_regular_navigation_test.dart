@@ -116,7 +116,7 @@ void main(){
     await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:150)));await tester.pump();
     await click(find.byTooltip('Edit or split mechanic labor').first);
     
-    await click(find.text('Assign / split'));
+    await click(find.text('Add mechanic'));
     await click(find.text('Beta'));
     // The second mechanic starts at zero allocated hours. The Owner sets
     // the approved credit once, before completing the task.
@@ -152,7 +152,7 @@ void main(){
     
     // Keep Alpha explicitly assigned, then add Beta to the same task identity.
     for(final name in ['Alpha','Beta']){
-      await click(find.text('Assign / split').last);await click(find.text(name).last);
+      await click(find.text('Add mechanic').last);await click(find.text(name).last);
       await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:400)));await tester.pump();
     }
     // Two independent assigned-hours choices on the shared labor line.
@@ -258,7 +258,7 @@ void main(){
     await click(chip);
     expect(tester.widget<JobDocumentScreen>(find.byType(JobDocumentScreen)).documentId,invoice);
     navigator.currentState!.pop();await tester.pumpAndSettle();
-    await click(find.descendant(of:jobPage,matching:find.widgetWithText(OutlinedButton,'Tasks')));
+    await click(find.descendant(of:jobPage,matching:find.widgetWithText(OutlinedButton,'Job Tasks')));
     await until(find.byType(TasksWorkspace));
     expect(tester.widget<TasksWorkspace>(find.byType(TasksWorkspace)).scopedJob,jobId);
     expect(find.text('Labor Task'),findsOneWidget);

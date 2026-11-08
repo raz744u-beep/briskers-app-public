@@ -41,7 +41,7 @@ void main() {
   });
 
   testWidgets(
-    'Owner planned time stays visible with edit affordance on narrow cards',
+    'Read-only mechanic allocations and total fit narrow cards regardless of legacy planned hours',
     (tester) async {
       tester.view.physicalSize = const Size(360, 740);
       tester.view.devicePixelRatio = 1;
@@ -60,14 +60,16 @@ void main() {
                 },
                 statusControl: const Text('Open'),
                 onOpen: () {},
-                onEditMechanic: () {},
-                onEditPlannedTime: () {},
+                mechanicMinutes: const {'Chris': 540, 'Kam': 120},
               ),
             ),
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.byIcon(Icons.timer_outlined), findsOneWidget);
+        expect(find.text('Chris 9h'), findsOneWidget);
+        expect(find.text('Kam 2h'), findsOneWidget);
+        expect(find.text('11 hr'), findsOneWidget);
+        expect(find.byIcon(Icons.edit_outlined), findsNothing);
         expect(tester.takeException(), isNull);
       }
     },

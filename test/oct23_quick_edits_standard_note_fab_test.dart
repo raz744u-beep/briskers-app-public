@@ -13,30 +13,12 @@ void main() {
     expect(source.lastIndexOf('SafeArea(', footer), greaterThan(0));
   });
 
-  test('Jobs quick edits publish local data before a network flush', () {
-    final source = File('lib/screens/jobs_screen.dart').readAsStringSync();
-    final mechanic = source.substring(
-      source.indexOf('Future<void> _quickEditMechanic('),
-      source.indexOf('Future<void> _quickEditPlannedTime('),
-    );
-    expect(
-      mechanic.indexOf('cachedEmployees(widget.businessId)'),
-      lessThan(mechanic.indexOf('refreshEmployees(widget.businessId)')),
-    );
-    final hours = source.substring(
-      source.indexOf('Future<void> _quickEditPlannedTime('),
-      source.indexOf('Future<void> _changeStatus('),
-    );
-    for (final code in [mechanic, hours]) {
-      expect(code, contains('_patchQuickAdminCard('));
-      expect(code, isNot(contains('await _load(refreshRemote: false)')));
-      expect(code, contains('_scheduleQuickEditSync();'));
-      expect(code, isNot(contains('await _offlineJobAdmin.flush(')));
-    }
-    expect(source, contains('bool _quickEditSyncRunning = false'));
-    expect(source, contains('bool _quickEditSyncRequested = false'));
+  test('Jobs list displays local allocations without standalone hour edits', () {
+    final jobs = File('lib/screens/jobs_screen.dart').readAsStringSync();
+    expect(jobs,contains('_localJobs.allocationHours('));
+    expect(jobs,isNot(contains('_quickEditPlannedTime(')));
+    expect(jobs,isNot(contains('_quickEditMechanic(')));
   });
-
   test('Primary New actions stay in approved positions with rounded styling', () {
     for (final path in const [
       'lib/screens/jobs_screen.dart',

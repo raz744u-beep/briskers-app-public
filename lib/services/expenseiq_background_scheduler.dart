@@ -29,7 +29,6 @@ void expenseIqPhotoCallbackDispatcher() {
     try {
       WidgetsFlutterBinding.ensureInitialized();
       DartPluginRegistrant.ensureInitialized();
-      validateBriskersEnvironment();
       await initializeLocalDatabase();
       await BriskersConnectionModeController.instance.initialize();
       if (BriskersConnectionModeController.instance.forceOffline) return true;

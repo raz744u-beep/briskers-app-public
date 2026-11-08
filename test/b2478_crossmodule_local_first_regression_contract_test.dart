@@ -36,23 +36,12 @@ void main() {
         isNot(contains('await _offlineJobAdmin.refreshEmployees(')));
   });
 
-  test('Jobs list mechanic and hours do not perform full list re-query',
-      () {
-    final s = source('lib/screens/jobs_screen.dart');
-    final from = s.indexOf('Future<void> _quickEditMechanic(');
-    final time = s.indexOf('Future<void> _quickEditPlannedTime(', from);
-    final end = s.indexOf('void _applyLocalStatus(', time);
-    expect(from, greaterThanOrEqualTo(0));
-    expect(time, greaterThan(from));
-    expect(end, greaterThan(time));
-    for (final code in [s.substring(from, time), s.substring(time, end)]) {
-      expect(code, contains('_patchQuickAdminCard('));
-      expect(code, contains('_scheduleQuickEditSync();'));
-      expect(code, isNot(contains('await _load(refreshRemote: false)')));
-      expect(code, isNot(contains('await _offlineJobAdmin.flush(')));
-    }
+  test('Jobs list displays local allocations without standalone hour edits', () {
+    final jobs = File('lib/screens/jobs_screen.dart').readAsStringSync();
+    expect(jobs,contains('_localJobs.allocationHours('));
+    expect(jobs,isNot(contains('_quickEditPlannedTime(')));
+    expect(jobs,isNot(contains('_quickEditMechanic(')));
   });
-
   test('Expenses create/edit/copy opens saved first frame and refreshes in '
       'background', () {
     final entry = source('lib/screens/expenses/expense_entry_screen.dart');
