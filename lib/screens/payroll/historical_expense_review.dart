@@ -20,6 +20,7 @@ class HistoricalExpenseReview extends StatefulWidget {
     required this.canView,
     required this.search,
     required this.source,
+    this.exactDate,
   });
 
   final String initialSearch;
@@ -27,6 +28,7 @@ class HistoricalExpenseReview extends StatefulWidget {
   final bool Function() canView;
   final ArchiveSearch search;
   final String source;
+  final DateTime? exactDate;
 
   static Future<void> open(BuildContext context, {
     required String businessId,
@@ -34,6 +36,7 @@ class HistoricalExpenseReview extends StatefulWidget {
     required ValueListenable<bool> access,
     required bool Function() canView,
     required LocalFinancialCache cache,
+    DateTime? exactDate,
   }) async {
     if (!canView()) return;
     final offline = BriskersConnectionModeController.instance.forceOffline;
@@ -42,16 +45,19 @@ class HistoricalExpenseReview extends StatefulWidget {
     await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) =>
       HistoricalExpenseReview(
         initialSearch: employeeName, access: access, canView: canView,
+        exactDate: exactDate,
         source: offline ? 'Expenses saved on this device' : 'Shop expense records',
         search: (query, offset, limit) async {
           if (!canView()) throw StateError('Owner access required.');
           if (offline) {
             final rows = await cache.loadTransactions(businessId,
-              endDate: end, search: query, direction: 'expense');
+              startDate: exactDate, endDate: exactDate ?? end,
+              search: query, direction: 'expense');
             return rows.skip(offset).take(limit).toList();
           }
           return const BriskersApi().transactionsPaged(businessId,
-            endDate: end, search: query.isEmpty ? null : query,
+            startDate: exactDate, endDate: exactDate ?? end,
+            search: query.isEmpty ? null : query,
             direction: 'expense', offset: offset, limit: limit);
         },
       )));
@@ -137,9 +143,9 @@ class _HistoricalExpenseReviewState extends State<HistoricalExpenseReview> {
       ? const Center(child: Text('Owner access required.'))
       : ListView(padding: const EdgeInsets.all(16), children: [
         Text(widget.source),
-        const Text('Search original expenses before November 7, 2026. '
-          'A matching payee does not verify an employee payment. '
-          'These records do not affect payroll balances.'),
+        Text(widget.exactDate == null
+          ? 'Search original expenses before November 7, 2026. A matching payee does not verify an employee payment. These records do not affect payroll balances.'
+          : 'Original expense entries for ${widget.exactDate!.month}/${widget.exactDate!.day}/${widget.exactDate!.year}. Verify the payee, amount and original transaction ID. This read-only review does not mark payroll paid.'),
         TextField(controller: _text, textInputAction: TextInputAction.search,
           onSubmitted: (_) => _load(reset: true),
           decoration: InputDecoration(labelText: 'Payee, category or remarks',
