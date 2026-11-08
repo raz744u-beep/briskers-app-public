@@ -60,7 +60,7 @@ class PayrollDryRunPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final totals=PayrollDryRunTotals.fromSavedWork(rows);
     String hours(int minutes)=>(minutes/60).toStringAsFixed(2);
-    String usd(int cents)=>'\${(cents/100).toStringAsFixed(2)}';
+    String usd(int cents) => String.fromCharCode(36) + (cents/100).toStringAsFixed(2);
     final friday=weekStart.add(const Duration(days:4));
     final sunday=weekStart.add(const Duration(days:6));
     return Scaffold(
