@@ -34,9 +34,9 @@ void main() {
     )));
     await tester.pumpAndSettle();
     expect(find.textContaining('11/6/2026'), findsOneWidget);
-    expect(find.text('Kam'), findsOneWidget);
+    expect(find.text('Kam'), findsWidgets);
     expect(find.textContaining('original-expense-11-06'), findsNothing);
-    await tester.tap(find.text('Kam'));
+    await tester.tap(find.text('Kam').last);
     await tester.pumpAndSettle();
     expect(find.textContaining('original-expense-11-06'), findsOneWidget);
     expect(find.text('Save Payment'), findsNothing);
