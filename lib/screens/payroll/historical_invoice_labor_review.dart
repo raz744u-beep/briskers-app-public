@@ -60,7 +60,7 @@ class _HistoricalInvoiceLaborReviewState
   Future<List<Map<String,dynamic>>> _read() async {
     if(!widget.canView())throw StateError('Owner access required.');
     final from=DateTime(widget.weekStart.year,widget.weekStart.month,widget.weekStart.day);
-    final end=from.add(const Duration(days:7));
+    final end=from.add(const Duration(days:5));
     final docs=await LocalDocumentRepository(database:widget.database)
         .listByKind(widget.businessId,kind:'invoice');
     final cache=LocalDocumentDetailCache(database:widget.database);
@@ -81,7 +81,7 @@ class _HistoricalInvoiceLaborReviewState
 
   @override
   Widget build(BuildContext context) {
-    final end=widget.weekStart.add(const Duration(days:6));
+    final end=widget.weekStart.add(const Duration(days:4));
     return Scaffold(
       appBar:AppBar(title:const Text('Saved Invoice Labor · History')),
       body:!widget.canView()
