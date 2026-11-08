@@ -40,7 +40,9 @@ void main() {
       ],
     )));
     expect(find.textContaining('TEST ONLY'),findsOneWidget);
-    expect(find.textContaining('11/6/2026'),findsOneWidget);
+    expect(find.text('Week: 11/2–11/6/2026'),findsOneWidget);
+    expect(find.textContaining('11/8/2026'),findsNothing);
+    expect(find.textContaining('11/6/2026'),findsWidgets);
     expect(find.text('Save Payment'),findsNothing);
     expect(find.text('Mark Paid'),findsNothing);
   });
