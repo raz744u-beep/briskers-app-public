@@ -6,7 +6,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   Map<String,dynamic> service(String job,int ageDays,
-      {String status='planned',int remaining=0,int paid=0}) {
+      {String status='planned',int remaining=0,int paid=0,bool archived=false}) {
     final now=DateTime.now();
     final day=DateTime(now.year,now.month,now.day)
       .subtract(Duration(days:ageDays));
@@ -16,6 +16,7 @@ void main() {
       'invoice_date':day.toIso8601String().substring(0,10),
       'source_description':'Service $job','description':'Service $job',
       'source_kind':'invoice','source_missing':0,
+      'archived_labor':archived?1:0,
       'employee_id':'mechanic','status':status,'remaining_minutes':remaining,
       'paid':paid,'completed_date': status=='done' ?
         day.toIso8601String().substring(0,10) : null,
@@ -109,5 +110,28 @@ void main() {
     expect(find.text('Jobs with Tasks · 1'),findsOneWidget);
     expect(find.text('J-historical'),findsOneWidget);
   });
+
+
+  testWidgets('archived planned invoice is historical, never active or unpaid',
+      (tester)async{
+    tester.view.physicalSize=const Size(390,844);
+    tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await showTasks(tester,[
+      service('historical',10,archived:true,remaining:60),
+    ]);
+    expect(find.text('Jobs with Tasks · 0'),findsOneWidget);
+    await tester.tap(find.byKey(const Key('show-all-service-task-statuses')));
+    await tester.pumpAndSettle();
+    expect(find.text('Jobs with Tasks · 1'),findsOneWidget);
+    expect(find.text('J-historical'),findsOneWidget);
+    await tester.tap(find.byTooltip('Status'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Unpaid').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Jobs with Tasks · 0'),findsOneWidget);
+  });
+
 
 }
