@@ -13,6 +13,9 @@ void main() {
     expect(summary,contains("label: 'Mechanic'"));
     expect(summary,contains("label: OwnerPayrollScreen.enabled?'Estimated labor':'Planned time'"));
     expect(source,contains('child:JobTasksAccess('));
-    expect(source,contains('CompletedWorkSection('));
+    // Owner-approved progress row replaces the old duplicate completion card.
+    expect(source,contains('if (_owner && OwnerPayrollScreen.enabled) _progressRow()'));
+    expect(source,isNot(contains('CompletedWorkSection(business:widget.businessId')));
+
   });
 }
