@@ -389,8 +389,20 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
           if(widget.scopedJob==null && widget.onAddService!=null)TextButton.icon(onPressed:widget.onAddService,icon:const Icon(Icons.add),label:const Text('New Task'))]),
         const SizedBox(height:9),
         if(entries.isEmpty)
-          const Padding(padding:EdgeInsets.all(15),
-            child:Text('No service tasks match these filters.')),
+          Padding(padding:const EdgeInsets.all(15),
+            child:Column(crossAxisAlignment:CrossAxisAlignment.start,
+              children:[
+                Text(widget.serviceTasks.isEmpty
+                  ? 'No service tasks are available in this view. This does not mean invoice labor or payment history was deleted.'
+                  : 'No service tasks match these filters. Your saved work may be completed, paid, or historical.'),
+                if(_status!='All' && widget.serviceTasks.isNotEmpty)
+                  TextButton.icon(
+                    key:const Key('show-all-service-task-statuses'),
+                    onPressed:()=>setState(()=>_status='All'),
+                    icon:const Icon(Icons.history),
+                    label:const Text('Show all task statuses'),
+                  ),
+              ])),
         for(final entry in entries) ...[
           Card(color:const Color(0xFFF0F5FA),margin:const EdgeInsets.only(bottom:9),
             child:Column(children:[
