@@ -139,10 +139,10 @@ class LocalPayrollRepository {
       final limit=(maxInvoices-checked)<10?(maxInvoices-checked):10;
       final rows=await _read(
         "SELECT id FROM local_documents WHERE business_id=? AND kind='invoice' "
-        "AND id>? AND COALESCE(status,'') NOT IN "
+        "AND document_date>=? AND id>? AND COALESCE(status,'') NOT IN "
         "('void','voided','cancelled','canceled','deleted') "
         "${job==null?'':'AND job_id=? '}ORDER BY id LIMIT $limit",
-        [business,after,?job]);
+        [business,LocalInvoiceTaskStore.payrollCutover,after,?job]);
       if(rows.isEmpty){
         if(resume){await db.customStatement(
           'INSERT INTO regular_payroll_recovery_cursor VALUES(?,?,?,1) '
@@ -202,6 +202,7 @@ class LocalPayrollRepository {
       "JOIN local_job_assignments a ON a.business_id=j.business_id AND a.job_id=j.id AND a.active=1 "
       "JOIN regular_payroll_employees e ON e.business_id=a.business_id AND e.id=a.employee_id "
       "WHERE t.business_id=? AND s.active=1 AND s.source_kind='invoice' AND e.rate>0 "
+      "AND NOT EXISTS(SELECT 1 FROM local_documents d WHERE d.business_id=s.business_id AND d.id=s.invoice_id AND d.document_date < '${LocalInvoiceTaskStore.payrollCutover}') "
       "AND (a.employee_id=j.assigned_employee_id OR (j.assigned_employee_id IS NULL AND "
       "(SELECT COUNT(*) FROM local_job_assignments a2 WHERE a2.business_id=j.business_id "
       "AND a2.job_id=j.id AND a2.active=1)=1)) "
@@ -341,6 +342,20 @@ class LocalPayrollRepository {
       );
       await _assign(task, employee);
       await queueChange?.call();
+      _authorize();
+    });
+  }
+
+  Future<void> reviewUnpaidCarry(String employee,String allocation) async {
+    _authorize();
+    await prepare();
+    await db.transaction(() async {
+      final row = (await work(employee:employee)).where((r)=>r['id']==allocation).single;
+      if(row['archived_labor']!=1 || row['paid_minutes']!=0 || row['assignment_conflict']==1) {
+        throw StateError('Only unreviewed unpaid historical work can be carried forward.');
+      }
+      await db.customStatement('INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) VALUES(?,?,?,?)',
+        [business,allocation,'owner_reviewed_unpaid_carry',jsonEncode({'employee':employee,'reviewed_at':DateTime.now().toUtc().toIso8601String()})]);
       _authorize();
     });
   }
@@ -1053,6 +1068,9 @@ class LocalPayrollRepository {
     await prepare();
     final rows = await _read(
       "SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,"
+      "CASE WHEN d.document_date < '${LocalInvoiceTaskStore.payrollCutover}' AND NOT EXISTS "
+      "(SELECT 1 FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id "
+      "AND a.event='owner_reviewed_unpaid_carry') THEN 1 ELSE 0 END AS archived_labor,"
       "p.state,p.completed_date,c.revision AS version,t.description,t.job_id,"
       "j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,"
       "(SELECT MIN(document_date) FROM local_documents jd WHERE jd.business_id=t.business_id AND jd.job_id=t.job_id) AS job_document_date,"
@@ -1643,7 +1661,7 @@ class LocalPayrollRepository {
       );
       if (staff.length != 1 || (base > 0 && staff.single['base_enabled'] != 1))
         { throw StateError('Base not allowed for employee'); }
-      final current = await work(employee: employee);
+      final current = (await work(employee: employee)).where((r)=>r['archived_labor']!=1).toList();
       if (base > 0 && selected.isEmpty) {
         final nextWeek = DateTime.parse(week).add(const Duration(days: 7));
         final unpaidWork = current.any((row) {

@@ -1,3 +1,4 @@
+import '../../services/local_invoice_task_store.dart';
 import 'dart:async';
 import 'dart:math';
 
@@ -382,8 +383,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     _loadStage = 'pending requests';
     final pendingPayments = await PayrollOwnerLedger(_db, widget.businessId).pending();
     _loadStage = 'tasks'; // Invoice saves maintain task identities incrementally.
-    final sources = await repository.tasks();
     final job = widget.jobId;
+    final sources = (await repository.tasks()).where((r)=>job!=null ||
+      r['invoice_date'] is! String || (r['invoice_date'] as String).compareTo(LocalInvoiceTaskStore.payrollCutover)>=0).toList();
     final persistedEmployees = job == null
         ? await repository.employees()
         : await repository.assignedEmployees(job);
@@ -400,7 +402,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         widget.employeeId == null && !_jobMode;
     final employee = widget.globalTasks || overview ? null :
         widget.employeeId ?? _employee ?? (employees.firstOrNull?['id'] as String?);
-    final work = await repository.work(employee: _jobMode ? null : employee, job: job);
+    final work = (await repository.work(employee: _jobMode ? null : employee, job: job))
+      .where((r)=>job!=null || r['archived_labor']!=1).toList();
     if(!mounted||generation!=_loadGeneration)return;
     if(!_canView)return;
     setState((){_hasLocalData=true;_employees=employees;_employee=employee;_work=work;_taskSources=sources;});
@@ -729,7 +732,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final conflict = row['assignment_conflict'] == 1;
     final removed = row['source_active'] == 0;
     final state = row['state']?.toString() ?? 'Open';
-    final canProgress = !paid && !conflict && !removed && !_busy;
+    final archived = row['archived_labor']==1;
+    final canProgress = !archived && !paid && !conflict && !removed && !_busy;
     final planned = (row['estimated_minutes'] as int? ?? 0) / 60;
     final actual = row['recorded_actual_minutes'] as int? ??
         row['actual_minutes'] as int? ?? 0;
@@ -748,6 +752,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if(archived) ListTile(title:const Text('Historical labor · excluded from payroll'),
+              trailing: paid ? null : TextButton(onPressed:()=>_reviewCarry(row),child:const Text('Review unpaid work'))),
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Icon(_workStatusIcon(state),
                 color: _workStatusColor(state),size:22),
@@ -2045,14 +2051,26 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if(mounted) await _load();
   }
 
+  Future<void> _reviewCarry(Map<String,dynamic> row) async {
+    final ok=await showDialog<bool>(context:context,builder:(dialog)=>AlertDialog(
+      title:const Text('Carry unpaid work into payroll?'),
+      content:Text('Confirm that you reviewed the historical payments for ${_employeeLabel(row['employee_id'] as String)} and this specific labor is still unpaid.'),
+      actions:[TextButton(onPressed:()=>Navigator.pop(dialog),child:const Text('Cancel')),
+        TextButton(onPressed:()=>Navigator.pop(dialog,true),child:const Text('Confirm unpaid'))]));
+    if(ok==true && mounted) {
+      await _runOwnerTaskEdit(()=>_taskEditRepository.reviewUnpaidCarry(row['employee_id'] as String,row['id'] as String));
+    }
+  }
+
   Future<void> _removeAssignment(Map<String,dynamic> row) async {
     final approved = await showDialog<bool>(context:context,builder:(dialog)=>AlertDialog(
       title:const Text('Remove unpaid assignment?'),
       content:Text('Remove ${_employeeLabel(row['employee_id'] as String)} from this labor line?'),
       actions:[TextButton(onPressed:()=>Navigator.pop(dialog),child:const Text('Cancel')),
         TextButton(onPressed:()=>Navigator.pop(dialog,true),child:const Text('Remove'))]));
-    if(approved==true && mounted) await _runOwnerTaskEdit(()=>_taskEditRepository.removeOpenAllocation(
-      row['task_id'] as String,row['employee_id'] as String));
+    if(approved==true && mounted) {
+      await _runOwnerTaskEdit(()=>_taskEditRepository.removeOpenAllocation(row['task_id'] as String,row['employee_id'] as String));
+    }
   }
 
   Widget _assignmentManager() {

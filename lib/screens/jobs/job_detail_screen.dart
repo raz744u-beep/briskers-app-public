@@ -159,12 +159,11 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     final percent = '${(fraction * 100).round()}%';
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Row(children: [
-        Expanded(child: Text(progress == null ? 'Task progress unavailable' :
-            '${progress.done} of ${progress.total} tasks completed')),
-        TextButton(onPressed: _openJobLaborTasks,
-          style: TextButton.styleFrom(foregroundColor: Colors.teal.shade800),
-          child: const Text('View Tasks')),
+        const Expanded(child:Text('Job Progress',style:TextStyle(fontWeight:FontWeight.bold))),
+        Flexible(child:Text(progress == null ? 'Progress unavailable' :
+            '${progress.done} of ${progress.total} tasks completed',textAlign:TextAlign.end)),
       ]),
+      const SizedBox(height:6),
       if (progress != null)
         ClipRRect(borderRadius: BorderRadius.circular(9), child: LayoutBuilder(
           builder: (context, box) => Stack(children: [
@@ -174,6 +173,11 @@ class _JobDetailScreenState extends State<JobDetailScreen>
               child: Center(child: Text(percent, style: TextStyle(fontSize: 12,
                 fontWeight: FontWeight.bold, color: fraction * box.maxWidth >= 42 ? Colors.white : Colors.black87)))),
           ]))),
+      TextButton(onPressed:_openJobLaborTasks,
+        style:TextButton.styleFrom(foregroundColor:Colors.teal.shade800),
+        child:Row(children:[const Icon(Icons.checklist),const SizedBox(width:8),
+          Expanded(child:Text(progress==null?'View Tasks':'View Tasks (${progress.total})')),
+          const Icon(Icons.chevron_right)])),
     ]);
   }
 
@@ -3865,7 +3869,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                         labelStyle: TextStyle(color: Colors.teal.shade900, fontWeight: FontWeight.bold),
                         avatar: Icon(Icons.receipt_long_outlined, size: 17, color: Colors.teal.shade800),
                         label: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Flexible(child: Text('${invoice['document_number'] ?? 'Open invoice'}', overflow: TextOverflow.ellipsis)),
+                          Flexible(child: Text(invoice['document_number']==null ? 'Open invoice' : '#${invoice['document_number']}' , overflow: TextOverflow.ellipsis)),
                           Icon(Icons.chevron_right, size: 18, color: Colors.teal.shade800),
                         ]),
                         onPressed: _busy ? null : () => _openDocument(invoice['id'] as String),

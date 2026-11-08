@@ -252,6 +252,8 @@ void main(){
     final jobPage = find.byType(JobDetailScreen);
     final chip = find.descendant(of:jobPage,matching:find.widgetWithIcon(ActionChip,Icons.receipt_long_outlined));
     await until(chip);
+    await until(find.text('Job Progress'));
+    await capture('bugs32-owner-job-details');
     final list = find.descendant(of:jobPage,matching:find.byType(RefreshIndicator)).first;
     final add = find.descendant(of:jobPage,matching:find.widgetWithText(FloatingActionButton,'New'));
     expect(tester.getRect(list).bottom, lessThanOrEqualTo(tester.getRect(add).top));

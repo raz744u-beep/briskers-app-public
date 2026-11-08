@@ -7,7 +7,6 @@ import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
 import '../core/job_status_style.dart';
-import '../core/employee_role_style.dart';
 import '../core/job_list_options.dart';
 import '../core/module_modal_theme.dart';
 import '../services/briskers_api.dart';
