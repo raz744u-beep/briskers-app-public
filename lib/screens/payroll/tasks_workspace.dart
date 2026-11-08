@@ -86,6 +86,10 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
 
   bool _matchesStatus(Map<String,dynamic> row) {
     final status = _statusName(row['status']);
+    // Historical invoice labor is visible under All / Paid / Done,
+    // but never masquerades as a new active or payable task.
+    final historical = row['archived_labor'] == 1;
+    if (historical && (_status == 'Active' || _status == 'Unpaid')) return false;
     if (_status == 'Unpaid') {
       return status == 'Done' &&
           (row['remaining_minutes'] as int? ?? 0) > 0;
