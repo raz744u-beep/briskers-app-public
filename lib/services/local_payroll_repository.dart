@@ -368,6 +368,7 @@ class LocalPayrollRepository {
         "SELECT p.id FROM regular_payroll_portions p JOIN local_mechanic_work_credits_v1 c "
         "ON c.business_id=p.business_id AND c.allocation_id=p.id WHERE p.business_id=? AND p.task_id=? "
         "AND p.employee_id=? AND p.state='Open' AND c.actual_minutes=0 AND c.completed=0 AND c.paid_operation_id IS NULL "
+        "AND NOT EXISTS(SELECT 1 FROM regular_payroll_actual_time at WHERE at.business_id=p.business_id AND at.credit_id=p.id AND at.minutes>0) "
         "AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage w WHERE w.business_id=p.business_id AND w.credit_id=p.id)",
         [business,task,employee]);
       if(open.isEmpty) throw StateError('Started, earned or paid work cannot be removed.');
@@ -385,20 +386,28 @@ class LocalPayrollRepository {
     await db.transaction(() async {
       if (previous != employee) {
         final open = await _read(
-          "SELECT p.id FROM regular_payroll_portions p "
+          "SELECT p.id,p.state FROM regular_payroll_portions p "
           "JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id "
           "LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id "
-          "WHERE p.business_id=? AND p.task_id=? AND p.employee_id=? AND p.state='Open' AND COALESCE(m.active,1)=1 "
+          "WHERE p.business_id=? AND p.task_id=? AND p.employee_id=? AND p.state IN ('Open','In Progress') AND COALESCE(m.active,1)=1 "
           "AND c.actual_minutes=0 AND c.completed=0 AND c.paid_operation_id IS NULL "
-          "AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage w WHERE w.business_id=p.business_id AND w.credit_id=p.id)",
+          "AND NOT EXISTS(SELECT 1 FROM regular_payroll_actual_time at WHERE at.business_id=p.business_id AND at.credit_id=p.id AND at.minutes>0) "
+        "AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage w WHERE w.business_id=p.business_id AND w.credit_id=p.id)",
           [business,task,previous]);
-        if (open.isEmpty) throw StateError('Only an unstarted assignment can change mechanic.');
+        if (open.isEmpty) throw StateError('Completed, credited or paid work cannot change mechanic.');
         final existing = await _read(
           'SELECT id FROM regular_payroll_portions WHERE business_id=? AND task_id=? AND employee_id=?',
           [business,task,employee]);
         if (existing.isNotEmpty) throw StateError('This mechanic already has an allocation on this task.');
         if ((await _read('SELECT id FROM regular_payroll_employees WHERE business_id=? AND id=?',[business,employee])).isEmpty) {
           await saveEmployeeCompensation(employee:employee,name:name,rate:0,weeklyBase:false);
+        }
+        if(open.single['state']=='In Progress') {
+          final id=open.single['id'];
+          await db.customStatement('INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) VALUES(?,?,?,?)',
+            [business,id,'owner_reassigned_unearned_work',jsonEncode({'from':previous,'to':employee,'status':'In Progress'})]);
+          await db.customStatement("UPDATE regular_payroll_portions SET state='Open',version=version+1 WHERE business_id=? AND id=?",[business,id]);
+          await db.customStatement("UPDATE local_mechanic_work_credits_v1 SET revision=revision+1 WHERE business_id=? AND allocation_id=?",[business,id]);
         }
         await LocalTaskAssignmentStore(db).allocate(business,task,employee,inherited:false);
         await db.customStatement(

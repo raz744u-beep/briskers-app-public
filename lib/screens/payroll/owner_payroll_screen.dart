@@ -661,10 +661,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               decoration:const InputDecoration(labelText:'Replace mechanic',border:OutlineInputBorder()),
               items:[for(final id in {previous,...staff.keys})
                 DropdownMenuItem(value:id,child:Text(_employeeLabel(id)))],
-              onChanged: row['state'] != 'Open' ? null :
+              onChanged: (row['actual_minutes'] as int? ?? 0)>0 || (row['recorded_actual_minutes'] as int? ?? 0)>0 ? null :
                 (id) { if(id!=null) update(()=>selected=id); }),
             if(row['state'] != 'Open') const Padding(padding:EdgeInsets.only(top:8),
-              child:Text('Work has started. You can correct the assigned hours. Completed credits stay with the original mechanic.')),
+              child:Text('Work has started. Replacement starts a new assignment and is available only before time is earned. Completed and paid credits stay with the original mechanic.')),
             const SizedBox(height:18),
             TextField(controller:input,keyboardType:const TextInputType.numberWithOptions(decimal:true),
               decoration:const InputDecoration(labelText:'Assigned hours',border:OutlineInputBorder()),

@@ -129,6 +129,7 @@ void main(){
     await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','invoice'),jsonEncode(detail));
     await db.customStatement("INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,payload_json,state) VALUES('shop','document_draft_create','invoice','create','{}','pending')");
     await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind,document_number) VALUES('unavailable','shop','job','invoice','SYNTHETIC-NO-CACHE')");
+    await db.customStatement("UPDATE local_documents SET document_date='2026-11-07' WHERE id IN ('invoice','unavailable')");
     final outboxBefore=(await db.customSelect('SELECT * FROM sync_outbox').get()).map((r)=>r.data).toList();
     var recovered=0,unavailable=0;
     await repo.backfillInvoiceTasks(onProgress:(checked,added,unknown){recovered=added;unavailable=unknown;});
