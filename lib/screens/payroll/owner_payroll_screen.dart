@@ -1866,6 +1866,20 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           for(final row in _work.where((r)=>r['archived_labor']!=1 && r['state']!='Done'))Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
             Text('${row['job_number']??'Job'} · ${row['vehicle_label']??''}'),_taskCard(row)])]))]),
     if(!_showGeneralTasks) _recordedServiceLabor(),
+    if(!_showGeneralTasks)
+      Align(alignment:Alignment.centerLeft,child:TextButton.icon(
+        onPressed:()=>HistoricalExpenseReview.open(context,
+          businessId:widget.businessId,
+          employeeName:_employeeLabel(widget.employeeId),
+          access:_historyUnlocked,
+          canView:()=>mounted && _canView,
+          cache:expenses.LocalFinancialCache(database:_db),
+          exactDate:DateTime(_week.year,_week.month,_week.day)
+              .subtract(Duration(days:_week.weekday-1))
+              .add(const Duration(days:4))),
+        icon:const Icon(Icons.receipt_long_outlined),
+        label:const Text('Review Friday expenses · read only'),
+      )),
     Expanded(child:_showGeneralTasks
       ? Builder(builder:(context) {
         final rows = _generalTasks;
