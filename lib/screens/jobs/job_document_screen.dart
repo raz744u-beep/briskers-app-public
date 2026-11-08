@@ -1018,12 +1018,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
+  bool get _canAddTaskLabor => widget.isOwner && _detail?['kind'] == 'invoice' && !_readOnly &&
+      const {'draft','issued','open','reopened'}.contains(_detail?['status']) &&
+      !const {'closed','paid','void','finalized'}.contains(_detail?['display_status_code']);
+
   Future<void> _runInitialAction(String action) async {
     switch (action) {
       case 'add_labor':
-        if (!widget.isOwner || _detail == null || _estimate || _readOnly ||
-            _detail?['status'] != 'draft') {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('An editable draft invoice is required to add labor.')));
+        if (!_canAddTaskLabor) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Open an editable invoice to add labor.')));
           return;
         }
         await _addCustomLine(laborOnly: true);
@@ -2137,6 +2140,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     if (translatedResult == null) return;
 
     await _runAddLine(() async {
+      if (laborOnly && !_canAddTaskLabor) {
+        throw StateError('This invoice is no longer editable.');
+      }
       return _addLineLocalAware(
         name: translatedResult['name'].toString(),
         description: translatedResult['description']?.toString(),

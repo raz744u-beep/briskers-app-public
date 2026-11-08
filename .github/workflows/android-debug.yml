@@ -898,7 +898,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: briskers-android-debug
-          run-id: '42165351470'
+          run-id: ${{ github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && '42390770895' || '42165351470' }}
           github-token: ${{ github.token }}
           path: upgrade-receipt-baseline
 

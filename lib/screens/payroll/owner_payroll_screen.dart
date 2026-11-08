@@ -1921,7 +1921,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                 if (row['id'] case final String id) id,
             ],
             serviceTaskCard: (row) => byTask.containsKey(row['line_id'])
-                ? Column(children: [for (final allocation in byTask[row['line_id']]!) _taskCard(allocation)])
+                ? Column(children: [
+                    for (final allocation in byTask[row['line_id']]!) _taskCard(allocation),
+                    if (row['invoice_id'] is String && row['source_line_id'] is String &&
+                        row['source_active'] != 0 && row['paid'] != 1)
+                      TextButton.icon(onPressed:_busy ? null : () => _assign(row['invoice_id'] as String,
+                        {'id':row['source_line_id'],'description':row['description']},jobId:row['job_id'] as String),
+                        icon:const Icon(Icons.group_add_outlined),label:const Text('Assign / split')),
+                  ])
                 : ListTile(
                     title: Text(row['description'] as String),
                     subtitle: const Text('Unassigned · Planned'),

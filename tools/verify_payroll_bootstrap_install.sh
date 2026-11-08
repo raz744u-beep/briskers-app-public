@@ -75,8 +75,12 @@ check_records baseline-launched
 # The intermediate is the latest receipt build, not another TEST application.
 intermediate=${BRISKERS_UPGRADE_INTERMEDIATE:-}
 if [ -n "$intermediate" ]; then
-  test "$(basename "$intermediate")" = Briskers-v0.10.9-b2571.apk
-  printf '%s  %s\n' '820845a388b63696525ccd7b2347a7690fec00690a227dd6ceb473f426572f2b' "$intermediate" | sha256sum -c
+  case "$(basename "$intermediate")" in
+    Briskers-v0.10.9-b2571.apk) intermediate_hash=820845a388b63696525ccd7b2347a7690fec00690a227dd6ceb473f426572f2b ;;
+    Briskers-v0.10.9-b2581.apk) intermediate_hash=50cadbc0d6a64fd8694e6dd78b0339634c746cbd83d6e84a8ec6c14b7b6a51b9 ;;
+    *) echo 'Unknown signed intermediate APK' >&2; exit 1 ;;
+  esac
+  printf '%s  %s\n' "$intermediate_hash" "$intermediate" | sha256sum -c
   adb install -r "$intermediate" | tee "$evidence/intermediate-install-result.txt"
   test "$(adb shell stat -c %u "$state" | tr -d '\r')" = "$uid"
   launch

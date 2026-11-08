@@ -119,16 +119,21 @@ void main(){
     await click(find.text('Beta'));
     // The second mechanic starts at zero allocated hours. The Owner sets
     // the approved credit once, before completing the task.
-    await tester.runAsync(() async {
-      final repo=LocalPayrollRepository(db,business:'shop',owner:true);
-      final work=await repo.work(employee:'b');
-      final credit=work.singleWhere((r)=>
-        r['description']=='Replace turbocharger and gaskets');
-      await repo.setEstimatedMinutes(
-        credit['task_id'] as String,'b',180);
-    });
-    await tester.pumpAndSettle();
     final turboCard=await creditCard('b','Replace turbocharger and gaskets');
+    final edit = find.descendant(of:turboCard,matching:find.byTooltip('Edit Assignment'));
+    await click(edit);
+    var field = find.widgetWithText(TextField,'Assigned hours');
+    await click(field);
+    final controller = tester.widget<TextField>(field).controller!;
+    expect(controller.selection.textInside(controller.text),controller.text);
+    expect(tester.widget<TextField>(field).keyboardType.decimal,true);
+    await tester.enterText(field,'7.5');
+    await click(find.text('Cancel'));
+    await click(edit);
+    field = find.widgetWithText(TextField,'Assigned hours');
+    expect(tester.widget<TextField>(field).controller!.text,'0.00');
+    await tester.enterText(field,'3');
+    await click(find.widgetWithText(FilledButton,'Save'));
     await until(turboCard);
     await click(find.descendant(of:turboCard,matching:
       find.widgetWithText(TextButton,'Start')));
