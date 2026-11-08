@@ -62,12 +62,12 @@ class PayrollDryRunPreview extends StatelessWidget {
     String hours(int minutes)=>(minutes/60).toStringAsFixed(2);
     String usd(int cents) => String.fromCharCode(36) + (cents/100).toStringAsFixed(2);
     final friday=weekStart.add(const Duration(days:4));
-    final sunday=weekStart.add(const Duration(days:6));
+
     return Scaffold(
       appBar:AppBar(title:const Text('Payroll Test · Read only')),
       body:ListView(padding:const EdgeInsets.all(16),children:[
         Text(employeeName,style:Theme.of(context).textTheme.titleLarge),
-        Text('Week: ${weekStart.month}/${weekStart.day}–${sunday.month}/${sunday.day}/${sunday.year}'),
+        Text('Week: ${weekStart.month}/${weekStart.day}–${friday.month}/${friday.day}/${friday.year}'),
         const SizedBox(height:12),
         const Text('TEST ONLY · No payment will be saved.',
           style:TextStyle(color:Colors.teal,fontWeight:FontWeight.w800)),
