@@ -290,12 +290,12 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
             border:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63))),
             enabledBorder:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63))),
             focusedBorder:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63),width:2)),
-            contentPadding:const EdgeInsets.symmetric(horizontal:12,vertical:14)),isExpanded:true,
+            isDense:true,contentPadding:const EdgeInsets.symmetric(horizontal:12,vertical:9)),isExpanded:true,
           items:[const DropdownMenuItem<String>(value:null,child:Text('Unassigned')),
             for(final entry in values.entries) if(entry.key is String)
               DropdownMenuItem(value:entry.key as String,child:Text(EmployeeNicknameStore.displayLabel(entry.value,staff)))],
           onChanged:busy?null:chooseMain)),
-        const SizedBox(width:8),Expanded(child:SizedBox(height:56,child:OutlinedButton.icon(
+        const SizedBox(width:8),Expanded(child:SizedBox(height:50,child:OutlinedButton.icon(
           style:OutlinedButton.styleFrom(
             backgroundColor:const Color(0xFFF0FBF7),
             foregroundColor:const Color(0xFF076B56),
