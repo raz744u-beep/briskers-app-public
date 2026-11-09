@@ -156,12 +156,26 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     final progress = _taskProgress;
     final fraction = progress == null || progress.total == 0 ? 0.0 : progress.done / progress.total;
     final percent = '${(fraction * 100).round()}%';
-    return InkWell(onTap: _openJobLaborTasks, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    return InkWell(
+      onTap: _openJobLaborTasks,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        margin: const EdgeInsets.only(top: 8, bottom: 3),
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 3),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFCBD5E1)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Row(children: [
-        const Expanded(child:Text('Job Progress',style:TextStyle(fontWeight:FontWeight.bold))),
+        const Expanded(child:Text('Job Progress',style:TextStyle(
+          fontWeight:FontWeight.w800,color:Color(0xFF17243B)))),
         Flexible(child:Text(progress == null ? 'Progress unavailable' :
             progress.total == 0 ? 'No tasks yet' :
-            '${progress.done} of ${progress.total} tasks completed',textAlign:TextAlign.end)),
+            '${progress.done} of ${progress.total} tasks completed',
+          textAlign:TextAlign.end,
+          style:const TextStyle(color:Color(0xFF334155),fontWeight:FontWeight.w600))),
       ]),
       const SizedBox(height:6),
       if (progress != null && progress.total > 0)
@@ -178,7 +192,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         child:Row(children:[const Icon(Icons.checklist),const SizedBox(width:8),
           Expanded(child:Text(progress==null?'View Tasks':'View Tasks (${progress.total})')),
           const Icon(Icons.chevron_right)])),
-    ]));
+    ])),
+      ),
+    );
   }
 
   bool _contentBlocked = false;
@@ -3752,6 +3768,25 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       );
     }
 
+    final linkedInvoices = _documents.where(
+      (row) => row['kind'] == 'invoice' && row['id'] is String,
+    ).toList();
+
+    Widget invoiceChip(Map<String, dynamic> invoice) => ActionChip(
+      backgroundColor: const Color(0xFFE6F4F1),
+      labelStyle: const TextStyle(
+        color: Color(0xFF07594D), fontWeight: FontWeight.w800),
+      avatar: const Icon(Icons.receipt_long_outlined,
+        size: 17, color: Color(0xFF07594D)),
+      label: Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(child: Text(invoice['document_number'] == null
+            ? 'Open invoice' : '#${invoice['document_number']}',
+          overflow: TextOverflow.ellipsis)),
+        const Icon(Icons.chevron_right, size: 18, color: Color(0xFF07594D)),
+      ]),
+      onPressed: _busy ? null : () => _openDocument(invoice['id'] as String),
+    );
+
     return Container(
       decoration: BoxDecoration(
         color: cardTint,
@@ -3852,30 +3887,29 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                             ),
                           ),
                         ),
-                        if (_canManage)
+                        if (_canSeeFinancial && linkedInvoices.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Flexible(child: Align(
+                            alignment: Alignment.centerRight,
+                            child: invoiceChip(linkedInvoices.first),
+                          )),
+                        ] else if (_canManage)
                           const Icon(Icons.chevron_right, size: 20),
                       ],
                     ),
                   ),
                 ),
-                if (_canSeeFinancial) ...[
-                  if (!_documents.any((row) => row['kind']=='invoice' && row['id'] is String))
-                    const Row(children: [Expanded(child: Text('Invoice')), Text('No linked invoice saved')]),
-                  for (final invoice in _documents.where((row) => row['kind']=='invoice' && row['id'] is String))
-                    Row(children: [
-                      const Expanded(child: Text('Invoice')),
-                      Flexible(child: Align(alignment:Alignment.centerRight,child:ActionChip(
-                        backgroundColor: Colors.teal.shade50,
-                        labelStyle: TextStyle(color: Colors.teal.shade900, fontWeight: FontWeight.bold),
-                        avatar: Icon(Icons.receipt_long_outlined, size: 17, color: Colors.teal.shade800),
-                        label: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Flexible(child: Text(invoice['document_number']==null ? 'Open invoice' : '#${invoice['document_number']}' , overflow: TextOverflow.ellipsis)),
-                          Icon(Icons.chevron_right, size: 18, color: Colors.teal.shade800),
-                        ]),
-                        onPressed: _busy ? null : () => _openDocument(invoice['id'] as String),
-                      ))),
-                    ]),
-                ],
+                if (_canSeeFinancial && linkedInvoices.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    child: Text('No linked invoice saved'),
+                  ),
+                // Additional invoices remain accessible without repeating the
+                // bold Job title or a second Invoice label.
+                if (_canSeeFinancial)
+                  for (final extra in linkedInvoices.skip(1))
+                    Align(alignment: Alignment.centerRight,
+                      child: invoiceChip(extra)),
                 if (_owner && OwnerPayrollScreen.enabled) _progressRow(),
                 // In restored Owner Tasks/Payroll, one job can have several
                 // mechanics and independently assigned labor hours. Repeating
