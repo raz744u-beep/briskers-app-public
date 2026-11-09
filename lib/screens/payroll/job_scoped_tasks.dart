@@ -402,8 +402,9 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
               child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 Icon(Icons.info_outline, size: 15, color: Color(0xFF52627A)),
                 SizedBox(width: 7),
-                Text('Tap to view · Long press for actions',
-                  style: TextStyle(color: Color(0xFF52627A), fontSize: 12)),
+                Flexible(child: Text('Tap to view · Long press for actions',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFF52627A), fontSize: 12))),
               ])),
         ],
       )),
