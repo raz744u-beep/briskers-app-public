@@ -2041,7 +2041,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                 : _searchController.text.trim().isNotEmpty
                                     ? 'Search totals include all dates.'
                                     : _lastPeriodAt == null
-                                        ? 'Complete posted totals · pending offline entries excluded'
+                                        ? 'Saved totals may be incomplete until posted history is downloaded and verified'
                                         : 'Posted totals for $_rangeLabel · verified ${DateFormat('h:mm a').format(_lastPeriodAt!)} · pending offline entries excluded'),
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
@@ -2111,7 +2111,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                   if (_searchController.text.trim().isNotEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 5, left: 4),
-                      child: Text('Search checks all transaction history.',
+                      child: Text('Search checks all saved local transactions. Older history may require download.',
                         style: TextStyle(fontSize: 12,
                           color: Color(0xFF667085))),
                     ),
