@@ -16,6 +16,9 @@ void main(){
         business:'test-shop',job:'J-test',database:db,
       ))),
     )));
+    // The offline roster has a bounded 3-second loading timeout; allow it to
+    // resolve before ending the widget test or fake_async reports a pending timer.
+    await tester.pump(const Duration(seconds:4));
     await tester.pump();
     final dropdown=find.byType(DropdownButton<String>);
     final taskButton=find.widgetWithText(OutlinedButton,'Job Tasks');
