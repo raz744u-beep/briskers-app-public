@@ -46,6 +46,8 @@ void main(){
     expect(text, contains("'Edit or split mechanic labor'"));
     expect(text, contains("onPressed:busy?null:open"));
     expect(text, contains("Assigned total:"));
+    expect(text, contains('linePeople.fold<int>'));
+    expect(text, contains("tooltip:'Assign or split mechanic labor'"));
     expect(repo, contains('setMainMechanic('));
     expect(repo, contains('LocalTaskAssignmentStore(db).inherit'));
     expect(repo, contains('setEstimatedMinutes('));
