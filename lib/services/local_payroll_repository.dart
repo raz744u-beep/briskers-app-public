@@ -1260,6 +1260,41 @@ class LocalPayrollRepository {
     });
   }
 
+  /// Edit an existing general task without changing its identity,
+  /// Job link, status, payroll coverage or payment history.
+  Future<void> editShopTask({
+    required int id,
+    required String previousEmployee,
+    required String employee,
+    required String description,
+    required String category,
+  }) async {
+    _authorize();
+    if (id <= 0 || previousEmployee.trim().isEmpty ||
+        employee.trim().isEmpty || description.trim().isEmpty ||
+        category.trim().isEmpty) {
+      throw ArgumentError('Valid task, assigned mechanic and description required.');
+    }
+    await prepare();
+    await db.transaction(() async {
+      _authorize();
+      final original = await _read(
+        'SELECT id FROM regular_payroll_shop_tasks '
+        'WHERE business_id=? AND id=? AND employee_id=?',
+        [business, id, previousEmployee],
+      );
+      if (original.length != 1) throw StateError('Task assignment changed. Refresh.');
+      await db.customStatement(
+        'UPDATE regular_payroll_shop_tasks '
+        'SET employee_id=?, description=?, category=? '
+        'WHERE business_id=? AND id=? AND employee_id=?',
+        [employee, description.trim(), category.trim(),
+          business, id, previousEmployee],
+      );
+      _authorize();
+    });
+  }
+
   Future<int> advance(String employee) async {
     _authorize();
     await prepare();
