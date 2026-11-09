@@ -24,6 +24,9 @@ CANDIDATE_BRANCHES = {CANDIDATE_BRANCH, "fix/post-b2382-ux-polish-20261021", "fi
 PAYROLL_CANDIDATE = "candidate/payroll-enabled"
 PAYROLL_VERIFICATION_BRANCH = "fix/tasks-test-parity-bugs30-20261106"
 CANDIDATE_BRANCHES.add(PAYROLL_CANDIDATE)
+# Owner-approved consolidated Bugs 33 phone test candidate. The gate still
+# validates exact source, workflow identity and required successful checks.
+CANDIDATE_BRANCHES.add("fix/bugs33-preserve-offline-financial-history-20261108")
 BUILD_WORKFLOW = ".github/workflows/android-debug.yml"
 REQUIRED_WORKFLOWS = {
     "diagnostics.yml": "Briskers Diagnostics",
