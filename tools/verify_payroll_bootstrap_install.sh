@@ -50,9 +50,17 @@ adb push "$fixture" "$dbpath"
 adb shell "rm -f '$dbpath-wal' '$dbpath-shm'; mkdir -p '$state/shared_prefs'"
 adb push "$tmp/preferences.xml" "$state/shared_prefs/FlutterSharedPreferences.xml"
 adb shell "chown -R '$uid:$uid' '$state'; restorecon -R '$state'"
+# Preserve a real image payload alongside synthetic database and preference records.
+photo="$state/app_flutter/receipts/upgrade-fixture.png"
+adb exec-out screencap -p > "$tmp/photo.png"
+adb shell "mkdir -p '$state/app_flutter/receipts'"
+adb push "$tmp/photo.png" "$photo"
+adb shell "chown '$uid:$uid' '$photo'; restorecon '$photo'"
 check_records() {
   phase=$1
   adb shell am force-stop "$package"
+  adb pull "$photo" "$tmp/$phase-photo.png"
+  cmp "$tmp/photo.png" "$tmp/$phase-photo.png"
   adb pull "$dbpath" "$tmp/$phase.sqlite"
   if adb shell "test -f '$dbpath-wal'"; then
     adb pull "$dbpath-wal" "$tmp/$phase.sqlite-wal"
@@ -67,8 +75,13 @@ check_records baseline-launched
 # The intermediate is the latest receipt build, not another TEST application.
 intermediate=${BRISKERS_UPGRADE_INTERMEDIATE:-}
 if [ -n "$intermediate" ]; then
-  test "$(basename "$intermediate")" = Briskers-v0.10.9-b2571.apk
-  printf '%s  %s\n' '820845a388b63696525ccd7b2347a7690fec00690a227dd6ceb473f426572f2b' "$intermediate" | sha256sum -c
+  case "$(basename "$intermediate")" in
+    Briskers-v0.10.9-b2571.apk) intermediate_hash=820845a388b63696525ccd7b2347a7690fec00690a227dd6ceb473f426572f2b ;;
+    Briskers-v0.10.9-b2581.apk) intermediate_hash=50cadbc0d6a64fd8694e6dd78b0339634c746cbd83d6e84a8ec6c14b7b6a51b9 ;;
+    Briskers-v0.10.9-b2582.apk) intermediate_hash=8737f3609320588081370fcfbf694f7cc7ca1b207c7c57df52bd9d5994858284 ;;
+    *) echo 'Unknown signed intermediate APK' >&2; exit 1 ;;
+  esac
+  printf '%s  %s\n' "$intermediate_hash" "$intermediate" | sha256sum -c
   adb install -r "$intermediate" | tee "$evidence/intermediate-install-result.txt"
   test "$(adb shell stat -c %u "$state" | tr -d '\r')" = "$uid"
   launch

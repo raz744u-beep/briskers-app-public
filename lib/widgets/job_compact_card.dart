@@ -12,8 +12,7 @@ class JobCompactCard extends StatelessWidget {
     required this.statusControl,
     required this.onOpen,
     this.onLongPress,
-    this.onEditMechanic,
-    this.onEditPlannedTime,
+    this.mechanicMinutes,
     this.canOpen = true,
   });
 
@@ -21,8 +20,7 @@ class JobCompactCard extends StatelessWidget {
   final Widget statusControl;
   final VoidCallback onOpen;
   final VoidCallback? onLongPress;
-  final VoidCallback? onEditMechanic;
-  final VoidCallback? onEditPlannedTime;
+  final Map<String,int>? mechanicMinutes;
   final bool canOpen;
 
   String _hours(Object? raw) {
@@ -252,97 +250,26 @@ class JobCompactCard extends StatelessWidget {
                         ),
                       ),
                       separator(),
-                      Expanded(
-                        flex: employeeFlex,
-                        child: InkWell(
-                          onTap: onEditMechanic,
-                          borderRadius: BorderRadius.circular(10),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 5,
-                            ),
-                            child: Center(
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    roleStyle.icon,
-                                    size: 17,
-                                    color: roleStyle.color,
-                                  ),
-                                  const SizedBox(width: 5),
-                                  Flexible(
-                                    child: Text(
-                                      firstName,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                  if (onEditMechanic != null) ...[
-                                    const SizedBox(width: 4),
-                                    Icon(
-                                      Icons.edit_outlined,
-                                      size: 13,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
+                      Expanded(flex:employeeFlex,child:Padding(
+                        padding:const EdgeInsets.symmetric(horizontal:4,vertical:5),
+                        child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                          // Show one mechanic label, not the Job lead and
+                          // the same assigned mechanic again underneath.
+                          if (mechanicMinutes == null || mechanicMinutes!.isEmpty)
+                            Text(firstName,style:TextStyle(
+                              color:roleStyle.color,fontWeight:FontWeight.w600))
+                          else
+                            for(final person in mechanicMinutes!.entries)
+                              Text(
+                                '${_firstName(person.key)} · ${_hours(person.value/60)}h',
+                                maxLines:1,overflow:TextOverflow.ellipsis,
+                                style:TextStyle(color:roleStyle.color,
+                                  fontWeight:FontWeight.w600)),
+                        ]))),
                       separator(),
-                      SizedBox(
-                        width: 82,
-                        child: InkWell(
-                          onTap: onEditPlannedTime,
-                          borderRadius: BorderRadius.circular(10),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 5),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                Flexible(
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text(
-                                      '${_hours(job['planned_hours'])} hr',
-                                      style: const TextStyle(
-                                        fontSize: 13.5,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                const Icon(
-                                  Icons.timer_outlined,
-                                  size: 17,
-                                  color: BriskersColors.jobs,
-                                ),
-                                if (onEditPlannedTime != null) ...[
-                                  const SizedBox(width: 3),
-                                  Icon(
-                                    Icons.edit_outlined,
-                                    size: 13,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
+                      Text(mechanicMinutes==null ? '—' :
+                        '${_hours(mechanicMinutes!.values.fold<int>(0,(a,b)=>a+b)/60)} hr',
+                        style:const TextStyle(fontWeight:FontWeight.w700)),
                     ],
                   ),
                   if (canOpen && onLongPress != null)

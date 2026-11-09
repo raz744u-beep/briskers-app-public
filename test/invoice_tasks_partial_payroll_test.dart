@@ -27,8 +27,8 @@ void main() {
       "VALUES('job','shop','owner','Repair','open','mechanic')",
     );
     await db.customStatement(
-      "INSERT INTO local_documents(id,business_id,job_id,kind) "
-      "VALUES('invoice','shop','job','invoice'),('estimate','shop','job','estimate')",
+      "INSERT INTO local_documents(document_date,id,business_id,job_id,kind) "
+      "VALUES('2026-11-07','invoice','shop','job','invoice'),('2026-11-07','estimate','shop','job','estimate')",
     );
     await db.customStatement(
       "INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id,employee_name) "

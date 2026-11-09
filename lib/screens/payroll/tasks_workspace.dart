@@ -6,7 +6,7 @@ import '../../core/briskers_colors.dart';
 import '../../services/service_task_order.dart';
 
 /// Tasks workspace. Only customer/job-linked records appear
-/// under Service Tasks; General Tasks have no job or invoice relationship.
+/// under Service Tasks. General Tasks can reference a job without billing it.
 class TasksWorkspace extends StatefulWidget {
   const TasksWorkspace({
     super.key,
@@ -21,7 +21,10 @@ class TasksWorkspace extends StatefulWidget {
     required this.onOpenJob,
     required this.onEmployeeTap,
     this.initialGeneral = false,
+    this.scopedJob,
     this.onAddService,
+    this.onAddRecheck,
+    this.onRecoverHistory,
   });
 
   final List<Map<String, dynamic>> serviceTasks;
@@ -32,10 +35,13 @@ class TasksWorkspace extends StatefulWidget {
   final Widget Function(Map<String,dynamic>) serviceTaskCard;
   final VoidCallback onAddGeneral;
   final VoidCallback? onAddService;
+  final ValueChanged<String>? onAddRecheck;
+  final VoidCallback? onRecoverHistory;
   final Future<void> Function(int taskId, String status) onGeneralStatus;
   final ValueChanged<String> onOpenJob;
   final ValueChanged<String> onEmployeeTap;
   final bool initialGeneral;
+  final String? scopedJob;
 
   @override
   State<TasksWorkspace> createState() => _TasksWorkspaceState();
@@ -50,8 +56,9 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
   String _category = 'All Categories';
   String _job = 'All Jobs';
   String _date = 'Any';
+  String _servicePeriod = 'Any time';
   String _sort = 'Newest First';
-  final Set<String> _collapsedJobs = <String>{};
+  final Set<String> _expandedJobs = <String>{};
 
   @override
   void initState() {
@@ -79,6 +86,17 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
 
   bool _matchesStatus(Map<String,dynamic> row) {
     final status = _statusName(row['status']);
+    // Historical invoice labor is visible under All / Paid / Done,
+    // but never masquerades as a new active or payable task.
+    final historical = row['archived_labor'] == 1;
+    if (historical && (_status == 'Active' || _status == 'Unpaid')) return false;
+    if (_status == 'Unpaid') {
+      return status == 'Done' &&
+          (row['remaining_minutes'] as int? ?? 0) > 0;
+    }
+    if (_status == 'Paid') {
+      return status == 'Done' && row['paid'] == 1;
+    }
     return _status == 'All' ||
       (_status == 'Active' && status != 'Done') ||
       status == _status;
@@ -113,18 +131,64 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
     return true;
   }
 
+  // Service periods use actual saved Job/invoice/completion dates—not
+  // list position or invoice number. Unknown dates stay visible only when
+  // the Owner chooses All time; this prevents fabricated recent activity.
+  bool _matchesServicePeriod(Map<String,dynamic> row) {
+    if (_servicePeriod == 'Any time') return true;
+    final isDone = _statusName(row['status']) == 'Done';
+    final completed = isDone
+        ? ServiceTaskOrder.timestamp(row['completed_date']) : 0;
+    final timestamp = completed > 0 ? completed :
+        ServiceTaskOrder.timestamp(row['invoice_date'] ??
+          row['invoice_created_at'] ?? row['job_created_at'] ??
+          row['job_document_date']);
+    if (timestamp <= 0) return false;
+    final event = DateTime.fromMillisecondsSinceEpoch(timestamp);
+    final date = DateTime(event.year,event.month,event.day);
+    final now=DateTime.now();
+    final day=DateTime(now.year,now.month,now.day);
+    final weekStart=day.subtract(Duration(days:day.weekday-1));
+    switch (_servicePeriod) {
+      case 'This week':
+        return !date.isBefore(weekStart) &&
+            date.isBefore(weekStart.add(const Duration(days:7)));
+      case 'Last week':
+        return !date.isBefore(weekStart.subtract(const Duration(days:7))) &&
+            date.isBefore(weekStart);
+      case 'Last 7 days':
+        return !date.isBefore(day.subtract(const Duration(days:6))) &&
+            !date.isAfter(day);
+      case 'Last 30 days':
+        return !date.isBefore(day.subtract(const Duration(days:29))) &&
+            !date.isAfter(day);
+      case 'Last 90 days':
+        return !date.isBefore(day.subtract(const Duration(days:89))) &&
+            !date.isAfter(day);
+      default:
+        return true;
+    }
+  }
+
   List<Map<String,dynamic>> get _service {
     final q = _search.text.toLowerCase().trim();
     final rows = widget.serviceTasks.where((task) {
+      if(widget.scopedJob != null && task['job_id'] != widget.scopedJob) return false;
       final desc = (task['custom_description'] ??
         task['source_description'] ?? '').toString().toLowerCase();
-      final isInvoice = task['document_id'] != null;
+      // Task-first Job work and rechecks both lack an invoice line. The
+      // saved source kind distinguishes them; absence of an invoice alone
+      // must not relabel ordinary Job work as a recheck.
+      final sourceKind = task['source_kind']?.toString();
+      final isInvoice = sourceKind == 'invoice' ||
+          (sourceKind == null && task['document_id'] != null);
       if (_kind == 'Invoice Labor' && !isInvoice) return false;
-      if (_kind == 'Rechecks' && isInvoice) return false;
+      if (_kind == 'Rechecks' && sourceKind != 'recheck') return false;
       if (_job != 'All Jobs' &&
           task['job_id']?.toString() != _job) return false;
       return task['source_missing'] != 1 &&
         _matchesStatus(task) && _matchesEmployee(task,general:false) &&
+        _matchesServicePeriod(task) &&
         (q.isEmpty || desc.contains(q) ||
           (task['job_number']?.toString().toLowerCase().contains(q) ?? false) ||
           widget.employeeName(task['employee_id']?.toString())
@@ -137,6 +201,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
   List<Map<String,dynamic>> get _internal {
     final q = _search.text.toLowerCase().trim();
     final rows = widget.generalTasks.where((task) {
+      if(widget.scopedJob != null && task['job_id'] != widget.scopedJob) return false;
       final description = task['description']?.toString().toLowerCase() ?? '';
       return _matchesStatus(task) &&
         _matchesEmployee(task,general:true) &&
@@ -177,19 +242,19 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
         constraints:const BoxConstraints(minHeight:37),
         padding:const EdgeInsets.symmetric(horizontal:9,vertical:4),
         decoration:BoxDecoration(
-          color: const Color(0xFFF3F7F8),
-          border: Border.all(color:const Color(0xFFCBD7DC)),
+          color: Colors.white,
+          border: Border.all(color:const Color(0xFF8A9CAA),width:1.2),
           borderRadius:BorderRadius.circular(18)),
         child:Row(children:[
           Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,
             mainAxisSize:MainAxisSize.min,children:[
             Text(title,maxLines:1,overflow:TextOverflow.ellipsis,
-              style:const TextStyle(fontSize:10,
-                color:Color(0xFF64748B))),
+              style:const TextStyle(fontSize:11,
+                fontWeight:FontWeight.w600,color:Color(0xFF475569))),
             const SizedBox(height:1),
             Text(chosen,maxLines:1,overflow:TextOverflow.ellipsis,
-              style:const TextStyle(fontSize:11.5,
-                fontWeight:FontWeight.w700)),
+              style:const TextStyle(fontSize:13,
+                color:Color(0xFF1E293B),fontWeight:FontWeight.w800)),
           ])),
           const SizedBox(width:5),
           const Icon(Icons.keyboard_arrow_down,size:16),
@@ -220,7 +285,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
   Future<void> _filters() async {
     var employee = _employee;
     var status = _status, type = _kind, category = _category;
-    var job = _job, date = _date, sort = _sort;
+    var job = _job, date = _date, sort = _sort, period = _servicePeriod;
     await showModalBottomSheet<void>(
       context:context,isScrollControlled:true,useSafeArea:true,
       showDragHandle:true,
@@ -251,20 +316,23 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                 TextButton(onPressed:()=>refresh((){
                   employee='';status='Active';type='All Types';
                   category='All Categories';job='All Jobs';
-                  date='Any';sort='Newest First';
+                  date='Any';sort='Newest First';period='Any time';
                 }),child:const Text('Reset')),
               ]),
               dropdown('Employee',employee.isEmpty ? 'All Employees' :
                 _employeeLabel(employee),_employeeChoices,
                 (v)=>employee=_employeeIdForName(v)),
               if(!_general) ...[
-                dropdown('Job',job,['All Jobs',
+                if(widget.scopedJob==null) dropdown('Job',job,['All Jobs',
                   for(final id in widget.serviceTasks
                     .map((t)=>t['job_id']?.toString()??'')
                     .where((e)=>e.isNotEmpty).toSet()) id],
                   (v)=>job=v),
                 dropdown('Task Type',type,
                   ['All Types','Invoice Labor','Rechecks'],(v)=>type=v),
+                dropdown('Period',period,
+                  ['Any time','This week','Last week','Last 7 days',
+                   'Last 30 days','Last 90 days'],(v)=>period=v),
               ] else ...[
                 dropdown('Category',category,
                   ['All Categories','General','Cleaning','Inventory','Office',
@@ -273,18 +341,30 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                   ['Any','Today','This Week','Overdue'],(v)=>date=v),
               ],
               dropdown('Status',status,
-                ['Active','All','Not Started','In Progress','Done'],
+                ['Active','Unpaid','Paid','All','Not Started','In Progress','Done'],
                 (v)=>status=v),
               dropdown('Sort By',sort,
                 ['Newest First','Oldest First','Due Date']
                   .where((s)=>_general||s!='Due Date').toList(),
                 (v)=>sort=v),
+              if (widget.onRecoverHistory != null) ...[
+                const SizedBox(height:8),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    widget.onRecoverHistory!();
+                  },
+                  icon: const Icon(Icons.history),
+                  label: const Text('Recover missing historical invoice tasks'),
+                ),
+              ],
               const SizedBox(height:8),
               FilledButton(
                 onPressed:(){
                   setState((){
                     _employee=employee;_status=status;_kind=type;
                     _category=category;_job=job;_date=date;_sort=sort;
+                    _servicePeriod=period;
                   });
                   Navigator.pop(context);
                 },
@@ -310,36 +390,79 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
       children:[
         Row(children:[Expanded(child:Text('Jobs with Tasks · '+entries.length.toString(),
           style:const TextStyle(fontWeight:FontWeight.w800,fontSize:15))),
-          if(widget.onAddService!=null)TextButton.icon(onPressed:widget.onAddService,icon:const Icon(Icons.add),label:const Text('New Task'))]),
+          if(widget.scopedJob==null && widget.onAddService!=null)TextButton.icon(onPressed:widget.onAddService,icon:const Icon(Icons.add),label:const Text('New Task'))]),
         const SizedBox(height:9),
         if(entries.isEmpty)
-          const Padding(padding:EdgeInsets.all(15),
-            child:Text('No service tasks match these filters.')),
+          Padding(padding:const EdgeInsets.all(15),
+            child:Column(crossAxisAlignment:CrossAxisAlignment.start,
+              children:[
+                Text(widget.serviceTasks.isEmpty
+                  ? 'No service tasks are available in this view. This does not mean invoice labor or payment history was deleted.'
+                  : 'No service tasks match these filters. Your saved work may be completed, paid, or historical.'),
+                if(_status!='All' && widget.serviceTasks.isNotEmpty)
+                  TextButton.icon(
+                    key:const Key('show-all-service-task-statuses'),
+                    onPressed:()=>setState(()=>_status='All'),
+                    icon:const Icon(Icons.history),
+                    label:const Text('Show all task statuses'),
+                  ),
+              ])),
         for(final entry in entries) ...[
           Card(color:const Color(0xFFF0F5FA),margin:const EdgeInsets.only(bottom:9),
             child:Column(children:[
               ListTile(
                 onTap:()=>setState((){
-                  if(!_collapsedJobs.add(entry.key)) {
-                    _collapsedJobs.remove(entry.key);
+                  if(!_expandedJobs.add(entry.key)) {
+                    _expandedJobs.remove(entry.key);
                   }
                 }),
-                title:Text(entry.value.first['job_number']?.toString() ?? 'Job',
-                  style:const TextStyle(fontWeight:FontWeight.w800)),
+                title:Text(() {
+                  final jobNumber = entry.value.first['job_number']?.toString() ?? 'Job';
+                  final invoice = entry.value.map((row) =>
+                    row['invoice_number']?.toString().trim()).whereType<String>()
+                    .where((number) => number.isNotEmpty).firstOrNull;
+                  return invoice == null ? jobNumber : '$jobNumber · Invoice #$invoice';
+                }(),style:const TextStyle(fontWeight:FontWeight.w800)),
                 subtitle:Text([
                   if (entry.value.first['customer_name'] case final String customer) customer,
                   if (entry.value.first['vehicle_label'] case final String vehicle) vehicle,
                   '${entry.value.length} tasks',
                 ].join(' · ')),
-                trailing:Icon(_collapsedJobs.contains(entry.key)
-                  ? Icons.expand_more:Icons.expand_less),
+                trailing:Icon(_expandedJobs.contains(entry.key)
+                  ? Icons.expand_less:Icons.expand_more),
               ),
-              if(!_collapsedJobs.contains(entry.key)) ...[
+              if(_expandedJobs.contains(entry.key)) ...[
                 const Divider(height:1),
-                for(final task in entry.value) widget.serviceTaskCard(task),
-                TextButton.icon(onPressed:()=>widget.onOpenJob(entry.key),
-                  icon:const Icon(Icons.open_in_new,size:17),
-                  label:const Text('Open Job Details')),
+                // Match the approved isolated Tasks TEST: a distinct white
+                // rounded work card sits inside each tinted Job group.
+                for(final task in entry.value)
+                  Card(
+                    color: Colors.white,
+                    elevation: 0,
+                    margin: const EdgeInsets.fromLTRB(10,8,10,5),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: const BorderSide(color: Color(0xFFD4DFE4)),
+                    ),
+                    child: ExpansionTile(
+                      key: ValueKey(task['line_id']),
+                      title: Text((task['source_description'] ?? task['description'] ?? 'Labor task').toString()),
+                      children: [Builder(builder: (_) => widget.serviceTaskCard(task))],
+                    ),
+                  ),
+                // A missing Job link is display-only. Never dispatch a
+                // fabricated label as a canonical Job ID for a recheck.
+                if (entry.key != 'Unlinked Job') ...[
+                  TextButton.icon(onPressed:()=>widget.onOpenJob(entry.key),
+                    icon:const Icon(Icons.open_in_new,size:17),
+                    label:const Text('Open Job Details')),
+                  if (widget.onAddRecheck != null)
+                    TextButton.icon(
+                      onPressed: () => widget.onAddRecheck!(entry.key),
+                      icon: const Icon(Icons.add_task_outlined, size: 17),
+                      label: const Text('Add Recheck'),
+                    ),
+                ],
                 const SizedBox(height:5),
               ],
             ]),
@@ -358,7 +481,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
         Row(children:[
           Expanded(child:Text('General Tasks · '+tasks.length.toString(),
             style:const TextStyle(fontSize:15,fontWeight:FontWeight.w800))),
-          TextButton.icon(onPressed:widget.onAddGeneral,
+          if(widget.scopedJob==null) TextButton.icon(onPressed:widget.onAddGeneral,
             icon:const Icon(Icons.add),label:const Text('New Task')),
         ]),
         if(tasks.isEmpty)
@@ -368,14 +491,14 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
           Card(
             key:ValueKey('general-task-'+task['id'].toString()),
             margin:const EdgeInsets.only(bottom:7),
-            child:ListTile(
+            child:ExpansionTile(
               leading: Icon(task['status']=='done'
                 ? Icons.check_circle: Icons.radio_button_unchecked,
                 color:task['status']=='done' ?
                   const Color(0xFF167A54):BriskersColors.jobs),
               title:Text(task['description']?.toString()??'',
                 style:const TextStyle(fontWeight:FontWeight.w700)),
-              subtitle:Column(
+              children:[ListTile(title:Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if ((task['employee_id']?.toString() ?? '').isNotEmpty)
@@ -440,7 +563,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                   PopupMenuItem(value:'in_progress',child:Text('In Progress')),
                   PopupMenuItem(value:'done',child:Text('Done')),
                 ],
-              ),
+              )),],
             ),
           ),
       ],
@@ -458,6 +581,11 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
             tooltip:'Advanced task filters',
             icon:const Icon(Icons.tune)),
         ]),
+        if(widget.scopedJob!=null)
+          Wrap(spacing:8,children:[
+            OutlinedButton.icon(onPressed:widget.onAddService,icon:const Icon(Icons.add),label:const Text('Labor Task')),
+            OutlinedButton.icon(onPressed:widget.onAddGeneral,icon:const Icon(Icons.add),label:const Text('General Task')),
+          ]),
         Container(
           decoration:BoxDecoration(color:const Color(0xFFF1F5F7),
             borderRadius:BorderRadius.circular(22)),
@@ -469,7 +597,8 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                   FocusManager.instance.primaryFocus?.unfocus();
                   setState((){
                   _general=option;
-                  _status='Active';_employee='';_sort='Newest First';_search.clear();
+                  _status='Active';_employee='';_sort='Newest First';
+                  _servicePeriod='Any time';_search.clear();
                   });
                 },
                 child:Container(
@@ -512,7 +641,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                 (v)=>setState(()=>_employee=_employeeIdForName(v)))),
               const SizedBox(width:5),
               Expanded(child:_picker('Status',_status,
-                ['Active','All','Not Started','In Progress','Done'],
+                ['Active','Unpaid','Paid','All','Not Started','In Progress','Done'],
                 (v)=>setState(()=>_status=v))),
             ]),
             const SizedBox(height:5),
@@ -526,14 +655,22 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                   if(_general) {_category=v;} else {_kind=v;}
                 }))),
               const SizedBox(width:5),
-              Expanded(child:_picker('Sort',_sort,
-                ['Newest First','Oldest First',if(_general)'Due Date'],
-                (v)=>setState(()=>_sort=v))),
+              Expanded(child:_general
+                ? _picker('Sort',_sort,
+                    ['Newest First','Oldest First','Due Date'],
+                    (v)=>setState(()=>_sort=v))
+                : _picker('Period',_servicePeriod,
+                    ['Any time','This week','Last week','Last 7 days',
+                     'Last 30 days','Last 90 days'],
+                    (v)=>setState(()=>_servicePeriod=v))),
             ]),
           ]),
         ),
       ]),
     ),
-    Expanded(child:_general?_generalView():_serviceView()),
+    // Filters must never paint over the first Job count row at large
+    // Android text scales or on a small phone.
+    const SizedBox(height: 8),
+    Expanded(child:ClipRect(child:_general?_generalView():_serviceView())),
   ]);
 }

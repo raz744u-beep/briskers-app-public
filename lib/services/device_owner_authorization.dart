@@ -119,10 +119,9 @@ class DeviceOwnerAuthorization with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if ((state == AppLifecycleState.paused || state == AppLifecycleState.detached) &&
-        !authority.isAuthenticating) {
-      authority.lock();
-    }
+    // Pausing/resuming Briskers must never become a second Owner login.
+    // Account sign-out and session changes revoke authority in the
+    // onAuthStateChange listener; each grant also checks currentIdentity.
   }
 
   /// Only invoke with an authenticated server response, never a cached row.

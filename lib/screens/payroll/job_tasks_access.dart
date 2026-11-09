@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import '../../local/briskers_local_database.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/device_owner_authorization.dart';
@@ -146,7 +147,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
       final task=allocation['task_id']?.toString();
       final employee=allocation['id']?.toString();
       if(task==null || employee==null)return;
-      // Revalidate paid coverage after the Owner challenge; partial payments
+      // Revalidate paid coverage after the Owner-session check; partial payments
       // are just as immutable as fully settled allocations.
       await repo.prepare();
       final settled=await db.customSelect(
@@ -195,7 +196,13 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
     }catch(_){if(mounted)setState(()=>warning='Saved mechanic list is not available yet. Retry.');}
   }
   Future<LocalPayrollRepository> unlock()async{
-    final grant=await (PayrollUiScope.of(context)?.unlock(widget.business) ?? DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.business));
+    final scope=PayrollUiScope.of(context);
+    // The already-signed-in Briskers Owner session is sufficient for
+    // Main Mechanic selection and per-line time editing. Only isolated
+    // debug fixtures may supply their synthetic Owner authority.
+    final grant=await (kDebugMode && scope?.debugAllowOwnerView==true
+      ? scope!.unlock(widget.business)
+      : DeviceOwnerAuthorization.instance.authority.authorizeSession(widget.business));
     void check()=>grant.assertValid(widget.business,grant.actorId);
     return LocalPayrollRepository(db,business:widget.business,owner:true,assertOwnerGrant:check);
   }
@@ -223,37 +230,54 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
   @override Widget build(BuildContext context){
     if(widget.line!=null){
       return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-        Wrap(spacing:4,runSpacing:2,crossAxisAlignment:WrapCrossAlignment.center,
-          children:[
-            for(final p in linePeople) Row(mainAxisSize:MainAxisSize.min,children:[
-              const Icon(Icons.engineering_outlined,size:14,color:Color(0xFF00897E)),
-              const SizedBox(width:2),
-              Text('${p['label']} ${((p['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(1)}h',
-                style:const TextStyle(fontSize:12,color:Color(0xFF00897E),
-                  fontWeight:FontWeight.w700)),
-              IconButton(
-                constraints:const BoxConstraints(minWidth:29,minHeight:29),
-                padding:EdgeInsets.zero,
-                icon:Icon(p['paid']==true?Icons.lock_outline:Icons.edit_outlined,
-                  size:18,color:p['paid']==true?const Color(0xFF64748B):
-                    const Color(0xFF00897E)),
-                tooltip:p['paid']==true?'Paid mechanic labor locked':
-                  'Edit ${p['label']} estimated mechanic hours',
-                onPressed:busy || p['paid']==true?null:()=>editMechanicHours(p),
-              ),
-            ]),
-            if(linePeople.isEmpty)
-              Text(lineAssignment??'Loading assignments…',
-                style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+        // Single-line TEST invoice header: the old Wrap broke before the
+        // mechanic name even for one mechanic, leaving "Labor" above "Chris".
+        // Keep the identity and hours on the same row; long split names use
+        // ellipsis instead of moving below the Labor heading.
+        Row(mainAxisSize:MainAxisSize.max,children:[
+          if(linePeople.isNotEmpty) ...[
+            Expanded(child: Tooltip(
+              message:linePeople.map((p) =>
+                '${p['label']} ${((p['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(1)}h'
+              ).join(' · '),
+              child:Text(linePeople.map((p) =>
+                '${p['label']} ${((p['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(1)}h'
+              ).join(' · '),
+                maxLines:1,
+                softWrap:false,
+                overflow:TextOverflow.ellipsis,
+                textAlign:TextAlign.end,
+                style:const TextStyle(fontSize:15,color:Color(0xFF00897E),
+                  fontWeight:FontWeight.w800)),
+            )),
+            IconButton(
+              constraints:const BoxConstraints(minWidth:28,minHeight:28),
+              padding:EdgeInsets.zero,
+              icon:Icon(linePeople.every((p)=>p['paid']==true)
+                  ? Icons.lock_outline : Icons.edit_outlined,
+                size:18,color:linePeople.every((p)=>p['paid']==true)
+                  ? const Color(0xFF64748B):const Color(0xFF00897E)),
+              tooltip:linePeople.every((p)=>p['paid']==true)
+                ? 'Paid mechanic labor locked'
+                : 'Edit or split mechanic labor',
+              onPressed:busy || linePeople.every((p)=>p['paid']==true)
+                ? null : open,
+            ),
+          ] else ...[
+            Expanded(child:Text(lineAssignment??'Loading assignments…',
+              textAlign:TextAlign.end,maxLines:1,
+              overflow:TextOverflow.ellipsis,
+              style:const TextStyle(fontSize:12,color:Color(0xFF64748B)))),
             IconButton(
               tooltip:'Assign or split mechanic labor',
-              icon:const Icon(Icons.person_add_alt_1_outlined,
+              icon:const Icon(Icons.edit_outlined,
                 color:Color(0xFF00897E),size:20),
               constraints:const BoxConstraints(minWidth:30,minHeight:30),
               padding:EdgeInsets.zero,
               onPressed:busy?null:open,
             ),
-          ]),
+          ],
+        ]),
         if(warning!=null)Text(warning!,style:const TextStyle(fontSize:11)),
       ]);
     }
@@ -261,13 +285,25 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
     return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
       Row(children:[
         Expanded(child:DropdownButtonFormField<String>(key:ValueKey(main),initialValue:values.containsKey(main)?main:null,
-          decoration:const InputDecoration(labelText:'Main Mechanic'),isExpanded:true,
+          decoration:InputDecoration(labelText:'Main Mechanic',filled:true,
+            fillColor:const Color(0xFFF0FBF7),
+            border:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63))),
+            enabledBorder:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63))),
+            focusedBorder:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63),width:2)),
+            isDense:true,contentPadding:const EdgeInsets.symmetric(horizontal:12,vertical:9)),isExpanded:true,
           items:[const DropdownMenuItem<String>(value:null,child:Text('Unassigned')),
             for(final entry in values.entries) if(entry.key is String)
               DropdownMenuItem(value:entry.key as String,child:Text(EmployeeNicknameStore.displayLabel(entry.value,staff)))],
           onChanged:busy?null:chooseMain)),
-        const SizedBox(width:8),OutlinedButton.icon(onPressed:open,icon:const Icon(Icons.task_alt),label:const Text('Tasks'))]),
-      if(estimated!=null)Text('Estimated labor: ${(estimated!/60).toStringAsFixed(2)} h · Actual: ${(actual!/60).toStringAsFixed(2)} h',style:const TextStyle(fontSize:12)),
+        const SizedBox(width:8),Expanded(child:SizedBox(height:50,child:OutlinedButton.icon(
+          style:OutlinedButton.styleFrom(
+            backgroundColor:const Color(0xFFF0FBF7),
+            foregroundColor:const Color(0xFF076B56),
+            side:const BorderSide(color:Color(0xFF087D63)),
+            shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(15))),
+          onPressed:busy?null:open,icon:const Icon(Icons.checklist),
+          label:const Text('Job Tasks',maxLines:1,overflow:TextOverflow.ellipsis))))]),
+      if(widget.invoice!=null && estimated!=null)Text('Estimated labor: ${(estimated!/60).toStringAsFixed(2)} h · Actual: ${(actual!/60).toStringAsFixed(2)} h',style:const TextStyle(fontSize:12)),
       if(warning!=null)Row(children:[Expanded(child:Text(warning!)),TextButton(onPressed:load,child:const Text('Retry'))]),
     ]);
   }

@@ -7,7 +7,6 @@ import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
 import '../core/job_status_style.dart';
-import '../core/employee_role_style.dart';
 import '../core/job_list_options.dart';
 import '../core/module_modal_theme.dart';
 import '../services/briskers_api.dart';
@@ -76,6 +75,7 @@ class _JobsScreenState extends State<JobsScreen>
   late final LocalDocumentRepository _localDocuments =
       widget.documentRepository ?? LocalDocumentRepository();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
+  Map<String,Map<String,int>> _allocationHours = {};
   final _nicknameStore = EmployeeNicknameStore();
 
   List<Map<String, dynamic>>? _rows;
@@ -295,6 +295,7 @@ class _JobsScreenState extends State<JobsScreen>
       _searchDebounce?.cancel();
       _search.clear();
       _rows = null;
+      _allocationHours = {};
       _coldLocalReadScope = null;
       _documentMatches = const [];
       _statuses = const [];
@@ -421,6 +422,19 @@ class _JobsScreenState extends State<JobsScreen>
         _onlineReady = online;
         _error = null;
       });
+      if (_canManage) {
+        unawaited(() async {
+          Map<String,Map<String,int>> hours;
+          try {
+            final ids = visibleRows.map((row)=>row['id']).whereType<String>().toList();
+            final saved = await _localJobs.allocationHours(businessId, ids);
+            hours = {for(final id in ids) id:saved[id] ?? {}};
+          } catch (_) {
+            hours = {};
+          }
+          if(mounted && visibility.isCurrent(generation)) setState(()=>_allocationHours=hours);
+        }());
+      }
       // First paint remains independent of preferences and nickname lookup.
       unawaited(() async {
         final aliases = await _nicknameStore.all(businessId);
@@ -600,231 +614,6 @@ class _JobsScreenState extends State<JobsScreen>
     );
     if (mounted) unawaited(_load());
     widget.onJobsChanged?.call();
-  }
-
-  // Only update an already visible authorized card. Do not add rows from
-  // callbacks, which could resurrect a quarantined/retired Job or leak
-  // another list filter. The next regular entry still queries local SQLite.
-  void _patchQuickAdminCard(
-    String jobId, Map<String, dynamic> values,
-  ) {
-    final current = _rows;
-    if (!mounted || current == null) return;
-    final index = current.indexWhere((row) =>
-        row['id']?.toString() == jobId);
-    if (index < 0) return;
-    final rows = List<Map<String, dynamic>>.from(current);
-    rows[index] = <String, dynamic>{
-      ...rows[index],
-      ...values,
-      'sync_state': 'pending',
-    };
-    setState(() => _rows = rows);
-  }
-
-  Future<void> _quickEditMechanic(Map<String, dynamic> job) async {
-    if (!_canManage || _busyJobId != null) return;
-
-    setState(() => _busyJobId = job['id']?.toString());
-    try {
-      // The previously saved employee list is the first source of truth
-      // for opening the picker. Never block the first tap on a network call.
-      var employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
-      if (employees.isEmpty &&
-          !BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          employees = await _offlineJobAdmin.refreshEmployees(widget.businessId);
-        } catch (_) {
-          // Retain offline-only behavior when the network is unavailable.
-        }
-      }
-
-      if (!mounted) return;
-      if (employees.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'No employee list is saved on this device yet. Open Jobs once while online, then mechanic changes will work offline.',
-            ),
-          ),
-        );
-        return;
-      }
-
-      employees = await _nicknameStore.decorate(widget.businessId, employees);
-      if (!mounted) return;
-      final currentId = job['assigned_employee_id']?.toString();
-      final selected = await showModalBottomSheet<String?>(
-        context: context,
-        showDragHandle: true,
-        builder: (sheetContext) => SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              const ListTile(
-                title: Text(
-                  'Assign mechanic / employee',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-                ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.person_off_outlined),
-                title: const Text('Unassigned'),
-                trailing: currentId == null || currentId.isEmpty
-                    ? const Icon(Icons.check, color: BriskersColors.jobs)
-                    : null,
-                onTap: () => Navigator.pop(sheetContext, ''),
-              ),
-              const Divider(),
-              ...employees.map((employee) {
-                final id = employee['id']?.toString() ?? '';
-                final position =
-                    employee['position_name']?.toString() ?? 'Employee';
-                final roleStyle = employeeRoleStyle(position);
-                return ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: roleStyle.color.withValues(alpha: 0.14),
-                    child: Icon(roleStyle.icon, color: roleStyle.color),
-                  ),
-                  title: Text(EmployeeNicknameStore.displayName(employee)),
-                  subtitle: Text(
-                    employee['nickname']?.toString().isNotEmpty == true
-                        ? '${employee['name']} • $position'
-                        : position,
-                  ),
-                  trailing: id == currentId
-                      ? const Icon(Icons.check, color: BriskersColors.jobs)
-                      : null,
-                  onTap: () => Navigator.pop(sheetContext, id),
-                );
-              }),
-            ],
-          ),
-        ),
-      );
-
-      if (selected == null) return;
-
-      Map<String, dynamic>? selectedEmployee;
-      if (selected.isNotEmpty) {
-        for (final employee in employees) {
-          if (employee['id']?.toString() == selected) {
-            selectedEmployee = employee;
-            break;
-          }
-        }
-      }
-
-      await _offlineJobAdmin.queueAssignment(
-        widget.businessId,
-        job['id'].toString(),
-        employeeId: selected.isEmpty ? null : selected,
-        employeeName: selectedEmployee?['name']?.toString(),
-        position: selectedEmployee?['position_name']?.toString(),
-      );
-
-      // SQLite and the retry-safe outbox are committed. Repaint only this
-      // already-authorized Job card; don't await a large sorted list query.
-      _patchQuickAdminCard(job['id'].toString(), {
-        'assigned_employee': selectedEmployee?['name'],
-        'assigned_employee_nickname': selectedEmployee?['nickname'],
-        'assigned_employee_id': selected.isEmpty ? null : selected,
-        'assigned_position': selectedEmployee?['position_name'],
-        'is_unassigned': selected.isEmpty,
-      });
-      widget.onJobsChanged?.call();
-      _scheduleQuickEditSync();
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    } finally {
-      if (mounted) setState(() => _busyJobId = null);
-    }
-  }
-
-  Future<void> _quickEditPlannedTime(Map<String, dynamic> job) async {
-    if (!_canManage || _busyJobId != null) return;
-
-    final controller = TextEditingController(
-      text: job['planned_hours']?.toString() ?? '0',
-    );
-    controller.selection = TextSelection(
-      baseOffset: 0,
-      extentOffset: controller.text.length,
-    );
-    var clearedForEntry = false;
-
-    final value = await showDialog<num?>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Planned time'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          onTap: () {
-            if (!clearedForEntry) {
-              if (controller.text.trim() == '0') {
-                controller.clear();
-              } else {
-                controller.selection = TextSelection(
-                  baseOffset: 0,
-                  extentOffset: controller.text.length,
-                );
-              }
-              clearedForEntry = true;
-            }
-          },
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            labelText: 'Hours',
-            suffixText: 'hr',
-          ),
-        ),
-        actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
-        actions: [
-          OutlinedButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: BriskersColors.jobs,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-            onPressed: () {
-              final parsed = num.tryParse(
-                controller.text.trim().isEmpty ? '0' : controller.text.trim(),
-              );
-              Navigator.pop(dialogContext, parsed);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-
-    if (value == null || value < 0) return;
-
-    setState(() => _busyJobId = job['id']?.toString());
-    try {
-      await _offlineJobAdmin.queuePlannedHours(
-        widget.businessId,
-        job['id'].toString(),
-        value,
-      );
-      _patchQuickAdminCard(job['id'].toString(), {
-        'planned_hours': value,
-      });
-      widget.onJobsChanged?.call();
-      _scheduleQuickEditSync();
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    } finally {
-      if (mounted) setState(() => _busyJobId = null);
-    }
   }
 
   void _applyLocalStatus(LocalJobStatusChanged event) {
@@ -1170,8 +959,7 @@ class _JobsScreenState extends State<JobsScreen>
     statusControl: _statusControl(job),
     onOpen: () => _openJob(job),
     onLongPress: () => _showJobActions(job),
-    onEditMechanic: _canManage ? () => _quickEditMechanic(job) : null,
-    onEditPlannedTime: _canManage ? () => _quickEditPlannedTime(job) : null,
+    mechanicMinutes: _canManage ? _allocationHours[job['id']] : null,
     canOpen: _busyJobId != job['id']?.toString(),
   );
 

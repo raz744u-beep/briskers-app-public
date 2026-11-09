@@ -27,6 +27,34 @@ Map<String, dynamic> receipt(String id, String state, double amount,
 };
 
 void main() {
+  test('payment and cloud sync labels are independent while Force Offline', () {
+    expect(InvoicePaymentFeed.paymentLabel({
+      '_receipt_state': 'local', '_payment_coverage': 'paid',
+    }), 'Recorded');
+    expect(InvoicePaymentFeed.syncLabel({
+      '_receipt_state': 'local',
+    }), 'Local · saved on this device');
+    expect(InvoicePaymentFeed.paymentLabel({
+      '_receipt_state': 'pending', '_payment_coverage': 'paid',
+    }), 'Recorded');
+    expect(InvoicePaymentFeed.syncLabel({
+      '_receipt_state': 'pending',
+    }), 'Pending cloud sync');
+    expect(InvoicePaymentFeed.paymentLabel({
+      '_receipt_state': 'posted', '_payment_coverage': 'partial',
+    }), 'Partial');
+    expect(InvoicePaymentFeed.paymentLabel({
+      '_receipt_state': 'posted', '_payment_coverage': 'paid',
+    }), 'Paid');
+    expect(InvoicePaymentFeed.syncLabel({
+      '_receipt_state': 'posted',
+    }), 'Synced');
+    expect(InvoicePaymentFeed.paymentLabel({
+      '_receipt_state': 'unknown', '_payment_coverage': 'paid',
+    }), 'Recorded');
+  });
+
+
   test('local outbox is immediately visible, without server or finalization',
       () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());

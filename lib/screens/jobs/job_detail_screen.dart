@@ -1,7 +1,7 @@
+import '../../services/job_task_summary.dart';
 import '../payroll/mechanic_labor_screen.dart';
 import '../payroll/owner_payroll_screen.dart';
 import '../payroll/job_tasks_access.dart';
-import '../../widgets/completed_work_section.dart';
 import '../../services/owner_job_retirement_service.dart';
 import 'owner_local_delete_action.dart';
 import 'dart:async';
@@ -140,6 +140,74 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   VoidCallback? _modalRefresh;
   int _loadEpoch = 0;
   int? _taskEstimatedMinutes;
+  JobTaskProgress? _taskProgress;
+
+  Future<void> _readTaskProgress(int epoch) async {
+    JobTaskProgress? progress;
+    try {
+      progress = await JobTaskSummary(localDatabase).progress(widget.businessId, widget.jobId);
+    } catch (_) {
+      // Keep a failed local read distinct from an empty job.
+    }
+    if (_currentLoad(epoch)) setState(() => _taskProgress = progress);
+  }
+
+  Widget _progressRow() {
+    final progress = _taskProgress;
+    final fraction = progress == null || progress.total == 0
+        ? 0.0 : progress.done / progress.total;
+    final percent = '${(fraction * 100).round()}%';
+    // Owner-approved J-44 design: no extra tinted panel inside the white
+    // Job summary card; dark labels and teal on a cool gray progress track.
+    return InkWell(
+      onTap: _openJobLaborTasks,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(6, 12, 6, 4),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            const Expanded(child: Text('Job Progress', style: TextStyle(
+              fontWeight: FontWeight.w800, color: Color(0xFF161D2B)))),
+            Flexible(child: Text(progress == null ? 'Progress unavailable' :
+              progress.total == 0 ? 'No tasks yet' :
+              '${progress.done} of ${progress.total} tasks completed',
+              textAlign: TextAlign.end,
+              style: const TextStyle(color: Color(0xFF161D2B),
+                fontWeight: FontWeight.w600))),
+          ]),
+          const SizedBox(height: 9),
+          if (progress != null && progress.total > 0)
+            ClipRRect(borderRadius: BorderRadius.circular(20),
+              child: LayoutBuilder(builder: (context, box) => Stack(children: [
+                const LinearProgressIndicator(value: 0, minHeight: 22,
+                  backgroundColor: Color(0xFFD0D4E0),
+                  color: Color(0xFFD0D4E0)),
+                LinearProgressIndicator(value: fraction, minHeight: 22,
+                  color: const Color(0xFF008D79),
+                  backgroundColor: Colors.transparent),
+                if (fraction > 0)
+                  SizedBox(width: fraction * box.maxWidth, height: 22,
+                    child: Center(child: Text(percent, style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w800,
+                      fontSize: 14)))),
+                if (fraction == 0)
+                  const SizedBox(height: 22, child: Center(
+                    child: Text('0%', style: TextStyle(
+                      color: Color(0xFF17243B),fontWeight: FontWeight.w800)))),
+              ]))),
+          TextButton(onPressed: _openJobLaborTasks,
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF006D58)),
+            child: Row(children: [
+              const Icon(Icons.checklist), const SizedBox(width: 8),
+              Expanded(child: Text(progress == null
+                ? 'View Tasks' : 'View Tasks (${progress.total})')),
+              const Icon(Icons.chevron_right),
+            ])),
+        ]),
+      ),
+    );
+  }
+
   bool _contentBlocked = false;
 
   bool _currentLoad(int epoch) => mounted && !_contentBlocked && epoch == _loadEpoch;
@@ -573,6 +641,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     }
     if (!mounted || epoch != _loadEpoch) return;
     _contentBlocked = false;
+    if (_owner && OwnerPayrollScreen.enabled) unawaited(_readTaskProgress(epoch));
     final loadWatch = Stopwatch()..start();
     var localShown = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
@@ -3588,10 +3657,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       _job?['status']?.toString(),
       _job?['status_color']?.toString(),
     );
-    final cardTint = Color.alphaBlend(
-      statusColor.withValues(alpha: 0.12),
-      const Color(0xFFFCFCFB),
-    );
+    final cardTint = _owner && OwnerPayrollScreen.enabled
+        ? const Color(0xFFFAFBFE)
+        : Color.alphaBlend(statusColor.withValues(alpha: 0.12),
+            const Color(0xFFFCFCFB));
 
     Widget infoRow({
       required IconData icon,
@@ -3710,11 +3779,32 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       );
     }
 
+    final linkedInvoices = _documents.where(
+      (row) => row['kind'] == 'invoice' && row['id'] is String,
+    ).toList();
+
+    Widget invoiceChip(Map<String, dynamic> invoice) => ActionChip(
+      backgroundColor: const Color(0xFFE6F4F1),
+      labelStyle: const TextStyle(
+        color: Color(0xFF07594D), fontWeight: FontWeight.w800),
+      avatar: const Icon(Icons.receipt_long_outlined,
+        size: 17, color: Color(0xFF07594D)),
+      label: Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(child: Text(invoice['document_number'] == null
+            ? 'Open invoice' : '#${invoice['document_number']}',
+          overflow: TextOverflow.ellipsis)),
+        const Icon(Icons.chevron_right, size: 18, color: Color(0xFF07594D)),
+      ]),
+      onPressed: _busy ? null : () => _openDocument(invoice['id'] as String),
+    );
+
     return Container(
       decoration: BoxDecoration(
         color: cardTint,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: statusColor.withValues(alpha: 0.24)),
+        border: Border.all(color: _owner && OwnerPayrollScreen.enabled
+            ? const Color(0xFFC7CDDA)
+            : statusColor.withValues(alpha: 0.24)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.06),
@@ -3810,12 +3900,36 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                             ),
                           ),
                         ),
-                        if (_canManage)
+                        if (_canSeeFinancial && linkedInvoices.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Flexible(child: Align(
+                            alignment: Alignment.centerRight,
+                            child: invoiceChip(linkedInvoices.first),
+                          )),
+                        ] else if (_canManage)
                           const Icon(Icons.chevron_right, size: 20),
                       ],
                     ),
                   ),
                 ),
+                if (_canSeeFinancial && linkedInvoices.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    child: Text('No linked invoice saved'),
+                  ),
+                // Additional invoices remain accessible without repeating the
+                // bold Job title or a second Invoice label.
+                if (_canSeeFinancial)
+                  for (final extra in linkedInvoices.skip(1))
+                    Align(alignment: Alignment.centerRight,
+                      child: invoiceChip(extra)),
+                if (_owner && OwnerPayrollScreen.enabled) _progressRow(),
+                // In restored Owner Tasks/Payroll, one job can have several
+                // mechanics and independently assigned labor hours. Repeating
+                // the single Main Mechanic in the green Job summary falsely
+                // suggests it is the whole allocation. Keep the lead selector
+                // and per-mechanic work below in the dedicated Tasks section.
+                if (!(OwnerPayrollScreen.enabled && _owner)) ...[
                 const SizedBox(height: 2),
                 Row(
                   children: [
@@ -3845,6 +3959,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                     ),
                   ],
                 ),
+                ],
               ],
             ),
           ),
@@ -5474,6 +5589,17 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     if (key == 'profit' && _owner) {
       await _reloadProfitability();
       if (!mounted) return;
+      if (BriskersConnectionModeController.instance.forceOffline && _profitability == null) {
+        await showModalBottomSheet<void>(context: context, useSafeArea: true,
+          builder: (_) => SafeArea(child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
+              children: [Text(tr('jobProfitabilityTile'), style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 8),
+                const Text('No verified profitability is saved on this device for this job. Go online to load it.'),
+              ]))));
+        return;
+      }
     }
 
     if (!mounted) return;
@@ -5696,29 +5822,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
   Future<void> _openJobLaborTasks() async {
     if (!_owner || !OwnerPayrollScreen.enabled) return;
-    try {
-      final documents = await _localDocuments.listByJob(widget.businessId, widget.jobId);
-      final labor = <String, List<Map<String, dynamic>>>{};
-      for (final document in documents) {
-        final id = document['id'];
-        if (document['kind'] != 'invoice' || id is! String) continue;
-        final detail = await _documentDetailCache.load(widget.businessId, id);
-        final lines = detail?['lines'] ?? detail?['items'];
-        if (lines is List) {
-          labor[id] = lines.whereType<Map>().map(Map<String, dynamic>.from).toList();
-        }
-      }
-      if (!mounted) return;
-      await Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => OwnerPayrollScreen(
-          businessId: widget.businessId, jobId: widget.jobId, jobInvoiceLabor: labor,
-        ),
-      ));
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
-      }
-    }
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => OwnerPayrollScreen(businessId: widget.businessId, jobId: widget.jobId),
+    ));
+    if (mounted) await _load();
   }
 
   @override
@@ -5841,7 +5948,6 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   )),
                 );
               }
-              if (value == 'job_tasks') await _openJobLaborTasks();
               if (value == 'edit') await _editJob();
               if (value == 'change_customer') await _changeCustomer();
               if (value == 'assignment') await _changeAssignment();
@@ -5849,8 +5955,6 @@ class _JobDetailScreenState extends State<JobDetailScreen>
               if (value == 'delete_unused') await _deleteUnusedJob();
             },
             itemBuilder: (_) => [
-              if (OwnerPayrollScreen.enabled && _owner)
-                const PopupMenuItem(value: 'job_tasks', child: Text('Tasks')),
               if (OwnerPayrollScreen.enabled && widget.roleCode == 'mechanic' &&
                   _canEditWork)
                 const PopupMenuItem(
@@ -5877,7 +5981,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                     title: Text('Change customer on job'),
                   ),
                 ),
-              if (_canQuickAdmin)
+              if (_canQuickAdmin && !(_owner && OwnerPayrollScreen.enabled))
                 const PopupMenuItem(
                   value: 'assignment',
                   child: ListTile(
@@ -5916,10 +6020,16 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           ),
         ],
       ),
-      bottomNavigationBar: widget.bottomNavigationBar,
-      floatingActionButton: (_canEditFindings || _canManage) ? FloatingActionButton.extended(
+      bottomNavigationBar: Column(mainAxisSize: MainAxisSize.min, children: [
+        if (_canEditFindings || _canManage)
+          SafeArea(top: false, bottom: widget.bottomNavigationBar == null,
+            child: Align(alignment: Alignment.centerRight,
+              child: Padding(padding: const EdgeInsets.fromLTRB(12,4,12,6),
+                child: FloatingActionButton.extended(
         onPressed: _busy ? null : _showNewMenu, backgroundColor: BriskersColors.jobs, foregroundColor: Colors.white, icon: const Icon(Icons.add), label: const Text('New', style: TextStyle(fontWeight: FontWeight.w800)),
-      ) : null,
+      )))),
+        if (widget.bottomNavigationBar != null) widget.bottomNavigationBar!,
+      ]),
       body: Stack(
         children: [
           RefreshIndicator(
@@ -5932,8 +6042,6 @@ class _JobDetailScreenState extends State<JobDetailScreen>
             jobTitle: jobTitle,
             assignment: assignment,
           ),
-          if (_canSeeFinancial)
-            CompletedWorkSection(business:widget.businessId,job:widget.jobId,revision:_loadEpoch),
           if (OwnerPayrollScreen.enabled && _owner)
             Padding(padding:const EdgeInsets.all(8),child:JobTasksAccess(business:widget.businessId,job:widget.jobId,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);})),
           if (_canSeeFinancial &&

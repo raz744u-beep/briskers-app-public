@@ -39,10 +39,12 @@ void main() {
       final root = await PayrollLanIdentity.fromSeed(List.filled(32, 1));
       final identity = currentHolder ? root : await PayrollLanIdentity.fromSeed(List.filled(32, 2));
       const who = OwnerSessionIdentity('owner', 'regular-app-session');
+      var devicePromptCount = 0;
       final auth = LocalOwnerAuthorization(store: _Unused(), currentIdentity: () => who,
-        verifyOwner: (_) async => throw StateError('No Supabase required'), authenticateDevice: () async => true,
+        verifyOwner: (_) async => throw StateError('No Supabase required'),
+        authenticateDevice: () async { devicePromptCount++; return true; },
         verifyLocalOwner: (shop) async => VerifiedOwnerEnrollment(who, shop));
-      Future<LocalOwnerGrant> unlock(String shop) => auth.authorizeLocal(shop);
+      Future<LocalOwnerGrant> unlock(String shop) => auth.authorizeSession(shop);
       PayrollOwnerLease lease() => PayrollOwnerLease(identity: identity, business: 'shop', anchor: root.deviceId,
         read: (key) async => values[key], write: (key, value) async { values[key] = value; });
       var authority = lease();
@@ -57,14 +59,20 @@ void main() {
       await tester.runAsync(() async {
       await LocalDocumentDetailCache.initialize(db);
       await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status,job_number) VALUES('job','shop','owner','Synthetic repair','open','J-TEST')");
-      await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind,document_number) VALUES('invoice','shop','job','invoice','TEST-100')");
+      await db.customStatement("INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) VALUES('2026-11-07','invoice','shop','job','invoice','TEST-100')");
       for (final employee in ['a', 'b']) {
         await db.customStatement('INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id,employee_name) VALUES(?,?,?,?,?)',
           [employee, 'shop', 'job', employee, employee == 'a' ? 'Alice' : 'Bob']);
       }
       await LocalDocumentDetailCache(database: db).save('shop', 'invoice', {'id': 'invoice', 'kind': 'invoice',
         'job_id': 'job', 'lines': [{'id': 'labor', 'line_kind': 'labor', 'description': 'Shared repair', 'quantity': 1}]});
-      final today = DateTime.now().toIso8601String().split('T').first;
+      // Payroll workweek is Monday-Friday. A Sunday completion is outside
+      // the selected workweek and must not be offered for payment.
+      final now = DateTime.now();
+      final monday = DateTime(now.year, now.month, now.day)
+          .subtract(Duration(days: now.weekday - DateTime.monday));
+      final friday = monday.add(const Duration(days: 4));
+      final today = friday.toIso8601String().split('T').first;
       for (final employee in ['a', 'b']) {
         await fixture.registerAssignedLabor(jobId: 'job', invoiceId: 'invoice', lineId: 'labor',
           employeeId: employee, employeeName: employee == 'a' ? 'Alice' : 'Bob', rateCents: 4000);
@@ -123,7 +131,14 @@ void main() {
         await tester.pumpAndSettle();
         await until(find.widgetWithText(FilledButton, 'Verify Payment'));
       }
-      await tester.tap(find.widgetWithText(FilledButton, 'Verify Payment'));
+      // The recorded-labor review above WeeklyLaborReview makes the footer
+      // scrollable on short phones; bring the existing payment action into
+      // view before tapping it.
+      final verify = find.widgetWithText(FilledButton, 'Verify Payment');
+      await tester.ensureVisible(verify);
+      await tester.pumpAndSettle();
+      expect(tester.widget<FilledButton>(verify).onPressed, isNotNull);
+      await tester.tap(verify);
       await until(find.widgetWithText(FilledButton, 'Record payment'));
       expect(find.text(r'Calculated labor: $40.00'), findsOneWidget);
       await tester.ensureVisible(find.widgetWithText(FilledButton, 'Record payment'));
@@ -169,6 +184,8 @@ void main() {
       }
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(milliseconds: 500));
+      expect(devicePromptCount, 0,
+        reason: 'Payroll, advances, repayments, actual payment and restart should use only the existing Briskers Owner login');
       expect(tester.takeException(), isNull);
     }, timeout: const Timeout(Duration(minutes: 2)));
   }

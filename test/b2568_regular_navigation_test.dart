@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
 import 'package:briskers_app/app.dart';
 import 'package:briskers_app/screens/home_screen.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -21,9 +22,11 @@ import 'package:briskers_app/services/payroll_lan_identity.dart';
 import 'package:briskers_app/services/payroll_owner_lease.dart';
 import 'package:briskers_app/services/payroll_owner_lan.dart';
 import 'package:briskers_app/screens/jobs/job_document_screen.dart';
+import 'package:briskers_app/screens/jobs/job_detail_screen.dart';
 import 'package:briskers_app/screens/payroll/owner_payroll_screen.dart';
 import 'package:briskers_app/screens/payroll/payroll_overview.dart';
 import 'package:briskers_app/screens/payroll/tasks_workspace.dart';
+import 'package:briskers_app/screens/payroll/job_scoped_tasks.dart';
 import 'package:briskers_app/screens/payroll/payroll_ui_scope.dart';
 class _Unused implements OwnerEnrollmentStore{
   @override Future<String?> read()async=>null;
@@ -56,13 +59,15 @@ void main(){
     final db=BriskersLocalDatabase(NativeDatabase(File('${directory.path}/shop.sqlite')));
     debugUseLocalDatabase(db);
     const who=OwnerSessionIdentity('owner','local');
+    var secondaryPrompts=0;
     final auth=LocalOwnerAuthorization(store:_Unused(),currentIdentity:()=>who,
-      verifyOwner:(_)async=>throw StateError('No cloud verification'),authenticateDevice:()async=>true,
+      verifyOwner:(_)async=>throw StateError('No cloud verification'),
+      authenticateDevice:()async{secondaryPrompts++;return true;},
       verifyLocalOwner:(s)async=>VerifiedOwnerEnrollment(who,s));
     final identity=await PayrollLanIdentity.fromSeed(List.filled(32,3));
     final values=<String,String>{};
     final lease=PayrollOwnerLease(identity:identity,business:'shop',anchor:identity.deviceId,read:(k)async=>values[k],write:(k,v)async{values[k]=v;});
-    await lease.migrate(await auth.authorizeLocal('shop'));
+    await lease.migrate(await auth.authorizeSession('shop'));
     final network=PayrollOwnerLan(lease:lease,database:db,actor:'owner',approve:(_)async=>null);
     addTearDown(()async{await network.close();await db.close();debugUseLocalDatabase(null);
       LocalDocumentDetailCache.sqliteWritesEnabled=false;HttpOverrides.global=previous;
@@ -81,7 +86,7 @@ void main(){
           {'name':'Labor','description':'Shared diagnostic labor','line_kind':'labor','quantity':3,'unit_price':100}]);
     });
     final boundary=GlobalKey();final navigator=GlobalKey<NavigatorState>();
-    await tester.pumpWidget(PayrollUiScope(database:db,unlock:auth.authorizeLocal,connection:network,debugAllowOwnerView:true,
+    await tester.pumpWidget(PayrollUiScope(database:db,unlock:auth.authorizeSession,connection:network,debugAllowOwnerView:true,
       child:RepaintBoundary(key:boundary,child:MaterialApp(debugShowCheckedModeBanner:false,theme:BriskersApp.applicationTheme,navigatorKey:navigator,home:JobDocumentScreen(businessId:'shop',documentId:invoice,isOwner:true,roleCode:'owner')))));
     Future<void> until(Finder f)async{
       for(var i=0;i<180;i++){
@@ -100,53 +105,125 @@ void main(){
       });
     }
 
+    Future<Finder> creditCard(String employee,String description) async {
+      final work=(await tester.runAsync(()=>LocalPayrollRepository(
+        db,business:'shop',owner:true).work(employee:employee)))!;
+      final credit=work.singleWhere((r)=>r['description']==description);
+      return find.byKey(ValueKey('mechanic-work-${credit['id']}'));
+    }
+
+    // Both tooltip states use the same approved single-pencil labor control.
+    // Before an allocation is loaded it says Assign; afterward it says Edit.
+    Finder laborPencils() => find.byWidgetPredicate((widget) =>
+      widget is IconButton &&
+      (widget.tooltip == 'Edit or split mechanic labor' ||
+       widget.tooltip == 'Assign or split mechanic labor'));
+
+    // Approved design: the job-wide Main Mechanic selector belongs on Job
+    // Details, never inside Invoice Items. Navigate to the real Job screen
+    // to set the lead, then return to the unchanged invoice labor pencil.
+    final jobId=(await tester.runAsync(()async{
+      final row=await db.customSelect(
+        'SELECT job_id FROM local_documents WHERE business_id=? AND id=?',
+        variables:[const Variable<String>('shop'),Variable<String>(invoice)],
+      ).getSingle();
+      return row.read<String>('job_id');
+    }))!;
+    navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>
+      JobDetailScreen(businessId:'shop',jobId:jobId,roleCode:'owner')));
+    await tester.pumpAndSettle();
     await until(find.text('Main Mechanic'));
+    expect(find.text('Job Tasks'),findsWidgets);
     await click(find.byType(DropdownButtonFormField<String>).first);
     await click(find.text('Alpha').last);
-    await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:150)));await tester.pump();
-    await click(find.byTooltip('Assign or split mechanic labor').first);
+    await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:150)));
+    await tester.pump();
+    navigator.currentState!.pop();
+    await tester.pumpAndSettle();
+    expect(find.text('Main Mechanic'),findsNothing,
+      reason:'Invoice Items must not duplicate Job Details controls.');
+    await until(laborPencils());
+    await click(laborPencils().first);
     
-    await click(find.text('Assign / split'));
+    await click(find.text('Add mechanic'));
     await click(find.text('Beta'));
-    await until(find.textContaining('Beta · Open'));
-    await click(find.widgetWithText(TextButton,'Start'));
-    await until(find.widgetWithText(TextButton,'Complete'));
-    await click(find.widgetWithText(TextButton,'Complete'));
-    await until(find.byType(AlertDialog));await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),'2');await click(find.text('Continue'));
-    await until(find.byType(AlertDialog));await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),'3');await click(find.text('Continue'));
-    await until(find.textContaining('120 actual min · 180 credited min'));
+    // The second mechanic starts at zero allocated hours. The Owner sets
+    // the approved credit once, before completing the task.
+    final turboCard=await creditCard('b','Replace turbocharger and gaskets');
+    final edit = find.descendant(of:turboCard,matching:find.byTooltip('Edit Assignment'));
+    await click(edit);
+    var field = find.widgetWithText(TextField,'Assigned hours');
+    await click(field);
+    final controller = tester.widget<TextField>(field).controller!;
+    expect(controller.selection.textInside(controller.text),controller.text);
+    expect(tester.widget<TextField>(field).keyboardType.decimal,true);
+    await tester.enterText(field,'7.5');
+    await click(find.text('Cancel'));
+    await click(edit);
+    field = find.widgetWithText(TextField,'Assigned hours');
+    expect(tester.widget<TextField>(field).controller!.text,'0.00');
+    await tester.enterText(field,'3');
+    await click(find.widgetWithText(FilledButton,'Save'));
+    await until(turboCard);
+    await click(find.descendant(of:turboCard,matching:
+      find.widgetWithText(TextButton,'Start')));
+    await until(find.descendant(of:turboCard,matching:find.text('In Progress')));
+    await click(find.descendant(of:turboCard,matching:
+      find.widgetWithText(OutlinedButton,'Mark Done')));
+    await until(find.textContaining('Actual: 3.00h · Credited: 3.00h'));
     await tester.runAsync(()async{
       final repo=LocalPayrollRepository(db,business:'shop',owner:true);
-      final work=await repo.work(employee:'b');expect(work.single['actual_minutes'],180);expect(work.single['recorded_actual_minutes'],120);
+      final work=await repo.work(employee:'b');expect(work.single['actual_minutes'],180);expect(work.single['recorded_actual_minutes'],180);
       final saved=await LocalDocumentDetailCache(database:db).load('shop',invoice);expect((saved!['lines'] as List).first['quantity'],6);
     });
     navigator.currentState!.pop();await tester.pumpAndSettle();
-    await click(find.byTooltip('Assign or split mechanic labor').at(1));
+    await until(laborPencils());
+    await click(laborPencils().last);
     
     // Keep Alpha explicitly assigned, then add Beta to the same task identity.
     for(final name in ['Alpha','Beta']){
-      await click(find.text('Assign / split'));await click(find.text(name));
+      await click(find.text('Add mechanic').last);await click(find.text(name).last);
       await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:400)));await tester.pump();
     }
+    // Two independent assigned-hours choices on the shared labor line.
+    await tester.runAsync(() async {
+      final repo=LocalPayrollRepository(db,business:'shop',owner:true);
+      final split=(await repo.work()).where(
+        (r)=>r['description']=='Shared diagnostic labor').toList();
+      final task=split.first['task_id'] as String;
+      await repo.setEstimatedMinutes(task,'a',60);
+      await repo.setEstimatedMinutes(task,'b',120);
+    });
+    await tester.pumpAndSettle();
     for(final name in ['Alpha','Beta']){
-      await until(find.textContaining('$name · Open'));
-      final card=find.ancestor(of:find.textContaining('$name · Open'),matching:find.byType(ListTile)).last;
-      await click(find.descendant(of:card,matching:find.widgetWithText(TextButton,'Start')));
-      await until(find.textContaining('$name · In Progress'));
-      final started=find.ancestor(of:find.textContaining('$name · In Progress'),matching:find.byType(ListTile)).last;
-      await click(find.descendant(of:started,matching:find.widgetWithText(TextButton,'Complete')));
-      for(var step=0;step<2;step++){
-        await until(find.byType(AlertDialog));
-        await tester.enterText(find.descendant(of:find.byType(AlertDialog).last,matching:find.byType(TextField)),name=='Alpha'?'1':'2');
-        await click(find.text('Continue'));
-      }
-      await until(find.textContaining('$name · Done'));
+      final card=await creditCard(name=='Alpha'?'a':'b','Shared diagnostic labor');
+      await until(card);
+      await click(find.descendant(of:card,matching:
+        find.widgetWithText(TextButton,'Start')));
+      await until(find.descendant(of:card,matching:find.text('In Progress')));
+      await click(find.descendant(of:card,matching:
+        find.widgetWithText(OutlinedButton,'Mark Done')));
+      await until(find.descendant(of:card,matching:find.text('Done')));
     }
     await tester.runAsync(()async{
       final all=await LocalPayrollRepository(db,business:'shop',owner:true).work();
       final split=all.where((r)=>r['description']=='Shared diagnostic labor').toList();
       expect(split,hasLength(2));expect(split.map((r)=>r['task_id']).toSet(),hasLength(1));
       expect(split.map((r)=>r['actual_minutes']).toSet(),{60,120});
+    });
+    // The test happens to run on a Sunday. Work completed by the synthetic
+    // UI must be dated inside the Mon–Fri shop week for the payroll review.
+    // This updates fixture-only timestamps, not paid credits or app behavior.
+    await tester.runAsync(() async {
+      final now=DateTime.now();
+      final finished=now.weekday<=DateTime.friday
+          ? now : now.subtract(Duration(days:now.weekday-DateTime.friday));
+      final savedDate=finished.toIso8601String().split('T').first;
+      await db.customStatement(
+        "UPDATE regular_payroll_portions SET completed_date=? "
+        "WHERE business_id='shop' AND state='Done'",
+        [savedDate],
+      );
     });
     navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>const OwnerPayrollScreen(businessId:'shop')));
     await tester.pumpAndSettle();
@@ -212,6 +289,33 @@ void main(){
     await until(find.text('Jobs with Tasks · 1'));
     expect(find.textContaining('2 tasks'),findsOneWidget);
     await capture('bugs30-global-completed-tasks');
-    await tester.pumpWidget(const SizedBox.shrink());await tester.pump(const Duration(milliseconds:500));expect(tester.takeException(),isNull);
+    // Reuse the Job identity already verified when navigating from Invoice.
+    navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>
+      JobDetailScreen(businessId:'shop',jobId:jobId,roleCode:'owner')));
+    final jobPage = find.byType(JobDetailScreen);
+    final chip = find.descendant(of:jobPage,matching:find.widgetWithIcon(ActionChip,Icons.receipt_long_outlined));
+    await until(chip);
+    await until(find.text('Job Progress'));
+    await capture('bugs32-owner-job-details');
+    final list = find.descendant(of:jobPage,matching:find.byType(RefreshIndicator)).first;
+    final add = find.descendant(of:jobPage,matching:find.widgetWithText(FloatingActionButton,'New'));
+    expect(tester.getRect(list).bottom, lessThanOrEqualTo(tester.getRect(add).top));
+    await click(chip);
+    expect(tester.widget<JobDocumentScreen>(find.byType(JobDocumentScreen)).documentId,invoice);
+    navigator.currentState!.pop();await tester.pumpAndSettle();
+    await click(find.descendant(of:jobPage,matching:find.widgetWithText(OutlinedButton,'Job Tasks')));
+    // Job-specific Tasks intentionally uses the approved compact view.
+    // Global Tasks above retains its existing filterable workspace.
+    await until(find.byType(JobScopedTasks));
+    expect(tester.widget<JobScopedTasks>(find.byType(JobScopedTasks)).jobId,jobId);
+    expect(find.text('Labor Task'),findsOneWidget);
+    expect(find.text('General Task'),findsOneWidget);
+    expect(find.byTooltip('Advanced task filters'),findsNothing);
+    expect(find.byIcon(Icons.more_vert),findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds:500));
+    expect(secondaryPrompts,0,
+      reason:'The regular invoice-to-Payroll-to-Tasks flow must require only the initial Briskers login.');
+    expect(tester.takeException(),isNull);
   },skip:!OwnerPayrollScreen.enabled,timeout:const Timeout(Duration(minutes:3)));
 }

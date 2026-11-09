@@ -76,6 +76,8 @@ void main() {
       await db.customStatement(
         'INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id) '
         'VALUES(?,?,?,?)', ['assignment', 'shop', initial!['job_id'], 'mechanic']);
+      // Seed the already-settled pre-upgrade ledger before replaying the old invoice.
+      await db.customStatement("UPDATE local_documents SET document_date='2026-11-07' WHERE id=?", [invoiceId]);
       await payroll.refreshInvoiceTasks();
       final originalTask = (await payroll.tasks()).single['id'];
       final allocation = (await payroll.work()).single['id'] as String;
@@ -88,6 +90,7 @@ void main() {
         adjustmentReason: '', repayment: 0, confirmedNet: 4000,
       );
 
+      await db.customStatement("UPDATE local_documents SET document_date='2026-10-12' WHERE id=?", [invoiceId]);
       final remoteProof = await _ConvertedInvoiceApi().documentDetail('shop', 'server-invoice');
       await expectLater(LocalInvoiceTaskStore(db).remapDraft('shop', invoiceId, initial, {
         ...remoteProof, 'lines': [{..._line, 'description': 'Unverified replacement'}],

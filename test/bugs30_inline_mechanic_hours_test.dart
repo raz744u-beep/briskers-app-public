@@ -25,8 +25,8 @@ void main() {
       "INSERT INTO local_jobs(id,business_id,access_scope,title,status,job_number) "
       "VALUES('job','shop','owner','Rear differential','open','J-24')");
     await db.customStatement(
-      "INSERT INTO local_documents(id,business_id,job_id,kind,document_number) "
-      "VALUES('invoice','shop','job','invoice','6342')");
+      "INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) "
+      "VALUES('2026-11-07','invoice','shop','job','invoice','6342')");
     final source={
       'id':'invoice','kind':'invoice','job_id':'job',
       'lines':[{'id':'rear','line_kind':'labor','description':'Replace rear differential fluid',
@@ -63,9 +63,12 @@ void main() {
     expect(find.textContaining('Adam 3.0h'),findsOneWidget,
       reason:tester.allWidgets.whereType<Text>().map((t)=>t.data).join(' | '));
     expect(find.textContaining('Chris 1.0h'),findsOneWidget);
-    expect(find.byTooltip('Edit Adam estimated mechanic hours'),findsOneWidget);
-    expect(find.byTooltip('Edit Chris estimated mechanic hours'),findsOneWidget);
-    expect(find.byTooltip('Assign or split mechanic labor'),findsOneWidget);
+    // The approved TEST presents one compact combined nickname/hour badge
+    // and one pencil. Both per-employee allocations still exist in Payroll.
+    expect(find.textContaining('Adam 3.0h · Chris 1.0h'),findsOneWidget);
+    expect(find.byTooltip('Edit or split mechanic labor'),findsOneWidget);
+    expect(find.byTooltip('Edit Adam estimated mechanic hours'),findsNothing);
+    expect(find.byTooltip('Edit Chris estimated mechanic hours'),findsNothing);
 
     final document=await LocalDocumentDetailCache(database:db).load('shop','invoice');
     expect((document!['lines'] as List).first['quantity'],0.8);

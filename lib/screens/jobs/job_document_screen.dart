@@ -1018,8 +1018,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
+  bool get _canAddTaskLabor => widget.isOwner && _detail?['kind'] == 'invoice' && !_readOnly &&
+      const {'draft','issued','open','reopened'}.contains(_detail?['status']) &&
+      !const {'closed','paid','void','finalized'}.contains(_detail?['display_status_code']);
+
   Future<void> _runInitialAction(String action) async {
     switch (action) {
+      case 'add_labor':
+        if (!_canAddTaskLabor) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Open an editable invoice to add labor.')));
+          return;
+        }
+        await _addCustomLine(laborOnly: true);
+        break;
       case 'add_item':
         await _openAddItemChoices();
         break;
@@ -2100,7 +2111,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     });
   }
 
-  Future<void> _addCustomLine() async {
+  Future<void> _addCustomLine({bool laborOnly = false}) async {
     if (_readOnly) return;
 
     final result = await showModalBottomSheet<Map<String, dynamic>>(
@@ -2112,13 +2123,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         line: <String, dynamic>{
           'name': '',
           'description': '',
-          'line_kind': 'item',
+          'line_kind': laborOnly ? 'labor' : 'item',
           'quantity': 1,
           'unit_price': 0,
           'tax_rate': _defaultTaxRate,
         },
         accent: _documentActionColor,
-        title: 'Add custom line',
+        title: laborOnly ? 'Add Labor Task' : 'Add custom line',
+        lockLineKind: laborOnly,
         saveLabel: 'Add',
         clearNumericOnFirstTap: true,
       ),
@@ -2128,6 +2140,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     if (translatedResult == null) return;
 
     await _runAddLine(() async {
+      if (laborOnly && !_canAddTaskLabor) {
+        throw StateError('This invoice is no longer editable.');
+      }
       return _addLineLocalAware(
         name: translatedResult['name'].toString(),
         description: translatedResult['description']?.toString(),
@@ -6101,9 +6116,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ],
             ),
           ),
-          if (OwnerPayrollScreen.enabled && widget.isOwner && !_estimate && _detail?['job_id'] is String)
-            Padding(padding:const EdgeInsets.all(12),child:JobTasksAccess(
-              business:widget.businessId,job:_detail!['job_id'] as String,invoice:widget.documentId,revision:_loadGeneration,onChanged:()=>unawaited(_load()))),
           if (lines.isEmpty)
             const Padding(
               padding: EdgeInsets.all(22),
@@ -6140,50 +6152,59 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                       bottom: BorderSide(color: Color(0xFFE1E6E9)),
                     ),
                   ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  // TEST parity: title and mechanic badges share a full
+                  // invoice-width header. Qty and Amount occupy their own
+                  // columns below, so phone widths do not push mechanics
+                  // beneath the labor name.
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                      if (OwnerPayrollScreen.enabled && widget.isOwner &&
+                          !_estimate && isInvoiceLaborLine(line) &&
+                          line['id'] is String && _detail?['job_id'] is String)
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            if (OwnerPayrollScreen.enabled && widget.isOwner &&
-                                !_estimate && isInvoiceLaborLine(line) &&
-                                line['id'] is String && _detail?['job_id'] is String)
-                              LayoutBuilder(builder:(context,limits) {
-                                final assignment=JobTasksAccess(
-                                  business:widget.businessId,
-                                  job:_detail!['job_id'] as String,
-                                  invoice:widget.documentId,
-                                  line:line['id'] as String,
-                                  revision:_loadGeneration,
-                                  onChanged:()=>unawaited(_load()),
-                                );
-                                final heading=Text(line['name']?.toString() ?? '',
-                                  style:const TextStyle(fontSize:16,
-                                    fontWeight:FontWeight.w800,
-                                    color:Color(0xFF0D1528)));
-                                // Retain the TEST inline presentation on wide
-                                // invoice rows; stack on narrow Samsung phones.
-                                return limits.maxWidth>=300
-                                  ? Row(crossAxisAlignment:CrossAxisAlignment.start,
-                                      children:[
-                                        Flexible(flex:2,child:heading),
-                                        const SizedBox(width:8),
-                                        Expanded(flex:5,child:assignment),
-                                      ])
-                                  : Column(crossAxisAlignment:CrossAxisAlignment.start,
-                                      children:[heading,assignment]);
-                              })
-                            else
-                              Text(
-                                line['name']?.toString() ?? '',
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
-                                  color: Color(0xFF0D1528),
-                                ),
+                            Text(line['name']?.toString() ?? '',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF0D1528),
+                              )),
+                            const SizedBox(width: 10),
+                            Expanded(child: Align(
+                              alignment: Alignment.centerRight,
+                              child: JobTasksAccess(
+                                business: widget.businessId,
+                                job: _detail!['job_id'] as String,
+                                invoice: widget.documentId,
+                                line: line['id'] as String,
+                                revision: _loadGeneration,
+                                onChanged: () => unawaited(_load()),
                               ),
+                            )),
+                          ],
+                        ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (!(OwnerPayrollScreen.enabled &&
+                                    widget.isOwner && !_estimate &&
+                                    isInvoiceLaborLine(line) &&
+                                    line['id'] is String &&
+                                    _detail?['job_id'] is String))
+                                  Text(
+                                    line['name']?.toString() ?? '',
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF0D1528),
+                                    ),
+                                  ),
                             if (description.isNotEmpty) ...[
                               const SizedBox(height: 3),
                               Text(
@@ -6253,6 +6274,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                             color: Color(0xFF182239),
                           ),
                         ),
+                      ),
+                        ],
                       ),
                     ],
                   ),
@@ -8063,17 +8086,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             job is! String || job.isEmpty) {
           return;
         }
-        final raw = detail?['lines'] ?? detail?['items'];
         await Navigator.push<void>(
           context,
           MaterialPageRoute(
             builder: (_) => OwnerPayrollScreen(
               businessId: widget.businessId,
               jobId: job,
-              invoiceId: widget.documentId,
-              invoiceLines: raw is List
-                  ? raw.whereType<Map>().map(Map<String, dynamic>.from).toList()
-                  : const [],
             ),
           ),
         );
@@ -8850,6 +8868,7 @@ class _EditLineDialog extends StatefulWidget {
     this.title = 'Edit item',
     this.saveLabel = 'Save',
     this.lockCatalogFields = false,
+    this.lockLineKind = false,
     this.clearNumericOnFirstTap = false,
   });
 
@@ -8858,6 +8877,7 @@ class _EditLineDialog extends StatefulWidget {
   final String title;
   final String saveLabel;
   final bool lockCatalogFields;
+  final bool lockLineKind;
   final bool clearNumericOnFirstTap;
 
   @override
@@ -9124,7 +9144,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                               child: Text(tr('shipping')),
                             ),
                           ],
-                          onChanged: (value) {
+                          onChanged: widget.lockLineKind ? null : (value) {
                             if (value != null) {
                               setState(() => _lineKind = value);
                             }

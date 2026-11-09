@@ -1,3 +1,4 @@
+import '../../services/local_invoice_task_store.dart';
 import 'dart:async';
 import 'dart:math';
 
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:drift/drift.dart' show Variable;
 import '../../services/local_customer_repository.dart';
+import '../../services/local_document_repository.dart';
 import '../jobs/job_customer_picker_screen.dart';
 import 'package:intl/intl.dart';
 
@@ -33,9 +35,14 @@ import '../jobs/job_detail_screen.dart';
 import '../settings/employee_edit_screen.dart';
 import '../jobs/job_document_screen.dart';
 import 'payroll_history_panel.dart';
+import 'historical_expense_review.dart';
+import 'payroll_dry_run_preview.dart';
+import 'historical_invoice_labor_review.dart';
+import '../../services/local_financial_cache.dart' as expenses;
 import 'payroll_lan_controls.dart';
 import 'weekly_labor_review_screen.dart';
 import 'tasks_workspace.dart';
+import 'job_scoped_tasks.dart';
 import 'payroll_overview.dart';
 
 class OwnerPayrollScreen extends StatefulWidget {
@@ -103,8 +110,20 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     DeviceOwnerAuthorization.instance.currentIdentity())==true);
   late final _viewRepository=LocalPayrollRepository(_db,
     business:widget.businessId,owner:true);
+  // Editing a task status is not a payroll disbursement. Guard against
+  // sign-out and business identity changes throughout the local operation.
+  late final _taskEditRepository = LocalPayrollRepository(
+    _db, business: widget.businessId, owner: true,
+    assertOwnerGrant: () {
+      if (!_canView) throw StateError('Sign in as Owner to edit tasks.');
+    },
+  );
   List<Map<String, dynamic>> _employees = [];
   List<Map<String, dynamic>> _work = [];
+  // Display history can include pre-cutover work, but all new payroll
+  // calculations must explicitly exclude archived historical allocations.
+  List<Map<String,dynamic>> get _currentPayrollWork =>
+      _work.where((row)=>row['archived_labor']!=1).toList();
   List<Map<String, dynamic>> _taskSources = [];
   List<Map<String, dynamic>> _history = [];
   List<Map<String, dynamic>> _overviewPayments = [];
@@ -160,12 +179,23 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     WidgetsBinding.instance.addPostFrameCallback((_){
       if(mounted)unawaited(_openSavedOwnerView());
     });
-    _lockCheck=Timer.periodic(const Duration(seconds:5),(_){
-      if(_grant==null || _busy)return;
-      try{_assertOwner();}on StateError{
-        if(mounted)setState(()=>_grant=null);
+    // An Owner session, not a two-minute device unlock, governs Payroll.
+    // Sign-out and account switching are checked by _canView / _assertOwner.
+  }
+
+  Future<LocalOwnerGrant> _signedInOwnerGrant() {
+    // In widget tests, the explicit debug fixture supplies its simulated
+    // saved Owner session. Release code always verifies the real signed-in
+    // Owner identity and business role without a second OS challenge.
+    if (kDebugMode && _debugOwnerView) {
+      final simulatedSession =
+          widget.unlockOwner ?? PayrollUiScope.of(context)?.unlock;
+      if (simulatedSession != null) {
+        return simulatedSession(widget.businessId);
       }
-    });
+    }
+    return DeviceOwnerAuthorization.instance.authority
+        .authorizeSession(widget.businessId);
   }
 
   Future<void> _openSavedOwnerView() async {
@@ -186,7 +216,16 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         _error='Sign in to the saved Owner account to view payroll.';
       }else{_error=null;_historyUnlocked.value=true;}
     });
-    if(_canView)await _load();
+    if (_canView) {
+      // Acquire session authority once for Owner-only financial operations.
+      // No device prompt; do not block the normal view if local role checks
+      // cannot issue the grant.
+      try {
+        final grant = await _signedInOwnerGrant();
+        if (mounted && _canView) setState(() => _grant = grant);
+      } catch (_) { /* Saved Owner view remains available. */ }
+      if (_canView) await _load();
+    }
   }
 
   @override
@@ -206,13 +245,6 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   bool get _jobMode => widget.jobId != null;
-  late final _repository = LocalPayrollRepository(
-        _db,
-        business: widget.businessId,
-        owner: true,
-        assertOwnerGrant: _assertOwner,
-      );
-
   void _assertOwner() {
     final grant = _grant;
     if (grant == null) throw StateError('Unlock Owner payroll first.');
@@ -221,9 +253,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if(state==AppLifecycleState.paused && !_authorizing && _grant!=null){
-      setState(()=>_grant=null);
-    }
+    // Backgrounding Briskers is not signing out of the Owner account.
     if(state==AppLifecycleState.resumed)unawaited(_openSavedOwnerView());
   }
 
@@ -239,18 +269,20 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     setState(() { _busy = true; _error = null; });
     var actionCompleted = false;
     try {
-      var needsUnlock = verifyPayment;
-      try { _assertOwner(); } on StateError { needsUnlock = true; }
-      if (needsUnlock) {
-        setState(() => _authorizing = true);
-        final grant = await ((widget.unlockOwner ?? PayrollUiScope.of(context)?.unlock)?.call(widget.businessId) ??
-            DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId))
-            .timeout(const Duration(seconds: 45), onTimeout: () =>
-              throw StateError('Owner unlock did not finish. Cancel the device prompt and retry.'));
-        if (!mounted) return;
-        grant.assertValid(widget.businessId, grant.actorId);
-        setState(() { _grant = grant; _authorizing = false; });
+      if (!_canView) throw StateError('Sign in to Briskers as Owner.');
+      var needsSessionGrant = _grant == null;
+      if (!needsSessionGrant) {
+        try { _assertOwner(); } on StateError { needsSessionGrant = true; }
       }
+      if (needsSessionGrant) {
+        // Actual payments still use the signed ledger lease and idempotency
+        // checks, but never demand another biometric/PIN authentication.
+        final grant = await _signedInOwnerGrant();
+        if (!mounted || !_canView) return;
+        grant.assertValid(widget.businessId, grant.actorId);
+        setState(() { _grant = grant; });
+      }
+      _assertOwner();
       if (!mounted) return;
       await action();
       actionCompleted = true;
@@ -265,6 +297,22 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       if (mounted) setState(() { _busy = false; _authorizing = false; });
     }
   }
+
+  Future<void> _runOwnerTaskEdit(Future<void> Function() action) async {
+    if (_busy || !_canView) return;
+    setState(() { _busy = true; _error = null; });
+    try {
+      await action();
+      if (mounted && _canView) unawaited(_load());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _changeGeneralTaskStatus(String employee, int id, String status) =>
+      _runOwnerTaskEdit(() => _taskEditRepository.setShopTaskStatus(employee, id, status));
 
   Future<void> _refreshLan() async {
     if (_refreshingOwnerState || _grant == null) return;
@@ -344,8 +392,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     _loadStage = 'pending requests';
     final pendingPayments = await PayrollOwnerLedger(_db, widget.businessId).pending();
     _loadStage = 'tasks'; // Invoice saves maintain task identities incrementally.
-    final sources = await repository.tasks();
     final job = widget.jobId;
+    // Keep historical invoice task sources visible in the Tasks UI.
+    // A pre-cutover source is read-only history, never a new payable credit.
+    final sources = (await repository.tasks()).map((r) => <String,dynamic>{
+      ...r,
+      'archived_labor': r['source_kind']=='invoice' &&
+          !LocalInvoiceTaskStore.currentPayrollDate(r['invoice_date']) ? 1 : 0,
+    }).toList();
     final persistedEmployees = job == null
         ? await repository.employees()
         : await repository.assignedEmployees(job);
@@ -362,6 +416,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         widget.employeeId == null && !_jobMode;
     final employee = widget.globalTasks || overview ? null :
         widget.employeeId ?? _employee ?? (employees.firstOrNull?['id'] as String?);
+    // Preserve historical allocations in read-only Tasks and Reports views.
+    // Payroll payment eligibility is guarded separately in WeeklyLaborReview.
     final work = await repository.work(employee: _jobMode ? null : employee, job: job);
     if(!mounted||generation!=_loadGeneration)return;
     if(!_canView)return;
@@ -384,7 +440,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final weeklyDefaults = employee == null || widget.employeeId == null ||
         widget.reportsOnly || _weeklyDefaultsLoaded
         ? null : await repository.weeklyDefaults(employee);
-    final generalTasks = widget.globalTasks ? await repository.shopTasks()
+    final generalTasks = (widget.globalTasks || _jobMode) ? await repository.shopTasks()
         : employee == null || widget.employeeId == null || widget.reportsOnly
             ? <Map<String, dynamic>>[] : await repository.shopTasks(employee);
     if(!_canView)return;
@@ -406,7 +462,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       _repayments = repayments;
       _openingAdvance = opening;
       if (!_editingOpening) _opening.text = opening == null ? '' : (opening / 100).toStringAsFixed(2);
-      _generalTasks = generalTasks;
+      _generalTasks = job == null ? generalTasks : generalTasks.where((row) => row['job_id'] == job).toList();
       if (!_weeklyDefaultsLoaded) {
         _weeklyDefaultsLoaded = true;
         String amount(String key) =>
@@ -474,13 +530,21 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final job = jobId ?? widget.jobId;
     if (job == null) return;
     var candidates = <Map<String, dynamic>>[];
-    await _run(() async {
+    // Opening a picker is a read-only Owner action, not a payroll payment.
+    // Keep the actual assignment transaction on its protected write path.
+    if (!_canView) return;
+    try {
       final roster=await OfflineJobAdminService(database:_db).cachedEmployees(widget.businessId);
-      final known=await _repository.employees();
+      if (!mounted || !_canView) return;
+      final known=await _viewRepository.employees();
+      if (!mounted || !_canView) return;
       candidates={for(final r in roster) r['id']:{...r,'employee_id':r['id']},
         for(final r in known) r['id']:{...?roster.where((p)=>p['id']==r['id']).firstOrNull,...r,'employee_id':r['id']}}.values.toList();
-    });
-    if (!mounted || _error != null) return;
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    }
+    if (!mounted || !_canView) return;
     if (candidates.isEmpty) {
       setState(() => _error = 'Assign mechanics to this Job first.');
       return;
@@ -488,7 +552,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final employee = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => SimpleDialog(
-        title: const Text('Assign invoice labor'),
+        title: const Text('Add mechanic to invoice labor'),
+        // Adding another mechanic keeps all existing allocations and hours.
         children: [
           for (final employee in candidates)
             SimpleDialogOption(
@@ -505,29 +570,67 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     // basis, NOT an automatic rate; actual payment remains unavailable until
     // the Owner configures and reviews compensation in Employee Details.
     final rate = employee['rate'] as int? ?? 0;
-    await _run(() async {
-      final assignments=LocalTaskAssignmentStore(_db);
-      await assignments.linkEmployee(widget.businessId,job,employeeId,name);
-      final source=(await _repository.tasks()).where((r)=>r['invoice_id']==invoiceId && r['source_line_id']==line['id']).firstOrNull;
-      if(source!=null) await assignments.retireInherited(widget.businessId,source['id'] as String,except:employeeId);
+    if (!_canView) return;
+    // Detect the saved shop link before editing. A failed peer read must
+    // never be silently interpreted as an unpaired, local-only device.
+    bool paired;
+    try {
       final identity = await PayrollLanIdentity.load();
-      final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, employeeId);
-      if (peer == null) {
-        await _repository.registerAssignedLabor(
-          jobId: job, invoiceId: invoiceId, lineId: line['id'] as String,
-          employeeId: employeeId, employeeName: name, rateCents: rate,
-        );
-      } else {
-        final workflow = await _workflow(employeeId);
-        await workflow.assign(
-          job: job, invoice: invoiceId, line: line['id'] as String,
-          description: (line['description'] ?? line['name'] ?? 'Invoice labor').toString(),
-          employeeName: name, rate: rate,
-        );
+      paired = await PayrollLanEnrollment(identity)
+          .ownerPeer(widget.businessId, employeeId) != null;
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    }
+    if (!mounted || !_canView) return;
+
+    Future<void> assign({required bool pairedDevice}) async {
+      final assignments = LocalTaskAssignmentStore(_db);
+      Future<void> apply() async {
+        if (!_canView) throw StateError('Owner account changed during assignment.');
+        await assignments.linkEmployee(widget.businessId, job, employeeId, name);
+        // Add/split MUST be additive, including when the first mechanic
+        // inherited the assignment from Main Mechanic. Retiring inherited
+        // allocations here silently replaced the original mechanic.
+        // Explicit reassignment is a distinct Owner operation, never an
+        // accidental consequence of adding a second person.
+        if (!pairedDevice) {
+          await _taskEditRepository.registerAssignedLabor(
+            jobId: job, invoiceId: invoiceId, lineId: line['id'] as String,
+            employeeId: employeeId, employeeName: name, rateCents: rate,
+          );
+        } else {
+          final workflow = await _workflow(employeeId);
+          await workflow.assign(
+            job: job, invoice: invoiceId, line: line['id'] as String,
+            description: (line['description'] ?? line['name'] ?? 'Invoice labor')
+                .toString(),
+            employeeName: name, rate: rate,
+          );
+        }
+        final task = (await _taskEditRepository.tasks())
+            .where((r) => r['invoice_id'] == invoiceId &&
+                r['source_line_id'] == line['id']).single;
+        await assignments.allocate(widget.businessId, task['id'] as String,
+            employeeId, inherited: false);
+        if (!_canView) throw StateError('Owner account changed during assignment.');
       }
-      final task=(await _repository.tasks()).where((r)=>r['invoice_id']==invoiceId && r['source_line_id']==line['id']).single;
-      await assignments.allocate(widget.businessId,task['id'] as String,employeeId,inherited:false);
-    });
+      // Keep a local assignment atomic. The paired LAN workflow has its own
+      // durable writer protocol and must not run inside a SQLite transaction.
+      if (pairedDevice) {
+        await apply();
+      } else {
+        await _db.transaction(apply);
+      }
+    }
+
+    if (paired) {
+      // A paired mechanic's LAN workflow retains the payment-grant protocol.
+      await _run(() => assign(pairedDevice: true));
+    } else {
+      // Normal local invoice labor assignment is not a payroll payment.
+      await _runOwnerTaskEdit(() => assign(pairedDevice: false));
+    }
     if(mounted && _error==null && rate==0){
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content:Text('Labor assigned. Set the employee pay rate in Details before paying.'),
@@ -535,76 +638,244 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     }
   }
 
-  Future<void> _recordTaskProgress(Map<String, dynamic> row) async {
-    final next = row['state'] == 'Open' ? 'In Progress' : 'Done';
+  Future<void> _recordTaskProgress(Map<String, dynamic> row,
+      {bool markDone = false}) async {
+    final next = markDone ? 'Done' :
+        row['state'] == 'Open' ? 'In Progress' : 'Done';
+    // Paid work is immutable. Start never turns assigned time into payable
+    // time. Mark Done credits exactly the hours already assigned by the Owner.
     if (row['state'] == 'Done' || (row['paid_minutes'] as int? ?? 0) > 0) return;
-    var minutes = row['actual_minutes'] as int;
-    if (next == 'Done') {
-      final value = await payrollLanInput(context, 'Complete mechanic work', 'Actual hours worked',initialValue:((row['recorded_actual_minutes'] as int? ?? row['actual_minutes'] as int)/60).toStringAsFixed(2));
-      if (!mounted || value == null) return;
-      final hours = double.tryParse(value);
-      if (hours == null || !hours.isFinite || hours <= 0 || hours > 10000) {
-        setState(() => _error = 'Enter valid actual hours.');
-        return;
-      }
-      minutes = (hours * 60).round();
-    }
-    var credited=minutes;
-    if(next=='Done') {
-      final value=await payrollLanInput(context,'Credited mechanic labor','Credited hours (actual: ${minutes/60})',initialValue:(minutes/60).toStringAsFixed(2));
-      if(value==null||!mounted)return;
-      final h=double.tryParse(value);
-      if(h==null||!h.isFinite||h<0||h>10000)return;
-      credited=(h*60).round();
-    }
-    await _run(() => _repository.recordAllocatedTime(row['id'] as String,next,minutes,credited,_date(DateTime.now())));
-  }
-
-  Future<void> _editEstimated(Map<String, dynamic> row) async {
-    final input = await payrollLanInput(
-      context, 'Mechanic estimated hours', 'Estimated hours for this mechanic',
-      initialValue: ((row['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(2),
-    );
-    if (input == null || !mounted) return;
-    final hours = double.tryParse(input);
-    if (hours == null || !hours.isFinite || hours < 0 || hours > 10000) {
-      setState(() => _error = 'Enter valid estimated hours.');
+    final assignedMinutes = row['estimated_minutes'] as int? ?? 0;
+    if (next == 'Done' && assignedMinutes <= 0) {
+      setState(() => _error =
+        'Assign mechanic hours with the pencil before marking Done.');
       return;
     }
-    await _run(() => _repository.setEstimatedMinutes(
-      row['task_id'] as String, row['employee_id'] as String, (hours * 60).round(),
+    final previousMinutes = row['recorded_actual_minutes'] as int? ??
+        row['actual_minutes'] as int? ?? 0;
+    final completedMinutes = next == 'Done' ? assignedMinutes : previousMinutes;
+    // No redundant dialogs: the assigned estimate is the Owner-approved
+    // time credit on completion. Recording payroll payment remains separate.
+    await _runOwnerTaskEdit(() => _taskEditRepository.recordAllocatedTime(
+      row['id'] as String, next, completedMinutes, completedMinutes,
+      _date(DateTime.now()),
     ));
   }
 
-  Widget _taskCard(Map<String, dynamic> row) => ListTile(
-    onLongPress: row['source_kind'] == 'invoice' && row['source_active'] != 0 &&
-        row['invoice_id'] is String && row['source_line_id'] is String
-      ? () => _assign(row['invoice_id'] as String,
-          {'id': row['source_line_id'], 'description': row['description']},
-          jobId: row['job_id'] as String) : null,
-    title: Text(row['description'] as String),
-    subtitle: Text('${_employeeLabel(row['employee_id']?.toString())} · ${row['state']} · '
-      '${row['recorded_actual_minutes'] ?? row['actual_minutes']} actual min · ${row['actual_minutes']} credited min · ${row['estimated_minutes'] ?? 0} estimated min · '
-      '${row['pay_status'] ?? (row['paid'] == 1 ? 'Paid' : 'Unpaid')}'
-      '${row['assignment_conflict']==1?' · Assignment changed; Owner review required':row['source_active'] == 0 ? ' · Removed from invoice' : ''}'),
-    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-      IconButton(
-        tooltip: 'Edit mechanic estimated hours',
-        icon: const Icon(Icons.edit_outlined, size: 19),
-        onPressed: _busy ? null : () => _editEstimated(row),
-      ),
-      if(row['assignment_conflict']==1)TextButton(onPressed:_busy?null:()=>_run(()async{await _repository.acceptChangedAssignment(row['id'] as String);}),child:const Text('Accept work')),
-      if (row['assignment_conflict']!=1 && row['state'] != 'Done' && (row['paid_minutes'] as int? ?? 0) == 0 &&
-          (row['source_active'] != 0 || row['state'] != 'Open'))
-        TextButton(
-          onPressed: _busy ? null : () => _recordTaskProgress(row),
-          child: Text(row['state'] == 'Open' ? 'Start' : 'Complete'),
-        ),
-    ]),
+  Future<void> _editEstimated(Map<String, dynamic> row) async {
+    final previous = row['employee_id'] as String;
+    var selected = previous;
+    final staff = {for (final person in _employees) if (person['id'] is String) person['id'] as String: person};
+    final input = TextEditingController(text: ((row['estimated_minutes'] as int? ?? 0) / 60).toStringAsFixed(2));
+    final hours = await showDialog<double>(context: context, builder: (dialog) =>
+      StatefulBuilder(builder: (context, update) {
+        final parsed = double.tryParse(input.text.trim());
+        return AlertDialog(title: const Text('Edit Assignment'), backgroundColor: Theme.of(context).colorScheme.surface,
+          scrollable:true, content: Column(mainAxisSize: MainAxisSize.min, children: [
+            DropdownButtonFormField<String>(initialValue: selected, isExpanded:true,
+              decoration:const InputDecoration(labelText:'Replace mechanic',border:OutlineInputBorder()),
+              items:[for(final id in {previous,...staff.keys})
+                DropdownMenuItem(value:id,child:Text(_employeeLabel(id)))],
+              onChanged: (row['actual_minutes'] as int? ?? 0)>0 || (row['recorded_actual_minutes'] as int? ?? 0)>0 ? null :
+                (id) { if(id!=null) update(()=>selected=id); }),
+            if(row['state'] != 'Open') const Padding(padding:EdgeInsets.only(top:8),
+              child:Text('Work has started. Replacement starts a new assignment and is available only before time is earned. Completed and paid credits stay with the original mechanic.')),
+            const SizedBox(height:18),
+            TextField(controller:input,keyboardType:const TextInputType.numberWithOptions(decimal:true),
+              decoration:const InputDecoration(labelText:'Assigned hours',border:OutlineInputBorder()),
+              onTapAlwaysCalled:true,
+              onTap:()=>input.selection=TextSelection(baseOffset:0,extentOffset:input.text.length),
+              onChanged:(_)=>update((){})),
+          ]),
+          actions:[
+            TextButton(onPressed:()=>Navigator.pop(dialog),child:const Text('Cancel')),
+            FilledButton(style:FilledButton.styleFrom(backgroundColor:Colors.teal.shade700,foregroundColor:Colors.white),onPressed:parsed==null || !parsed.isFinite || parsed<0 || parsed>10000
+              ? null : ()=>Navigator.pop(dialog,parsed),child:const Text('Save')),
+          ]);
+      }));
+    Future<void>.delayed(const Duration(milliseconds:400),input.dispose);
+    if (hours == null || !mounted || !_canView) return;
+    await _runOwnerTaskEdit(() => _taskEditRepository.editAllocation(
+      task:row['task_id'] as String,previous:previous,employee:selected,
+      name:(staff[selected]?['name'] ?? _employeeLabel(selected)).toString(), minutes:(hours*60).round()));
+  }
+
+  // Match the saved mechanic progress state in both TEST-style indicators.
+  // This is presentational only: Starting does not credit payroll hours.
+  static IconData _workStatusIcon(String state, {bool inner = false}) {
+    switch (state) {
+      case 'Done':
+        return inner ? Icons.check_circle_outline : Icons.check_circle;
+      case 'In Progress':
+        return Icons.timelapse;
+      default:
+        return Icons.radio_button_unchecked;
+    }
+  }
+
+  static Color _workStatusColor(String state) {
+    switch (state) {
+      case 'Done':
+        return const Color(0xFF00897E);
+      case 'In Progress':
+        return const Color(0xFFD97706);
+      default:
+        return const Color(0xFF7C8A9D);
+    }
+  }
+
+  // The approved Tasks TEST separates the job/task header from the mechanic's
+  // progress controls. This is a view over the real immutable payroll credits.
+  // Approved compact TEST-style hours: readable without dominating the card.
+  Widget _compactPlannedHours(double hours) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: const Color(0xFFE1F6E9),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Text('${hours.toStringAsFixed(2)} hrs',
+      style: const TextStyle(
+        color: Color(0xFF126A46),
+        fontSize: 13.5,
+        fontWeight: FontWeight.w800,
+      )),
   );
 
-  Future<void> _addRecheck() async {
-    final job = widget.jobId;
+  Widget _taskCard(Map<String, dynamic> row, {bool manage = true}) {
+    final paid = (row['paid_minutes'] as int? ?? 0) > 0 ||
+        row['paid'] == 1;
+    final conflict = row['assignment_conflict'] == 1;
+    final removed = row['source_active'] == 0;
+    final state = row['state']?.toString() ?? 'Open';
+    final archived = row['archived_labor']==1;
+    final canProgress = !archived && !paid && !conflict && !removed && !_busy;
+    final planned = (row['estimated_minutes'] as int? ?? 0) / 60;
+    final actual = row['recorded_actual_minutes'] as int? ??
+        row['actual_minutes'] as int? ?? 0;
+    final credited = row['actual_minutes'] as int? ?? 0;
+    return KeyedSubtree(
+      key: ValueKey('mechanic-work-${row['id']}'),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if(archived) ListTile(title:const Text('Historical labor · excluded from payroll'),
+              trailing: paid ? null : TextButton(onPressed:()=>_reviewCarry(row),child:const Text('Review unpaid work'))),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(_workStatusIcon(state),
+                color: _workStatusColor(state),size:22),
+              const SizedBox(width: 10),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(row['description']?.toString() ?? 'Task',
+                    style: const TextStyle(fontSize: 15.5,
+                      fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 3),
+                  Text(_employeeLabel(row['employee_id']?.toString()),
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                ],
+              )),
+              const SizedBox(width: 5),
+              _compactPlannedHours(planned),
+              if (paid) const Padding(
+                padding: EdgeInsets.only(left: 6),
+                child: Icon(Icons.lock_outline,size:20,
+                  color: Color(0xFF64748B))),
+              if (manage && !paid) IconButton(
+                tooltip: 'Edit Assignment',
+                icon: const Icon(Icons.edit_outlined,size:19,
+                  color: Color(0xFF00897E)),
+                onPressed: _busy || conflict || removed || state=='Done'
+                  ? null : () => _editEstimated(row),
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth:34,minHeight:34),
+              ),
+            ]),
+            const SizedBox(height: 9),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10,vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F5F8),
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: const Color(0xFFDCE6EB)),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Icon(_workStatusIcon(state, inner: true),size:19,
+                      color: _workStatusColor(state)),
+                    const SizedBox(width: 7),
+                    Expanded(child: Text(
+                      _employeeLabel(row['employee_id']?.toString()),
+                      style:const TextStyle(fontWeight:FontWeight.w700))),
+                    _compactPlannedHours(planned),
+                  ]),
+                  const SizedBox(height: 5),
+                  // Keep the completion control beside In Progress.
+                  // The previous Wrap placed Mark Done on its own bottom
+                  // line where the Android navigation area obscured it.
+                  if (state == 'In Progress')
+                    Row(children: [
+                      const Expanded(child: Text('In Progress',
+                        style:TextStyle(color:Color(0xFF64748B),
+                          fontWeight:FontWeight.w600))),
+                      if (canProgress)
+                        OutlinedButton.icon(
+                          onPressed:()=>_recordTaskProgress(row,markDone:true),
+                          style:OutlinedButton.styleFrom(
+                            visualDensity:VisualDensity.compact,
+                            padding:const EdgeInsets.symmetric(
+                              horizontal:12,vertical:6)),
+                          icon:const Icon(Icons.done,size:17),
+                          label:const Text('Mark Done')),
+                    ])
+                  else
+                    Wrap(alignment: WrapAlignment.end,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,runSpacing: 2,children: [
+                        Text(state == 'Open' ? 'Not Started' : state,
+                          style:const TextStyle(color:Color(0xFF64748B),
+                            fontWeight:FontWeight.w600)),
+                        if (canProgress && state == 'Open')
+                          TextButton.icon(
+                            onPressed:()=>_recordTaskProgress(row),
+                            icon:const Icon(Icons.play_arrow,size:18),
+                            label:const Text('Start')),
+                        if (canProgress && state == 'Open')
+                          OutlinedButton.icon(
+                            onPressed:()=>_recordTaskProgress(row,markDone:true),
+                            icon:const Icon(Icons.done,size:17),
+                            label:const Text('Mark Done')),
+                        if (conflict)
+                          TextButton(onPressed:_busy?null:()=>_runOwnerTaskEdit(
+                            ()=>_taskEditRepository.acceptChangedAssignment(
+                              row['id'] as String)),
+                            child:const Text('Accept work')),
+                        if (paid) const Text('Paid · Locked',
+                          style:TextStyle(fontWeight:FontWeight.w700,
+                            color:Color(0xFF64748B))),
+                      ]),
+                  if (actual > 0 || credited > 0)
+                    Text('Actual: ${(actual/60).toStringAsFixed(2)}h · '
+                      'Credited: ${(credited/60).toStringAsFixed(2)}h',
+                      style:const TextStyle(fontSize:11,
+                        color:Color(0xFF64748B))),
+                  if (removed) const Text('Removed from invoice',
+                    style:TextStyle(fontSize:11)),
+                  if (conflict) const Text(
+                    'Assignment changed; Owner review required',
+                    style:TextStyle(fontSize:11)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _addRecheck({String? jobId}) async {
+    final job = jobId ?? widget.jobId;
     if (job == null) return;
     final employee = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -631,25 +902,41 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       setState(() => _error = 'Save this employee’s hourly compensation first.');
       return;
     }
+    // This is a task creation, not a payroll payment. The local Owner
+    // repository checks session identity before and after the transaction.
+    // Paired-device writes retain their existing LAN Owner-grant protection.
+    if (!_canView) return;
     final operation = _operationId();
-    await _run(() async {
-      final id = employee['employee_id'] as String;
-      final name = (employee['name'] ?? employee['employee_name']).toString();
+    final id = (employee['employee_id'] ?? employee['id']) as String;
+    final name = (employee['name'] ?? employee['employee_name'] ?? _employeeLabel(id)).toString();
+    // Do not turn a missing or unreadable pairing record into a silent
+    // unpaired write; show an error and preserve the saved task.
+    var paired = false;
+    try {
       final identity = await PayrollLanIdentity.load();
-      final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, id);
-      if (peer == null) {
-        await _repository.createRecheck(
-          operation: operation, job: job, description: description,
-          employee: id, name: name, rate: rate, estimatedMinutes: (hours * 60).round(),
-        );
-      } else {
+      paired = await PayrollLanEnrollment(identity)
+          .ownerPeer(widget.businessId, id) != null;
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    }
+    if (!mounted || !_canView) return;
+    if (!paired) {
+      await _runOwnerTaskEdit(() => _taskEditRepository.createRecheck(
+        operation: operation, job: job, description: description,
+        employee: id, name: name, rate: rate,
+        estimatedMinutes: (hours * 60).round(),
+      ));
+    } else {
+      await _run(() async {
         final workflow = await _workflow(id);
         await workflow.assignRecheck(
-          operation: operation, job: job, description: description, employeeName: name,
-          rate: rate, estimatedMinutes: (hours * 60).round(),
+          operation: operation, job: job, description: description,
+          employeeName: name, rate: rate,
+          estimatedMinutes: (hours * 60).round(),
         );
-      }
-    });
+      });
+    }
   }
 
   Future<void> _recordWeekly(
@@ -843,9 +1130,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final tomorrow = midnight.add(const Duration(days: 1));
     switch (_payrollPeriod) {
       case 'This Week':
-        return (from:monday,until:monday.add(const Duration(days: 7)));
+        return (from:monday,until:monday.add(const Duration(days: 5)));
       case 'Last Week':
-        return (from:monday.subtract(const Duration(days: 7)),until:monday);
+        return (from:monday.subtract(const Duration(days: 7)),until:monday.subtract(const Duration(days: 2)));
       case 'Last 30 Days':
         return (from:midnight.subtract(const Duration(days: 29)),until:tomorrow);
       case 'Last 3 Months':
@@ -864,9 +1151,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               _customPeriod!.end.month,_customPeriod!.end.day)
               .add(const Duration(days: 1)));
         }
-        return (from:monday,until:monday.add(const Duration(days: 7)));
+        return (from:monday,until:monday.add(const Duration(days: 5)));
       default:
-        return (from:monday,until:monday.add(const Duration(days: 7)));
+        return (from:monday,until:monday.add(const Duration(days: 5)));
     }
   }
 
@@ -888,7 +1175,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   PayrollPeriodTotals _projectPeriod(DateTime from, DateTime until) =>
-      PayrollPeriodTotals.calculate(work: _work, payments: _history, from: from, until: until);
+      PayrollPeriodTotals.calculate(work: _currentPayrollWork, payments: _history, from: from, until: until);
 
   void _selectAmount(TextEditingController controller) {
     controller.selection = TextSelection(baseOffset: 0, extentOffset: controller.text.length);
@@ -952,7 +1239,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         recordPayment: _recordWeekly,
       ),
     ));
-    if (mounted) await _run(() async {});
+    if (mounted && _canView) await _load();
   }
 
   Widget _flexibleWeeklyPreview(double trackedHours) {
@@ -1147,8 +1434,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           ],
         )),
         if (['fixed_weekly', 'flexible_weekly'].contains(widget.employeePayType) ||
-            _work.every((row) => (row['rate_cents'] as int) <= 0))
-          _flexibleWeeklyPreview(_work.fold<double>(
+            _currentPayrollWork.every((row) => (row['rate_cents'] as int) <= 0))
+          _flexibleWeeklyPreview(_currentPayrollWork.fold<double>(
             0, (sum, row) => sum + (row['actual_minutes'] as int) / 60,
           )),
         _advancePanel(),
@@ -1306,11 +1593,39 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     ));
   }
 
+  Future<void> _newJobLabor() async {
+    if (!_canView || widget.jobId == null) return;
+    try {
+      final documents = await LocalDocumentRepository(database: _db)
+          .listByJob(widget.businessId, widget.jobId!);
+      if (!mounted || !_canView) return;
+      final invoices = documents.where((row) => row['kind'] == 'invoice' && row['id'] is String).toList();
+      if (invoices.isEmpty) {
+        setState(() => _error = 'Create an invoice for this job before adding labor.');
+        return;
+      }
+      final id = invoices.length == 1 ? invoices.single['id'] as String :
+          await showDialog<String>(context: context, builder: (dialog) =>
+            SimpleDialog(title: const Text('Choose invoice'), children: [
+              for (final invoice in invoices)
+                SimpleDialogOption(onPressed: () => Navigator.pop(dialog, invoice['id']),
+                  child: Text('Invoice ${invoice['document_number'] ?? ''}')),
+            ]));
+      if (!mounted || !_canView || id == null) return;
+      await Navigator.push<void>(context, MaterialPageRoute(builder: (_) =>
+        JobDocumentScreen(businessId: widget.businessId, documentId: id,
+          isOwner: true, roleCode: 'owner', initialAction: 'add_labor')));
+      if (mounted && _canView) await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
   Future<void> _newServiceTask() async {
-    await _run(() async {});
-    if(!mounted||_grant==null)return;
+    if (!mounted || !_canView) return;
     final roster=await OfflineJobAdminService(database:_db).cachedEmployees(widget.businessId);
-    final known=await _repository.employees();
+    final known=await _viewRepository.employees();
+    if (!mounted || !_canView) return;
     final staff={for(final r in known) r['id']:r,for(final r in roster) r['id']:{...?known.where((k)=>k['id']==r['id']).firstOrNull,...r}};
     if(!mounted)return;
     String? employee=widget.employeeId;
@@ -1362,26 +1677,49 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       rate=(amount*100).round();
     }
     final operation=_operationId();
-    await _run(() async {
+    if (!_canView) return;
+    await _runOwnerTaskEdit(() async {
       await _db.transaction(() async {
+        if (!_canView) throw StateError('Owner account changed during task creation.');
         var jobId=selected;
         if(selected=='create'){jobId=await OfflineJobAdminService(database:_db).queueJobCreate(widget.businessId,
           customerId:customer!['id'] as String,customerName:(customer['display_name']??customer['name']??'Customer').toString(),
           vehicleId:vehicle?['id'] as String?,vehicleLabel:vehicle==null?null:'${vehicle['year']??''} ${vehicle['make']??''} ${vehicle['model']??''}',title:description);}
         await LocalTaskAssignmentStore(_db).linkEmployee(widget.businessId,jobId,id,name);
-        await _repository.createRecheck(operation:operation,job:jobId,description:description,employee:id,name:name,
+        await _taskEditRepository.createRecheck(operation:operation,job:jobId,description:description,employee:id,name:name,
           rate:rate,estimatedMinutes:(hours*60).round(),kind:'job');
+        if (!_canView) throw StateError('Owner account changed during task creation.');
       });
     });
   }
 
   Future<void> _createEmployeeGeneralTask() async {
+    var eligible = _employees;
+    if (widget.jobId != null) {
+      final assigned = await _viewRepository.assignedEmployees(widget.jobId!);
+      final lead = await _db.customSelect(
+        'SELECT assigned_employee_id FROM local_jobs WHERE business_id=? AND id=?',
+        variables:[Variable<String>(widget.businessId),
+          Variable<String>(widget.jobId!)],
+      ).getSingleOrNull();
+      final allowed = <String>{
+        for (final row in assigned)
+          if (row['employee_id'] case final String id) id,
+        if (lead?.data['assigned_employee_id'] case final String id) id,
+      };
+      eligible = _employees.where((row) => allowed.contains(row['id'])).toList();
+      if (!mounted || !_canView) return;
+      if (eligible.isEmpty) {
+        setState(() => _error = 'Assign a mechanic to this job first.');
+        return;
+      }
+    }
     final employee = widget.employeeId ?? await showDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
         title: const Text('Assign general task'),
         children: [
-          for (final row in _employees)
+          for (final row in eligible)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, row['id']),
               child: Text((row['nickname'] ?? row['name'] ?? row['id']).toString()),
@@ -1435,10 +1773,21 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           const SizedBox(height: 12),
           FilledButton(onPressed: saving ? null : () async {
             if (description.text.trim().isEmpty) return;
+            if (!_canView) {
+              if (sheet.mounted) {
+                ScaffoldMessenger.of(sheet).showSnackBar(const SnackBar(
+                  content: Text('Sign in as Owner to create tasks.'),
+                ));
+              }
+              return;
+            }
             update(() => saving = true);
             try {
-              await _repository.addShopTask(
-                employee, description.text, category, due: due,
+              // General Tasks are local operational work, not payroll
+              // disbursements. The repository rechecks Owner identity
+              // before and after its atomic SQLite write.
+              await _taskEditRepository.addShopTask(
+                employee, description.text, category, due: due, job: widget.jobId,
               );
               if (sheet.mounted) Navigator.pop(sheet,true);
             } catch(error) {
@@ -1452,13 +1801,156 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       )),
     );
     description.dispose();
-    if (created == true && mounted) await _run(() async {});
+    if (created == true && mounted && _canView) await _load();
+  }
+
+  /// Job-scoped General Task edits live in the standard long-press menu,
+  /// not the read-only expanded card. Only saved Job mechanics are choices.
+  Future<void> _editJobGeneralTask(Map<String,dynamic> task) async {
+    if (!_canView || widget.jobId == null || _busy) return;
+    final former = task['employee_id']?.toString() ?? '';
+    if (former.isEmpty || task['id'] is! int) return;
+    final roster = await _viewRepository.assignedEmployees(widget.jobId!);
+    final lead = await _db.customSelect(
+      'SELECT assigned_employee_id FROM local_jobs WHERE business_id=? AND id=?',
+      variables:[Variable<String>(widget.businessId),Variable<String>(widget.jobId!)],
+    ).getSingleOrNull();
+    if (!mounted || !_canView) return;
+    final allowed = <String>{
+      former,
+      for(final row in roster)
+        if (row['employee_id'] case final String id) id,
+      if (lead?.data['assigned_employee_id'] case final String id) id,
+    };
+    final description = TextEditingController(text:
+      task['description']?.toString() ?? '');
+    var selected = former;
+    var category = task['category']?.toString() ?? 'General';
+    final edited = await showDialog<Map<String,String>>(
+      context:context,
+      builder:(dialog)=>StatefulBuilder(builder:(context,refresh)=>
+        AlertDialog(
+          title:const Text('Edit General Task'),
+          scrollable:true,
+          content:Column(mainAxisSize:MainAxisSize.min,children:[
+            TextField(controller:description,maxLines:3,minLines:1,
+              decoration:const InputDecoration(labelText:'Task description',
+                border:OutlineInputBorder())),
+            const SizedBox(height:12),
+            DropdownButtonFormField<String>(
+              initialValue:selected,isExpanded:true,
+              decoration:const InputDecoration(labelText:'Assigned mechanic',
+                border:OutlineInputBorder()),
+              items:[
+                for(final id in allowed)
+                  DropdownMenuItem(value:id,child:Text(_employeeLabel(id))),
+              ],
+              onChanged:(id){if(id!=null)refresh(()=>selected=id);},
+            ),
+            const SizedBox(height:12),
+            DropdownButtonFormField<String>(
+              initialValue:category,isExpanded:true,
+              decoration:const InputDecoration(labelText:'Category',
+                border:OutlineInputBorder()),
+              items:[
+                for(final value in {category,'General','Cleaning','Inventory',
+                  'Office','Maintenance','Yard','Errands'})
+                  DropdownMenuItem(value:value,child:Text(value)),
+              ],
+              onChanged:(value){if(value!=null)refresh(()=>category=value);},
+            ),
+          ]),
+          actions:[
+            TextButton(onPressed:()=>Navigator.pop(dialog),
+              child:const Text('Cancel')),
+            FilledButton(onPressed:()=>Navigator.pop(dialog,
+              {'employee':selected,'description':description.text,
+                'category':category}),
+              child:const Text('Save')),
+          ],
+        )),
+    );
+    Future<void>.delayed(const Duration(milliseconds:400), description.dispose);
+    if (edited == null || !mounted || !_canView ||
+        (edited['description']?.trim().isEmpty ?? true)) {
+      return;
+    }
+    await _runOwnerTaskEdit(() => _taskEditRepository.editShopTask(
+      id:task['id'] as int, previousEmployee:former,
+      employee:edited['employee']!, description:edited['description']!,
+      category:edited['category']!,
+    ));
   }
 
   Future<void> _updateEmployeeGeneralTask(int id, String status) =>
-      _run(() => _repository.setShopTaskStatus(widget.employeeId!, id, status));
+      _changeGeneralTaskStatus(widget.employeeId!, id, status);
 
-  Widget _tasksTab() => _PayrollViewport(minHeight:_currentJobsExpanded?600:360,child:Column(children:[
+  // Read-only weekly work history: Tasks must not masquerade as the
+  // unpaid-only payment selection panel. This never creates payroll credits.
+  Widget _recordedServiceLabor() {
+    final monday = DateTime(_week.year,_week.month,_week.day)
+        .subtract(Duration(days:_week.weekday-1));
+    final end = monday.add(const Duration(days:5));
+    DateTime? recordedDate(Map<String,dynamic> row) {
+      for (final field in const ['completed_date','invoice_date','job_document_date']) {
+        final value = row[field]?.toString();
+        if(value==null || value.isEmpty)continue;
+        final date=DateTime.tryParse(value);
+        if(date!=null)return date;
+      }
+      final created=row['job_created_at'];
+      if(created is int && created>0) {
+        return DateTime.fromMillisecondsSinceEpoch(
+          created<100000000000 ? created*1000 : created);
+      }
+      return null;
+    }
+    final rows = _work.where((row) {
+      final date = recordedDate(row);
+      return date!=null && !date.isBefore(monday) && date.isBefore(end);
+    }).toList();
+    return ExpansionTile(
+      key:ValueKey('employee-recorded-week-${widget.employeeId}-${monday.toIso8601String()}'),
+      initiallyExpanded:false,
+      title:Text('Recorded labor this week · ${rows.length}',
+        style:const TextStyle(fontWeight:FontWeight.w700)),
+      subtitle:const Text('Assigned, completed and historical work · view only',
+        style:TextStyle(fontSize:12)),
+      children:[
+        ListTile(
+          title:const Text('Preview weekly payroll · TEST ONLY'),
+          subtitle:const Text('Read only · does not record a payment'),
+          trailing:const Icon(Icons.chevron_right),
+          onTap:()=>Navigator.of(context).push<void>(
+            MaterialPageRoute(builder:(_)=>PayrollDryRunPreview(
+              employeeName:_employeeLabel(widget.employeeId),
+              weekStart:monday,
+              rows:List<Map<String,dynamic>>.from(rows),
+            )),
+          ),
+        ),
+        if(rows.isEmpty)const ListTile(
+          dense:true,
+          title:Text('No linked mechanic allocations dated this week.'),
+          subtitle:Text('Invoice labor and prior payments remain in their original records.')),
+        for(final row in rows)
+          ListTile(
+            dense:true,
+            title:Text('${row['job_number']??'Job'} · ${row['description']??'Labor'}',
+              maxLines:2,overflow:TextOverflow.ellipsis),
+            subtitle:Text(row['archived_labor']==1
+                ? 'Historical labor · excluded from new payroll'
+                : row['state']=='Done' ? 'Completed' :
+                    row['state']=='In Progress' ? 'In progress' : 'Assigned'),
+            trailing:Text(
+              '${((row['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(2)} h',
+              style:const TextStyle(fontWeight:FontWeight.w700)),
+          ),
+      ],
+    );
+  }
+
+  Widget _tasksTab() => _PayrollViewport(minHeight:_currentJobsExpanded?680:480,child:Column(children:[
     Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),
       child:Row(children:[
         for(final general in [false,true])
@@ -1480,12 +1972,27 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if(!_showGeneralTasks)Row(children:[
       const Expanded(child:Text('Service Tasks',style:TextStyle(fontWeight:FontWeight.w700))),
       TextButton.icon(onPressed:_newServiceTask,icon:const Icon(Icons.add),label:const Text('New Task'))]),
-    if(!_showGeneralTasks && _work.any((r)=>r['state']!='Done'))
+    if(!_showGeneralTasks && _work.any((r)=>r['archived_labor']!=1 && r['state']!='Done'))
       ExpansionTile(key:PageStorageKey('employee-current-jobs-${widget.employeeId}'),
         initiallyExpanded:_currentJobsExpanded,onExpansionChanged:(v)=>setState(()=>_currentJobsExpanded=v),
         title:const Text('Current assigned Jobs'),children:[SizedBox(height:160,child:ListView(children:[
-          for(final row in _work.where((r)=>r['state']!='Done'))Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+          for(final row in _work.where((r)=>r['archived_labor']!=1 && r['state']!='Done'))Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
             Text('${row['job_number']??'Job'} · ${row['vehicle_label']??''}'),_taskCard(row)])]))]),
+    if(!_showGeneralTasks) _recordedServiceLabor(),
+    if(!_showGeneralTasks)
+      Align(alignment:Alignment.centerLeft,child:TextButton.icon(
+        onPressed:()=>HistoricalExpenseReview.open(context,
+          businessId:widget.businessId,
+          employeeName:_employeeLabel(widget.employeeId),
+          access:_historyUnlocked,
+          canView:()=>mounted && _canView,
+          cache:expenses.LocalFinancialCache(database:_db),
+          exactDate:DateTime(_week.year,_week.month,_week.day)
+              .subtract(Duration(days:_week.weekday-1))
+              .add(const Duration(days:4))),
+        icon:const Icon(Icons.receipt_long_outlined),
+        label:const Text('Review Friday expenses · read only'),
+      )),
     Expanded(child:_showGeneralTasks
       ? Builder(builder:(context) {
         final rows = _generalTasks;
@@ -1524,7 +2031,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         tasks: _work, week: _week, embedded: true,
         advanceBalance: () => _viewRepository.advance(widget.employeeId!),
         recordPayment: _recordWeekly,
-        onWeekChanged: (week) => _week = week,
+        onWeekChanged: (week) => setState(()=>_week = week),
         onCancel: () => Navigator.of(context).pop(),
       )),
   ]));
@@ -1560,6 +2067,19 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final service = [
       for (final entry in byTask.entries)
         {...entry.value.first,
+          // Grouped task status must use ALL mechanic allocations. Paid
+          // history is not active work, and an unpaid completed split must
+          // remain visible under Unpaid until its coverage is settled.
+          'remaining_minutes': entry.value.fold<int>(0,(sum,r)=>
+            sum+(r['remaining_minutes'] as int? ?? 0)),
+          'paid': entry.value.every((r)=>r['state']=='Done') &&
+              entry.value.every((r)=>(r['remaining_minutes'] as int? ?? 0)==0) &&
+              entry.value.any((r)=>(r['actual_minutes'] as int? ?? 0)>0) ? 1 : 0,
+          'completed_date': ([
+            for(final r in entry.value)
+              if(r['completed_date']?.toString().isNotEmpty==true)
+                r['completed_date'].toString(),
+          ]..sort()).lastOrNull,
           'source_missing': entry.value.every((r)=>r['source_active']==0 && r['state']=='Open')?1:0,
           'line_id': entry.key,
           'document_id': entry.value.first['invoice_id'],
@@ -1582,9 +2102,46 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         if(!_canView)const Text('Sign in as Owner to view tasks.'),
         if (_busy) const LinearProgressIndicator(),
         if (_error != null) Text(_error!),
-        _recoveryStatus(),
+        if (_backfillActive) _recoveryStatus(),
+        if (_canView && widget.globalTasks)
+          Align(alignment:Alignment.centerLeft,child:TextButton.icon(
+            icon:const Icon(Icons.receipt_long_outlined),
+            label:const Text('View saved invoice labor history · read only'),
+            onPressed:()=>Navigator.of(context).push<void>(
+              MaterialPageRoute(builder:(_)=>HistoricalInvoiceLaborReview(
+                businessId:widget.businessId,
+                database:_db,
+                weekStart:DateTime(_week.year,_week.month,_week.day)
+                    .subtract(Duration(days:_week.weekday-1)),
+                canView:()=>mounted && _canView,
+              )),
+            ),
+          )),
         if (_canView)
-          Expanded(child: TasksWorkspace(
+          Expanded(child: _jobMode && widget.invoiceId == null
+            ? JobScopedTasks(
+                jobId: widget.jobId!,
+                serviceTasks: service,
+                generalTasks: _generalTasks,
+                allocationsByLine: byTask,
+                employeeName: _employeeLabel,
+                onAddLabor: _newJobLabor,
+                onAddGeneral: _createEmployeeGeneralTask,
+                onLaborProgress: (allocation, finish) =>
+                    _recordTaskProgress(allocation, markDone: finish),
+                onGeneralProgress: (id, status) async {
+                  final task = _generalTasks.where((r) => r['id'] == id).firstOrNull;
+                  if (task != null) {
+                    await _changeGeneralTaskStatus(
+                      task['employee_id'] as String, id, status);
+                  }
+                },
+                onManageLabor: (row) => unawaited(_openAssignments(row)),
+                onManageGeneral: (row) =>
+                    unawaited(_editJobGeneralTask(row)),
+              )
+            : TasksWorkspace(
+            scopedJob: widget.jobId,
             serviceTasks: service,
             generalTasks: _generalTasks,
             allocationsByLine: byTask,
@@ -1594,22 +2151,28 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                 if (row['id'] case final String id) id,
             ],
             serviceTaskCard: (row) => byTask.containsKey(row['line_id'])
-                ? Column(children: [for (final allocation in byTask[row['line_id']]!) _taskCard(allocation)])
+                ? Column(children: [
+                    for (final allocation in byTask[row['line_id']]!) _taskCard(allocation, manage:row['invoice_id'] is! String),
+                    if (row['archived_labor']!=1 && row['invoice_id'] is String && row['source_line_id'] is String && row['source_active'] != 0)
+                      IconButton(tooltip:'Manage Labor Assignments',icon:const Icon(Icons.edit_outlined),
+                        onPressed:()=>_openAssignments(row)),
+                  ])
                 : ListTile(
                     title: Text(row['description'] as String),
-                    subtitle: const Text('Unassigned · Planned'),
-                    trailing: const Icon(Icons.person_add_alt_1_outlined),
-                    onTap: row['invoice_id'] is String && row['source_line_id'] is String
-                      ? () => _assign(row['invoice_id'] as String,
-                          {'id': row['source_line_id'], 'description': row['description']},
-                          jobId: row['job_id'] as String) : null,
+                    subtitle: Text(row['archived_labor']==1
+                      ? 'Historical invoice labor · view only' : 'Unassigned · Planned'),
+                    trailing: row['archived_labor']==1 ? const Icon(Icons.lock_outline)
+                      : const Icon(Icons.edit_outlined),
+                    onTap: row['archived_labor']!=1 && row['invoice_id'] is String && row['source_line_id'] is String
+                      ? () => _openAssignments(row) : null,
                   ),
-            onAddService: _newServiceTask,
+            onAddService: _jobMode ? _newJobLabor : _newServiceTask,
+            onAddRecheck: (jobId) => _addRecheck(jobId: jobId),
             onAddGeneral: _createEmployeeGeneralTask,
             onGeneralStatus: (id, status) async {
               final row = _generalTasks.where((row) => row['id'] == id).firstOrNull;
               if (row == null) return;
-              await _run(() => _repository.setShopTaskStatus(row['employee_id'] as String, id, status));
+              await _changeGeneralTaskStatus(row['employee_id'] as String, id, status);
             },
             onOpenJob: (id) => _openRecordedWork(id, invoice: false),
             onEmployeeTap: (id) => _openEmployeeProfile(id,_week,0),
@@ -1641,7 +2204,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         ),
         if(!_canView)const Text('Sign in as Owner to view profile.'),
         if (_authorizing || _loadingLocal || _backfillActive) const LinearProgressIndicator(),
-        _recoveryStatus(),
+        if (_backfillActive) _recoveryStatus(),
         if (_error != null)
           ConstrainedBox(constraints:const BoxConstraints(maxHeight:96),child:SingleChildScrollView(child:ListTile(dense: true, title: Text(_error!), trailing: TextButton(
             onPressed: _loadingLocal ? null : () => unawaited(_load()), child: const Text('Retry'))))),
@@ -1663,6 +2226,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Widget _reportsPanel() => _PayrollViewport(minHeight:360,child:Column(children: [
+    if (_canView && (widget.employeeId ?? _employee) != null)
+      TextButton.icon(icon: const Icon(Icons.manage_search),
+        label: const Text('Review historical expenses'),
+        onPressed: () => HistoricalExpenseReview.open(context,
+          businessId: widget.businessId,
+          employeeName: _employeeLabel(widget.employeeId ?? _employee),
+          access: _historyUnlocked, canView: () => mounted && _canView,
+          cache: expenses.LocalFinancialCache(database: _db))),
+
     if (_pendingPayments.isNotEmpty)
       MaterialBanner(content: Text(
         "${_pendingPayments.length} payment request(s) pending — not recorded as paid. "
@@ -1700,6 +2272,61 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if (mounted) await _load();
   }
 
+  Future<void> _openAssignments(Map<String,dynamic> row) async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => OwnerPayrollScreen(
+      businessId:widget.businessId, jobId:row['job_id'] as String, invoiceId:row['invoice_id'] as String,
+      focusLineId:row['source_line_id'] as String, database:_db, unlockOwner:widget.unlockOwner,
+      ownerConnection:widget.ownerConnection)));
+    if(mounted) await _load();
+  }
+
+  Future<void> _reviewCarry(Map<String,dynamic> row) async {
+    final ok=await showDialog<bool>(context:context,builder:(dialog)=>AlertDialog(
+      title:const Text('Carry unpaid work into payroll?'),
+      content:Text('Confirm that you reviewed the historical payments for ${_employeeLabel(row['employee_id'] as String)} and this specific labor is still unpaid.'),
+      actions:[TextButton(onPressed:()=>Navigator.pop(dialog),child:const Text('Cancel')),
+        TextButton(onPressed:()=>Navigator.pop(dialog,true),child:const Text('Confirm unpaid'))]));
+    if(ok==true && mounted) {
+      await _runOwnerTaskEdit(()=>_taskEditRepository.reviewUnpaidCarry(row['employee_id'] as String,row['id'] as String));
+    }
+  }
+
+  Future<void> _removeAssignment(Map<String,dynamic> row) async {
+    final approved = await showDialog<bool>(context:context,builder:(dialog)=>AlertDialog(
+      title:const Text('Remove unpaid assignment?'),
+      content:Text('Remove ${_employeeLabel(row['employee_id'] as String)} from this labor line?'),
+      actions:[TextButton(onPressed:()=>Navigator.pop(dialog),child:const Text('Cancel')),
+        TextButton(onPressed:()=>Navigator.pop(dialog,true),child:const Text('Remove'))]));
+    if(approved==true && mounted) {
+      await _runOwnerTaskEdit(()=>_taskEditRepository.removeOpenAllocation(row['task_id'] as String,row['employee_id'] as String));
+    }
+  }
+
+  Widget _assignmentManager() {
+    final source = _taskSources.where((r)=>r['job_id']==widget.jobId &&
+      r['invoice_id']==widget.invoiceId && r['source_line_id']==widget.focusLineId).firstOrNull;
+    final rows = _work.where((r)=>r['job_id']==widget.jobId && r['invoice_id']==widget.invoiceId &&
+      r['source_line_id']==widget.focusLineId).toList();
+    return Scaffold(appBar:AppBar(title:const Text('Manage Labor Assignments')),
+      body:SafeArea(child:ListView(padding:const EdgeInsets.all(16),children:[
+        if(_busy || _loadingLocal) const LinearProgressIndicator(),
+        if(_error!=null) Text(_error!),
+        if(source!=null) Text(source['description']?.toString() ?? 'Invoice labor',
+          style:Theme.of(context).textTheme.titleMedium),
+        for(final row in rows) ...[
+          _taskCard(row),
+          if(row['state']=='Open' && (row['paid_minutes'] as int? ?? 0)==0)
+            Align(alignment:Alignment.centerRight,child:TextButton(onPressed:_busy?null:()=>_removeAssignment(row),
+              child:Text('Remove ${_employeeLabel(row['employee_id'] as String)}'))),
+        ],
+        if(source!=null && source['source_active']!=0)
+          OutlinedButton.icon(onPressed:_busy?null:()=>_assign(widget.invoiceId!,{
+            'id':widget.focusLineId,'description':source['description']}),
+            icon:const Icon(Icons.person_add_alt_1),label:const Text('Add mechanic')),
+        if(!_loadingLocal && source==null) const Text('No saved invoice labor is available for this line.'),
+      ])));
+  }
+
   Widget _overview() => Scaffold(
     appBar: AppBar(title: const Text('Payroll')),
     body: Column(children: [
@@ -1711,7 +2338,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       if(_canView && _hasLocalData && !_loadingLocal && _employees.isEmpty)const Padding(padding:EdgeInsets.all(12),child:Text('No saved employees are available. Review the offline employee roster.')),
       if (_canView)
         Expanded(child: !_reportsLoaded ? Center(child:Text(_loadingLocal?'Loading saved payroll totals…':'Saved payroll totals are unavailable. Use Retry above.')) : PayrollOverview(
-          employees: _employees, work: _work, payments: _overviewPayments,
+          employees: _employees, work: _currentPayrollWork, payments: _overviewPayments,
           onOpenProfile: (id, week) => _openEmployeeProfile(id, week, 0),
           onReviewWeek: (id, week) => _openEmployeeProfile(id, week, 0),
         )),
@@ -1719,12 +2346,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   );
 
   @override
-  Widget build(BuildContext context) => widget.globalTasks ? _workspace() : widget.reportsOnly ? _reports() : widget.employeeId != null ? _profile() : !_jobMode ? _overview() : Scaffold(
+  Widget build(BuildContext context) => widget.focusLineId != null ? _assignmentManager() : (widget.globalTasks || (_jobMode && widget.invoiceId == null)) ? _workspace() : widget.reportsOnly ? _reports() : widget.employeeId != null ? _profile() : !_jobMode ? _overview() : Scaffold(
         appBar: AppBar(title: Text(widget.reportsOnly
             ? 'Payroll reports'
             : _jobMode ? 'Job labor tasks' : 'Owner payroll')),
         body: ListView(
-          padding: const EdgeInsets.all(16),
+          // Keep the last action clear of Android gesture/three-button nav.
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 112),
           children: [
             FilledButton(
               onPressed: _loadingLocal ? null : () => unawaited(_load()),
@@ -1759,7 +2387,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                 ListTile(title:Text(source['description'].toString()),
                   subtitle:const Text('Invoice labor · mechanic allocations'),
                   trailing:TextButton(onPressed:()=>_assign(source['invoice_id'] as String,
-                    {'id':source['source_line_id'],'description':source['description']}),child:const Text('Assign / split'))),
+                    {'id':source['source_line_id'],'description':source['description']}),child:const Text('Add mechanic'))),
               if (_employees.isEmpty) const Text('No active assignment is saved for this job.'),
               ListTile(
                 title: const Text('Additional job work / Rechecks'),
@@ -1785,7 +2413,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                       _work = [];
                       _history = [];
                                 });
-                    _run(() async {});
+                    if (_canView) unawaited(_load());
                   },
                 ),
               if (_employee != null)

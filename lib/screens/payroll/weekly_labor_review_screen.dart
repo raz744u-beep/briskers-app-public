@@ -66,7 +66,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       DateTime(date.year, date.month, date.day)
         .subtract(Duration(days: date.weekday - 1));
   static DateTime _end(DateTime date) =>
-      _start(date).add(const Duration(days: 7));
+      _start(date).add(const Duration(days: 5));
   static String _id(Map<String, dynamic> task) => task['id'] as String;
   static double _assigned(Map<String, dynamic> task) =>
       (task['actual_minutes'] as int) / 60;
@@ -124,7 +124,10 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     if (_future) return const [];
     return widget.tasks.where((task) {
       final date = DateTime.tryParse(task['completed_date']?.toString() ?? '');
-      if (task['assignment_conflict']==1 || task['state'] != 'Done' || date == null || !date.isBefore(_end(_week))) {
+      // Archived historical labor remains visible elsewhere, but must NEVER
+      // become selectable for new payroll without explicit Owner carry-forward.
+      if (task['archived_labor']==1 || task['assignment_conflict']==1 ||
+          task['state'] != 'Done' || date == null || !date.isBefore(_end(_week))) {
         return false;
       }
       return task['paid'] != 1 || !date.isBefore(_start(_week));

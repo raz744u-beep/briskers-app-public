@@ -65,6 +65,9 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   bool _appLoginBusy = false;
   bool _loading = true;
   bool _secureOffline = false;
+  String? _localPayType;
+  int? _localPayCents;
+  bool _savingOfflinePay = false;
   Set<String> _secureKeys={};
   LocalOwnerGrant? _detailsGrant;
   Timer? _privacyTimer;
@@ -158,10 +161,15 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
         setState(() {
           _loading = false;
           _error = _editing
-              ? 'Other employee profile fields require a connection. '
-                  'You can save the nickname on this device.'
+              ? null
               : 'Creating employee records is not available in Force Offline.';
         });
+        // This Owner is already signed in to Briskers. Read only the existing
+        // encrypted employee snapshot and locally configured pay information;
+        // never require a second biometric/PIN or a Supabase round trip.
+        if (_editing && widget.isOwner) {
+          unawaited(_unlockOffline());
+        }
         return;
       }
       final positions = await _api.employeePositions(widget.businessId).timeout(const Duration(seconds:8));
@@ -224,10 +232,123 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
     } catch(_){if(mounted)setState(()=>_error='Nickname is not available yet. Known employee details are retained. Retry.');}
   }
 
+  Future<void> _hydrateLocalPayBasis(LocalOwnerGrant grant) async {
+    if (!widget.isOwner || widget.employeeId == null) return;
+    final repo = LocalPayrollRepository(localDatabase,
+      business: widget.businessId, owner: true,
+      assertOwnerGrant: () => grant.assertValid(widget.businessId, grant.actorId));
+    final employee = (await repo.employees())
+      .where((row) => row['id'] == widget.employeeId).firstOrNull;
+    final defaults = await repo.weeklyDefaults(widget.employeeId!);
+    grant.assertValid(widget.businessId, grant.actorId);
+    if (!mounted || employee == null) return;
+    final fixed = employee['base_enabled'] == 1;
+    final cents = fixed
+        ? (defaults?['base_cents'] as int?)
+        : (employee['rate'] as int?);
+    setState(() {
+      _localPayType = fixed ? 'fixed_weekly' : 'hourly';
+      _localPayCents = cents;
+      _secureOffline = true;
+      _paymentType = _localPayType!;
+      if (cents != null) _rate.text = (cents / 100).toStringAsFixed(2);
+    });
+  }
+
+  Future<void> _editOfflinePayBasis() async {
+    if (!widget.isOwner || !_editing || _savingOfflinePay) return;
+    try {
+      final grant = await (widget.unlockOwner?.call(widget.businessId) ??
+        DeviceOwnerAuthorization.instance.authority.authorizeSession(widget.businessId));
+      await _hydrateLocalPayBasis(grant);
+      if (!mounted) return;
+      var type = _localPayType ?? 'hourly';
+      final amount = TextEditingController(
+        text: _localPayCents == null ? '' :
+          (_localPayCents! / 100).toStringAsFixed(2),
+      );
+      final choice = await showDialog<({String type, int cents})>(
+        context: context,
+        builder: (dialog) => StatefulBuilder(
+          builder: (dialog, update) => AlertDialog(
+            title: const Text('Employee payment settings'),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              DropdownButtonFormField<String>(
+                initialValue: type,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Payment type'),
+                items: const [
+                  DropdownMenuItem(value: 'hourly',child: Text('Hourly')),
+                  DropdownMenuItem(value: 'fixed_weekly',
+                    child: Text('Fixed weekly')),
+                ],
+                onChanged: (value) {
+                  if (value != null) update(() => type = value);
+                },
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: amount,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  labelText: type == 'hourly' ? 'Hourly rate' : 'Weekly pay',
+                  prefixText: '\$ ',
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text('Saved on this device for offline Payroll. '
+                'Existing paid work is not repriced. Server employee settings '
+                'are not updated until a separate verified sync.',
+                style: TextStyle(fontSize: 12)),
+            ]),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dialog),
+                child: const Text('Cancel')),
+              FilledButton(
+                onPressed: () {
+                  final value = double.tryParse(amount.text.trim());
+                  if (value == null || !value.isFinite ||
+                      value < 0 || value > 1000000) {
+                    return;
+                  }
+                  Navigator.pop(dialog,
+                    (type: type, cents: (value * 100).round()));
+                },
+                child: const Text('Save offline pay settings'),
+              ),
+            ],
+          ),
+        ),
+      );
+      amount.dispose();
+      if (choice == null || !mounted) return;
+      setState(() => _savingOfflinePay = true);
+      final repo = LocalPayrollRepository(localDatabase,
+        business: widget.businessId, owner: true,
+        assertOwnerGrant: () => grant.assertValid(widget.businessId, grant.actorId));
+      await repo.saveLocalPayBasis(
+        employee: widget.employeeId!,
+        name: _name.text.trim().isNotEmpty ? _name.text.trim() :
+          (widget.rosterName ?? widget.employeeId!),
+        paymentType: choice.type,
+        amountCents: choice.cents,
+      );
+      await _hydrateLocalPayBasis(grant);
+      if (mounted) {
+        setState(() =>
+          _error = 'Local pay settings saved. Paid work was not changed.');
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _savingOfflinePay = false);
+    }
+  }
+
   Future<void> _unlockOffline() async {
     if(!widget.isOwner||!_editing)return;
     try{
-      final grant=await (widget.unlockOwner?.call(widget.businessId) ?? DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId));
+      final grant=await (widget.unlockOwner?.call(widget.businessId) ?? DeviceOwnerAuthorization.instance.authority.authorizeSession(widget.businessId));
       final snapshot=await const SecureEmployeeDetailsCache().read(widget.businessId,widget.employeeId!,grant);
       if(!mounted)return;
       if(snapshot==null){
@@ -242,20 +363,23 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
           _rate.text=saved==null?'':((saved['rate'] as int)/100).toStringAsFixed(2);
           _error='No verified contact/tax snapshot is saved. This does not mean the record is missing. '
             '${saved==null?'':'Showing the Owner-configured local payroll rate; current server values are unknown.'}';
-        });return;
+        });
+        await _hydrateLocalPayBasis(grant);
+        return;
       }
       final d=snapshot['details'] as Map;
       setState((){_detailsGrant=grant;_secureOffline=true;_secureKeys=d.keys.map((k)=>k.toString()).toSet();
         _phone.text=d['phone']?.toString()??'';_email.text=d['email']?.toString()??'';
         _address.text=d['address']?.toString()??'';_rate.text=(d['hourly_rate']??d['weekly_rate'])?.toString()??'';
         _ssnLast4=d['ssn_last4']?.toString();_error='Verified snapshot: ${snapshot['verified_at']}. Offline copy; current server changes are not known.';});
+      await _hydrateLocalPayBasis(grant);
     }catch(e){if(mounted)setState(()=>_error='$e');}
   }
 
   Future<void> _saveSecureSnapshot() async {
     if(!widget.isOwner||!_detailLoaded||!_editing)return;
     try{
-      final grant=await (widget.unlockOwner?.call(widget.businessId) ?? DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId));
+      final grant=await (widget.unlockOwner?.call(widget.businessId) ?? DeviceOwnerAuthorization.instance.authority.authorizeSession(widget.businessId));
       await const SecureEmployeeDetailsCache().save(widget.businessId,widget.employeeId!,{
         'id':widget.employeeId,'name':_name.text,'phone':_phone.text,'email':_email.text,'address':_address.text,
         'position_id':_positionId,'payment_type':_paymentType,'hourly_rate':_paymentType=='hourly'?_rate.text:null,
@@ -536,43 +660,91 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
     return null;
   }
 
-  Widget _cachedDetails() => ListView(
-    padding: const EdgeInsets.all(16),
-    children: [
-      if (_name.text.isNotEmpty)
-        ListTile(title: const Text('Full name'), subtitle: Text(_name.text)),
-      if (widget.rosterPosition case final String position)
-        ListTile(title: const Text('Position'), subtitle: Text(position)),
-      const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
-        child: Text('Contact, tax, and compensation details are unavailable '
-          'until the employee record can be loaded securely.'),
-      ),
-      if(widget.isOwner)OutlinedButton(onPressed:_unlockOffline,child:const Text('Unlock verified offline details')),
-      if(_secureOffline && _detailsGrant!=null)...[
-        ListTile(title:const Text('Phone'),subtitle:Text(_secureKeys.contains('phone')?(_phone.text.isEmpty?'Not recorded in verified copy':_phone.text):'Not cached')),
-        ListTile(title:const Text('Email'),subtitle:Text(_secureKeys.contains('email')?(_email.text.isEmpty?'Not recorded in verified copy':_email.text):'Not cached')),
-        ListTile(title:const Text('Address'),subtitle:Text(_secureKeys.contains('address')?(_address.text.isEmpty?'Not recorded in verified copy':_address.text):'Not cached')),
-        ListTile(title:const Text('Compensation'),subtitle:Text(_rate.text)),
-        if(_ssnLast4!=null)ListTile(title:const Text('SSN ending'),subtitle:Text(_ssnLast4!)),
-      ],
-      if (widget.isOwner) ...[
-        TextFormField(
-          controller: _nickname,
-          maxLength: 32,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(labelText: 'Nickname (optional)'),
+  Widget _cachedDetails() {
+    final verified = widget.isOwner && _secureOffline && _detailsGrant != null;
+    final rate = verified && _localPayCents != null
+        ? '${String.fromCharCode(36)}${(_localPayCents! / 100).toStringAsFixed(2)}'
+          '${_localPayType == 'fixed_weekly' ? '/week' : '/hr'}'
+        : 'Not saved locally';
+    String cachedValue(String field, String value) {
+      if (!verified || !_secureKeys.contains(field)) return 'Not saved locally';
+      return value.trim().isEmpty ? 'Not recorded' : value.trim();
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 32),
+      children: [
+        ListTile(
+          leading: const Icon(Icons.build_outlined, size: 34),
+          title: Text(_name.text.isEmpty ? 'Employee' : _name.text,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
+          subtitle: Text(widget.rosterPosition ?? 'Position not saved'),
         ),
-        OutlinedButton.icon(
-          onPressed: _savingNickname ? null : _saveNicknameLocally,
-          icon: const Icon(Icons.save_outlined),
-          label: const Text('Save nickname on this device'),
+        const Divider(height: 24),
+        ListTile(
+          title: const Text('Payment type'),
+          subtitle: Text(_localPayType == 'fixed_weekly'
+            ? 'Fixed weekly' : _localPayType == 'hourly'
+              ? 'Hourly' : 'Not saved locally'),
         ),
+        ListTile(
+          title: Text(_localPayType == 'fixed_weekly'
+            ? 'Weekly pay' : 'Hourly rate'),
+          trailing: Text(rate, style: const TextStyle(fontWeight: FontWeight.w600)),
+        ),
+        if (widget.isOwner && _editing)
+          OutlinedButton.icon(
+            onPressed: _savingOfflinePay ? null : _editOfflinePayBasis,
+            icon: const Icon(Icons.edit_outlined),
+            label: const Text('Edit offline pay settings'),
+          ),
+        ListTile(
+          title: const Text('Phone, email and address'),
+          subtitle: Text(verified
+            ? [cachedValue('phone',_phone.text), cachedValue('email',_email.text),
+                cachedValue('address',_address.text)].join(' · ')
+            : 'Not saved locally'),
+        ),
+        ListTile(
+          title: const Text('SSN and W-9'),
+          subtitle: Text(verified && _ssnLast4 != null
+            ? 'SSN ending in $_ssnLast4 · Full SSN remains protected'
+            : 'Protected information not saved locally'),
+        ),
+        const ListTile(
+          title: Text('Default payment method'),
+          subtitle: Text('Not saved locally'),
+        ),
+        ListTile(
+          title: const Text('Position icon'),
+          subtitle: Text(widget.rosterPosition ?? 'Role-based icon'),
+        ),
+        if (widget.isOwner) ...[
+          const Divider(height: 26),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: const Text('Nickname'),
+            subtitle: const Text('Optional display name on this device'),
+            children: [
+              TextFormField(
+                controller: _nickname,
+                maxLength: 32,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'Nickname (optional)'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _savingNickname ? null : _saveNicknameLocally,
+                icon: const Icon(Icons.save_outlined),
+                label: const Text('Save nickname on this device'),
+              ),
+            ],
+          ),
+        ],
+        if (_error != null)
+          Padding(padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(_error!,style:const TextStyle(fontSize:12))),
       ],
-      if (_error != null) Text(_error!),
-      TextButton(onPressed:()=>unawaited(_hydrateNickname()),child:const Text('Retry nickname')),
-    ],
-  );
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

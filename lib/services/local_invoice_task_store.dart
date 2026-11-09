@@ -11,6 +11,16 @@ import 'local_task_assignment_store.dart';
 class LocalInvoiceTaskStore {
   LocalInvoiceTaskStore(this.db);
   final BriskersLocalDatabase db;
+  // The last paid Monday-Friday shop workweek ended November 6.
+  // Preserve the existing task identity cutover; weekly payroll selection
+  // handles Monday-Friday separately from this invoice source-date boundary.
+  static const payrollCutover = '2026-11-07';
+  static bool currentPayrollDate(Object? value) {
+    if (value is! String || !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) return false;
+    final parsed = DateTime.tryParse(value);
+    return parsed != null && parsed.toIso8601String().startsWith(value) &&
+        value.compareTo(payrollCutover) >= 0;
+  }
 
   Future<void> prepare() async {
     await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_task_order '
@@ -38,7 +48,7 @@ class LocalInvoiceTaskStore {
     final job = detail['job_id'];
     if (job is! String || job.isEmpty) return;
     final source = await db.customSelect(
-      "SELECT j.title,d.status AS document_status FROM local_documents d JOIN local_jobs j "
+      "SELECT j.title,d.document_date,d.status AS document_status FROM local_documents d JOIN local_jobs j "
       "ON j.business_id=d.business_id AND j.id=d.job_id "
       "WHERE d.business_id=? AND d.id=? AND d.job_id=? AND d.kind='invoice'",
       variables: [Variable(business), Variable(document), Variable(job)],
@@ -55,6 +65,12 @@ class LocalInvoiceTaskStore {
     await prepare();
     if (['void','voided','cancelled','canceled','deleted'].contains((source.data['document_status'] ?? detail['status'])?.toString().toLowerCase())) {
       await db.customStatement("UPDATE regular_payroll_task_sources SET active=0 WHERE business_id=? AND invoice_id=? AND source_kind='invoice'",[business,document]);
+      return;
+    }
+    final date = source.readNullable<String>('document_date');
+    if (!currentPayrollDate(date)) {
+      // Reading an archived invoice must never reconstruct its labor as new work.
+      // Existing tasks, payments and invoice lines remain available as history.
       return;
     }
     await db.transaction(() async {

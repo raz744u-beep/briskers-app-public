@@ -27,9 +27,13 @@ void main(){
       if(!slow)gate.complete();
       final db=BriskersLocalDatabase(LazyDatabase(()async{await gate.future;return NativeDatabase.memory();}));
       var clock=DateTime.now();
+      var devicePrompts = 0;
       const who=OwnerSessionIdentity('owner','local');
       final auth=LocalOwnerAuthorization(store:_Unused(),currentIdentity:()=>who,
-        verifyOwner:(_)async=>throw StateError('No internet'),authenticateDevice:()async=>true,
+        verifyOwner:(_)async=>throw StateError('No internet'),authenticateDevice:()async{
+          devicePrompts++;
+          return true;
+        },
         verifyLocalOwner:(shop)async=>VerifiedOwnerEnrollment(who,shop),now:()=>clock);
       final id=await PayrollLanIdentity.fromSeed(List.filled(32,3));
       final values=<String,String>{};
@@ -38,10 +42,10 @@ void main(){
       final network=PayrollOwnerLan(lease:lease,database:db,actor:'owner',approve:(_)async=>null);
       addTearDown(()async{if(!gate.isCompleted)gate.complete();await network.close();await db.close();});
       await tester.pumpWidget(MaterialApp(home:PayrollUiScope(database:db,
-        unlock:auth.authorizeLocal,connection:network,debugAllowOwnerView:true,
+        unlock:auth.authorizeSession,connection:network,debugAllowOwnerView:true,
         child:OwnerPayrollScreen(businessId:'shop',employeeId:'a',
           employeeName:'Known Employee',employeeRole:'Mechanic',
-          database:db,unlockOwner:auth.authorizeLocal,ownerConnection:network))));
+          database:db,unlockOwner:auth.authorizeSession,ownerConnection:network))));
       for(final name in ['Tasks','Payroll','Reports','Taxes']){expect(find.text(name),findsOneWidget);}
       final x=[for(final name in ['Tasks','Payroll','Reports','Taxes'])tester.getCenter(find.text(name)).dx];
       expect(x[1]-x[0],closeTo(x[2]-x[1],1));expect(x[2]-x[1],closeTo(x[3]-x[2],1));
@@ -64,8 +68,10 @@ void main(){
       clock=clock.add(const Duration(minutes:3));
       await tester.pump(const Duration(seconds:6));
       expect(find.text('Unlock Owner payroll'),findsNothing);
+      expect(devicePrompts, 0, reason: 'Switching Owner profile tabs must never challenge the device');
       await tester.tap(find.text('Taxes'));await tester.pumpAndSettle();
       expect(find.textContaining('1099'),findsWidgets);
+      expect(devicePrompts, 0, reason: 'Payment grant expiry must not challenge while reading Taxes');
       await tester.pumpWidget(const SizedBox.shrink());await tester.pump();
       expect(tester.takeException(),isNull);
     });

@@ -83,13 +83,15 @@ class JobFinancialStatusCard extends StatelessWidget {
     final unknown = status == null;
     final paid = status == 'Paid';
     final invoiceNeeded = status == 'Invoice needed';
+    // Readable on a neutral surface, including for unpaid invoices.
+    // Status meanings remain unchanged; only the visual contrast changes.
     final color = unknown
-        ? const Color(0xFF697586)
+        ? const Color(0xFF475569)
         : paid
-            ? const Color(0xFF169B62)
+            ? const Color(0xFF08734E)
             : invoiceNeeded
-                ? const Color(0xFFC62828)
-                : const Color(0xFFE58A00);
+                ? const Color(0xFFB42318)
+                : const Color(0xFF92400E);
     final icon = unknown
         ? Icons.info_outline
         : paid
@@ -102,7 +104,11 @@ class JobFinancialStatusCard extends StatelessWidget {
       height: 50,
       child: Card(
         margin: EdgeInsets.zero,
-        color: color.withValues(alpha: 0.08),
+        color: const Color(0xFFF8FAFC),
+        shape: RoundedRectangleBorder(
+          side: BorderSide(color: color.withValues(alpha: 0.30)),
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 13),
           child: Row(

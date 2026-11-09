@@ -171,20 +171,11 @@ void main() {
     expect(picker, contains("'assignments': assigned"));
   });
 
-  test('Jobs list quick editors patch visible cards without querying all Jobs',
-      () {
-    final src = File('lib/screens/jobs_screen.dart').readAsStringSync();
-    expect(src, contains('void _patchQuickAdminCard('));
-    final a = src.indexOf('Future<void> _quickEditMechanic(');
-    final b = src.indexOf('Future<void> _quickEditPlannedTime(', a);
-    final c = src.indexOf('void _applyLocalStatus(', b);
-    final mechanic = src.substring(a, b);
-    final hours = src.substring(b, c);
-    for (final flow in [mechanic, hours]) {
-      expect(flow, contains('_patchQuickAdminCard('));
-      expect(flow, contains('_scheduleQuickEditSync();'));
-      expect(flow, isNot(contains('await _load(refreshRemote: false);')));
-      expect(flow, isNot(contains('await _offlineJobAdmin.flush(')));
-    }
+  test('Jobs list displays local allocations without standalone hour edits', () {
+    final jobs = File('lib/screens/jobs_screen.dart').readAsStringSync();
+    expect(jobs,contains('_localJobs.allocationHours('));
+    expect(jobs,isNot(contains('_quickEditPlannedTime(')));
+    expect(jobs,isNot(contains('_quickEditMechanic(')));
   });
+
 }
