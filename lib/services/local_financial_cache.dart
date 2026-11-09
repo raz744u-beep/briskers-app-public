@@ -209,11 +209,19 @@ class LocalFinancialCache {
       }
 
       final overlay = overlayPending(serverRows.map(preserveOccurrence).toList(), saved);
+      // A server page is a partial inventory, not proof that previously
+      // saved financial history has been deleted. Preserve every cached
+      // transaction omitted by the page, including older posted expenses,
+      // payroll and locally committed (not yet acknowledged) changes.
+      // Matching server IDs take precedence unless there is a pending local
+      // edit; recurring verified metadata is retained above.
       final seen = overlay.map((r) => r['id'].toString()).toSet();
       final merged = <Map<String, dynamic>>[
         ...overlay,
-        for (final entry in downloaded.entries)
-          if (seen.add(entry.key)) entry.value,
+        for (final previous in saved)
+          if ((previous['id']?.toString() ?? '').isNotEmpty &&
+              seen.add(previous['id'].toString()))
+            previous,
       ];
       merged.sort((a, b) =>
         (b['transaction_date']?.toString() ?? '').compareTo(
