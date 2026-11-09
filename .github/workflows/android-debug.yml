@@ -772,7 +772,11 @@ jobs:
 
       - name: Resolve packages
         working-directory: generated
-        run: flutter pub get
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flutter pub get
+          bash "$GITHUB_WORKSPACE/tools/ci_sqlite_assets.sh"
 
       - name: Generate local database code
         working-directory: generated
@@ -881,6 +885,7 @@ jobs:
           mkdir test
           cp ../test/release_upgrade_fixture_test.dart test/
           flutter pub get
+          GH_TOKEN="${{ github.token }}" bash "$GITHUB_WORKSPACE/tools/ci_sqlite_assets.sh"
           dart run build_runner build --delete-conflicting-outputs
           BRISKERS_UPGRADE_FIXTURE="$GITHUB_WORKSPACE/upgrade-fixture/shop.sqlite" flutter test test/release_upgrade_fixture_test.dart --reporter expanded
 
