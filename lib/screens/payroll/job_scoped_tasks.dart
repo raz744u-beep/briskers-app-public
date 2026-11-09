@@ -270,10 +270,9 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
           onLongPress: () => _longPress(key, row, general),
           child: Container(
             decoration: BoxDecoration(
-              border: Border(left: BorderSide(color: color, width: 5),
-                top: BorderSide(color: color.withValues(alpha: 0.32)),
-                right: BorderSide(color: color.withValues(alpha: 0.32)),
-                bottom: BorderSide(color: color.withValues(alpha: 0.32))),
+              // Flutter requires a uniform border when using rounded corners.
+              // The status-colored outline, icon and tint remain visible.
+              border: Border.all(color: color, width: 2),
               borderRadius: BorderRadius.circular(14)),
             child: Column(children: [
               Padding(
