@@ -1694,12 +1694,32 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Future<void> _createEmployeeGeneralTask() async {
+    var eligible = _employees;
+    if (widget.jobId != null) {
+      final assigned = await _viewRepository.assignedEmployees(widget.jobId!);
+      final lead = await _db.customSelect(
+        'SELECT assigned_employee_id FROM local_jobs WHERE business_id=? AND id=?',
+        variables:[Variable<String>(widget.businessId),
+          Variable<String>(widget.jobId!)],
+      ).getSingleOrNull();
+      final allowed = <String>{
+        for (final row in assigned)
+          if (row['employee_id'] case final String id) id,
+        if (lead?.data['assigned_employee_id'] case final String id) id,
+      };
+      eligible = _employees.where((row) => allowed.contains(row['id'])).toList();
+      if (!mounted || !_canView) return;
+      if (eligible.isEmpty) {
+        setState(() => _error = 'Assign a mechanic to this job first.');
+        return;
+      }
+    }
     final employee = widget.employeeId ?? await showDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
         title: const Text('Assign general task'),
         children: [
-          for (final row in _employees)
+          for (final row in eligible)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, row['id']),
               child: Text((row['nickname'] ?? row['name'] ?? row['id']).toString()),
