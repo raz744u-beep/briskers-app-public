@@ -105,6 +105,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
           linePeople=people;
           staff=cached;
           lineAssignment=people.isEmpty?'Unassigned':null;
+          warning=null;
         });
       }
     }catch(_){
@@ -112,6 +113,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
         setState((){
           linePeople=[];
           lineAssignment='Assignments unavailable · Tap to retry';
+          warning='Saved mechanic assignments could not be read. Reopen this invoice to retry.';
         });
       }
     }
@@ -325,7 +327,9 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
                     child:Text(EmployeeNicknameStore.displayLabel(person,staff),
                       maxLines:1,overflow:TextOverflow.ellipsis)),
               ],
-              onChanged:busy || available.isEmpty ? null :(id){
+              onChanged:busy || available.isEmpty ||
+                lineAssignment?.startsWith('Assignments unavailable')==true
+                  ? null :(id){
                 if(id!=null)unawaited(chooseLineMechanic(id));
               },
             )),
