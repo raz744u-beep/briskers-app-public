@@ -124,7 +124,9 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
   /// work is modified. Paired workers keep their existing LAN workflow.
   Future<void> chooseLineMechanic(String employeeId) async {
     if(busy || widget.invoice==null || widget.line==null ||
-       linePeople.any((p)=>p['id']==employeeId)) return;
+       linePeople.any((p)=>p['id']==employeeId)) {
+      return;
+    }
     final person=staff.where((p)=>p['id']?.toString()==employeeId).firstOrNull;
     if(person==null) { return; }
     setState(()=>busy=true);
