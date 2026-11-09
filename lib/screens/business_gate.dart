@@ -486,7 +486,10 @@ class _BusinessGateState extends State<BusinessGate> with WidgetsBindingObserver
           _api.transactions(businessId, limit: 1000),
           _api.transactionOptions(businessId),
         ]);
-        await _localFinancial.saveTransactions(
+        // A bounded download is never a complete shop financial ledger.
+        // Merge by transaction identity instead of wiping older downloaded
+        // history and offline-created, not-yet-synced payments.
+        await _localFinancial.mergeServerTransactions(
           businessId,
           List<Map<String, dynamic>>.from(results[0] as List),
         );
