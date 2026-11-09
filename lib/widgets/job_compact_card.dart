@@ -253,10 +253,18 @@ class JobCompactCard extends StatelessWidget {
                       Expanded(flex:employeeFlex,child:Padding(
                         padding:const EdgeInsets.symmetric(horizontal:4,vertical:5),
                         child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-                          Text(firstName,style:TextStyle(color:roleStyle.color,fontWeight:FontWeight.w600)),
-                          if(mechanicMinutes!=null)
+                          // Show one mechanic label, not the Job lead and
+                          // the same assigned mechanic again underneath.
+                          if (mechanicMinutes == null || mechanicMinutes!.isEmpty)
+                            Text(firstName,style:TextStyle(
+                              color:roleStyle.color,fontWeight:FontWeight.w600))
+                          else
                             for(final person in mechanicMinutes!.entries)
-                              Text('${person.key} ${_hours(person.value/60)}h'),
+                              Text(
+                                '${_firstName(person.key)} · ${_hours(person.value/60)}h',
+                                maxLines:1,overflow:TextOverflow.ellipsis,
+                                style:TextStyle(color:roleStyle.color,
+                                  fontWeight:FontWeight.w600)),
                         ]))),
                       separator(),
                       Text(mechanicMinutes==null ? '—' :
