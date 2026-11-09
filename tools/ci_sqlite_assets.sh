@@ -10,14 +10,27 @@ mkdir "$dir/$tag"
 gh release download "$tag" --repo simolus3/sqlite3.dart --dir "$dir/$tag" \
   --pattern 'libsqlite3.x64.linux.so' --pattern 'libsqlite3.*.android.so'
 unset GH_TOKEN
-python3 - "$dir" <<'PY'
+python3 - "$dir" "$tag" <<'PY'
 import functools
 import http.server
+import hashlib
+import json
+import re
+from urllib.parse import unquote, urlparse
 import os
 import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
+packages = json.loads(Path(".dart_tool/package_config.json").read_text())["packages"]
+entry = next(package for package in packages if package["name"] == "sqlite3")
+package_root = Path(unquote(urlparse(entry["rootUri"]).path))
+pins = (package_root / "lib/src/hook/asset_hashes.dart").read_text()
+for asset in (root / sys.argv[2]).iterdir():
+    match = re.search(r"'" + re.escape(asset.name) + r"':\s*'([a-f0-9]{64})'", pins)
+    if match is None or hashlib.sha256(asset.read_bytes()).hexdigest() != match[1]:
+        raise SystemExit(f"Upstream asset does not match the resolved sqlite3 package: {asset.name}")
+print(f"Verified SQLite release assets for {sys.argv[2]}", flush=True)
 serve = functools.partial(http.server.SimpleHTTPRequestHandler, directory=root)
 server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), serve)
 port = server.server_port

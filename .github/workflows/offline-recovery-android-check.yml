@@ -25,6 +25,10 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Create temporary Android runner before resolving the release dependencies
+        run: |
+          flutter create --no-pub --platforms=android --project-name briskers_app .
+          git restore -- pubspec.yaml pubspec.lock
       - name: Resolve packages
         env:
           GH_TOKEN: ${{ github.token }}
@@ -37,8 +41,6 @@ jobs:
         run: |
           flutter test test/services/local_owner_invoice_numbering_test.dart
           flutter test test/services/local_numbered_document_overlay_test.dart
-      - name: Create temporary Android test project
-        run: flutter create --platforms=android --project-name briskers_app .
       - name: Stage verified Gradle distribution
         env:
           GH_TOKEN: ${{ github.token }}
