@@ -210,11 +210,15 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
                   ((allocation['estimated_minutes'] as int? ?? 0) / 60)
                     .toStringAsFixed(1) + ' hrs',
                   maxLines: 2)),
-                _action(key + '-' + allocation['id'].toString(),
-                  allocation['state']?.toString() == 'Done' ? 'Done' :
-                    allocation['state']?.toString() == 'In Progress'
-                      ? 'In Progress' : 'Not Started',
-                  allocation: allocation),
+                // Single mechanic already has the action on the closed
+                // card. Inline details stay read-only, without duplicates.
+                // Split tasks retain independent per-mechanic actions.
+                if (allocations.length > 1)
+                  _action(key + '-' + allocation['id'].toString(),
+                    allocation['state']?.toString() == 'Done' ? 'Done' :
+                      allocation['state']?.toString() == 'In Progress'
+                        ? 'In Progress' : 'Not Started',
+                    allocation: allocation),
               ]),
             ),
         if (notes.isNotEmpty) ...[
