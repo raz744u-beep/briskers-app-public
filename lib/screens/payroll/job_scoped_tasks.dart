@@ -335,16 +335,38 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
       Padding(
         padding: const EdgeInsets.fromLTRB(12, 9, 12, 8),
         child: Column(children: [
+          // Both creation actions must fit the narrow Android job screen.
+          // FittedBox scales only label content, never the touch target.
           Row(children: [
-            Expanded(child: OutlinedButton.icon(
-              onPressed: widget.onAddLabor,
-              icon: const Icon(Icons.add),
-              label: const Text('Labor Task'))),
+            Expanded(child: SizedBox(height: 44,
+              child: OutlinedButton(
+                onPressed: widget.onAddLabor,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                  minimumSize: Size.zero,
+                ),
+                child: const FittedBox(fit: BoxFit.scaleDown,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.add, size: 20), SizedBox(width: 5),
+                    Text('Labor Task', style: TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w700)),
+                  ])),
+              ))),
             const SizedBox(width: 8),
-            Expanded(child: OutlinedButton.icon(
-              onPressed: widget.onAddGeneral,
-              icon: const Icon(Icons.add),
-              label: const Text('General Task'))),
+            Expanded(child: SizedBox(height: 44,
+              child: OutlinedButton(
+                onPressed: widget.onAddGeneral,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                  minimumSize: Size.zero,
+                ),
+                child: const FittedBox(fit: BoxFit.scaleDown,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.add, size: 20), SizedBox(width: 5),
+                    Text('General Task', style: TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w700)),
+                  ])),
+              ))),
           ]),
           if (number.isNotEmpty || customer.isNotEmpty || vehicle.isNotEmpty) ...[
             const SizedBox(height: 10),
