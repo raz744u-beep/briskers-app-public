@@ -20,7 +20,7 @@ Map<String, dynamic> row(
   'category': category,
   'counterparty': counterparty,
   'amount': amount,
-  if (syncState != null) 'sync_state': syncState,
+  'sync_state': ?syncState,
 };
 
 void main() {
