@@ -28,6 +28,11 @@ class JobCompactCard extends StatelessWidget {
     return value.toStringAsFixed(2);
   }
 
+  String _firstName(String fullName) {
+    final parts = fullName.trim().split(RegExp(r'\\s+'));
+    return parts.isEmpty || parts.first.isEmpty ? 'Unassigned' : parts.first;
+  }
+
   @override
   Widget build(BuildContext context) {
     final number = job['job_number']?.toString().trim() ?? '';
@@ -46,7 +51,7 @@ class JobCompactCard extends StatelessWidget {
     final nickname = job['assigned_employee_nickname']?.toString().trim() ?? '';
     final displayMechanic = nickname.isNotEmpty
         ? nickname
-        : (employee.isEmpty ? 'Unassigned' : employee);
+        : (employee.isEmpty ? 'Unassigned' : _firstName(employee));
     final findings =
         int.tryParse(job['open_findings']?.toString() ?? '') ?? 0;
     final requests =
@@ -250,7 +255,7 @@ class JobCompactCard extends StatelessWidget {
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 2),
                                   child: Text(
-                                    '${person.key} · ${_hours(person.value / 60)} hr',
+                                    '${person.key} · ${_hours(person.value / 60)}h',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     textAlign: TextAlign.end,
