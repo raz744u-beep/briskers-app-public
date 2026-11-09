@@ -872,7 +872,7 @@ jobs:
           } > "${APK%.apk}.verification.txt"
 
       - name: Generate representative records with exact signed b2568 source
-        if: (github.ref_name == 'candidate/payroll-enabled' || (github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && inputs.payroll_candidate))
+        if: (github.ref_name == 'candidate/payroll-enabled' || ((github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' || github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108') && inputs.payroll_candidate))
         run: |
           git fetch --depth=1 origin 51d214a1593c7a73c9091cf930fa920a928b7c69
           mkdir upgrade-source
@@ -885,32 +885,32 @@ jobs:
           BRISKERS_UPGRADE_FIXTURE="$GITHUB_WORKSPACE/upgrade-fixture/shop.sqlite" flutter test test/release_upgrade_fixture_test.dart --reporter expanded
 
       - name: Download signed upgrade baseline
-        if: github.ref_name == 'candidate/payroll-bootstrap' || (github.ref_name == 'candidate/payroll-enabled' || (github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && inputs.payroll_candidate))
+        if: github.ref_name == 'candidate/payroll-bootstrap' || (github.ref_name == 'candidate/payroll-enabled' || ((github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' || github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108') && inputs.payroll_candidate))
         uses: actions/download-artifact@v4
         with:
           name: briskers-android-debug
-          run-id: ${{ (github.ref_name == 'candidate/payroll-enabled' || (github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && inputs.payroll_candidate)) && '41997297822' || '41925087962' }}
+          run-id: ${{ (github.ref_name == 'candidate/payroll-enabled' || ((github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' || github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108') && inputs.payroll_candidate)) && '41997297822' || '41925087962' }}
           github-token: ${{ github.token }}
           path: upgrade-baseline
 
       - name: Download latest signed receipt baseline
-        if: (github.ref_name == 'candidate/payroll-enabled' || (github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && inputs.payroll_candidate))
+        if: (github.ref_name == 'candidate/payroll-enabled' || ((github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' || github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108') && inputs.payroll_candidate))
         uses: actions/download-artifact@v4
         with:
           name: briskers-android-debug
-          run-id: ${{ github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && '42414887944' || '42165351470' }}
+          run-id: ${{ github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108' && '42561821792' || github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && '42414887944' || '42165351470' }}
           github-token: ${{ github.token }}
           path: upgrade-receipt-baseline
 
       - name: Enable emulator acceleration
-        if: github.ref_name == 'candidate/payroll-bootstrap' || (github.ref_name == 'candidate/payroll-enabled' || (github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && inputs.payroll_candidate))
+        if: github.ref_name == 'candidate/payroll-bootstrap' || (github.ref_name == 'candidate/payroll-enabled' || ((github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' || github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108') && inputs.payroll_candidate))
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
       - name: Verify install-over preservation on Android
-        if: github.ref_name == 'candidate/payroll-bootstrap' || (github.ref_name == 'candidate/payroll-enabled' || (github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && inputs.payroll_candidate))
+        if: github.ref_name == 'candidate/payroll-bootstrap' || (github.ref_name == 'candidate/payroll-enabled' || ((github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' || github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108') && inputs.payroll_candidate))
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -924,7 +924,7 @@ jobs:
             "$(find generated/build/app/outputs/flutter-apk -name 'Briskers-v*.apk' -print -quit)"
 
       - name: Upload install-over evidence
-        if: always() && (github.ref_name == 'candidate/payroll-enabled' || (github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && inputs.payroll_candidate))
+        if: always() && (github.ref_name == 'candidate/payroll-enabled' || ((github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' || github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108') && inputs.payroll_candidate))
         uses: actions/upload-artifact@v4
         with:
           name: briskers-b2568-upgrade-evidence

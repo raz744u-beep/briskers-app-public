@@ -430,6 +430,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     bool forceTotals = false,
   }) async {
     final epoch = ++_loadEpoch;
+    _loadingMore = false;
     final businessId = widget.businessId;
     if (_serverConfirmedBusinessId != businessId) {
       _serverConfirmedTransactionIds.clear();
@@ -527,7 +528,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           WarrantyReceiptReporting.unverified).toList();
         // Paint locally committed transactions before loading account/category
         // dropdown options. An options query failure must not blank Expenses.
-        if (_isCurrentLoad(epoch, businessId) && localRows.isNotEmpty) {
+        if (_isCurrentLoad(epoch, businessId) &&
+            (localRows.isNotEmpty || BriskersConnectionModeController.instance.forceOffline)) {
           setState(() {
             _transactions = localRows;
             _hasMore = hasMoreLocal;
@@ -1055,6 +1057,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
             .map(WarrantyReceiptReporting.unverified).toList();
         setState(() {
           _transactions = [..._transactions, ...next];
+          _visibleCount += next.length;
           _hasMore = cached.length > _transactions.length;
           _loadingMore = false;
         });
@@ -1088,16 +1091,18 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     // Force Offline remains unchanged; only this expressly approved,
     // read-only request is sent over HTTPS.
     final end = _rangeEndDate ?? _dateOnly(DateTime.now());
-    final start = _rangeStartDate ?? DateTime(2020, 1, 1);
-    if (start.isAfter(end)) return;
+    final start = _rangeStartDate;
+    if (start != null && start.isAfter(end)) return;
+    final period = start == null
+        ? 'through ${DateFormat('MMM d, yyyy').format(end)}'
+        : 'for ${DateFormat('MMM d, yyyy').format(start)}–${DateFormat('MMM d, yyyy').format(end)}';
     final allowed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Download saved history?'),
         content: Text(
           'Read posted Income & Expenses transactions from Briskers '
-          'for ${DateFormat('MMM d, yyyy').format(start)}–'
-          '${DateFormat('MMM d, yyyy').format(end)}. '
+          '$period. '
           'Downloaded records are merged with existing local history. '
           'Pending offline payments are not submitted or replaced. '
           'Force Offline stays enabled. This uses internet for this '

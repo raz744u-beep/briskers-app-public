@@ -19,11 +19,11 @@ class FinancialHistoryRecovery {
   /// Returns fetched server IDs, not the total local row count.
   Future<int> download({
     required String businessId,
-    required DateTime start,
+    required DateTime? start,
     required DateTime end,
     required void Function(int) onPage,
   }) async {
-    if (businessId.trim().isEmpty || end.isBefore(start)) {
+    if (businessId.trim().isEmpty || (start != null && end.isBefore(start))) {
       throw ArgumentError('Choose a valid business and date range.');
     }
     final client = _client ?? supabase;
@@ -31,7 +31,7 @@ class FinancialHistoryRecovery {
     if (identity == null || client.auth.currentSession == null) {
       throw StateError('Sign in to Briskers before downloading history.');
     }
-    final startDay = start.toIso8601String().split('T').first;
+    final startDay = start?.toIso8601String().split('T').first;
     final endDay = end.toIso8601String().split('T').first;
     final ids = <String>{};
     final batch = <Map<String, dynamic>>[];
