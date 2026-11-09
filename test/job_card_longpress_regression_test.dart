@@ -66,8 +66,8 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('Chris 9h'), findsOneWidget);
-        expect(find.text('Kam 2h'), findsOneWidget);
+        expect(find.text('Chris · 9h'), findsOneWidget);
+        expect(find.text('Kam · 2h'), findsOneWidget);
         expect(find.text('11 hr'), findsOneWidget);
         expect(find.byIcon(Icons.edit_outlined), findsNothing);
         expect(tester.takeException(), isNull);
