@@ -172,7 +172,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
               '${progress.done} of ${progress.total} tasks completed',
               textAlign: TextAlign.end,
               style: const TextStyle(color: Color(0xFF161D2B),
-                fontWeight: FontWeight.w600))),
+                fontWeight: FontWeight.w800))),
           ]),
           const SizedBox(height: 9),
           if (progress != null && progress.total > 0)
@@ -200,7 +200,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
             child: Row(children: [
               const Icon(Icons.checklist), const SizedBox(width: 8),
               Expanded(child: Text(progress == null
-                ? 'View Tasks' : 'View Tasks (${progress.total})')),
+                ? 'View Tasks' : 'View Tasks (${progress.total})',
+                style: const TextStyle(fontWeight: FontWeight.w800,
+                  fontSize: 15.5))),
               const Icon(Icons.chevron_right),
             ])),
         ]),
@@ -3792,7 +3794,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       label: Row(mainAxisSize: MainAxisSize.min, children: [
         Flexible(child: Text(invoice['document_number'] == null
             ? 'Open invoice' : '#${invoice['document_number']}',
-          overflow: TextOverflow.ellipsis)),
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 17,
+            fontWeight: FontWeight.w900, color: Color(0xFF07594D)))),
         const Icon(Icons.chevron_right, size: 18, color: Color(0xFF07594D)),
       ]),
       onPressed: _busy ? null : () => _openDocument(invoice['id'] as String),
