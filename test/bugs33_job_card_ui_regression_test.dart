@@ -22,7 +22,9 @@ void main() {
         .readAsString();
     final detail = await File('lib/screens/jobs/job_detail_screen.dart')
         .readAsString();
-    expect(access, contains("SizedBox(height:50,child:DropdownButtonFormField"));
+    expect(access, contains("Expanded(child:Container("));
+    expect(access, contains("height:50,"));
+    expect(access, contains("DropdownButtonHideUnderline("));
     expect(access, contains("SizedBox(height:50,child:OutlinedButton.icon"));
     expect(access, contains("EmployeeNicknameStore.displayLabel"));
     expect(access, contains("fontWeight:FontWeight.w800,fontSize:15"));
