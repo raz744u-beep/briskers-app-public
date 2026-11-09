@@ -26,6 +26,7 @@ import 'package:briskers_app/screens/jobs/job_detail_screen.dart';
 import 'package:briskers_app/screens/payroll/owner_payroll_screen.dart';
 import 'package:briskers_app/screens/payroll/payroll_overview.dart';
 import 'package:briskers_app/screens/payroll/tasks_workspace.dart';
+import 'package:briskers_app/screens/payroll/job_scoped_tasks.dart';
 import 'package:briskers_app/screens/payroll/payroll_ui_scope.dart';
 class _Unused implements OwnerEnrollmentStore{
   @override Future<String?> read()async=>null;
@@ -303,10 +304,14 @@ void main(){
     expect(tester.widget<JobDocumentScreen>(find.byType(JobDocumentScreen)).documentId,invoice);
     navigator.currentState!.pop();await tester.pumpAndSettle();
     await click(find.descendant(of:jobPage,matching:find.widgetWithText(OutlinedButton,'Job Tasks')));
-    await until(find.byType(TasksWorkspace));
-    expect(tester.widget<TasksWorkspace>(find.byType(TasksWorkspace)).scopedJob,jobId);
+    // Job-specific Tasks intentionally uses the approved compact view.
+    // Global Tasks above retains its existing filterable workspace.
+    await until(find.byType(JobScopedTasks));
+    expect(tester.widget<JobScopedTasks>(find.byType(JobScopedTasks)).jobId,jobId);
     expect(find.text('Labor Task'),findsOneWidget);
     expect(find.text('General Task'),findsOneWidget);
+    expect(find.byTooltip('Advanced task filters'),findsNothing);
+    expect(find.byIcon(Icons.more_vert),findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds:500));
     expect(secondaryPrompts,0,
