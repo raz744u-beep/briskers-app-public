@@ -1784,6 +1784,82 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if (created == true && mounted && _canView) await _load();
   }
 
+  /// Job-scoped General Task edits live in the standard long-press menu,
+  /// not the read-only expanded card. Only saved Job mechanics are choices.
+  Future<void> _editJobGeneralTask(Map<String,dynamic> task) async {
+    if (!_canView || widget.jobId == null || _busy) return;
+    final former = task['employee_id']?.toString() ?? '';
+    if (former.isEmpty || task['id'] is! int) return;
+    final roster = await _viewRepository.assignedEmployees(widget.jobId!);
+    final lead = await _db.customSelect(
+      'SELECT assigned_employee_id FROM local_jobs WHERE business_id=? AND id=?',
+      variables:[Variable<String>(widget.businessId),Variable<String>(widget.jobId!)],
+    ).getSingleOrNull();
+    if (!mounted || !_canView) return;
+    final allowed = <String>{
+      former,
+      for(final row in roster)
+        if (row['employee_id'] case final String id) id,
+      if (lead?.data['assigned_employee_id'] case final String id) id,
+    };
+    final description = TextEditingController(text:
+      task['description']?.toString() ?? '');
+    var selected = former;
+    var category = task['category']?.toString() ?? 'General';
+    final edited = await showDialog<Map<String,String>>(
+      context:context,
+      builder:(dialog)=>StatefulBuilder(builder:(context,refresh)=>
+        AlertDialog(
+          title:const Text('Edit General Task'),
+          scrollable:true,
+          content:Column(mainAxisSize:MainAxisSize.min,children:[
+            TextField(controller:description,maxLines:3,minLines:1,
+              decoration:const InputDecoration(labelText:'Task description',
+                border:OutlineInputBorder())),
+            const SizedBox(height:12),
+            DropdownButtonFormField<String>(
+              initialValue:selected,isExpanded:true,
+              decoration:const InputDecoration(labelText:'Assigned mechanic',
+                border:OutlineInputBorder()),
+              items:[
+                for(final id in allowed)
+                  DropdownMenuItem(value:id,child:Text(_employeeLabel(id))),
+              ],
+              onChanged:(id){if(id!=null)refresh(()=>selected=id);},
+            ),
+            const SizedBox(height:12),
+            DropdownButtonFormField<String>(
+              initialValue:category,isExpanded:true,
+              decoration:const InputDecoration(labelText:'Category',
+                border:OutlineInputBorder()),
+              items:[
+                for(final value in {category,'General','Cleaning','Inventory',
+                  'Office','Maintenance','Yard','Errands'})
+                  DropdownMenuItem(value:value,child:Text(value)),
+              ],
+              onChanged:(value){if(value!=null)refresh(()=>category=value);},
+            ),
+          ]),
+          actions:[
+            TextButton(onPressed:()=>Navigator.pop(dialog),
+              child:const Text('Cancel')),
+            FilledButton(onPressed:()=>Navigator.pop(dialog,
+              {'employee':selected,'description':description.text,
+                'category':category}),
+              child:const Text('Save')),
+          ],
+        ))),
+    );
+    Future<void>.delayed(const Duration(milliseconds:400), description.dispose);
+    if (edited == null || !mounted || !_canView ||
+        (edited['description']?.trim().isEmpty ?? true)) return;
+    await _runOwnerTaskEdit(() => _taskEditRepository.editShopTask(
+      id:task['id'] as int, previousEmployee:former,
+      employee:edited['employee']!, description:edited['description']!,
+      category:edited['category']!,
+    ));
+  }
+
   Future<void> _updateEmployeeGeneralTask(int id, String status) =>
       _changeGeneralTaskStatus(widget.employeeId!, id, status);
 
@@ -2039,6 +2115,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                   }
                 },
                 onManageLabor: (row) => unawaited(_openAssignments(row)),
+                onManageGeneral: (row) =>
+                    unawaited(_editJobGeneralTask(row)),
               )
             : TasksWorkspace(
             scopedJob: widget.jobId,
