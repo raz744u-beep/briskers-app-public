@@ -1868,11 +1868,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                 'category':category}),
               child:const Text('Save')),
           ],
-        ))),
+        )),
     );
     Future<void>.delayed(const Duration(milliseconds:400), description.dispose);
     if (edited == null || !mounted || !_canView ||
-        (edited['description']?.trim().isEmpty ?? true)) return;
+        (edited['description']?.trim().isEmpty ?? true)) {
+      return;
+    }
     await _runOwnerTaskEdit(() => _taskEditRepository.editShopTask(
       id:task['id'] as int, previousEmployee:former,
       employee:edited['employee']!, description:edited['description']!,
