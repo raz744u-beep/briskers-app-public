@@ -29,7 +29,7 @@ class JobCompactCard extends StatelessWidget {
   }
 
   String _firstName(String fullName) {
-    final parts = fullName.trim().split(RegExp(r'\\s+'));
+    final parts = fullName.trim().split(RegExp(r'\s+'));
     return parts.isEmpty || parts.first.isEmpty ? 'Unassigned' : parts.first;
   }
 
@@ -255,7 +255,7 @@ class JobCompactCard extends StatelessWidget {
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 2),
                                   child: Text(
-                                    '${person.key} · ${_hours(person.value / 60)}h',
+                                    '${person.key == employee ? displayMechanic : person.key} · ${_hours(person.value / 60)}h',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     textAlign: TextAlign.end,
@@ -266,6 +266,11 @@ class JobCompactCard extends StatelessWidget {
                                     ),
                                   ),
                                 ),
+                            if ((mechanicMinutes?.length ?? 0) > 1)
+                              Text(
+                                '${_hours(mechanicMinutes!.values.reduce((a, b) => a + b) / 60)} hr',
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                              ),
                           ],
                         ),
                       ),

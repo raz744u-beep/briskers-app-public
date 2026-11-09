@@ -28,7 +28,8 @@ void main() {
     expect(find.text('Chris · 2h'), findsOneWidget);
     expect(find.text('Chris'), findsNothing);
     expect(find.text('Chris Rideaux 2h'), findsNothing);
-    expect(find.text('2 hr'), findsOneWidget);
+    expect(find.text('2 hr'), findsNothing,
+      reason: 'A single mechanic already shows the full assigned hours.');
     expect(tester.takeException(), isNull);
   });
 }
