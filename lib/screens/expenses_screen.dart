@@ -15,6 +15,7 @@ import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
 import '../services/warranty_receipt_reporting.dart';
 import '../services/local_financial_cache.dart';
+import '../services/financial_history_recovery.dart';
 import '../services/invoice_payment_feed.dart';
 import '../services/expenses_period_totals.dart';
 import '../services/local_expense_subtotal.dart';
@@ -70,6 +71,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
 
   bool _loading = true;
   bool _loadingMore = false;
+  bool _downloadingHistory = false;
+  int _downloadedHistoryCount = 0;
+  String? _historyRecoveryMessage;
+
   bool _hasMore = true;
   bool _importing = false;
   bool _requestingPhotoSync = false;
@@ -1076,6 +1081,70 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
   }
 
+  Future<void> _downloadSavedHistory() async {
+    if (!_owner || _downloadingHistory) return;
+    // Recover complete historical transaction rows, not only the search
+    // result. A search or category chip must not reduce the download.
+    // Force Offline remains unchanged; only this expressly approved,
+    // read-only request is sent over HTTPS.
+    final end = _rangeEndDate ?? _dateOnly(DateTime.now());
+    final start = _rangeStartDate ?? DateTime(2020, 1, 1);
+    if (start.isAfter(end)) return;
+    final allowed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Download saved history?'),
+        content: Text(
+          'Read posted Income & Expenses transactions from Briskers '
+          'for ${DateFormat('MMM d, yyyy').format(start)}–'
+          '${DateFormat('MMM d, yyyy').format(end)}. '
+          'Downloaded records are merged with existing local history. '
+          'Pending offline payments are not submitted or replaced. '
+          'Force Offline stays enabled. This uses internet for this '
+          'one read-only download only.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Download')),
+        ],
+      ),
+    ) ?? false;
+    if (!allowed || !mounted) return;
+    setState(() {
+      _downloadingHistory = true;
+      _downloadedHistoryCount = 0;
+      _historyRecoveryMessage = null;
+    });
+    try {
+      final count = await FinancialHistoryRecovery(
+        cache: _localFinancial,
+      ).download(
+        businessId: widget.businessId,
+        start: start,
+        end: end,
+        onPage: (count) {
+          if (mounted) setState(() => _downloadedHistoryCount = count);
+        },
+      );
+      if (!mounted) return;
+      setState(() => _historyRecoveryMessage =
+        'Downloaded $count posted records to saved local history. '
+        'Pending offline transactions are preserved.');
+      await _load(showLoading: false, forceTotals: true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _historyRecoveryMessage =
+        'Download incomplete: $error. Already saved records were retained. '
+        'No payments were submitted.');
+      // Refresh the local view only, never toggle connection mode.
+      await _load(showLoading: false);
+    } finally {
+      if (mounted) setState(() => _downloadingHistory = false);
+    }
+  }
+
   void _searchChanged(String _) {
     _searchDebounce?.cancel();
     _searchDebounce = Timer(const Duration(milliseconds: 350), () {
@@ -2014,6 +2083,31 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                         ),
                     ],
                   ),
+                  if (_owner) ...[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: _downloadingHistory
+                            ? null : _downloadSavedHistory,
+                        icon: _downloadingHistory
+                            ? const SizedBox.square(
+                                dimension: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.download_for_offline_outlined),
+                        label: Text(_downloadingHistory
+                            ? 'Saving history… $_downloadedHistoryCount records'
+                            : 'Download missing history to this device'),
+                      ),
+                    ),
+                    if (_historyRecoveryMessage != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 3, 4, 5),
+                        child: Text(_historyRecoveryMessage!,
+                          style: const TextStyle(fontSize: 12,
+                            color: Color(0xFF526171))),
+                      ),
+                  ],
                   if (_searchController.text.trim().isNotEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 5, left: 4),
