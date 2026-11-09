@@ -568,7 +568,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           if (!_showingLocal && _transactions.isEmpty) {
             _transactions = const [];
           }
-          _hasMore = false;
+          // Keep _hasMore from the complete filtered local cache query.
+          // Force Offline must not hide remaining historical pages.
           _loading = false;
           _error = null;
           _transactionRefreshFailed = false;
@@ -1023,24 +1024,51 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
   Future<void> _loadMore() async {
-    if (_showingLocal || _loading || _loadingMore || !_hasMore) {
-      return;
-    }
+    if (_loading || _loadingMore || !_hasMore) return;
+    final epoch = _loadEpoch;
+    final businessId = widget.businessId;
+    final local = _showingLocal;
+    final offset = _transactions.length;
     setState(() => _loadingMore = true);
     try {
-      final rows = await _fetchTransactions(offset: _transactions.length);
-      if (!mounted) return;
+      // Offline has the same paginated browsing as online. Only page the
+      // locally saved ledger; never connect merely to reveal older records.
+      if (local) {
+        final cached = await _localFinancial.loadTransactions(
+          businessId,
+          startDate: _rangeStartDate,
+          endDate: _rangeEndDate,
+          search: _searchController.text.trim().isEmpty
+              ? null : _searchController.text.trim(),
+          direction: _filter == 'all' ? null : _filter,
+          accountId: _accountFilterId,
+          categoryId: _categoryFilterId,
+          counterpartyId: _counterpartyFilterId,
+        );
+        if (!_isCurrentLoad(epoch, businessId) || !_showingLocal) return;
+        final next = cached.skip(offset).take(_pageSize)
+            .map(WarrantyReceiptReporting.unverified).toList();
+        setState(() {
+          _transactions = [..._transactions, ...next];
+          _hasMore = cached.length > _transactions.length;
+          _loadingMore = false;
+        });
+        return;
+      }
+      final rows = await _fetchTransactions(offset: offset);
+      if (!_isCurrentLoad(epoch, businessId) || _showingLocal) return;
       setState(() {
         _serverConfirmedTransactionIds.addAll(
           rows.map((row) => row['id']?.toString() ?? '')
               .where((id) => id.isNotEmpty),
         );
-        _transactions = LocalFinancialCache.overlayPending([..._transactions, ...rows], _transactions);
+        _transactions = LocalFinancialCache.overlayPending(
+          [..._transactions, ...rows], _transactions);
         _hasMore = rows.length == _pageSize;
         _loadingMore = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!_isCurrentLoad(epoch, businessId)) return;
       setState(() {
         _loadingMore = false;
         _error = error.toString();
