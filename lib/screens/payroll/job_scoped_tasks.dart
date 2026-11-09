@@ -17,6 +17,7 @@ class JobScopedTasks extends StatefulWidget {
     required this.onLaborProgress,
     required this.onGeneralProgress,
     this.onManageLabor,
+    this.onManageGeneral,
   });
 
   final String jobId;
@@ -31,6 +32,7 @@ class JobScopedTasks extends StatefulWidget {
   final Future<void> Function(int taskId, String nextStatus)
       onGeneralProgress;
   final ValueChanged<Map<String, dynamic>>? onManageLabor;
+  final ValueChanged<Map<String, dynamic>>? onManageGeneral;
 
   @override
   State<JobScopedTasks> createState() => _JobScopedTasksState();
@@ -125,6 +127,15 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
               onTap: () {
                 Navigator.pop(sheet);
                 widget.onManageLabor!(row);
+              },
+            ),
+          if (general && widget.onManageGeneral != null)
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit general task'),
+              onTap: () {
+                Navigator.pop(sheet);
+                widget.onManageGeneral!(row);
               },
             ),
           const SizedBox(height: 8),
