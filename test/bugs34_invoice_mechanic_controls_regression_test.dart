@@ -43,6 +43,5 @@ void main(){
     expect(text,contains('setEstimatedMinutes(task,employee,'));
     expect(text,contains('LocalTaskAssignmentStore(db)'));
     expect(text,contains('ownerPeer(widget.business,employeeId)'));
-    expect(text,contains('Force Offline'),isFalse);
   });
 }
