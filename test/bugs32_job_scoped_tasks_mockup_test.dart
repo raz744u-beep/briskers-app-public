@@ -77,6 +77,8 @@ void main() {
       onManageLabor: (_) => assignmentsOpened = true,
     ))));
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull,
+      reason: 'Closed task cards must not overflow a 390px phone.');
 
     expect(find.text('3 tasks'), findsOneWidget);
     expect(find.text('Labor Task'), findsOneWidget);
@@ -102,6 +104,8 @@ void main() {
     expect(find.text('Type: Labor'), findsOneWidget);
     expect(find.text('Status: In Progress'), findsOneWidget);
     expect(find.textContaining('3.6 hrs'), findsWidgets);
+    expect(tester.takeException(), isNull,
+      reason: 'Expanded task details must fit a 390px phone.');
 
     await tester.longPress(find.text('Replace front struts').first);
     await tester.pumpAndSettle();
