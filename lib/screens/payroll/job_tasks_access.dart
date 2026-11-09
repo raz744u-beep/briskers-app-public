@@ -8,6 +8,9 @@ import '../../services/device_owner_authorization.dart';
 import '../../services/local_payroll_repository.dart';
 import '../../services/employee_nickname_store.dart';
 import '../../services/offline_job_admin_service.dart';
+import '../../services/local_task_assignment_store.dart';
+import '../../services/payroll_lan_identity.dart';
+import '../../services/payroll_lan_enrollment.dart';
 import 'owner_payroll_screen.dart';
 import 'payroll_ui_scope.dart';
 
@@ -100,6 +103,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
       if(mounted && widget.invoice==invoice && widget.line==line){
         setState((){
           linePeople=people;
+          staff=cached;
           lineAssignment=people.isEmpty?'Unassigned':null;
         });
       }
@@ -110,6 +114,54 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
           lineAssignment='Assignments unavailable · Tap to retry';
         });
       }
+    }
+  }
+
+  /// The invoice selection is the same Owner-protected local labor allocation
+  /// used by Tasks/Payroll. No invoice billing quantity, payment or completed
+  /// work is modified. Paired workers keep their existing LAN workflow.
+  Future<void> chooseLineMechanic(String employeeId) async {
+    if(busy || widget.invoice==null || widget.line==null ||
+       linePeople.any((p)=>p['id']==employeeId)) return;
+    final person=staff.where((p)=>p['id']?.toString()==employeeId).firstOrNull;
+    if(person==null) return;
+    setState(()=>busy=true);
+    try {
+      // A paired mechanic must be registered through the existing LAN
+      // assignment protocol, not bypassed with a local-only write.
+      final identity=await PayrollLanIdentity.load();
+      final paired=await PayrollLanEnrollment(identity)
+        .ownerPeer(widget.business,employeeId)!=null;
+      if(paired){
+        if(mounted) setState(()=>warning=
+          'Paired mechanic: use Job Tasks to confirm the shared assignment.');
+        if(mounted) await open();
+        return;
+      }
+      final repo=await unlock();
+      await repo.prepare();
+      final name=(person['name']??person['employee_name']??employeeId).toString();
+      final employees=await repo.employees();
+      final prior=employees.where((e)=>e['id']==employeeId).firstOrNull;
+      final rate=prior?['rate'] as int? ?? 0;
+      await db.transaction(() async {
+        final links=LocalTaskAssignmentStore(db);
+        await links.linkEmployee(widget.business,widget.job,employeeId,name);
+        await repo.registerAssignedLabor(
+          jobId:widget.job,
+          invoiceId:widget.invoice!,
+          lineId:widget.line!,
+          employeeId:employeeId,
+          employeeName:name,
+          rateCents:rate,
+        );
+      });
+      await loadLine();
+      if(mounted) widget.onChanged?.call();
+    }catch(error){
+      if(mounted) setState(()=>warning='Could not assign mechanic: $error');
+    }finally{
+      if(mounted)setState(()=>busy=false);
     }
   }
 
@@ -229,57 +281,97 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
   }
   @override Widget build(BuildContext context){
     if(widget.line!=null){
-      return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-        // Single-line TEST invoice header: the old Wrap broke before the
-        // mechanic name even for one mechanic, leaving "Labor" above "Chris".
-        // Keep the identity and hours on the same row; long split names use
-        // ellipsis instead of moving below the Labor heading.
-        Row(mainAxisSize:MainAxisSize.max,children:[
-          if(linePeople.isNotEmpty) ...[
-            Expanded(child: Tooltip(
-              message:linePeople.map((p) =>
-                '${p['label']} ${((p['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(1)}h'
-              ).join(' · '),
-              child:Text(linePeople.map((p) =>
-                '${p['label']} ${((p['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(1)}h'
-              ).join(' · '),
-                maxLines:1,
-                softWrap:false,
-                overflow:TextOverflow.ellipsis,
-                textAlign:TextAlign.end,
-                style:const TextStyle(fontSize:15,color:Color(0xFF00897E),
-                  fontWeight:FontWeight.w800)),
+      final assigned={
+        for(final p in linePeople) p['id']?.toString():p,
+      };
+      final selected=linePeople.length==1 ? linePeople.single['id']?.toString():null;
+      final available=staff.where((p) =>
+        p['id'] is String && (linePeople.length==1 ||
+        !assigned.containsKey(p['id']?.toString()))).toList();
+      final totalMinutes=linePeople.fold<int>(0,(sum,p)=>
+        sum+(p['estimated_minutes'] as int? ?? 0));
+      final one=linePeople.length==1?linePeople.first:null;
+      return Column(
+        crossAxisAlignment:CrossAxisAlignment.stretch,
+        children:[
+          Row(children:[
+            Expanded(child:DropdownButtonFormField<String>(
+              key:ValueKey('invoice-mechanic-${widget.line}-$selected'),
+              initialValue:available.any((p)=>p['id']==selected)?selected:null,
+              isExpanded:true,
+              decoration:InputDecoration(
+                labelText:linePeople.isEmpty?'Mechanic':'Mechanic / Add',
+                floatingLabelBehavior:FloatingLabelBehavior.never,
+                hintText:linePeople.isEmpty?'Select mechanic':'Add mechanic',
+                filled:true,
+                fillColor:const Color(0xFFF0FBF7),
+                isDense:true,
+                contentPadding:const EdgeInsets.symmetric(
+                  horizontal:9,vertical:9),
+                border:OutlineInputBorder(borderRadius:BorderRadius.circular(12),
+                  borderSide:const BorderSide(color:Color(0xFF087D63))),
+                enabledBorder:OutlineInputBorder(borderRadius:BorderRadius.circular(12),
+                  borderSide:const BorderSide(color:Color(0xFF087D63))),
+              ),
+              style:const TextStyle(color:Color(0xFF153E38),
+                fontWeight:FontWeight.w800,fontSize:13),
+              items:[
+                if(linePeople.isEmpty)
+                  const DropdownMenuItem<String>(value:null,
+                    child:Text('Select mechanic')),
+                for(final person in available)
+                  DropdownMenuItem<String>(
+                    value:person['id'] as String,
+                    child:Text(EmployeeNicknameStore.displayLabel(person,staff),
+                      maxLines:1,overflow:TextOverflow.ellipsis)),
+              ],
+              onChanged:busy || available.isEmpty ? null :(id){
+                if(id!=null)unawaited(chooseLineMechanic(id));
+              },
             )),
+            if(one!=null)...[
+              const SizedBox(width:7),
+              OutlinedButton(
+                onPressed:busy || one['paid']==true
+                  ? null :()=>editMechanicHours(one),
+                style:OutlinedButton.styleFrom(
+                  foregroundColor:const Color(0xFF076B56),
+                  side:const BorderSide(color:Color(0xFF087D63)),
+                  padding:const EdgeInsets.symmetric(horizontal:9,vertical:9)),
+                child:Text(
+                  '${((one['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(1)} h',
+                  style:const TextStyle(fontWeight:FontWeight.w800)),
+              ),
+            ],
             IconButton(
-              constraints:const BoxConstraints(minWidth:28,minHeight:28),
-              padding:EdgeInsets.zero,
-              icon:Icon(linePeople.every((p)=>p['paid']==true)
-                  ? Icons.lock_outline : Icons.edit_outlined,
-                size:18,color:linePeople.every((p)=>p['paid']==true)
-                  ? const Color(0xFF64748B):const Color(0xFF00897E)),
-              tooltip:linePeople.every((p)=>p['paid']==true)
-                ? 'Paid mechanic labor locked'
-                : 'Edit or split mechanic labor',
-              onPressed:busy || linePeople.every((p)=>p['paid']==true)
-                ? null : open,
-            ),
-          ] else ...[
-            Expanded(child:Text(lineAssignment??'Loading assignments…',
-              textAlign:TextAlign.end,maxLines:1,
-              overflow:TextOverflow.ellipsis,
-              style:const TextStyle(fontSize:12,color:Color(0xFF64748B)))),
-            IconButton(
-              tooltip:'Assign or split mechanic labor',
+              tooltip:'Add, replace or split mechanic labor',
+              onPressed:busy?null:open,
               icon:const Icon(Icons.edit_outlined,
                 color:Color(0xFF00897E),size:20),
-              constraints:const BoxConstraints(minWidth:30,minHeight:30),
-              padding:EdgeInsets.zero,
-              onPressed:busy?null:open,
+              visualDensity:VisualDensity.compact,
             ),
-          ],
-        ]),
-        if(warning!=null)Text(warning!,style:const TextStyle(fontSize:11)),
-      ]);
+          ]),
+          if(linePeople.length>1)
+            Wrap(spacing:6,runSpacing:2,children:[
+              for(final person in linePeople)
+                ActionChip(
+                  onPressed:busy || person['paid']==true
+                    ? null:()=>editMechanicHours(person),
+                  label:Text('${person['label']} · '
+                    '${((person['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(1)} h',
+                    style:const TextStyle(fontWeight:FontWeight.w800)),
+                ),
+            ]),
+          if(linePeople.isNotEmpty)
+            Align(alignment:Alignment.centerRight,
+              child:Text(
+                'Assigned total: ${(totalMinutes/60).toStringAsFixed(1)} h',
+                style:const TextStyle(fontSize:11,
+                  fontWeight:FontWeight.w700,color:Color(0xFF526171)))),
+          if(warning!=null)Text(warning!,
+            style:const TextStyle(fontSize:11,color:Color(0xFF8B3E13))),
+        ],
+      );
     }
     final values={for(final p in staff) p['id']:p};
     return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
