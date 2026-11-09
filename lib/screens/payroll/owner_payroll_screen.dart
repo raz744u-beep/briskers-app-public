@@ -42,6 +42,7 @@ import '../../services/local_financial_cache.dart' as expenses;
 import 'payroll_lan_controls.dart';
 import 'weekly_labor_review_screen.dart';
 import 'tasks_workspace.dart';
+import 'job_scoped_tasks.dart';
 import 'payroll_overview.dart';
 
 class OwnerPayrollScreen extends StatefulWidget {
@@ -2019,7 +2020,27 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             ),
           )),
         if (_canView)
-          Expanded(child: TasksWorkspace(
+          Expanded(child: _jobMode && widget.invoiceId == null
+            ? JobScopedTasks(
+                jobId: widget.jobId!,
+                serviceTasks: service,
+                generalTasks: _generalTasks,
+                allocationsByLine: byTask,
+                employeeName: _employeeLabel,
+                onAddLabor: _newJobLabor,
+                onAddGeneral: _createEmployeeGeneralTask,
+                onLaborProgress: (allocation, finish) =>
+                    _recordTaskProgress(allocation, markDone: finish),
+                onGeneralProgress: (id, status) async {
+                  final task = _generalTasks.where((r) => r['id'] == id).firstOrNull;
+                  if (task != null) {
+                    await _changeGeneralTaskStatus(
+                      task['employee_id'] as String, id, status);
+                  }
+                },
+                onManageLabor: (row) => unawaited(_openAssignments(row)),
+              )
+            : TasksWorkspace(
             scopedJob: widget.jobId,
             serviceTasks: service,
             generalTasks: _generalTasks,
