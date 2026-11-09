@@ -154,45 +154,56 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
   Widget _progressRow() {
     final progress = _taskProgress;
-    final fraction = progress == null || progress.total == 0 ? 0.0 : progress.done / progress.total;
+    final fraction = progress == null || progress.total == 0
+        ? 0.0 : progress.done / progress.total;
     final percent = '${(fraction * 100).round()}%';
+    // Owner-approved J-44 design: no extra tinted panel inside the white
+    // Job summary card; dark labels and teal on a cool gray progress track.
     return InkWell(
       onTap: _openJobLaborTasks,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        margin: const EdgeInsets.only(top: 8, bottom: 3),
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 3),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFCBD5E1)),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(6, 12, 6, 4),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Row(children: [
-        const Expanded(child:Text('Job Progress',style:TextStyle(
-          fontWeight:FontWeight.w800,color:Color(0xFF17243B)))),
-        Flexible(child:Text(progress == null ? 'Progress unavailable' :
-            progress.total == 0 ? 'No tasks yet' :
-            '${progress.done} of ${progress.total} tasks completed',
-          textAlign:TextAlign.end,
-          style:const TextStyle(color:Color(0xFF334155),fontWeight:FontWeight.w600))),
-      ]),
-      const SizedBox(height:6),
-      if (progress != null && progress.total > 0)
-        ClipRRect(borderRadius: BorderRadius.circular(9), child: LayoutBuilder(
-          builder: (context, box) => Stack(children: [
-            LinearProgressIndicator(value: fraction, minHeight: 20,
-              color: Colors.teal.shade700, backgroundColor: Colors.teal.shade50),
-            SizedBox(width: (fraction * box.maxWidth).clamp(42.0,box.maxWidth).toDouble(), height: 20,
-              child: Center(child: Text(percent, style: TextStyle(fontSize: 12,
-                fontWeight: FontWeight.bold, color: fraction * box.maxWidth >= 42 ? Colors.white : Colors.black87)))),
-          ]))),
-      TextButton(onPressed:_openJobLaborTasks,
-        style:TextButton.styleFrom(foregroundColor:Colors.teal.shade800),
-        child:Row(children:[const Icon(Icons.checklist),const SizedBox(width:8),
-          Expanded(child:Text(progress==null?'View Tasks':'View Tasks (${progress.total})')),
-          const Icon(Icons.chevron_right)])),
-    ])),
+          Row(children: [
+            const Expanded(child: Text('Job Progress', style: TextStyle(
+              fontWeight: FontWeight.w800, color: Color(0xFF161D2B)))),
+            Flexible(child: Text(progress == null ? 'Progress unavailable' :
+              progress.total == 0 ? 'No tasks yet' :
+              '${progress.done} of ${progress.total} tasks completed',
+              textAlign: TextAlign.end,
+              style: const TextStyle(color: Color(0xFF161D2B),
+                fontWeight: FontWeight.w600))),
+          ]),
+          const SizedBox(height: 9),
+          if (progress != null && progress.total > 0)
+            ClipRRect(borderRadius: BorderRadius.circular(20),
+              child: LayoutBuilder(builder: (context, box) => Stack(children: [
+                const LinearProgressIndicator(value: 0, minHeight: 22,
+                  backgroundColor: Color(0xFFD0D4E0),
+                  color: Color(0xFFD0D4E0)),
+                LinearProgressIndicator(value: fraction, minHeight: 22,
+                  color: const Color(0xFF008D79),
+                  backgroundColor: Colors.transparent),
+                if (fraction > 0)
+                  SizedBox(width: fraction * box.maxWidth, height: 22,
+                    child: Center(child: Text(percent, style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w800,
+                      fontSize: 14)))),
+                if (fraction == 0)
+                  const SizedBox(height: 22, child: Center(
+                    child: Text('0%', style: TextStyle(
+                      color: Color(0xFF17243B),fontWeight: FontWeight.w800)))),
+              ]))),
+          TextButton(onPressed: _openJobLaborTasks,
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF006D58)),
+            child: Row(children: [
+              const Icon(Icons.checklist), const SizedBox(width: 8),
+              Expanded(child: Text(progress == null
+                ? 'View Tasks' : 'View Tasks (${progress.total})')),
+              const Icon(Icons.chevron_right),
+            ])),
+        ]),
       ),
     );
   }
@@ -3646,10 +3657,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       _job?['status']?.toString(),
       _job?['status_color']?.toString(),
     );
-    final cardTint = Color.alphaBlend(
-      statusColor.withValues(alpha: 0.12),
-      const Color(0xFFFCFCFB),
-    );
+    final cardTint = _owner && OwnerPayrollScreen.enabled
+        ? const Color(0xFFFAFBFE)
+        : Color.alphaBlend(statusColor.withValues(alpha: 0.12),
+            const Color(0xFFFCFCFB));
 
     Widget infoRow({
       required IconData icon,
@@ -3791,7 +3802,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       decoration: BoxDecoration(
         color: cardTint,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: statusColor.withValues(alpha: 0.24)),
+        border: Border.all(color: _owner && OwnerPayrollScreen.enabled
+            ? const Color(0xFFC7CDDA)
+            : statusColor.withValues(alpha: 0.24)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.06),
