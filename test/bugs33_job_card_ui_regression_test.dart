@@ -27,7 +27,7 @@ void main() {
     expect(access, contains("EmployeeNicknameStore.displayLabel"));
     expect(access, contains("fontWeight:FontWeight.w800,fontSize:15"));
     expect(detail, contains("fontWeight: FontWeight.w900, color: Color(0xFF07594D)"));
-    expect(detail, contains("View Tasks (${progress.total})"));
+    expect(detail, contains(r"View Tasks (${progress.total})"));
     expect(detail, contains('_progressRow()'));
   });
 }
