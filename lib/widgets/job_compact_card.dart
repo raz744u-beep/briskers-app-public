@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
-import '../core/employee_role_style.dart';
 import '../core/job_status_style.dart';
 
 class JobCompactCard extends StatelessWidget {
@@ -29,11 +28,6 @@ class JobCompactCard extends StatelessWidget {
     return value.toStringAsFixed(2);
   }
 
-  String _firstName(String fullName) {
-    final parts = fullName.trim().split(RegExp(r'\s+'));
-    return parts.isEmpty || parts.first.isEmpty ? 'Unassigned' : parts.first;
-  }
-
   @override
   Widget build(BuildContext context) {
     final number = job['job_number']?.toString().trim() ?? '';
@@ -49,15 +43,10 @@ class JobCompactCard extends StatelessWidget {
             ?.toString()
             .trim() ??
         '';
-    final position =
-        job['assigned_position']?.toString().trim().isNotEmpty == true
-            ? job['assigned_position'].toString().trim()
-            : 'Employee';
-    final roleStyle = employeeRoleStyle(position);
     final nickname = job['assigned_employee_nickname']?.toString().trim() ?? '';
-    final firstName = nickname.isNotEmpty
+    final displayMechanic = nickname.isNotEmpty
         ? nickname
-        : (employee.isEmpty ? 'Unassigned' : _firstName(employee));
+        : (employee.isEmpty ? 'Unassigned' : employee);
     final findings =
         int.tryParse(job['open_findings']?.toString() ?? '') ?? 0;
     final requests =
@@ -81,21 +70,10 @@ class JobCompactCard extends StatelessWidget {
         ? const Color(0xFF169B62)
         : const Color(0xFFE58A00);
 
-    final vehicleFlex = (3 + (vehicle.length / 8).ceil()).clamp(3, 7).toInt();
-    final employeeFlex =
-        (3 + (firstName.length / 5).ceil()).clamp(3, 6).toInt();
-
     final cardTint = Color.alphaBlend(
       statusColor.withValues(alpha: 0.14),
       const Color(0xFFF7FAF9),
     );
-
-    Widget separator() => Container(
-          width: 1,
-          height: 22,
-          margin: const EdgeInsets.symmetric(horizontal: 6),
-          color: statusColor.withValues(alpha: 0.30),
-        );
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -233,43 +211,59 @@ class JobCompactCard extends StatelessWidget {
                     color: statusColor.withValues(alpha: 0.22),
                   ),
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Expanded(
-                        flex: vehicleFlex,
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            vehicle.isEmpty ? 'No vehicle' : vehicle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w700,
-                            ),
+                        flex: 5,
+                        child: Text(
+                          vehicle.isEmpty ? 'No vehicle' : vehicle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF182333),
                           ),
                         ),
                       ),
-                      separator(),
-                      Expanded(flex:employeeFlex,child:Padding(
-                        padding:const EdgeInsets.symmetric(horizontal:4,vertical:5),
-                        child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-                          // Show one mechanic label, not the Job lead and
-                          // the same assigned mechanic again underneath.
-                          if (mechanicMinutes == null || mechanicMinutes!.isEmpty)
-                            Text(firstName,style:TextStyle(
-                              color:roleStyle.color,fontWeight:FontWeight.w600))
-                          else
-                            for(final person in mechanicMinutes!.entries)
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 4,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            if (mechanicMinutes == null ||
+                                mechanicMinutes!.isEmpty)
                               Text(
-                                '${_firstName(person.key)} · ${_hours(person.value/60)}h',
-                                maxLines:1,overflow:TextOverflow.ellipsis,
-                                style:TextStyle(color:roleStyle.color,
-                                  fontWeight:FontWeight.w600)),
-                        ]))),
-                      separator(),
-                      Text(mechanicMinutes==null ? '—' :
-                        '${_hours(mechanicMinutes!.values.fold<int>(0,(a,b)=>a+b)/60)} hr',
-                        style:const TextStyle(fontWeight:FontWeight.w700)),
+                                displayMechanic,
+                                textAlign: TextAlign.end,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Color(0xFF153E38),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              )
+                            else
+                              for (final person in mechanicMinutes!.entries)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 2),
+                                  child: Text(
+                                    '${person.key} · ${_hours(person.value / 60)} hr',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.end,
+                                    style: const TextStyle(
+                                      color: Color(0xFF153E38),
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                   if (canOpen && onLongPress != null)
