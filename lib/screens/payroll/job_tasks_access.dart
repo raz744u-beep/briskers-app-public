@@ -376,19 +376,60 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
     final values={for(final p in staff) p['id']:p};
     return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
       Row(crossAxisAlignment:CrossAxisAlignment.center,children:[
-        Expanded(child:SizedBox(height:50,child:DropdownButtonFormField<String>(key:ValueKey(main),initialValue:values.containsKey(main)?main:null,
-          decoration:InputDecoration(labelText:'Main Mechanic',filled:true,
-            fillColor:const Color(0xFFF0FBF7),
-            border:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63))),
-            enabledBorder:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63))),
-            focusedBorder:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63),width:2)),
-            isDense:true,contentPadding:const EdgeInsets.symmetric(horizontal:12,vertical:8)),isExpanded:true,
-          style:const TextStyle(fontSize:15,fontWeight:FontWeight.w800,color:Color(0xFF153E38)),
-          items:[const DropdownMenuItem<String>(value:null,child:Text('Unassigned')),
-            for(final entry in values.entries) if(entry.key is String)
-              DropdownMenuItem(value:entry.key as String,child:Text(EmployeeNicknameStore.displayLabel(entry.value,staff),
-                maxLines:1,overflow:TextOverflow.ellipsis))],
-          onChanged:busy?null:chooseMain))),
+        Expanded(child:Container(
+          height:50,
+          padding:const EdgeInsets.symmetric(horizontal:11),
+          decoration:BoxDecoration(
+            color:const Color(0xFFF0FBF7),
+            borderRadius:BorderRadius.circular(15),
+            border:Border.all(color:const Color(0xFF087D63)),
+          ),
+          child:DropdownButtonHideUnderline(
+            child:DropdownButton<String>(
+              key:ValueKey('main-mechanic-$main'),
+              value:values.containsKey(main)?main:null,
+              isExpanded:true,isDense:true,
+              icon:const Icon(Icons.arrow_drop_down,
+                color:Color(0xFF076B56)),
+              hint:const Column(
+                mainAxisAlignment:MainAxisAlignment.center,
+                crossAxisAlignment:CrossAxisAlignment.start,
+                children:[
+                  Text('Main Mechanic',style:TextStyle(fontSize:10,
+                    color:Color(0xFF526171),fontWeight:FontWeight.w700)),
+                  Text('Unassigned',style:TextStyle(fontSize:14,
+                    color:Color(0xFF153E38),fontWeight:FontWeight.w800)),
+                ],
+              ),
+              selectedItemBuilder:(_)=>[
+                const Text('Unassigned'),
+                for(final entry in values.entries)
+                  Column(
+                    mainAxisAlignment:MainAxisAlignment.center,
+                    crossAxisAlignment:CrossAxisAlignment.start,
+                    children:[
+                      const Text('Main Mechanic',style:TextStyle(fontSize:10,
+                        color:Color(0xFF526171),fontWeight:FontWeight.w700)),
+                      Text(EmployeeNicknameStore.displayLabel(entry.value,staff),
+                        maxLines:1,overflow:TextOverflow.ellipsis,
+                        style:const TextStyle(fontSize:14,
+                          color:Color(0xFF153E38),fontWeight:FontWeight.w800)),
+                    ],
+                  ),
+              ],
+              items:[
+                const DropdownMenuItem<String>(value:null,
+                  child:Text('Unassigned')),
+                for(final entry in values.entries)
+                  DropdownMenuItem<String>(
+                    value:entry.key as String,
+                    child:Text(EmployeeNicknameStore.displayLabel(entry.value,staff),
+                      maxLines:1,overflow:TextOverflow.ellipsis)),
+              ],
+              onChanged:busy?null:chooseMain,
+            ),
+          ),
+        )),
         const SizedBox(width:8),Expanded(child:SizedBox(height:50,child:OutlinedButton.icon(
           style:OutlinedButton.styleFrom(
             backgroundColor:const Color(0xFFF0FBF7),
