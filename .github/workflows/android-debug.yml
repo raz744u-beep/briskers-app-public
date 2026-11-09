@@ -793,6 +793,12 @@ jobs:
         working-directory: generated
         run: flutter test
 
+      - name: Stage verified Gradle distribution
+        working-directory: generated
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash "$GITHUB_WORKSPACE/tools/ci_gradle_distribution.sh"
+
       - name: Build permanently signed Android APK
         working-directory: generated
         env:

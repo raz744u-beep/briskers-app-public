@@ -39,6 +39,11 @@ jobs:
           flutter test test/services/local_numbered_document_overlay_test.dart
       - name: Create temporary Android test project
         run: flutter create --platforms=android --project-name briskers_app .
+      - name: Stage verified Gradle distribution
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash "$GITHUB_WORKSPACE/tools/ci_gradle_distribution.sh"
+
       - name: Compile Android debug APK
         run: flutter build apk --debug
       - name: Verify APK exists
