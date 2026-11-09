@@ -13,7 +13,12 @@ void main() {
     expect(paint, greaterThan(0));
     expect(options, greaterThan(paint));
     expect(source, contains('WidgetsBinding.instance.addPostFrameCallback'));
-    expect(source, contains('if (_isCurrentLoad(epoch, businessId) && localRows.isNotEmpty)'));
+    final firstPaintGuard = RegExp(
+      r'if\s*\(_isCurrentLoad\(epoch, businessId\)\s*&&\s*'
+      r'\(localRows\.isNotEmpty\s*\|\|\s*'
+      r'BriskersConnectionModeController\.instance\.forceOffline\)\)',
+    );
+    expect(firstPaintGuard.hasMatch(source.substring(0, paint)), isTrue);
   });
 
   test('Expenses first paint retains existing ledger and receipt safeguards',

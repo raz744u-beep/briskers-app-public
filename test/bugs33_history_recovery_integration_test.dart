@@ -43,11 +43,11 @@ void main() {
         offsets.add(offset);
         if (interrupt && offset != 0) {
           return http.Response('{"message":"download interrupted"}', 400,
-            headers: {'content-type': 'application/json'});
+            request: request, headers: {'content-type': 'application/json'});
         }
         response = [for (var i = 0; i < (interrupt ? FinancialHistoryRecovery.pageSize : 26); i++) payment(i)];
       }
-      return http.Response(jsonEncode(response), 200, headers: {'content-type': 'application/json'});
+      return http.Response(jsonEncode(response), 200, request: request, headers: {'content-type': 'application/json'});
     });
     final client = SupabaseClient('https://fixture.invalid', 'fixture', httpClient: transport);
     addTearDown(client.dispose);
