@@ -2266,12 +2266,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       ),
                     )
                   else if (visible.isEmpty)
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(20),
-                        child: Text('No transactions in this view.'),
-                      ),
-                    )
+                     Card(
+                       child: Padding(
+                         padding: const EdgeInsets.all(20),
+                         child: Text(_showingLocal
+                             ? 'No saved transactions match this view. Older records may not have been downloaded to this device.'
+                             : 'No transactions in this view.'),
+                       ),
+                     )
                   else
                     ...visible.map((transaction) {
                       final incomeRow =
@@ -2572,15 +2574,18 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       child: Center(child: CircularProgressIndicator()),
                     )
                   else if (!_hasMore && !moreReceiptPages && visible.isNotEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Center(
-                        child: Text(
-                          'No more transactions',
-                          style: TextStyle(color: Color(0xFF667085)),
-                        ),
-                      ),
-                    ),
+                     Padding(
+                       padding: const EdgeInsets.symmetric(vertical: 12),
+                       child: Center(
+                         child: Text(
+                           _showingLocal
+                               ? 'End of saved transactions on this device. Older records may not be downloaded.'
+                               : 'No more transactions',
+                           textAlign: TextAlign.center,
+                           style: const TextStyle(color: Color(0xFF667085)),
+                         ),
+                       ),
+                     ),
                 ],
               ),
             ),
