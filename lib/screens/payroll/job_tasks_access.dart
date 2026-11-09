@@ -54,6 +54,8 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
         'regular_payroll_employees'
       });
       final people=<Map<String,dynamic>>[];
+      final cached=await OfflineJobAdminService(database:db)
+          .cachedEmployees(widget.business);
       if(hasCore){
         final nick=names.contains('local_employee_nicknames');
         final meta=names.contains('regular_payroll_assignment_meta');
@@ -77,8 +79,6 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
           '${meta?"AND (COALESCE(m.active,1)=1 OR p.state='Done') ": ""}'
           'ORDER BY e.name',
           variables:[widget.business,invoice,line].map(Variable<String>.new).toList()).get();
-        final cached=await OfflineJobAdminService(database:db)
-          .cachedEmployees(widget.business);
         final known={for(final p in cached)p['id']:p}.values.toList();
         for(final row in rows){
           final data=row.data;
@@ -126,7 +126,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
     if(busy || widget.invoice==null || widget.line==null ||
        linePeople.any((p)=>p['id']==employeeId)) return;
     final person=staff.where((p)=>p['id']?.toString()==employeeId).firstOrNull;
-    if(person==null) return;
+    if(person==null) { return; }
     setState(()=>busy=true);
     try {
       // A paired mechanic must be registered through the existing LAN
@@ -135,9 +135,11 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
       final paired=await PayrollLanEnrollment(identity)
         .ownerPeer(widget.business,employeeId)!=null;
       if(paired){
-        if(mounted) setState(()=>warning=
-          'Paired mechanic: use Job Tasks to confirm the shared assignment.');
-        if(mounted) await open();
+        if(mounted) {
+          setState(()=>warning=
+            'Paired mechanic: use Job Tasks to confirm the shared assignment.');
+          await open();
+        }
         return;
       }
       final repo=await unlock();
@@ -159,11 +161,11 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
         );
       });
       await loadLine();
-      if(mounted) widget.onChanged?.call();
+      if(mounted) { widget.onChanged?.call(); }
     }catch(error){
-      if(mounted) setState(()=>warning='Could not assign mechanic: $error');
+      if(mounted) { setState(()=>warning='Could not assign mechanic: $error'); }
     }finally{
-      if(mounted)setState(()=>busy=false);
+      if(mounted) { setState(()=>busy=false); }
     }
   }
 
