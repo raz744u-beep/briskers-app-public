@@ -30,18 +30,21 @@ void main(){
     expect(dropdownHeight,buttonHeight);
   });
 
-  test('Invoice line exposes selection and per-person edit, total is derived',
+  test('Invoice labor inherits lead; pencil manages assignments and hours',
       () async {
     final text=await File('lib/screens/payroll/job_tasks_access.dart')
         .readAsString();
-    expect(text,contains('chooseLineMechanic(String employeeId)'));
-    expect(text,contains('registerAssignedLabor('));
-    expect(text,contains('editMechanicHours(one)'));
-    expect(text,contains('editMechanicHours(person)'));
-    expect(text,contains('linePeople.fold<int>'));
-    expect(text,contains('Assigned total:'));
-    expect(text,contains('setEstimatedMinutes(task,employee,'));
-    expect(text,contains('LocalTaskAssignmentStore(db)'));
-    expect(text,contains('ownerPeer(widget.business,employeeId)'));
+    final repo=await File('lib/services/local_payroll_repository.dart')
+        .readAsString();
+    expect(text, isNot(contains('chooseLineMechanic(String employeeId)')));
+    expect(text, contains("if(widget.line!=null)"));
+    expect(text, contains("linePeople.map((p) =>"));
+    expect(text, contains("tooltip:'Assign or split mechanic labor'"));
+    expect(text, contains("'Edit or split mechanic labor'"));
+    expect(text, contains("onPressed:busy?null:open"));
+    expect(text, contains("Assigned total:"));
+    expect(repo, contains('setMainMechanic('));
+    expect(repo, contains('LocalTaskAssignmentStore(db).inherit'));
+    expect(repo, contains('setEstimatedMinutes('));
   });
 }
