@@ -49,22 +49,33 @@ class JobTaskSummary {
   Future<Map<String, Map<String,int>>> hours(String business, List<String> jobs) async {
     final result = <String,Map<String,int>>{};
     if (jobs.isEmpty || !await _has('regular_payroll_assignment_meta')) return result;
+    // Nicknames are keyed by immutable employee ID in the local shop DB.
+    // Use them for display only; never rewrite assignment or payroll identity.
+    final nicknamesReady = await _has('local_employee_nicknames');
     final rows = await db.customSelect("""
-      SELECT t.job_id,p.employee_id,e.name,SUM(COALESCE(v.minutes,0)) AS minutes
+      SELECT t.job_id,p.employee_id,e.name,
+        ${nicknamesReady ? "n.nickname" : "NULL"} AS nickname,
+        SUM(COALESCE(v.minutes,0)) AS minutes
       FROM regular_payroll_tasks t
       JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id AND s.active=1
       JOIN regular_payroll_portions p ON p.business_id=t.business_id AND p.task_id=t.id
       JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id
+      ${nicknamesReady ? "LEFT JOIN local_employee_nicknames n ON n.business_id=p.business_id AND n.employee_id=p.employee_id" : ""}
       LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id
       LEFT JOIN regular_payroll_estimates v ON v.business_id=p.business_id AND v.task_id=p.task_id AND v.employee_id=p.employee_id
       WHERE t.business_id=? AND t.job_id IN (${List.filled(jobs.length,'?').join(',')})
         AND (COALESCE(m.active,1)=1 OR p.state='Done')
-      GROUP BY t.job_id,p.employee_id,e.name ORDER BY e.name,p.employee_id
+      GROUP BY t.job_id,p.employee_id,e.name${nicknamesReady ? ",n.nickname" : ""} ORDER BY e.name,p.employee_id
     """, variables: [Variable(business), ...jobs.map(Variable<String>.new)]).get();
     for (final r in rows) {
       final people = result.putIfAbsent(r.read<String>('job_id'), () => {});
-      final name = r.read<String>('name');
-      final label = people.containsKey(name) ? '$name (${r.read<String>('employee_id')})' : name;
+      final savedNickname = r.readNullable<String>('nickname')?.trim() ?? '';
+      final name = savedNickname.isNotEmpty
+          ? savedNickname
+          : r.read<String>('name');
+      final label = people.containsKey(name)
+          ? '$name (${r.read<String>('employee_id')})'
+          : name;
       people[label] = r.read<int>('minutes');
     }
     return result;
