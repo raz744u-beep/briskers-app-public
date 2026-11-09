@@ -12,8 +12,8 @@ class FinancialHistoryRecovery {
 
   final LocalFinancialCache _cache;
   final SupabaseClient? _client;
-  static const pageSize = 100;
-  static const maxPages = 300;
+  static const pageSize = 200;
+  static const maxPages = 150;
 
   /// [onPage] is progress only; the local cache remains usable between pages.
   /// Returns fetched server IDs, not the total local row count.
@@ -34,6 +34,7 @@ class FinancialHistoryRecovery {
     final startDay = start.toIso8601String().split('T').first;
     final endDay = end.toIso8601String().split('T').first;
     final ids = <String>{};
+    final batch = <Map<String, dynamic>>[];
     for (var page = 0; page < maxPages; page++) {
       if (client.auth.currentUser?.id != identity ||
           client.auth.currentSession == null) {
@@ -75,7 +76,14 @@ class FinancialHistoryRecovery {
           throw StateError('Historical pages changed during download. Retry to verify.');
         }
       }
-      await _cache.mergeServerTransactions(businessId, rows);
+      // Save in bounded batches instead of rewriting a large SQLite JSON
+      // snapshot after every individual 200-row page. Failed downloads
+      // preserve previously saved pages and the user's pending outbox.
+      batch.addAll(rows);
+      if (batch.length >= 1000 || rows.length < pageSize) {
+        await _cache.mergeServerTransactions(businessId, batch);
+        batch.clear();
+      }
       onPage(ids.length);
       if (rows.length < pageSize) return ids.length;
     }
