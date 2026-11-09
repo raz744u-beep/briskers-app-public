@@ -283,18 +283,20 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
     }
     final values={for(final p in staff) p['id']:p};
     return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-      Row(children:[
-        Expanded(child:DropdownButtonFormField<String>(key:ValueKey(main),initialValue:values.containsKey(main)?main:null,
+      Row(crossAxisAlignment:CrossAxisAlignment.center,children:[
+        Expanded(child:SizedBox(height:50,child:DropdownButtonFormField<String>(key:ValueKey(main),initialValue:values.containsKey(main)?main:null,
           decoration:InputDecoration(labelText:'Main Mechanic',filled:true,
             fillColor:const Color(0xFFF0FBF7),
             border:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63))),
             enabledBorder:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63))),
             focusedBorder:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63),width:2)),
-            isDense:true,contentPadding:const EdgeInsets.symmetric(horizontal:12,vertical:9)),isExpanded:true,
+            isDense:true,contentPadding:const EdgeInsets.symmetric(horizontal:12,vertical:8)),isExpanded:true,
+          style:const TextStyle(fontSize:15,fontWeight:FontWeight.w800,color:Color(0xFF153E38)),
           items:[const DropdownMenuItem<String>(value:null,child:Text('Unassigned')),
             for(final entry in values.entries) if(entry.key is String)
-              DropdownMenuItem(value:entry.key as String,child:Text(EmployeeNicknameStore.displayLabel(entry.value,staff)))],
-          onChanged:busy?null:chooseMain)),
+              DropdownMenuItem(value:entry.key as String,child:Text(EmployeeNicknameStore.displayLabel(entry.value,staff),
+                maxLines:1,overflow:TextOverflow.ellipsis))],
+          onChanged:busy?null:chooseMain))),
         const SizedBox(width:8),Expanded(child:SizedBox(height:50,child:OutlinedButton.icon(
           style:OutlinedButton.styleFrom(
             backgroundColor:const Color(0xFFF0FBF7),
@@ -302,7 +304,8 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
             side:const BorderSide(color:Color(0xFF087D63)),
             shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(15))),
           onPressed:busy?null:open,icon:const Icon(Icons.checklist),
-          label:const Text('Job Tasks',maxLines:1,overflow:TextOverflow.ellipsis))))]),
+          label:const Text('Job Tasks',maxLines:1,overflow:TextOverflow.ellipsis,
+            style:TextStyle(fontWeight:FontWeight.w800,fontSize:15)))))]),
       if(widget.invoice!=null && estimated!=null)Text('Estimated labor: ${(estimated!/60).toStringAsFixed(2)} h · Actual: ${(actual!/60).toStringAsFixed(2)} h',style:const TextStyle(fontSize:12)),
       if(warning!=null)Row(children:[Expanded(child:Text(warning!)),TextButton(onPressed:load,child:const Text('Retry'))]),
     ]);
