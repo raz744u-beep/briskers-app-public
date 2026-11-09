@@ -34,9 +34,12 @@ jobs:
           cp pubspec.yaml analysis_options.yaml generated/
           cp -R assets generated/
       - name: Generate SQLite bindings and analyze
+        env:
+          GH_TOKEN: ${{ github.token }}
         working-directory: generated
         run: |
           flutter pub get
+          bash "$GITHUB_WORKSPACE/tools/ci_sqlite_assets.sh"
           dart run build_runner build --delete-conflicting-outputs
           flutter analyze
       - name: Retry bounds and restart regressions (synthetic local transports)

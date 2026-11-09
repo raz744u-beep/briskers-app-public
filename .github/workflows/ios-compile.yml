@@ -116,5 +116,17 @@ jobs:
         run: flutter analyze
       - name: Compile iOS without code signing
         working-directory: generated
-        run: flutter build ios --no-codesign
+        run: |
+          # Apply unsigned verification to every generated Xcode target, including pods.
+          export XCODE_XCCONFIG_FILE="$RUNNER_TEMP/unsigned-device.xcconfig"
+          cat > "$XCODE_XCCONFIG_FILE" <<'CONFIG'
+          CODE_SIGNING_ALLOWED = NO
+          CODE_SIGNING_REQUIRED = NO
+          CODE_SIGN_IDENTITY =
+          CONFIG
+          if ! flutter build ios --release --no-codesign --verbose > "$RUNNER_TEMP/ios-build.log" 2>&1; then
+            grep -i -C 3 -E 'error:|fatal:|failed|provisioning' "$RUNNER_TEMP/ios-build.log" | tail -200
+            exit 1
+          fi
+          test -s build/ios/iphoneos/Runner.app/Runner
 
