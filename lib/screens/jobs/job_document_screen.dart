@@ -7705,14 +7705,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Vehicle Findings',
-                            style: TextStyle(fontWeight: FontWeight.w800)),
-                        const SizedBox(height: 6),
-                        for (final row in rows)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 4),
-                            child: Text((row as Map)['body']?.toString() ?? ''),
-                          ),
+                        for (final group in const [
+                          ('resolved', 'Resolved on This Job'),
+                          ('unresolved', 'Unresolved Findings'),
+                        ]) ...[
+                          if (rows.any((row) =>
+                              (row as Map)['resolution_group'] == group.$1)) ...[
+                            Text(group.$2,
+                                style: const TextStyle(fontWeight: FontWeight.w800)),
+                            const SizedBox(height: 6),
+                            for (final row in rows)
+                              if ((row as Map)['resolution_group'] == group.$1)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 4),
+                                  child: Text(row['body']?.toString() ?? ''),
+                                ),
+                            const SizedBox(height: 8),
+                          ],
+                        ],
                       ],
                     ),
                   ),
