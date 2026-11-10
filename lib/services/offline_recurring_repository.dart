@@ -2,7 +2,8 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 
-import '../local/briskers_local_database.dart';
+import '../local/briskers_local_database.dart' hide LocalFinancialCache;
+import 'local_financial_cache.dart' show LocalFinancialCache;
 
 typedef RecurringRow = Map<String, dynamic>;
 
@@ -263,6 +264,12 @@ class OfflineRecurringRepository {
     var generated = 0;
     var visited = 0;
     final all = {for (final row in await _rows('occurrence')) row['_key']: row};
+    final verified = {
+      for (final row in await LocalFinancialCache(database: database).loadTransactions(businessId))
+        if (row['recurring_verified_download'] == true && row['recurring_rule_id'] is String &&
+            row['recurring_occurrence_date'] is String)
+          occurrenceKey(row['recurring_rule_id'] as String, row['recurring_occurrence_date'] as String),
+    };
     for (final rule in await _rows('rule')) {
       if (rule['_state'] == 'conflict' || rule['is_repeating'] != true ||
           (rule['paused_reason']?.toString().isNotEmpty ?? false)) {
@@ -283,7 +290,7 @@ class OfflineRecurringRepository {
           (rule['end_date'] == null || due.compareTo(rule['end_date'] as String) <= 0)) {
         visited++;
         final key = occurrenceKey(rule['id'] as String, due);
-        if (!all.containsKey(key)) {
+        if (!all.containsKey(key) && !verified.contains(key)) {
           final row = <String, dynamic>{
             'id': 'local-recurring-${Uri.encodeComponent(businessId)}-'
                 '${Uri.encodeComponent(rule['id'] as String)}-$due',

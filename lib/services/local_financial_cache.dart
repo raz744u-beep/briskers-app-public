@@ -487,7 +487,7 @@ class LocalFinancialCache {
       final index = rows.indexWhere((row) => row['id'] == id);
       final old = index < 0 ? null : rows[index];
       final next = {...?old, ...edit, 'name': name, 'sync_state': 'pending',
-        'base': old?['sync_state'] == 'pending' ? old?['base'] : old,
+        'base': old != null && old['sync_state'] == 'pending' ? old['base'] : old,
       };
       if (index < 0) { rows.add(next); } else { rows[index] = next; }
       await _save(business, _optionsKey, jsonEncode({...options, 'counterparties': rows}));

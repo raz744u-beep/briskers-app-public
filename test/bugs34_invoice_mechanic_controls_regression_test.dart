@@ -31,6 +31,14 @@ void main(){
     expect(dropdownHeight,50);
     expect(buttonHeight,50);
     expect(dropdownHeight,buttonHeight);
+    final outline = find.descendant(of:taskButton,matching:find.byType(Material));
+    final painted = tester.getRect(outline.first);
+    final selector = tester.getRect(outer.first);
+    expect(painted.top,selector.top);
+    expect(painted.bottom,selector.bottom);
+    final label = tester.getRect(find.text('Main Mechanic'));
+    expect(selector.contains(label.topLeft),isTrue);
+    expect(selector.contains(label.bottomRight),isTrue);
   });
 
   test('Invoice labor inherits lead; pencil manages assignments and hours',
