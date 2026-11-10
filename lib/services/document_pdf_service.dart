@@ -361,7 +361,10 @@ class DocumentPdfService {
 
     final notes = <String>[
       if (memo.isNotEmpty) memo,
-      ...findingNotes,
+      if (findingNotes.isNotEmpty) ...[
+        'Vehicle Findings:',
+        ...findingNotes,
+      ],
     ];
 
     final subtotal =
