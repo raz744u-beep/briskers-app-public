@@ -51,8 +51,35 @@ BEGIN
     v_count := v_count + 1;
   END LOOP;
   IF v_count = 0 THEN
-    RAISE EXCEPTION 'No pending rows: verify previously posted identities before retry'
-      USING ERRCODE='23514';
+    -- On lost response, verify original identities and posted allocations.
+    FOR k IN SELECT * FROM briskers.invoice_payment_operation_keys
+      WHERE business_id=p_business_id AND invoice_id=p_invoice_id
+      ORDER BY created_at,operation_id
+    LOOP
+      SELECT t.id INTO v_tx
+      FROM briskers.financial_transactions t
+      JOIN briskers.payment_allocations a
+        ON a.business_id=t.business_id AND a.transaction_id=t.id
+      WHERE t.business_id=p_business_id
+        AND t.idempotency_key=k.operation_id
+        AND t.kind='customer_payment' AND t.status='posted'
+        AND t.amount=k.amount
+        AND t.payment_method_id IS NOT DISTINCT FROM k.method_id
+        AND a.document_id=p_invoice_id AND a.gross_amount=k.amount;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'Previously received payment not fully reconciled'
+          USING ERRCODE='23514';
+      END IF;
+      v_mapping := v_mapping || jsonb_build_array(jsonb_build_object(
+        'operation_id',k.operation_id,'pending_payment_id',k.pending_payment_id,
+        'transaction_id',v_tx,'amount',k.amount
+      ));
+      v_count := v_count + 1;
+    END LOOP;
+    IF v_count = 0 THEN
+      RAISE EXCEPTION 'No original payment identities found'
+        USING ERRCODE='23514';
+    END IF;
   END IF;
   RETURN v_mapping;
 END
