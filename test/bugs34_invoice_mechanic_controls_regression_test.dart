@@ -41,6 +41,35 @@ void main(){
     expect(selector.contains(label.bottomRight),isTrue);
   });
 
+  testWidgets('Invoice mirrors the job Main Mechanic selector without Job Tasks button',
+      (tester) async {
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    await tester.pumpWidget(MaterialApp(home:Scaffold(
+      body:SizedBox(width:220,child:JobTasksAccess(
+        business:'test-shop',job:'J-test',invoice:'invoice-test',
+        selectorOnly:true,database:db,
+      )),
+    )));
+    await tester.pump(const Duration(seconds:4));
+    await tester.pump();
+    expect(find.text('Main Mechanic'), findsOneWidget);
+    expect(find.byType(DropdownButton<String>), findsOneWidget);
+    expect(find.text('Job Tasks'), findsNothing);
+  });
+
+  test('Invoice Items uses the same durable main mechanic assignment',
+      () async {
+    final invoice=await File('lib/screens/jobs/job_document_screen.dart')
+        .readAsString();
+    final access=await File('lib/screens/payroll/job_tasks_access.dart')
+        .readAsString();
+    expect(invoice, contains('selectorOnly: true'));
+    expect(invoice, contains('job: _detail![' + "'job_id'" + '].toString()'));
+    expect(access, contains('await repo.setMainMechanic(widget.job,id,'));
+    expect(access, contains('final bool selectorOnly;'));
+  });
+
   test('Invoice labor inherits lead; pencil manages assignments and hours',
       () async {
     final text=await File('lib/screens/payroll/job_tasks_access.dart')
