@@ -311,7 +311,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
               key:ValueKey('main-mechanic-$main'),
               value:values.containsKey(main)?main:null,
               isExpanded:true,isDense:true,
-              style:const TextStyle(fontSize:14,color:Color(0xFF153E38),fontWeight:FontWeight.w800),
+              style:Theme.of(context).textTheme.bodyMedium!.copyWith(fontSize:14,color:const Color(0xFF153E38),fontWeight:FontWeight.w800),
               icon:const Icon(Icons.arrow_drop_down,color:Color(0xFF076B56)),
               hint:const Text('Unassigned'),
               items:[
