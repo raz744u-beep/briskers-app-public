@@ -13,7 +13,7 @@ class ReceiptScanningNotice {
   static Future<bool> setShown(String business, bool value) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.setBool('receipt_scan_notice:$business', value);
+      return await prefs.setBool('receipt_scan_notice:$business', value);
     } catch (_) {
       return false;
     }
