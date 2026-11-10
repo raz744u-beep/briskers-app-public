@@ -2403,6 +2403,27 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     return projected;
   }
 
+  // Project invoice-selected findings from the local vehicle record without
+  // mutating the owner's manually entered memo or requiring Supabase sync.
+  Future<Map<String, dynamic>> _withLocalFindingNotes(
+      Map<String, dynamic> detail) async {
+    if (_estimate) return detail;
+    final vehicleId = detail['vehicle_id']?.toString() ?? '';
+    if (vehicleId.isEmpty) return detail;
+    final findings = await _localFindingRecords.loadLocalFindings(
+        widget.businessId, vehicleId);
+    final seen = <String>{};
+    final selected = <Map<String, dynamic>>[];
+    for (final finding in findings) {
+      if (finding['include_on_invoice'] != true) continue;
+      final body = finding['body']?.toString().trim() ?? '';
+      final id = finding['id']?.toString() ?? '';
+      if (body.isEmpty || id.isEmpty || !seen.add(id)) continue;
+      selected.add({'id': id, 'body': '• $body'});
+    }
+    return <String, dynamic>{...detail, 'finding_notes': selected};
+  }
+
   Future<Map<String, dynamic>?> _preparePdf() async {
     final lines = List<dynamic>.from(_detail?['lines'] ?? const []);
     if (lines.isEmpty) {
@@ -2414,8 +2435,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
       final localDetail = _detail;
       if (localDetail == null) return null;
-      return _withPdfUnits(await _pendingMemoForPdf(
-        await _projectSavedInvoiceIdentity(localDetail)));
+      return _withPdfUnits(await _withLocalFindingNotes(
+        await _pendingMemoForPdf(
+          await _projectSavedInvoiceIdentity(localDetail))));
     }
 
     try {
@@ -2504,7 +2526,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       final memoForPdf = await _pendingMemoForPdf(detail);
       detail.clear();
       detail.addAll(memoForPdf);
-      return await _withPdfUnits(detail);
+      return await _withPdfUnits(await _withLocalFindingNotes(detail));
     } catch (error) {
       // Auto's network may fail while the known invoice is still safely
       // available in the local cache. Do not silently send an unverified PDF.
