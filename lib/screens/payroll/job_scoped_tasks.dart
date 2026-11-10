@@ -301,14 +301,17 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
                     _action(key, status,
                       allocation: allocations.single)
                   else if (allocations.isEmpty && status != 'Done')
-                    // Never silently hide Start when the local invoice
-                    // allocation has not been recovered. An allocation must
-                    // exist before work can be started or paid.
-                    OutlinedButton(
-                      onPressed: widget.onManageLabor == null
-                          ? null : () => widget.onManageLabor!(row),
-                      child: const Text('Assign mechanic'),
-                    )
+                    // Do not create payable labor from a historical source
+                    // that is read-only under the payroll cutover policy.
+                    // Current work without an allocation can be recovered
+                    // explicitly by the Owner.
+                    row['archived_labor'] == 1
+                        ? const Text('Historical · read only')
+                        : OutlinedButton(
+                            onPressed: widget.onManageLabor == null
+                                ? null : () => widget.onManageLabor!(row),
+                            child: const Text('Assign mechanic'),
+                          )
                   else if (allocations.length > 1 && status != 'Done')
                     // Split work has separate Start/Finish actions per
                     // mechanic in expanded details. Make them discoverable
