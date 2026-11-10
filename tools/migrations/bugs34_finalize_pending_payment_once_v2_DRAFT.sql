@@ -20,6 +20,14 @@ BEGIN
   IF NOT FOUND OR d.kind <> 'invoice' OR d.status NOT IN ('issued','accepted') THEN
     RAISE EXCEPTION 'Issued invoice required' USING ERRCODE='23514';
   END IF;
+  -- Reject mixed legacy posted and pending payments before any write.
+  IF EXISTS (SELECT 1 FROM briskers.payment_allocations a
+      WHERE a.business_id=p_business_id AND a.document_id=p_invoice_id)
+     AND EXISTS (SELECT 1 FROM briskers.invoice_pending_payments x
+      WHERE x.business_id=p_business_id AND x.invoice_id=p_invoice_id) THEN
+    RAISE EXCEPTION 'Mixed posted and pending payments require reconciliation'
+      USING ERRCODE='23514';
+  END IF;
   -- No partial finalization: every pending row must have exactly one original
   -- operation mapping and its immutable financial attributes must agree.
   FOR p IN SELECT * FROM briskers.invoice_pending_payments
