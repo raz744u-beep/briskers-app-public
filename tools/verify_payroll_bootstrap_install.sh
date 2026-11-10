@@ -79,6 +79,7 @@ if [ -n "$intermediate" ]; then
     Briskers-v0.10.9-b2571.apk) intermediate_hash=820845a388b63696525ccd7b2347a7690fec00690a227dd6ceb473f426572f2b ;;
     Briskers-v0.10.9-b2581.apk) intermediate_hash=50cadbc0d6a64fd8694e6dd78b0339634c746cbd83d6e84a8ec6c14b7b6a51b9 ;;
     Briskers-v0.10.9-b2582.apk) intermediate_hash=8737f3609320588081370fcfbf694f7cc7ca1b207c7c57df52bd9d5994858284 ;;
+    Briskers-v0.10.9-b2587.apk) intermediate_hash=3dd35d27decc90174dc1432970de5459baaa78ae4def068a126d27838ac353af ;;
     Briskers-v0.10.9-b2586.apk) intermediate_hash=3e131b8fd491714b709d31838fbb3a3009f7626c540774a4b0056d869602d59b ;;
     *) echo 'Unknown signed intermediate APK' >&2; exit 1 ;;
   esac

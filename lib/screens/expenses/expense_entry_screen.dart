@@ -1,3 +1,4 @@
+import '../../services/receipt_scanning_notice.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
@@ -236,7 +237,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
         .toList();
     final counterparties = List<dynamic>.from(
       data['counterparties'] ?? const [],
-    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).where((row) =>
+        row['active'] != false || row['id'] == detail?['counterparty_id']).toList();
     final quickTemplates = List<dynamic>.from(
       data['quick_templates'] ?? const [],
     ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
@@ -402,7 +404,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       await _localFinancial.saveOptions(widget.businessId, data);
 
       if (!mounted) return;
-      _applyLoadedOptions(data, detail);
+      final merged = await _localFinancial.loadOptions(widget.businessId);
+      if (!mounted) return;
+      _applyLoadedOptions(merged, detail);
 
       if (widget.autoScanReceipt &&
           !_autoScanLaunched &&
@@ -603,26 +607,32 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       });
       return;
     }
-    final consent = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Read receipt with online AI?'),
-        content: const Text(
-          'Send this receipt photo to the Briskers receipt AI service for recognition. Review the suggestions before saving. Shop synchronization stays unchanged.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Enter manually'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Read receipt'),
-          ),
-        ],
-      ),
-    );
-    if (consent != true || !mounted) return;
+    final showNotice = await ReceiptScanningNotice.shown(widget.businessId);
+    if (!mounted) return;
+    if (showNotice) {
+      var remember = false;
+      final consent = await showDialog<bool>(
+        context: context,
+        builder: (context) => StatefulBuilder(builder: (context, update) => AlertDialog(
+          title: const Text('Read receipt with online AI?'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('Send this receipt photo to the Briskers receipt AI service for recognition. Review the suggestions before saving. Shop synchronization stays unchanged.'),
+            CheckboxListTile(
+              title: const Text("Don't show this again"),
+              value: remember,
+              onChanged: (value) => update(() => remember = value ?? false),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Enter manually')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Read receipt')),
+          ],
+        )),
+      );
+      if (consent != true || !mounted) return;
+      if (remember) await ReceiptScanningNotice.setShown(widget.businessId, false);
+      if (!mounted) return;
+    }
     setState(() {
       _readingReceipt = true;
       _receiptReadMessage = 'Reading receipt using internet AI...';

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -865,38 +866,52 @@ class _CounterpartiesSettingsScreenState
     _load();
   }
 
+  final cache = LocalFinancialCache();
+  int _epoch = 0;
+
+  void _display(Map<String, dynamic> data) {
+    rows = [for (final row in data['counterparties'] as List? ?? const [])
+      Map<String, dynamic>.from(row as Map)];
+    categories = [for (final row in data['categories'] as List? ?? const [])
+      if (row['normal_direction'] == 'expense' && row['active'] != false)
+        Map<String, dynamic>.from(row as Map)];
+    error = data.containsKey('counterparties') ? null : 'Payees and payers have not been downloaded on this device.';
+    if (rows!.isEmpty && error == null) error = 'No saved payees or payers.';
+  }
+
   Future<void> _load() async {
+    final epoch = ++_epoch;
     try {
-      final data = await loadSettings(widget.businessId);
-      final result = List<dynamic>.from(data['counterparties'] ?? const [])
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
-      final loadedCategories =
-          List<dynamic>.from(data['categories'] ?? const [])
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .where(
-                (e) =>
-                    e['normal_direction']?.toString() == 'expense' &&
-                    e['active'] != false,
-              )
-              .toList();
-      if (!mounted) return;
-      setState(() {
-        rows = result;
-        categories = loadedCategories;
-        error = null;
-      });
+      final local = await cache.loadOptions(widget.businessId);
+      if (!mounted || epoch != _epoch) return;
+      setState(() => _display(local));
+      if (BriskersConnectionModeController.instance.forceOffline) return;
+      final remote = await loadSettings(widget.businessId);
+      if (!mounted || epoch != _epoch) return;
+      await cache.saveOptions(widget.businessId, remote);
+      final merged = await cache.loadOptions(widget.businessId);
+      if (mounted && epoch == _epoch) setState(() => _display(merged));
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        rows = const [];
-        error = e.toString();
-      });
+      if (mounted && epoch == _epoch) setState(() { rows ??= []; error = e.toString(); });
     }
   }
 
+  Future<void> _sync(Map<String, dynamic> row) async {
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    try {
+      await cache.reconcileCounterparty(widget.businessId, row, () async {
+        final id = await networkSupabase.rpc('briskers_reconcile_counterparty_v1', params: {
+          'p_business_id': widget.businessId, 'p_id': row['id'],
+          'p_edit': row, 'p_base': row['base'],
+        }).timeout(const Duration(seconds: 15));
+        return id.toString();
+      });
+      await _load();
+    } catch (e) { await showError(e); }
+  }
+
   Future<void> _edit([Map<String, dynamic>? row]) async {
-    final changed = await showDialog<bool>(
+    final id = await showDialog<String>(
       context: context,
       builder: (_) => _CounterpartyDialog(
         businessId: widget.businessId,
@@ -904,35 +919,12 @@ class _CounterpartiesSettingsScreenState
         categories: categories,
       ),
     );
-    if (changed == true) await _load();
-  }
-
-  Future<void> _delete(Map<String, dynamic> row) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete payee/payer?'),
-        content: Text(
-          'Delete "${row['name']}"? A payee or payer that has ever been used cannot be deleted.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      await api.deleteCounterparty(widget.businessId, row['id'].toString());
-      await _load();
-    } catch (e) {
-      await showError(e);
+    if (id == null || !mounted) return;
+    final saved = await cache.loadOptions(widget.businessId);
+    if (!mounted) return;
+    setState(() => _display(saved));
+    if (!BriskersConnectionModeController.instance.forceOffline) {
+      await _sync(rows!.singleWhere((entry) => entry['id'] == id));
     }
   }
 
@@ -1020,22 +1012,23 @@ class _CounterpartiesSettingsScreenState
                             if (surcharge > 0) surchargeLabel,
                             '$count transaction(s)',
                             if (!active) 'Inactive',
+                            if (row['sync_state'] == 'pending') 'Saved on this device',
                           ].join(' • '),
                         ),
                         trailing: PopupMenuButton<String>(
                           onSelected: (value) {
                             if (value == 'edit') _edit(row);
-                            if (value == 'delete') _delete(row);
+                            if (value == 'sync') _sync(row);
                           },
                           itemBuilder: (_) => [
                             const PopupMenuItem(
                               value: 'edit',
                               child: Text('Edit'),
                             ),
-                            if (count == 0)
+                            if (row['sync_state'] == 'pending' && !BriskersConnectionModeController.instance.forceOffline)
                               const PopupMenuItem(
-                                value: 'delete',
-                                child: Text('Delete'),
+                                value: 'sync',
+                                child: Text('Sync saved change'),
                               ),
                           ],
                         ),
@@ -1066,7 +1059,16 @@ class _CounterpartyDialog extends StatefulWidget {
 }
 
 class _CounterpartyDialogState extends State<_CounterpartyDialog> {
-  static const _api = BriskersApi();
+  late final String _id = widget.row?['id']?.toString() ?? _newId();
+
+  String _newId() {
+    final random = Random.secure();
+    final b = List.generate(16, (_) => random.nextInt(256));
+    b[6] = (b[6] & 15) | 64;
+    b[8] = (b[8] & 63) | 128;
+    final h = b.map((v) => v.toRadixString(16).padLeft(2, '0')).join();
+    return '${h.substring(0,8)}-${h.substring(8,12)}-${h.substring(12,16)}-${h.substring(16,20)}-${h.substring(20)}';
+  }
 
   late final TextEditingController name;
   late final TextEditingController surchargePercent;
@@ -1114,15 +1116,12 @@ class _CounterpartyDialogState extends State<_CounterpartyDialog> {
       error = null;
     });
     try {
-      await _api.saveCounterparty(
-        widget.businessId,
-        counterpartyId: widget.row?['id']?.toString(),
-        name: name.text.trim(),
-        active: active,
-        defaultCategoryId: defaultCategoryId,
-        defaultSurchargePercent: surcharge,
-      );
-      if (mounted) Navigator.pop(context, true);
+      await LocalFinancialCache().saveLocalCounterparty(widget.businessId, {
+        'id': _id, 'name': name.text.trim(), 'active': active,
+        'default_category_id': defaultCategoryId, 'default_surcharge_percent': surcharge,
+        'default_category': widget.categories.where((c) => c['id'] == defaultCategoryId).firstOrNull?['name'],
+      });
+      if (mounted) Navigator.pop(context, _id);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -1738,6 +1737,7 @@ class _RecurringTransactionsScreenState
   List<Map<String, dynamic>>? rows;
   Map<String, dynamic>? options;
   String? error;
+  Set<String> _posted = {};
   bool _offlineUnavailable = false;
   bool _showingSavedList = false;
 
@@ -1748,7 +1748,7 @@ class _RecurringTransactionsScreenState
   // A business alone is not enough to isolate an offline financial snapshot.
   // Never read another signed-in user's recurring instructions from this phone.
   String? get _cacheKey {
-    final userId = networkSupabase.auth.currentUser?.id;
+    final userId = supabase.auth.currentUser?.id;
     if (userId == null || userId.isEmpty) return null;
     return 'briskers_recurring_management_v1_${userId}_${widget.businessId}';
   }
@@ -1789,11 +1789,17 @@ class _RecurringTransactionsScreenState
     if (BriskersConnectionModeController.instance.forceOffline) {
       // Do not start the API requests at all in Force Offline.
       final saved = await _readSavedList();
+      final history = await LocalFinancialCache().loadTransactions(widget.businessId);
+      final posted = {for (final row in history)
+        if (row['recurring_verified_download'] == true && row['sync_state'] == 'synced')
+          "${row['recurring_rule_id']}:${row['recurring_occurrence_date']}"};
+
       if (!mounted) return;
       setState(() {
         rows = saved ?? <Map<String, dynamic>>[];
         options = null; // Recurrence edits are server-authoritative.
         error = null;
+        _posted = posted;
         _offlineUnavailable = saved == null;
         _showingSavedList = saved != null;
       });
@@ -1856,6 +1862,7 @@ class _RecurringTransactionsScreenState
         );
       }
       if (!mounted) return;
+      if (detail != null) setState(() => _posted.add('$ruleId:$dueDate'));
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
         detail == null
             ? 'No posted occurrence was found for that date.'
@@ -1989,7 +1996,9 @@ class _RecurringTransactionsScreenState
                             <String>[
                               row['category']?.toString() ?? '',
                               _frequency(row),
-                              recurringScheduleStatus(
+                              if (_posted.contains("${row['id']}:${row['next_date']}"))
+                                "Posted ${row['next_date']} · saved on this device"
+                              else recurringScheduleStatus(
                                 row,
                                 today: DateTime.now(),
                                 cached: _showingSavedList,

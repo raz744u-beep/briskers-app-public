@@ -134,6 +134,7 @@ void main(){
     await tester.pumpAndSettle();
     await until(find.text('Main Mechanic'));
     expect(find.text('Job Tasks'),findsWidgets);
+    await capture('job-detail-main-mechanic');
     await click(find.byType(DropdownButton<String>).first);
     await click(find.text('Alpha').last);
     await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:150)));

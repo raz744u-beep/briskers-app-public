@@ -536,6 +536,14 @@ class OfflineFinancialWriteService {
         jsonDecode(current.read<String>('payload_json')) as Map,
       );
 
+      // Keep dependent expenses queued until the payee's permanent ID is acknowledged.
+      if (payload['counterparty_id'] != null) {
+        final options = await _cache.loadOptions(businessId);
+        if ((options['counterparties'] as List? ?? const []).whereType<Map>().any(
+            (r) => r['id'] == payload['counterparty_id'] && r['sync_state'] == 'pending')) {
+          break;
+        }
+      }
       try {
         await LocalJobQuarantine.assertReplayAllowed(
           _database,

@@ -445,20 +445,72 @@ class LocalFinancialCache {
     String businessId,
     Map<String, dynamic> options,
   ) async {
-    await _save(businessId, _optionsKey, jsonEncode(options));
+    await _database.transaction(() async {
+      final previous = await loadOptions(businessId);
+      final people = <String, Map<String, dynamic>>{};
+      for (final source in [previous, options]) {
+        for (final item in (source['counterparties'] as List? ?? const []).whereType<Map>()) {
+          final id = item['id'];
+          if (id is String && id.isNotEmpty && people[id]?['sync_state'] != 'pending') {
+            people[id] = {...?people[id], ...Map<String, dynamic>.from(item)};
+          }
+        }
+      }
+      await _save(businessId, _optionsKey, jsonEncode({
+        ...previous, ...options,
+        if (previous.containsKey('counterparties') || options.containsKey('counterparties'))
+          'counterparties': people.values.toList(),
+      }));
+    });
   }
 
   Future<Map<String, dynamic>> loadOptions(String businessId) async {
     final raw = await _load(businessId, _optionsKey);
     if (raw == null || raw.isEmpty) return const {};
-    try {
-      final decoded = jsonDecode(raw);
-      return decoded is Map
-          ? Map<String, dynamic>.from(decoded)
-          : const {};
-    } catch (_) {
-      return const {};
-    }
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) throw const FormatException('Unreadable transaction settings.');
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  Future<void> saveLocalCounterparty(String business, Map<String, dynamic> edit) async {
+    await _database.transaction(() async {
+      final options = await loadOptions(business);
+      final rows = [for (final raw in options['counterparties'] as List? ?? const [])
+        Map<String, dynamic>.from(raw as Map)];
+      final id = edit['id'] as String;
+      final name = (edit['name'] as String).trim();
+      if (business.isEmpty || id.isEmpty || name.isEmpty) throw ArgumentError('Missing payee identity.');
+      if (rows.any((row) => row['id'] != id &&
+          row['name'].toString().trim().toLowerCase() == name.toLowerCase())) {
+        throw StateError('This name is already saved. Edit the existing payee or payer.');
+      }
+      final index = rows.indexWhere((row) => row['id'] == id);
+      final old = index < 0 ? null : rows[index];
+      final next = {...?old, ...edit, 'name': name, 'sync_state': 'pending',
+        'base': old?['sync_state'] == 'pending' ? old?['base'] : old,
+      };
+      if (index < 0) { rows.add(next); } else { rows[index] = next; }
+      await _save(business, _optionsKey, jsonEncode({...options, 'counterparties': rows}));
+    });
+  }
+
+  Future<void> reconcileCounterparty(String business, Map<String, dynamic> sent,
+      Future<String> Function() submit) async {
+    if (await submit() != sent['id']) throw StateError('Payee identity changed.');
+    await _database.transaction(() async {
+      final options = await loadOptions(business);
+      final rows = [for (final raw in options['counterparties'] as List? ?? const [])
+        Map<String, dynamic>.from(raw as Map)];
+      final index = rows.indexWhere((row) => row['id'] == sent['id']);
+      if (index < 0 || rows[index]['sync_state'] != 'pending') return;
+      final clean = Map<String, dynamic>.from(sent)..remove('base')..remove('sync_state');
+      if (jsonEncode(rows[index]) == jsonEncode(sent)) {
+        rows[index] = clean;
+      } else if (jsonEncode(rows[index]['base']) == jsonEncode(sent['base'])) {
+        rows[index]['base'] = clean;
+      }
+      await _save(business, _optionsKey, jsonEncode({...options, 'counterparties': rows}));
+    });
   }
 
   Future<void> _save(
