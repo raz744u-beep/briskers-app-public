@@ -36,6 +36,35 @@ void main() {
     expect(managed, same(task));
   });
 
+  testWidgets('historical labor without allocation is read-only',
+      (tester) async {
+    final task = <String, dynamic>{
+      'job_id': 'J-old',
+      'line_id': 'old-line',
+      'source_description': 'Historical invoice labor',
+      'archived_labor': 1,
+      'status': 'planned',
+    };
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body:
+      JobScopedTasks(
+        jobId: 'J-old',
+        serviceTasks: [task],
+        generalTasks: const [],
+        allocationsByLine: const {},
+        employeeName: (id) => id ?? 'Unassigned',
+        onAddLabor: () {},
+        onAddGeneral: () {},
+        onLaborProgress: (allocation, finish) async {},
+        onGeneralProgress: (taskId, status) async {},
+        onManageLabor: (row) =>
+            fail('Historical labor must not become assignable'),
+      ),
+    )));
+    expect(find.text('Historical · read only'), findsOneWidget);
+    expect(find.text('Assign mechanic'), findsNothing);
+    expect(find.text('Start'), findsNothing);
+  });
+
   testWidgets('assigned labor shows mechanic, hours and Start action',
       (tester) async {
     final task = <String, dynamic>{
