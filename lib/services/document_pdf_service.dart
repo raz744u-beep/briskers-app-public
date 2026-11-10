@@ -351,17 +351,27 @@ class DocumentPdfService {
         signatureCurrent && signatureBytes is Uint8List;
     final memo = detail['memo']?.toString().trim() ?? '';
 
-    final findingNotes = List<dynamic>.from(
-      detail['finding_notes'] ?? const [],
-    )
+    final findingNotes = List<dynamic>.from(detail['finding_notes'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
-        .map((finding) => finding['body']?.toString().trim() ?? '')
-        .where((text) => text.isNotEmpty)
+        .where((finding) => (finding['body']?.toString().trim() ?? '').isNotEmpty)
         .toList();
+    final resolvedNotes = findingNotes
+        .where((finding) => finding['resolution_group'] == 'resolved')
+        .map((finding) => finding['body'].toString()).toList();
+    final unresolvedNotes = findingNotes
+        .where((finding) => finding['resolution_group'] != 'resolved')
+        .map((finding) => finding['body'].toString()).toList();
 
     final notes = <String>[
       if (memo.isNotEmpty) memo,
-      ...findingNotes,
+      if (resolvedNotes.isNotEmpty) ...[
+        'Resolved on This Job:',
+        ...resolvedNotes,
+      ],
+      if (unresolvedNotes.isNotEmpty) ...[
+        'Unresolved Findings:',
+        ...unresolvedNotes,
+      ],
     ];
 
     final subtotal =

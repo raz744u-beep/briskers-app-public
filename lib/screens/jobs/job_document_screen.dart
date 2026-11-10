@@ -1,3 +1,4 @@
+import '../../services/invoice_finding_notes_projection.dart';
 import '../payroll/owner_payroll_screen.dart';
 import '../payroll/job_tasks_access.dart';
 import 'owner_local_delete_action.dart';
@@ -2403,6 +2404,26 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     return projected;
   }
 
+  // Project invoice-selected findings from the local vehicle record without
+  // mutating the owner's manually entered memo or requiring Supabase sync.
+  Future<Map<String, dynamic>> _withLocalFindingNotes(
+      Map<String, dynamic> detail) async {
+    if (_estimate) return detail;
+    final vehicleId = detail['vehicle_id']?.toString() ?? '';
+    final jobId = detail['job_id']?.toString() ?? '';
+    // Never copy vehicle-wide findings onto an unrelated invoice. A finding
+    // needs a durable link to the invoice's job before it can be projected.
+    if (vehicleId.isEmpty || jobId.isEmpty) {
+      return <String, dynamic>{...detail, 'finding_notes': <Map<String, dynamic>>[]};
+    }
+    final findings = await _localFindingRecords.loadLocalFindings(
+        widget.businessId, vehicleId);
+    return <String, dynamic>{
+      ...detail,
+      'finding_notes': invoiceFindingNotesForJob(jobId: jobId, findings: findings),
+    };
+  }
+
   Future<Map<String, dynamic>?> _preparePdf() async {
     final lines = List<dynamic>.from(_detail?['lines'] ?? const []);
     if (lines.isEmpty) {
@@ -2414,8 +2435,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
       final localDetail = _detail;
       if (localDetail == null) return null;
-      return _withPdfUnits(await _pendingMemoForPdf(
-        await _projectSavedInvoiceIdentity(localDetail)));
+      return _withPdfUnits(await _withLocalFindingNotes(
+        await _pendingMemoForPdf(
+          await _projectSavedInvoiceIdentity(localDetail))));
     }
 
     try {
@@ -2504,6 +2526,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       final memoForPdf = await _pendingMemoForPdf(detail);
       detail.clear();
       detail.addAll(memoForPdf);
+      final withFindingNotes = await _withLocalFindingNotes(detail);
+      detail.clear();
+      detail.addAll(withFindingNotes);
       return await _withPdfUnits(detail);
     } catch (error) {
       // Auto's network may fail while the known invoice is still safely
@@ -7660,6 +7685,53 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ),
             ),
           ],
+          if (!_estimate && _detail != null)
+            FutureBuilder<Map<String, dynamic>>(
+              future: _withLocalFindingNotes(_detail!),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'Vehicle Findings could not be loaded from this device. '
+                      'Refresh before issuing the invoice.',
+                      style: TextStyle(color: Color(0xFFB42318)),
+                    ),
+                  );
+                }
+                final rows = snapshot.data?['finding_notes'] as List? ?? const [];
+                if (rows.isEmpty) return const SizedBox.shrink();
+                return Card(
+                  key: const ValueKey('invoice-notes-selected-findings'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final group in const [
+                          ('resolved', 'Resolved on This Job'),
+                          ('unresolved', 'Unresolved Findings'),
+                        ]) ...[
+                          if (rows.any((row) =>
+                              (row as Map)['resolution_group'] == group.$1)) ...[
+                            Text(group.$2,
+                                style: const TextStyle(fontWeight: FontWeight.w800)),
+                            const SizedBox(height: 6),
+                            for (final row in rows)
+                              if ((row as Map)['resolution_group'] == group.$1)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 4),
+                                  child: Text(row['body']?.toString() ?? ''),
+                                ),
+                            const SizedBox(height: 8),
+                          ],
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
           const SizedBox(height: 8),
           TextField(
             controller: _notesController,
