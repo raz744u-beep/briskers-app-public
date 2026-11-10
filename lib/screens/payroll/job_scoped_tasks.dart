@@ -309,6 +309,14 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
                           ? null : () => widget.onManageLabor!(row),
                       child: const Text('Assign mechanic'),
                     )
+                  else if (allocations.length > 1 && status != 'Done')
+                    // Split work has separate Start/Finish actions per
+                    // mechanic in expanded details. Make them discoverable
+                    // from the collapsed card instead of showing no action.
+                    TextButton(
+                      onPressed: () => _toggle(key),
+                      child: const Text('View mechanics'),
+                    )
                   else if (status == 'Done')
                     _action(key, status),
                   Icon(expanded ? Icons.expand_less : Icons.chevron_right,
