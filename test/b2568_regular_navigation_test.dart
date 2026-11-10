@@ -119,9 +119,9 @@ void main(){
       (widget.tooltip == 'Edit or split mechanic labor' ||
        widget.tooltip == 'Assign or split mechanic labor'));
 
-    // Approved design: the job-wide Main Mechanic selector belongs on Job
-    // Details, never inside Invoice Items. Navigate to the real Job screen
-    // to set the lead, then return to the unchanged invoice labor pencil.
+    // The same job-wide Main Mechanic selector is now mirrored on Job
+    // Details and Invoice Items. Both edit one saved job lead identity;
+    // individual invoice labor still uses the existing pencil.
     final jobId=(await tester.runAsync(()async{
       final row=await db.customSelect(
         'SELECT job_id FROM local_documents WHERE business_id=? AND id=?',
@@ -141,8 +141,9 @@ void main(){
     await tester.pump();
     navigator.currentState!.pop();
     await tester.pumpAndSettle();
-    expect(find.text('Main Mechanic'),findsNothing,
-      reason:'Invoice Items must not duplicate Job Details controls.');
+    await until(find.text('Main Mechanic'));
+    expect(find.text('Main Mechanic'),findsOneWidget,
+      reason:'Invoice mirrors the same saved Job Main Mechanic selector.');
     await until(laborPencils());
     await click(laborPencils().first);
     
