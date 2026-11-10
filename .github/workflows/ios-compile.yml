@@ -125,7 +125,10 @@ jobs:
           CODE_SIGN_IDENTITY =
           CONFIG
           if ! flutter build ios --release --no-codesign --verbose > "$RUNNER_TEMP/ios-build.log" 2>&1; then
-            grep -i -C 3 -E 'error:|fatal:|failed|provisioning' "$RUNNER_TEMP/ios-build.log" | tail -200
+            echo '=== iOS compiler diagnostics ==='
+            grep -i -C 3 -E '(^|[[:space:]])(error:|fatal error:)|BUILD FAILED|Swift Compiler Error|Xcode build done' "$RUNNER_TEMP/ios-build.log" | tail -100 || true
+            echo '=== final iOS build output ==='
+            tail -160 "$RUNNER_TEMP/ios-build.log"
             exit 1
           fi
           test -s build/ios/iphoneos/Runner.app/Runner
