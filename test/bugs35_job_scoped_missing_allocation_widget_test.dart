@@ -24,8 +24,8 @@ void main() {
         employeeName: (id) => id ?? 'Unassigned',
         onAddLabor: () {},
         onAddGeneral: () {},
-        onLaborProgress: (_, __) async {},
-        onGeneralProgress: (_, __) async {},
+        onLaborProgress: (allocation, finish) async {},
+        onGeneralProgress: (taskId, status) async {},
         onManageLabor: (row) => managed = row,
       ),
     )));
@@ -57,8 +57,8 @@ void main() {
         employeeName: (id) => id == 'mechanic-1' ? 'Chris' : 'Unassigned',
         onAddLabor: () {},
         onAddGeneral: () {},
-        onLaborProgress: (_, __) async {},
-        onGeneralProgress: (_, __) async {},
+        onLaborProgress: (allocation, finish) async {},
+        onGeneralProgress: (taskId, status) async {},
       ),
     )));
     expect(find.textContaining('Chris'), findsWidgets);
