@@ -426,6 +426,84 @@ class LocalPayrollRepository {
     });
   }
 
+  /// Record the Owner's explicit confirmation of wages paid BEFORE this
+  /// task entered the new payroll workflow. This is NOT a new payroll payment.
+  /// One immutable allocation/employee share is settled, not the entire job.
+  Future<void> confirmHistoricalAlreadyPaid(String allocation) async {
+    _authorize();
+    await prepare();
+    await db.transaction(() async {
+      final rows = await _read(
+        'SELECT p.id,p.task_id,p.employee_id,p.state,c.revision,c.actual_minutes,'
+        'c.paid_operation_id,COALESCE(e.minutes,0) AS estimated_minutes '
+        'FROM regular_payroll_portions p '
+        'JOIN local_mechanic_work_credits_v1 c '
+        'ON c.business_id=p.business_id AND c.allocation_id=p.id '
+        'LEFT JOIN regular_payroll_estimates e ON e.business_id=p.business_id '
+        'AND e.task_id=p.task_id AND e.employee_id=p.employee_id '
+        'WHERE p.business_id=? AND p.id=?',
+        [business,allocation],
+      );
+      if (rows.length != 1) throw StateError('Saved labor allocation unavailable.');
+      final row = rows.single;
+      final previous = await _read(
+        'SELECT allocation_id FROM regular_payroll_owner_prior_paid_v1 '
+        'WHERE business_id=? AND allocation_id=?',
+        [business,allocation],
+      );
+      if (previous.isNotEmpty) return; // Idempotent confirmation, no new pay.
+      final paid = await _read(
+        'SELECT credit_id FROM regular_payroll_work_coverage '
+        'WHERE business_id=? AND credit_id=? LIMIT 1',
+        [business,allocation],
+      );
+      if (row['paid_operation_id'] != null || paid.isNotEmpty) {
+        throw StateError('This portion is already settled in payroll.');
+      }
+      final minutes = (row['actual_minutes'] as int) > 0
+          ? row['actual_minutes'] as int
+          : row['estimated_minutes'] as int;
+      if (minutes <= 0) {
+        throw StateError('Enter the historical mechanic hours before marking Already Paid.');
+      }
+      // No historical completion date is invented. The Owner's confirmation
+      // establishes Done now; prior actual dates remain intact if saved.
+      await LocalMechanicWorkCreditRepository(database:db).recordWork(
+        businessId:business, allocationId:allocation,
+        employeeId:row['employee_id'] as String,
+        expectedRevision:row['revision'] as int,
+        actualMinutes:minutes, completed:true,
+      );
+      await db.customStatement(
+        "UPDATE regular_payroll_portions SET state='Done',version=version+1 "
+        'WHERE business_id=? AND id=?',
+        [business,allocation],
+      );
+      await db.customStatement(
+        'INSERT INTO regular_payroll_actual_time(business_id,credit_id,minutes,revision) '
+        'SELECT ?,?,?,revision FROM local_mechanic_work_credits_v1 '
+        'WHERE business_id=? AND allocation_id=? '
+        'ON CONFLICT(business_id,credit_id) DO UPDATE SET '
+        'minutes=excluded.minutes,revision=excluded.revision',
+        [business,allocation,minutes,business,allocation],
+      );
+      final now = DateTime.now().toUtc().toIso8601String();
+      await db.customStatement(
+        'INSERT INTO regular_payroll_owner_prior_paid_v1 '
+        '(business_id,allocation_id,employee_id,confirmed_at) VALUES(?,?,?,?)',
+        [business,allocation,row['employee_id'],now],
+      );
+      await db.customStatement(
+        'INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) '
+        'VALUES(?,?,?,?)',
+        [business,allocation,'owner_confirmed_historical_already_paid',
+         jsonEncode({'employee':row['employee_id'],'minutes':minutes,
+           'confirmed_at':now,'payment_record_created':false})],
+      );
+      _authorize();
+    });
+  }
+
   /// Owner correction to an existing allocation. A completed but UNPAID
   /// portion can have its assigned and credited time corrected together.
   /// Payment coverage/operation locks are never bypassed, and we never
