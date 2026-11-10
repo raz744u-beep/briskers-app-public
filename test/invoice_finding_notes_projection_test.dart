@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:briskers/services/invoice_finding_notes_projection.dart';
+import 'package:briskers_app/services/invoice_finding_notes_projection.dart';
 
 void main() {
   test('selected findings are included only for the invoice job', () {
