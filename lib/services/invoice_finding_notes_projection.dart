@@ -15,7 +15,13 @@ List<Map<String, dynamic>> invoiceFindingNotesForJob({
     final id = finding['id']?.toString() ?? '';
     final body = finding['body']?.toString().trim() ?? '';
     if (id.isEmpty || body.isEmpty || !seen.add(id)) continue;
-    notes.add(<String, dynamic>{'id': id, 'body': '• $body'});
+    notes.add(<String, dynamic>{
+      'id': id,
+      'body': '• $body',
+      'resolution_group': finding['status'] == 'resolved' && repairJobId == jobId
+          ? 'resolved'
+          : 'unresolved',
+    });
   }
   return notes;
 }
