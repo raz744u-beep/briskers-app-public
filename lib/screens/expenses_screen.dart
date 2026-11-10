@@ -2482,22 +2482,34 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                           fontWeight: FontWeight.w800,
                                         ),
                                       ),
-                                      if (!invoiceReceipt) Text(
-                                        remarks.isEmpty
-                                            ? <String>[
-                                                if (category.isNotEmpty)
-                                                  category,
-                                                if (date.isNotEmpty) date,
-                                              ].join(' • ')
-                                            : remarks,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onSurfaceVariant,
+                                      if (!invoiceReceipt) ...[
+                                        // Always show the actual saved date,
+                                        // even when imported remarks exist.
+                                        Text(
+                                          date.isEmpty ? 'Date unavailable' : date,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 12.5,
+                                          ),
                                         ),
-                                      ),
+                                        if (category.isNotEmpty)
+                                          Text(
+                                            category,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        if (remarks.isNotEmpty &&
+                                            !remarks.startsWith('S36 Active Screen, Snap TBL-'))
+                                          Text(
+                                            remarks,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: Theme.of(context)
+                                                  .colorScheme.onSurfaceVariant,
+                                            ),
+                                          ),
+                                      ],
                                     ],
                                   ),
                                 ),
