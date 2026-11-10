@@ -702,6 +702,29 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       name:(staff[selected]?['name'] ?? _employeeLabel(selected)).toString(), minutes:(hours*60).round()));
   }
 
+  /// Owner-only historical settlement: a confirmation, never a new payment.
+  Future<void> _confirmHistoricalPaid(Map<String,dynamic> row) async {
+    if (!_canView || _busy) return;
+    final mechanic=_employeeLabel(row['employee_id']?.toString());
+    final ok=await showDialog<bool>(context:context,builder:(dialog)=>AlertDialog(
+      title:const Text('Already Paid — mark Done?'),
+      content:Text(
+        'Confirm that $mechanic was already paid for this labor before '
+        'it was entered into the new payroll workflow. This marks only '
+        'this mechanic\'s task portion Done and excludes it from future payroll. '
+        'It does not create a payment or close the job.'),
+      actions:[
+        TextButton(onPressed:()=>Navigator.pop(dialog,false),
+          child:const Text('Cancel')),
+        FilledButton(onPressed:()=>Navigator.pop(dialog,true),
+          child:const Text('Confirm Already Paid')),
+      ],
+    ));
+    if (ok != true || !mounted || !_canView) return;
+    await _runOwnerTaskEdit(()=>
+      _taskEditRepository.confirmHistoricalAlreadyPaid(row['id'] as String));
+  }
+
   // Match the saved mechanic progress state in both TEST-style indicators.
   // This is presentational only: Starting does not credit payroll hours.
   static IconData _workStatusIcon(String state, {bool inner = false}) {
@@ -2317,6 +2340,25 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           style:Theme.of(context).textTheme.titleMedium),
         for(final row in rows) ...[
           _taskCard(row),
+          if (row['owner_prior_paid'] == 1)
+            const ListTile(
+              dense:true,
+              leading:Icon(Icons.verified,color:Color(0xFF078C49)),
+              title:Text('Already Paid · Done'),
+              subtitle:Text('Owner-confirmed historical settlement'),
+            )
+          else if ((row['paid_minutes'] as int? ?? 0)==0 &&
+                   row['paid']!=1 && row['assignment_conflict']!=1)
+            CheckboxListTile(
+              value:false,
+              dense:true,
+              controlAffinity:ListTileControlAffinity.leading,
+              title:const Text('Already Paid — exclude from payroll'),
+              subtitle:const Text('Owner confirmation also marks this labor Done'),
+              onChanged:_busy?null:(checked){
+                if(checked==true)unawaited(_confirmHistoricalPaid(row));
+              },
+            ),
           if(row['state']=='Open' && (row['paid_minutes'] as int? ?? 0)==0)
             Align(alignment:Alignment.centerRight,child:TextButton(onPressed:_busy?null:()=>_removeAssignment(row),
               child:Text('Remove ${_employeeLabel(row['employee_id'] as String)}'))),
