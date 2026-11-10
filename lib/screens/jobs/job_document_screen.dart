@@ -2409,13 +2409,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       Map<String, dynamic> detail) async {
     if (_estimate) return detail;
     final vehicleId = detail['vehicle_id']?.toString() ?? '';
-    if (vehicleId.isEmpty) return detail;
+    final jobId = detail['job_id']?.toString() ?? '';
+    // Never copy vehicle-wide findings onto an unrelated invoice. A finding
+    // needs a durable link to the invoice's job before it can be projected.
+    if (vehicleId.isEmpty || jobId.isEmpty) {
+      return <String, dynamic>{...detail, 'finding_notes': <Map<String, dynamic>>[]};
+    }
     final findings = await _localFindingRecords.loadLocalFindings(
         widget.businessId, vehicleId);
     final seen = <String>{};
     final selected = <Map<String, dynamic>>[];
     for (final finding in findings) {
       if (finding['include_on_invoice'] != true) continue;
+      final foundJobId = finding['found_job_id']?.toString() ?? '';
+      final repairJobId = finding['repair_job_id']?.toString() ?? '';
+      if (foundJobId != jobId && repairJobId != jobId) continue;
       final body = finding['body']?.toString().trim() ?? '';
       final id = finding['id']?.toString() ?? '';
       if (body.isEmpty || id.isEmpty || !seen.add(id)) continue;
