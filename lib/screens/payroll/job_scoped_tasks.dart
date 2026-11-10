@@ -314,7 +314,7 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
                     // mechanic in expanded details. Make them discoverable
                     // from the collapsed card instead of showing no action.
                     TextButton(
-                      onPressed: () => _toggle(key),
+                      onPressed: expanded ? null : () => _toggle(key),
                       child: const Text('View mechanics'),
                     )
                   else if (status == 'Done')
