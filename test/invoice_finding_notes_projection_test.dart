@@ -33,8 +33,15 @@ void main() {
       },
     ]);
     expect(notes, [
-      {'id': 'resolved-1', 'body': '• Strut mounts are broken'},
+      {'id': 'resolved-1', 'body': '• Strut mounts are broken', 'resolution_group': 'resolved'},
     ]);
+  });
+
+  test('in-job is not falsely labeled repaired before status is resolved', () {
+    final rows = invoiceFindingNotesForJob(jobId: 'j', findings: [
+      {'id': 'x', 'repair_job_id': 'j', 'status': 'in_job', 'body': 'Concern', 'include_on_invoice': true},
+    ]);
+    expect(rows.single['resolution_group'], 'unresolved');
   });
 
   test('does not duplicate or include blank findings', () {
@@ -43,7 +50,7 @@ void main() {
       {'id': 'a', 'found_job_id': 'j', 'body': 'First', 'include_on_invoice': true},
       {'id': 'b', 'found_job_id': 'j', 'body': '  ', 'include_on_invoice': true},
     ]);
-    expect(rows, [{'id': 'a', 'body': '• First'}]);
+    expect(rows, [{'id': 'a', 'body': '• First', 'resolution_group': 'unresolved'}]);
     expect(invoiceFindingNotesForJob(jobId: '', findings: const []), isEmpty);
   });
 }
