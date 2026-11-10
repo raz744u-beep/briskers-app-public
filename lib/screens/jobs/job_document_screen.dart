@@ -7686,6 +7686,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             FutureBuilder<Map<String, dynamic>>(
               future: _withLocalFindingNotes(_detail!),
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'Vehicle Findings could not be loaded from this device. '
+                      'Refresh before issuing the invoice.',
+                      style: TextStyle(color: Color(0xFFB42318)),
+                    ),
+                  );
+                }
                 final rows = snapshot.data?['finding_notes'] as List? ?? const [];
                 if (rows.isEmpty) return const SizedBox.shrink();
                 return Card(
