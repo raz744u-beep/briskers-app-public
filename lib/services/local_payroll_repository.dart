@@ -98,6 +98,23 @@ class LocalPayrollRepository {
           WHERE p.business_id=OLD.business_id AND p.task_id=OLD.task_id
             AND p.employee_id=OLD.employee_id)
         BEGIN SELECT RAISE(ABORT,'Owner-confirmed prior paid hours are immutable'); END''',
+      '''CREATE TRIGGER IF NOT EXISTS regular_payroll_owner_prior_paid_credit_no_delete
+        BEFORE DELETE ON local_mechanic_work_credits_v1
+        WHEN EXISTS(SELECT 1 FROM regular_payroll_owner_prior_paid_v1 h
+          WHERE h.business_id=OLD.business_id AND h.allocation_id=OLD.allocation_id)
+        BEGIN SELECT RAISE(ABORT,'Owner-confirmed prior paid labor is immutable'); END''',
+      '''CREATE TRIGGER IF NOT EXISTS regular_payroll_owner_prior_paid_portion_lock
+        BEFORE UPDATE OF state,employee_id,task_id ON regular_payroll_portions
+        WHEN (NEW.state<>OLD.state OR NEW.employee_id<>OLD.employee_id
+          OR NEW.task_id<>OLD.task_id) AND EXISTS(
+          SELECT 1 FROM regular_payroll_owner_prior_paid_v1 h
+          WHERE h.business_id=OLD.business_id AND h.allocation_id=OLD.id)
+        BEGIN SELECT RAISE(ABORT,'Owner-confirmed prior paid task is immutable'); END''',
+      '''CREATE TRIGGER IF NOT EXISTS regular_payroll_owner_prior_paid_portion_no_delete
+        BEFORE DELETE ON regular_payroll_portions
+        WHEN EXISTS(SELECT 1 FROM regular_payroll_owner_prior_paid_v1 h
+          WHERE h.business_id=OLD.business_id AND h.allocation_id=OLD.id)
+        BEGIN SELECT RAISE(ABORT,'Owner-confirmed prior paid task is immutable'); END''',
       '''CREATE TRIGGER IF NOT EXISTS regular_payroll_credit_frozen_update BEFORE UPDATE ON local_mechanic_work_credits_v1 WHEN OLD.paid_operation_id IS NOT NULL AND EXISTS(SELECT 1 FROM regular_payroll_paid_work WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id) BEGIN SELECT RAISE(ABORT,'Paid credit is immutable'); END''',
       '''CREATE TRIGGER IF NOT EXISTS regular_payroll_credit_frozen_delete BEFORE DELETE ON local_mechanic_work_credits_v1 WHEN EXISTS(SELECT 1 FROM regular_payroll_paid_work WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id) BEGIN SELECT RAISE(ABORT,'Paid credit is immutable'); END''',
       '''CREATE TRIGGER IF NOT EXISTS regular_payroll_paid_work_frozen_update BEFORE UPDATE ON regular_payroll_paid_work BEGIN SELECT RAISE(ABORT,'Paid work is immutable'); END''',
