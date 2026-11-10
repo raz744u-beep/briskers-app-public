@@ -262,7 +262,9 @@ class LocalFinancialCache {
       }
       final snapshot = {
         ...detail,
-        'transaction_date': detail['date'],
+        // Some verified recurring responses already use transaction_date
+        // rather than date. Never erase the posted date on import.
+        'transaction_date': detail['transaction_date'] ?? detail['date'],
         'sync_state': 'synced',
       };
       final identity = {
@@ -278,7 +280,11 @@ class LocalFinancialCache {
       await saveTransactions(businessId, [
         if (!rows.any((row) => row['id'] == id)) {...snapshot, ...identity},
         for (final row in rows)
-          if (row['id'] == id) {...row, ...identity} else row,
+          // The old merge retained stale amount/date/description on a
+          // matching ID, so a verified downloaded occurrence could remain
+          // missing or incorrect in the visible local transaction list.
+          // Preserve local-only fields while refreshing verified posted data.
+          if (row['id'] == id) {...row, ...snapshot, ...identity} else row,
       ]);
     });
   }
