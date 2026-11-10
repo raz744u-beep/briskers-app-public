@@ -11,14 +11,16 @@ List<Map<String, dynamic>> invoiceFindingNotesForJob({
     if (finding['include_on_invoice'] != true) continue;
     final foundJobId = finding['found_job_id']?.toString() ?? '';
     final repairJobId = finding['repair_job_id']?.toString() ?? '';
-    if (foundJobId != jobId && repairJobId != jobId) continue;
+    final resolvedJobId = finding['resolved_job_id']?.toString() ?? '';
+    if (foundJobId != jobId && repairJobId != jobId && resolvedJobId != jobId) continue;
     final id = finding['id']?.toString() ?? '';
     final body = finding['body']?.toString().trim() ?? '';
     if (id.isEmpty || body.isEmpty || !seen.add(id)) continue;
     notes.add(<String, dynamic>{
       'id': id,
       'body': '• $body',
-      'resolution_group': finding['status'] == 'resolved' && repairJobId == jobId
+      'resolution_group': finding['status'] == 'resolved' &&
+              (repairJobId == jobId || resolvedJobId == jobId)
           ? 'resolved'
           : 'unresolved',
     });
