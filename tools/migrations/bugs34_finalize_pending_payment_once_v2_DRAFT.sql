@@ -13,12 +13,23 @@ DECLARE
   v_tx uuid;
   v_mapping jsonb := '[]'::jsonb;
   v_count integer := 0;
+  v_expected_count integer := 0;
+  v_expected_total numeric := 0;
+  v_posted_total numeric := 0;
 BEGIN
   PERFORM briskers.require_permission(p_business_id,'payments.create');
   SELECT * INTO d FROM briskers.sales_documents
    WHERE business_id=p_business_id AND id=p_invoice_id FOR UPDATE;
   IF NOT FOUND OR d.kind <> 'invoice' OR d.status NOT IN ('issued','accepted') THEN
     RAISE EXCEPTION 'Issued invoice required' USING ERRCODE='23514';
+  END IF;
+  SELECT count(*),coalesce(sum(amount),0)
+    INTO v_expected_count,v_expected_total
+    FROM briskers.invoice_payment_operation_keys
+   WHERE business_id=p_business_id AND invoice_id=p_invoice_id;
+  IF v_expected_count=0 OR v_expected_total IS DISTINCT FROM d.total_amount THEN
+    RAISE EXCEPTION 'Original receipt coverage does not match invoice total'
+      USING ERRCODE='23514';
   END IF;
   -- Reject mixed legacy posted and pending payments before any write.
   IF EXISTS (SELECT 1 FROM briskers.payment_allocations a
@@ -88,6 +99,17 @@ BEGIN
       RAISE EXCEPTION 'No original payment identities found'
         USING ERRCODE='23514';
     END IF;
+  END IF;
+  SELECT coalesce(sum(a.gross_amount),0) INTO v_posted_total
+    FROM briskers.payment_allocations a
+    JOIN briskers.financial_transactions t
+      ON t.business_id=a.business_id AND t.id=a.transaction_id
+   WHERE a.business_id=p_business_id AND a.document_id=p_invoice_id
+     AND t.status='posted';
+  IF v_posted_total IS DISTINCT FROM d.total_amount
+     OR jsonb_array_length(v_mapping) <> v_expected_count THEN
+    RAISE EXCEPTION 'Posted payment coverage incomplete'
+      USING ERRCODE='23514';
   END IF;
   RETURN v_mapping;
 END
