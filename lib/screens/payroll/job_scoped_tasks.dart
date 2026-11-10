@@ -300,6 +300,15 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
                   else if (allocations.length == 1)
                     _action(key, status,
                       allocation: allocations.single)
+                  else if (allocations.isEmpty && status != 'Done')
+                    // Never silently hide Start when the local invoice
+                    // allocation has not been recovered. An allocation must
+                    // exist before work can be started or paid.
+                    OutlinedButton(
+                      onPressed: widget.onManageLabor == null
+                          ? null : () => widget.onManageLabor!(row),
+                      child: const Text('Assign mechanic'),
+                    )
                   else if (status == 'Done')
                     _action(key, status),
                   Icon(expanded ? Icons.expand_less : Icons.chevron_right,
