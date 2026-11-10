@@ -6042,6 +6042,27 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
+          // Mirror the SAME saved job-level lead from Job Details. This is
+          // one assignment with two entry points, not a labor-line selector.
+          if (!_estimate && widget.isOwner && OwnerPayrollScreen.enabled &&
+              (_detail?['job_id']?.toString().isNotEmpty ?? false))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: SizedBox(
+                  width: 220,
+                  child: JobTasksAccess(
+                    business: widget.businessId,
+                    job: _detail!['job_id'].toString(),
+                    invoice: widget.documentId,
+                    selectorOnly: true,
+                    revision: _loadGeneration,
+                    onChanged: () => unawaited(_load()),
+                  ),
+                ),
+              ),
+            ),
           if (identifixImported)
             Container(
               margin: const EdgeInsets.fromLTRB(12, 12, 12, 10),
