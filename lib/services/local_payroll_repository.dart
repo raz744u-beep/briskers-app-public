@@ -77,6 +77,11 @@ class LocalPayrollRepository {
       '''CREATE TABLE IF NOT EXISTS regular_payroll_paid_work (business_id TEXT NOT NULL, credit_id TEXT NOT NULL, operation_id TEXT NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(business_id,credit_id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_paid_base (business_id TEXT NOT NULL, employee_id TEXT NOT NULL, week TEXT NOT NULL, operation_id TEXT NOT NULL, amount INTEGER NOT NULL, PRIMARY KEY(business_id,employee_id,week))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, business_id TEXT NOT NULL, operation_id TEXT NOT NULL, event TEXT NOT NULL, payload TEXT NOT NULL)''',
+      // Explicit historical Owner confirmation, NEVER a payroll payment.
+      '''CREATE TABLE IF NOT EXISTS regular_payroll_owner_prior_paid_v1 (
+        business_id TEXT NOT NULL,allocation_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,confirmed_at TEXT NOT NULL,
+        PRIMARY KEY(business_id,allocation_id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_sync_outbox (business_id TEXT NOT NULL, operation_id TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'held_local', attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(business_id,operation_id))''',
       '''CREATE TRIGGER IF NOT EXISTS regular_payroll_credit_frozen_update BEFORE UPDATE ON local_mechanic_work_credits_v1 WHEN OLD.paid_operation_id IS NOT NULL AND EXISTS(SELECT 1 FROM regular_payroll_paid_work WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id) BEGIN SELECT RAISE(ABORT,'Paid credit is immutable'); END''',
       '''CREATE TRIGGER IF NOT EXISTS regular_payroll_credit_frozen_delete BEFORE DELETE ON local_mechanic_work_credits_v1 WHEN EXISTS(SELECT 1 FROM regular_payroll_paid_work WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id) BEGIN SELECT RAISE(ABORT,'Paid credit is immutable'); END''',
@@ -438,7 +443,8 @@ class LocalPayrollRepository {
         'LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id '
         'WHERE p.business_id=? AND p.task_id=? AND p.employee_id=? AND COALESCE(m.active,1)=1 '
         'AND c.paid_operation_id IS NULL '
-        'AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage w WHERE w.business_id=p.business_id AND w.credit_id=p.id)',
+        'AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage w WHERE w.business_id=p.business_id AND w.credit_id=p.id) '
+        'AND NOT EXISTS(SELECT 1 FROM regular_payroll_owner_prior_paid_v1 h WHERE h.business_id=p.business_id AND h.allocation_id=p.id)',
         [business, task, employee],
       );
       if (assignment.length != 1) {
@@ -1167,6 +1173,7 @@ class LocalPayrollRepository {
     await prepare();
     final rows = await _read(
       "SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,"
+      "CASE WHEN h.allocation_id IS NULL THEN 0 ELSE 1 END AS owner_prior_paid,"
       "CASE WHEN s.source_kind='invoice' AND (date(d.document_date) IS NULL OR date(d.document_date)!=d.document_date OR d.document_date < '${LocalInvoiceTaskStore.payrollCutover}') AND NOT EXISTS "
       "(SELECT 1 FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id "
       "AND a.event='owner_reviewed_unpaid_carry') THEN 1 ELSE 0 END AS archived_labor,"
@@ -1189,6 +1196,7 @@ class LocalPayrollRepository {
       "JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id "
       "LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id "
       "LEFT JOIN regular_payroll_actual_time at ON at.business_id=p.business_id AND at.credit_id=p.id "
+      "LEFT JOIN regular_payroll_owner_prior_paid_v1 h ON h.business_id=p.business_id AND h.allocation_id=p.id "
       "LEFT JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id "
       "LEFT JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id "
       "LEFT JOIN local_documents d ON d.business_id=s.business_id AND d.id=s.invoice_id "
@@ -1202,17 +1210,21 @@ class LocalPayrollRepository {
     _authorize();
     return rows.map((row) {
       final total = row['actual_minutes'] as int;
-      final paid = row['paid_minutes'] as int;
+      final ownerPriorPaid = row['owner_prior_paid'] == 1;
+      final paid = ownerPriorPaid ? total : row['paid_minutes'] as int;
       final rate = row['rate_cents'] as int;
       if (paid < 0 || paid > total) throw StateError('Conflicting payroll coverage.');
       final remaining = total - paid;
       return {
         ...row, 'hours_hundredths': (total * 100 + 30) ~/ 60,
+        'paid_minutes': paid,
+        'paid_cents': ownerPriorPaid ? ((total * rate + 30) ~/ 60) : row['paid_cents'],
         'remaining_minutes': remaining,
         'remaining_cents': ((total * rate + 30) ~/ 60) - ((paid * rate + 30) ~/ 60),
         'gross_cents': (total * rate + 30) ~/ 60,
         'paid': total > 0 && remaining == 0 ? 1 : 0,
-        'pay_status': paid == 0 ? 'Unpaid' : remaining == 0 ? 'Paid' : 'Partially Paid',
+        'pay_status': ownerPriorPaid ? 'Already Paid' :
+            paid == 0 ? 'Unpaid' : remaining == 0 ? 'Paid' : 'Partially Paid',
       };
     }).toList();
   }
