@@ -62,11 +62,11 @@ void main() {
 
     await expectLater(
       repo.setEstimatedMinutes('task','emp',120,reviseCompletedUnpaid:true),
-      throwsA(isA<Exception>()),
+      throwsA(isA<StateError>()),
     );
     await expectLater(
       repo.updateWork('alloc','In Progress',120,'2026-11-10'),
-      throwsA(isA<Exception>()),
+      throwsA(isA<StateError>()),
     );
   });
 }
