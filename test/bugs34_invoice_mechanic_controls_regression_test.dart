@@ -65,7 +65,7 @@ void main(){
     final access=await File('lib/screens/payroll/job_tasks_access.dart')
         .readAsString();
     expect(invoice, contains('selectorOnly: true'));
-    expect(invoice, contains('job: _detail![' + "'job_id'" + '].toString()'));
+    expect(invoice, contains("job: _detail!['job_id'].toString()"));
     expect(access, contains('await repo.setMainMechanic(widget.job,id,'));
     expect(access, contains('final bool selectorOnly;'));
   });
