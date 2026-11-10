@@ -1,3 +1,4 @@
+import '../../services/invoice_finding_notes_projection.dart';
 import '../payroll/owner_payroll_screen.dart';
 import '../payroll/job_tasks_access.dart';
 import 'owner_local_delete_action.dart';
@@ -2417,19 +2418,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
     final findings = await _localFindingRecords.loadLocalFindings(
         widget.businessId, vehicleId);
-    final seen = <String>{};
-    final selected = <Map<String, dynamic>>[];
-    for (final finding in findings) {
-      if (finding['include_on_invoice'] != true) continue;
-      final foundJobId = finding['found_job_id']?.toString() ?? '';
-      final repairJobId = finding['repair_job_id']?.toString() ?? '';
-      if (foundJobId != jobId && repairJobId != jobId) continue;
-      final body = finding['body']?.toString().trim() ?? '';
-      final id = finding['id']?.toString() ?? '';
-      if (body.isEmpty || id.isEmpty || !seen.add(id)) continue;
-      selected.add({'id': id, 'body': '• $body'});
-    }
-    return <String, dynamic>{...detail, 'finding_notes': selected};
+    return <String, dynamic>{
+      ...detail,
+      'finding_notes': invoiceFindingNotesForJob(jobId: jobId, findings: findings),
+    };
   }
 
   Future<Map<String, dynamic>?> _preparePdf() async {
