@@ -186,8 +186,8 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
     }
     return OutlinedButton.icon(
       onPressed: onPress,
-      style: OutlinedButton.styleFrom(foregroundColor: orange,
-        side: const BorderSide(color: orange),
+      style: OutlinedButton.styleFrom(foregroundColor: blue,
+        side: const BorderSide(color: blue),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         visualDensity: VisualDensity.compact),
       icon: const Icon(Icons.play_arrow, size: 17),

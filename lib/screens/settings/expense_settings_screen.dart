@@ -888,9 +888,10 @@ class _CounterpartiesSettingsScreenState
       if (BriskersConnectionModeController.instance.forceOffline) return;
       final remote = await loadSettings(widget.businessId);
       if (!mounted || epoch != _epoch) return;
-      await cache.saveOptions(widget.businessId, remote);
+      if (remote['counterparties'] is! List) throw StateError('Payee list unavailable.');
+      await cache.saveOptions(widget.businessId, {'counterparties':remote['counterparties']});
       final merged = await cache.loadOptions(widget.businessId);
-      if (mounted && epoch == _epoch) setState(() => _display(merged));
+      if (mounted && epoch == _epoch) setState(() => _display({...merged,'categories':remote['categories'] ?? merged['categories']}));
     } catch (e) {
       if (mounted && epoch == _epoch) setState(() { rows ??= []; error = e.toString(); });
     }

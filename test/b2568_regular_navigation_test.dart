@@ -313,6 +313,11 @@ void main(){
     expect(find.text('General Task'),findsOneWidget);
     expect(find.byTooltip('Advanced task filters'),findsNothing);
     expect(find.byIcon(Icons.more_vert),findsNothing);
+    await capture('job-tasks-collapsed');
+    final scopedTask = find.descendant(of:find.byType(JobScopedTasks),
+      matching:find.text('Shared diagnostic labor'));
+    await click(scopedTask.first);
+    await capture('job-tasks-expanded');
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds:500));
     expect(secondaryPrompts,0,

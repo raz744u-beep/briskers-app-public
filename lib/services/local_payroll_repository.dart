@@ -452,6 +452,24 @@ class LocalPayrollRepository {
         'ON CONFLICT(business_id,job_id) DO UPDATE SET employee_id=excluded.employee_id,employee_name=excluded.employee_name,revision=revision+1 '
         'WHERE employee_id IS NOT excluded.employee_id OR employee_name IS NOT excluded.employee_name',[business,job,employee,name]);
       if (employee != null) {
+        // Explicit lead selection on an open, older job can assign operational
+        // hours. The payroll cutover still archives every credit until reviewed.
+        final older = await _read(
+          "SELECT d.id FROM local_documents d JOIN local_jobs j "
+          "ON j.business_id=d.business_id AND j.id=d.job_id "
+          "WHERE d.business_id=? AND d.job_id=? AND d.kind='invoice' "
+          "AND d.closed_at IS NULL AND j.completed_at IS NULL "
+          "AND j.status IN ('open','in_progress') "
+          "AND lower(coalesce(d.status,'')) IN ('draft','open','issued','pending') "
+          "AND date(d.document_date)=d.document_date AND d.document_date < ?",
+          [business,job,LocalInvoiceTaskStore.payrollCutover]);
+        for (final row in older) {
+          final id = row['id'] as String;
+          final detail = await LocalDocumentDetailCache(database:db).load(business,id);
+          if (detail != null) {
+            await LocalInvoiceTaskStore(db).save(business,id,detail,ownerAssignedOpenDocument:true);
+          }
+        }
         await LocalTaskAssignmentStore(db).inherit(business, job);
       } else {
         for(final task in await tasks()){

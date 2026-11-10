@@ -40,7 +40,7 @@ class LocalInvoiceTaskStore {
       'PRIMARY KEY(business_id,task_id))');
   }
 
-  Future<void> save(String business, String document, Map<String, dynamic> detail) async {
+  Future<void> save(String business, String document, Map<String, dynamic> detail, {bool ownerAssignedOpenDocument = false}) async {
     if (detail['id'] != document ||
         (detail['business_id'] != null && detail['business_id'] != business)) {
       return;
@@ -68,7 +68,7 @@ class LocalInvoiceTaskStore {
       return;
     }
     final date = source.readNullable<String>('document_date');
-    if (!currentPayrollDate(date)) {
+    if (!currentPayrollDate(date) && !ownerAssignedOpenDocument) {
       // Reading an archived invoice must never reconstruct its labor as new work.
       // Existing tasks, payments and invoice lines remain available as history.
       return;
@@ -120,7 +120,8 @@ class LocalInvoiceTaskStore {
           'ON CONFLICT(business_id,task_id) DO UPDATE SET line_position=excluded.line_position',
           [position,business,document,line['id']]);
       }
-      await LocalTaskAssignmentStore(db).inherit(business, job);
+      await LocalTaskAssignmentStore(db).inherit(business, job,
+        ownerAssignedDocument: ownerAssignedOpenDocument ? document : null);
     });
   }
 

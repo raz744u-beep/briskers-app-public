@@ -99,6 +99,31 @@ void main() {
     expect((invoice!['lines'] as List).single['quantity'],8.5);
   });
 
+  test('pending invoice 6366 on open J-47 assigns seven hours without reviving old payroll', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(() async { await db.close(); LocalDocumentDetailCache.sqliteWritesEnabled=false; });
+    await LocalDocumentDetailCache.initialize(db);
+    final repo = LocalPayrollRepository(db,business:'shop',owner:true);
+    await repo.prepare();
+    await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status,job_number) VALUES('job','shop','owner','Thermostat','in_progress','J-47')");
+    await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind,document_number,document_date,status,sync_state) VALUES('doc','shop','job','invoice','6366','2026-11-06','draft','pending')");
+    final cache = LocalDocumentDetailCache(database:db);
+    await cache.save('shop','doc',{'id':'doc','kind':'invoice','job_id':'job','lines':[
+      {'id':'line','name':'Labor','line_kind':'labor','description':'Replace thermostat assembly','quantity':7,'unit_price':150},
+    ]});
+    await repo.refreshInvoiceTasks();
+    expect(await repo.work(),isEmpty);
+    await repo.setMainMechanic('job','chris','Chris');
+    await repo.refreshInvoiceTasks();
+    final row = (await repo.work()).single;
+    expect(row['estimated_minutes'],420);
+    expect(row['actual_minutes'],0);
+    expect(row['archived_labor'],1);
+    final line = ((await cache.load('shop','doc'))!['lines'] as List).single;
+    expect(line['quantity'] * line['unit_price'],1050);
+  });
+
   test('Job labor Assign / split is additive in source, never replace', () {
     final screen=File('lib/screens/payroll/owner_payroll_screen.dart')
       .readAsStringSync();
