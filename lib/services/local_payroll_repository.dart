@@ -83,6 +83,21 @@ class LocalPayrollRepository {
         employee_id TEXT NOT NULL,confirmed_at TEXT NOT NULL,
         PRIMARY KEY(business_id,allocation_id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_sync_outbox (business_id TEXT NOT NULL, operation_id TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'held_local', attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(business_id,operation_id))''',
+      '''CREATE TRIGGER IF NOT EXISTS regular_payroll_owner_prior_paid_credit_lock
+        BEFORE UPDATE OF actual_minutes,completed,employee_id,allocation_id
+        ON local_mechanic_work_credits_v1
+        WHEN EXISTS(SELECT 1 FROM regular_payroll_owner_prior_paid_v1 h
+          WHERE h.business_id=OLD.business_id AND h.allocation_id=OLD.allocation_id)
+        BEGIN SELECT RAISE(ABORT,'Owner-confirmed prior paid labor is immutable'); END''',
+      '''CREATE TRIGGER IF NOT EXISTS regular_payroll_owner_prior_paid_estimate_lock
+        BEFORE UPDATE OF minutes ON regular_payroll_estimates
+        WHEN NEW.minutes<>OLD.minutes AND EXISTS(
+          SELECT 1 FROM regular_payroll_portions p
+          JOIN regular_payroll_owner_prior_paid_v1 h
+            ON h.business_id=p.business_id AND h.allocation_id=p.id
+          WHERE p.business_id=OLD.business_id AND p.task_id=OLD.task_id
+            AND p.employee_id=OLD.employee_id)
+        BEGIN SELECT RAISE(ABORT,'Owner-confirmed prior paid hours are immutable'); END''',
       '''CREATE TRIGGER IF NOT EXISTS regular_payroll_credit_frozen_update BEFORE UPDATE ON local_mechanic_work_credits_v1 WHEN OLD.paid_operation_id IS NOT NULL AND EXISTS(SELECT 1 FROM regular_payroll_paid_work WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id) BEGIN SELECT RAISE(ABORT,'Paid credit is immutable'); END''',
       '''CREATE TRIGGER IF NOT EXISTS regular_payroll_credit_frozen_delete BEFORE DELETE ON local_mechanic_work_credits_v1 WHEN EXISTS(SELECT 1 FROM regular_payroll_paid_work WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id) BEGIN SELECT RAISE(ABORT,'Paid credit is immutable'); END''',
       '''CREATE TRIGGER IF NOT EXISTS regular_payroll_paid_work_frozen_update BEFORE UPDATE ON regular_payroll_paid_work BEGIN SELECT RAISE(ABORT,'Paid work is immutable'); END''',
@@ -1182,7 +1197,13 @@ class LocalPayrollRepository {
       final retired = await _read('SELECT active FROM regular_payroll_assignment_meta WHERE business_id=? AND task_id=? AND employee_id=?',
         [business, rows.firstOrNull?['task_id']?.toString() ?? '', rows.firstOrNull?['employee_id']?.toString() ?? '']);
       if (!allowRetiredProgress && retired.firstOrNull?['active'] == 0){throw StateError('This inherited assignment changed. Refresh tasks.');}
-      if (rows.length != 1 || rows.single['paid_operation_id'] != null)
+      final priorPaid = await _read(
+        'SELECT allocation_id FROM regular_payroll_owner_prior_paid_v1 '
+        'WHERE business_id=? AND allocation_id=?',
+        [business,id],
+      );
+      if (rows.length != 1 || rows.single['paid_operation_id'] != null ||
+          priorPaid.isNotEmpty)
         { throw StateError('Missing or paid work; add a recheck'); }
       if (rows.single['state'] == 'Open') {
         final removed = await _read(
