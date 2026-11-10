@@ -13,9 +13,11 @@ import 'payroll_ui_scope.dart';
 
 /// The same task identity is used by the invoice, Job and employee screens.
 class JobTasksAccess extends StatefulWidget {
-  const JobTasksAccess({super.key,required this.business,required this.job,this.invoice,this.line,this.database,this.onChanged,this.onHours,this.revision=0});
+  const JobTasksAccess({super.key,required this.business,required this.job,this.invoice,this.line,this.database,this.onChanged,this.onHours,this.revision=0,this.selectorOnly=false});
   final String business,job;
   final int revision;
+  /// Render just the same job-level Main Mechanic selector on Invoice Details.
+  final bool selectorOnly;
   final String? invoice,line;
   final BriskersLocalDatabase? database;
   final VoidCallback? onChanged;
@@ -328,6 +330,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
             ],
           ),
         )),
+        if (!widget.selectorOnly) ...[
         const SizedBox(width:8),Expanded(child:SizedBox(height:50,child:OutlinedButton.icon(
           style:OutlinedButton.styleFrom(
             tapTargetSize:MaterialTapTargetSize.shrinkWrap,
@@ -339,8 +342,9 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
             shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(15))),
           onPressed:busy?null:open,icon:const Icon(Icons.checklist),
           label:const Text('Job Tasks',maxLines:1,overflow:TextOverflow.ellipsis,
-            style:TextStyle(fontWeight:FontWeight.w800,fontSize:15)))))]),
-      if(widget.invoice!=null && estimated!=null)Text('Estimated labor: ${(estimated!/60).toStringAsFixed(2)} h · Actual: ${(actual!/60).toStringAsFixed(2)} h',style:const TextStyle(fontSize:12)),
+            style:TextStyle(fontWeight:FontWeight.w800,fontSize:15)))))],
+      ]),
+      if(!widget.selectorOnly && widget.invoice!=null && estimated!=null)Text('Estimated labor: ${(estimated!/60).toStringAsFixed(2)} h · Actual: ${(actual!/60).toStringAsFixed(2)} h',style:const TextStyle(fontSize:12)),
       if(warning!=null)Row(children:[Expanded(child:Text(warning!)),TextButton(onPressed:load,child:const Text('Retry'))]),
     ]);
   }
