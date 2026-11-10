@@ -37,6 +37,17 @@ void main() {
     ]);
   });
 
+  test('historical resolved job is classified for the correct invoice', () {
+    final rows = invoiceFindingNotesForJob(jobId: 'job-50', findings: [
+      {'id': 'history', 'resolved_job_id': 'job-50', 'status': 'resolved',
+       'body': 'Repaired mount', 'include_on_invoice': true},
+      {'id': 'other', 'resolved_job_id': 'job-49', 'status': 'resolved',
+       'body': 'Different visit', 'include_on_invoice': true},
+    ]);
+    expect(rows.length, 1);
+    expect(rows.single['resolution_group'], 'resolved');
+  });
+
   test('in-job is not falsely labeled repaired before status is resolved', () {
     final rows = invoiceFindingNotesForJob(jobId: 'j', findings: [
       {'id': 'x', 'repair_job_id': 'j', 'status': 'in_job', 'body': 'Concern', 'include_on_invoice': true},
