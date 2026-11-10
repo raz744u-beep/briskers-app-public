@@ -186,8 +186,8 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
     }
     return OutlinedButton.icon(
       onPressed: onPress,
-      style: OutlinedButton.styleFrom(foregroundColor: blue,
-        side: const BorderSide(color: blue),
+      style: OutlinedButton.styleFrom(foregroundColor: orange,
+        side: const BorderSide(color: orange),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         visualDensity: VisualDensity.compact),
       icon: const Icon(Icons.play_arrow, size: 17),
@@ -322,8 +322,6 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
                     )
                   else if (status == 'Done')
                     _action(key, status),
-                  Icon(expanded ? Icons.expand_less : Icons.chevron_right,
-                    color: const Color(0xFF26364B), size: 20),
                 ]),
               ),
               if (expanded)
