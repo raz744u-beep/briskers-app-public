@@ -2526,7 +2526,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       final memoForPdf = await _pendingMemoForPdf(detail);
       detail.clear();
       detail.addAll(memoForPdf);
-      return await _withPdfUnits(await _withLocalFindingNotes(detail));
+      final withFindingNotes = await _withLocalFindingNotes(detail);
+      detail.clear();
+      detail.addAll(withFindingNotes);
+      return await _withPdfUnits(detail);
     } catch (error) {
       // Auto's network may fail while the known invoice is still safely
       // available in the local cache. Do not silently send an unverified PDF.
