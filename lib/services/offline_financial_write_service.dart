@@ -278,6 +278,7 @@ class OfflineFinancialWriteService {
         'signed_amount': direction == 'expense' ? -amount : amount,
         'transaction_date': dateText,
         'counterparty': cleanCounterparty,
+        'counterparty_id': counterpartyId,
         'category': categoryName,
         'category_id': categoryId,
         'account': accountName,

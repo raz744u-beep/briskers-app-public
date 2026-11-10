@@ -64,7 +64,7 @@ void main() {
         containsPair('recurring_occurrence_date', '2026-11-04'));
 
     // Match the shop's two weekly dates without posting anything to the server.
-    const october = {...occurrence, 'id':'october', 'date':'2026-10-28',
+    final october = {...occurrence, 'id':'october', 'date':'2026-10-28',
       'recurring_occurrence_date':'2026-10-28', 'attachments':[{'id':'receipt','local_file_path':'receipt.jpg'}]};
     await cache.importRecurringExpenseOccurrence('shop','weekly-rule','2026-10-28',october);
     final repo = OfflineRecurringRepository(database:db,businessId:'shop',userId:'owner',

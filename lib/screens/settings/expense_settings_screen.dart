@@ -1158,6 +1158,9 @@ class _CounterpartyDialogState extends State<_CounterpartyDialog> {
                   value: null,
                   child: Text('No default category'),
                 ),
+                if (defaultCategoryId != null && !widget.categories.any((c) => c['id'] == defaultCategoryId))
+                  DropdownMenuItem(value:defaultCategoryId,
+                    child:Text(widget.row?['default_category']?.toString() ?? 'Previously saved category')),
                 ...widget.categories.map(
                   (category) => DropdownMenuItem<String?>(
                     value: category['id']?.toString(),
@@ -1200,7 +1203,7 @@ class _CounterpartyDialogState extends State<_CounterpartyDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: saving ? null : () => Navigator.pop(context, false),
+          onPressed: saving ? null : () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
         FilledButton(
