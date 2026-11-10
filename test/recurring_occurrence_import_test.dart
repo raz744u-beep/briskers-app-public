@@ -65,6 +65,8 @@ void main() {
         .singleWhere((row) => row['id'] == 'server-expense');
     expect(repaired['amount'], 105.29);
     expect(repaired['transaction_date'], '2026-11-04');
+    expect(repaired['recurring_occurrence_date'], '2026-11-04');
+    expect(repaired['recurring_rule_id'], 'weekly-rule');
     expect(await cache.loadTransactions('shop'), hasLength(2));
     final saved = await cache.loadTransactionDetail('shop', 'server-expense');
     expect(saved, containsPair('amount', 105.29));
