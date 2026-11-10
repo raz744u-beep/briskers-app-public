@@ -7682,6 +7682,33 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ),
             ),
           ],
+          if (!_estimate && _detail != null)
+            FutureBuilder<Map<String, dynamic>>(
+              future: _withLocalFindingNotes(_detail!),
+              builder: (context, snapshot) {
+                final rows = snapshot.data?['finding_notes'] as List? ?? const [];
+                if (rows.isEmpty) return const SizedBox.shrink();
+                return Card(
+                  key: const ValueKey('invoice-notes-selected-findings'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Vehicle Findings',
+                            style: TextStyle(fontWeight: FontWeight.w800)),
+                        const SizedBox(height: 6),
+                        for (final row in rows)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Text((row as Map)['body']?.toString() ?? ''),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
           const SizedBox(height: 8),
           TextField(
             controller: _notesController,
