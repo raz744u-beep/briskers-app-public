@@ -415,24 +415,69 @@ class LocalPayrollRepository {
           'ON CONFLICT(business_id,task_id,employee_id) DO UPDATE SET active=0,revision=revision+1',
           [business,task,previous]);
       }
-      await setEstimatedMinutes(task, employee, minutes);
+      await setEstimatedMinutes(task, employee, minutes,
+          reviseCompletedUnpaid: previous == employee);
       _authorize();
     });
   }
 
-  Future<void> setEstimatedMinutes(String task, String employee, int minutes) async {
+  /// Owner correction to an existing allocation. A completed but UNPAID
+  /// portion can have its assigned and credited time corrected together.
+  /// Payment coverage/operation locks are never bypassed, and we never
+  /// create a new allocation or a second wage credit for this correction.
+  Future<void> setEstimatedMinutes(String task, String employee, int minutes, {
+    bool reviseCompletedUnpaid = false,
+  }) async {
     _authorize();
     if (minutes < 0 || minutes > 600000) throw ArgumentError('Invalid estimated minutes.');
     await prepare();
     await db.transaction(() async {
       final assignment = await _read(
-        'SELECT p.id FROM regular_payroll_portions p JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id '
+        'SELECT p.id,p.state,c.revision,c.completed FROM regular_payroll_portions p '
+        'JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id '
         'LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id '
-        "WHERE p.business_id=? AND p.task_id=? AND p.employee_id=? AND p.state!='Done' AND COALESCE(m.active,1)=1 AND c.paid_operation_id IS NULL "
+        'WHERE p.business_id=? AND p.task_id=? AND p.employee_id=? AND COALESCE(m.active,1)=1 '
+        'AND c.paid_operation_id IS NULL '
         'AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage w WHERE w.business_id=p.business_id AND w.credit_id=p.id)',
         [business, task, employee],
       );
-      if (assignment.isEmpty) throw StateError('This mechanic is not assigned to the task.');
+      if (assignment.length != 1) {
+        throw StateError('Mechanic allocation is unavailable or already paid.');
+      }
+      final row = assignment.single;
+      if (row['state'] == 'Done' && !reviseCompletedUnpaid) {
+        throw StateError('Completed labor requires the Owner correction action.');
+      }
+      if (row['state'] == 'Done' && minutes == 0) {
+        throw StateError('Completed labor must retain positive credited time.');
+      }
+      if (row['state'] == 'Done') {
+        // Preserve Done and the original completion date while revising the
+        // exact SAME unpaid allocation; no new task or payroll payment.
+        await LocalMechanicWorkCreditRepository(database: db).recordWork(
+          businessId: business,
+          allocationId: row['id'] as String,
+          employeeId: employee,
+          expectedRevision: row['revision'] as int,
+          actualMinutes: minutes,
+          completed: true,
+        );
+        await db.customStatement(
+          'INSERT INTO regular_payroll_actual_time(business_id,credit_id,minutes,revision) '
+          'SELECT ?,?,?,revision FROM local_mechanic_work_credits_v1 '
+          'WHERE business_id=? AND allocation_id=? '
+          'ON CONFLICT(business_id,credit_id) DO UPDATE SET '
+          'minutes=excluded.minutes,revision=excluded.revision',
+          [business,row['id'],minutes,business,row['id']],
+        );
+        await db.customStatement(
+          'INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) '
+          'VALUES(?,?,?,?)',
+          [business,row['id'],'owner_corrected_completed_unpaid_hours',
+           jsonEncode({'task':task,'employee':employee,'minutes':minutes,
+             'recorded_at':DateTime.now().toUtc().toIso8601String()})],
+        );
+      }
       await db.customStatement(
         'INSERT INTO regular_payroll_estimates VALUES(?,?,?,?) '
         'ON CONFLICT(business_id,task_id,employee_id) DO UPDATE SET minutes=excluded.minutes',
