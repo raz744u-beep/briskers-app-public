@@ -47,6 +47,25 @@ void main() {
     expect(rows.map((row) => row['id']),
         unorderedEquals(['server-expense', 'local-unrelated']));
     expect(rows.singleWhere((row) => row['id'] == 'local-unrelated')['amount'], 32);
+    final savedRow = rows.singleWhere((row) => row['id'] == 'server-expense');
+    expect(savedRow['transaction_date'], '2026-11-04');
+    expect(savedRow['amount'], 105.29);
+    // Re-importing the verified server identity must refresh stale cached
+    // display fields without producing a duplicate expense.
+    await cache.saveTransactions('shop', [
+      for (final row in rows)
+        if (row['id'] == 'server-expense')
+          {...row, 'amount': 0, 'transaction_date': '2026-11-03'}
+        else row,
+    ]);
+    await cache.importRecurringExpenseOccurrence(
+      'shop', 'weekly-rule', '2026-11-04', occurrence,
+    );
+    final repaired = (await cache.loadTransactions('shop'))
+        .singleWhere((row) => row['id'] == 'server-expense');
+    expect(repaired['amount'], 105.29);
+    expect(repaired['transaction_date'], '2026-11-04');
+    expect(await cache.loadTransactions('shop'), hasLength(2));
     final saved = await cache.loadTransactionDetail('shop', 'server-expense');
     expect(saved, containsPair('amount', 105.29));
     expect(saved, containsPair('remarks', 'weekly supplies'));
