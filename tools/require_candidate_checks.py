@@ -26,7 +26,8 @@ PAYROLL_VERIFICATION_BRANCH = "fix/tasks-test-parity-bugs30-20261106"
 CANDIDATE_BRANCHES.add(PAYROLL_CANDIDATE)
 # Owner-approved consolidated Bugs 33 phone test candidate. The gate still
 # validates exact source, workflow identity and required successful checks.
-CANDIDATE_BRANCHES.add("fix/bugs33-preserve-offline-financial-history-20261108")
+BUGS33_RELEASE_BRANCH = "fix/bugs33-preserve-offline-financial-history-20261108"
+CANDIDATE_BRANCHES.add(BUGS33_RELEASE_BRANCH)
 BUILD_WORKFLOW = ".github/workflows/android-debug.yml"
 REQUIRED_WORKFLOWS = {
     "diagnostics.yml": "Briskers Diagnostics",
@@ -39,7 +40,7 @@ GLORIA_RECOVERY_WORKFLOW = ("gloria-exact-total-regression.yml",
 
 def workflows_for_branch(branch):
     workflows = dict(REQUIRED_WORKFLOWS)
-    if branch == PAYROLL_CANDIDATE:
+    if branch in {PAYROLL_CANDIDATE, BUGS33_RELEASE_BRANCH}:
         workflows["offline-recovery-android-check.yml"] = "Offline recovery Android debug verification"
         filename, name = GLORIA_RECOVERY_WORKFLOW
         workflows[filename] = name
