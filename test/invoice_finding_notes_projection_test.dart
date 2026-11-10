@@ -14,6 +14,29 @@ void main() {
     ]);
   });
 
+  test('resolved findings remain independently eligible for invoice notes', () {
+    final notes = invoiceFindingNotesForJob(jobId: 'job-50', findings: [
+      {
+        'id': 'resolved-1',
+        'found_job_id': 'job-50',
+        'repair_job_id': 'job-50',
+        'status': 'resolved',
+        'body': 'Strut mounts are broken',
+        'include_on_invoice': true,
+      },
+      {
+        'id': 'resolved-2',
+        'found_job_id': 'job-50',
+        'status': 'resolved',
+        'body': 'Do not print',
+        'include_on_invoice': false,
+      },
+    ]);
+    expect(notes, [
+      {'id': 'resolved-1', 'body': '• Strut mounts are broken'},
+    ]);
+  });
+
   test('does not duplicate or include blank findings', () {
     final rows = invoiceFindingNotesForJob(jobId: 'j', findings: [
       {'id': 'a', 'found_job_id': 'j', 'body': 'First', 'include_on_invoice': true},
