@@ -678,8 +678,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                 DropdownMenuItem(value:id,child:Text(_employeeLabel(id)))],
               onChanged: (row['actual_minutes'] as int? ?? 0)>0 || (row['recorded_actual_minutes'] as int? ?? 0)>0 ? null :
                 (id) { if(id!=null) update(()=>selected=id); }),
-            if(row['state'] != 'Open') const Padding(padding:EdgeInsets.only(top:8),
-              child:Text('Work has started. Replacement starts a new assignment and is available only before time is earned. Completed and paid credits stay with the original mechanic.')),
+            if(row['state'] != 'Open') Padding(padding:const EdgeInsets.only(top:8),
+              child:Text(row['state']=='Done'
+                ? 'Completed but unpaid: changing assigned hours also corrects credited work time. The mechanic cannot be replaced after work was earned.'
+                : 'Work has started. Replacement is available only before time is earned. Paid work remains locked.')),
             const SizedBox(height:18),
             TextField(controller:input,keyboardType:const TextInputType.numberWithOptions(decimal:true),
               decoration:const InputDecoration(labelText:'Assigned hours',border:OutlineInputBorder()),
@@ -785,7 +787,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                 tooltip: 'Edit Assignment',
                 icon: const Icon(Icons.edit_outlined,size:19,
                   color: Color(0xFF00897E)),
-                onPressed: _busy || conflict || removed || state=='Done'
+                onPressed: _busy || conflict || removed || archived
                   ? null : () => _editEstimated(row),
                 visualDensity: VisualDensity.compact,
                 constraints: const BoxConstraints(minWidth:34,minHeight:34),
