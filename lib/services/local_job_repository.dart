@@ -35,6 +35,9 @@ class LocalJobRepository {
   Future<Map<String,Map<String,int>>> allocationHours(String business,List<String> jobs) =>
       JobTaskSummary(_database).hours(business,jobs);
 
+  Future<Map<String,JobTaskProgress>> taskProgress(String business,List<String> jobs) =>
+      JobTaskSummary(_database).progressForJobs(business,jobs);
+
   // Shared device SQLite has one executor: avoid repeated DDL ahead of cards.
   // This is only an index/setup cache, not a bypass of retirement checks.
   static final _listIndexesReady =

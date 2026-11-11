@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/job_status_style.dart';
+import '../services/job_task_summary.dart';
+import 'job_list_approved_card.dart';
+export 'job_list_approved_card.dart' show approvedJobListStatusColor;
 
 class JobCompactCard extends StatelessWidget {
   const JobCompactCard({
@@ -14,6 +17,8 @@ class JobCompactCard extends StatelessWidget {
     this.onOpenInvoice,
     this.mechanicMinutes,
     this.canOpen = true,
+    this.approvedListDesign = false,
+    this.taskProgress,
   });
 
   final Map<String, dynamic> job;
@@ -23,6 +28,8 @@ class JobCompactCard extends StatelessWidget {
   final VoidCallback? onOpenInvoice;
   final Map<String,int>? mechanicMinutes;
   final bool canOpen;
+  final bool approvedListDesign;
+  final JobTaskProgress? taskProgress;
 
   String _hours(Object? raw) {
     final value = num.tryParse(raw?.toString() ?? '') ?? 0;
@@ -59,6 +66,16 @@ class JobCompactCard extends StatelessWidget {
     final displayMechanic = nickname.isNotEmpty
         ? nickname
         : (employee.isEmpty ? 'Unassigned' : _firstName(employee));
+    if (approvedListDesign) {
+      return JobListApprovedCard(
+        job: job, number: number, customer: customer, invoiceNumber: invoiceNumber,
+        vehicle: vehicle, description: displayDescription,
+        mechanic: displayMechanic, employee: employee, mechanicMinutes: mechanicMinutes,
+        progress: taskProgress, statusControl: statusControl,
+        onOpen: canOpen ? onOpen : null, onLongPress: canOpen ? onLongPress : null,
+        onOpenInvoice: canOpen ? onOpenInvoice : null,
+      );
+    }
     final findings =
         int.tryParse(job['open_findings']?.toString() ?? '') ?? 0;
     final requests =

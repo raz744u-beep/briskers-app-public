@@ -3,7 +3,7 @@
 ## Delivered source and verification scope
 
 - Owner offline single-payment finalization and bulk invoice close now save durable SQLite intents. Eligibility for the whole selection is atomic. Requests retain receipt identities, amounts, dates, methods and invoice totals. They survive restart and do not represent server confirmation. Replay requires Owner access, network permission and drained receipt/edit queues; retirement and quarantine block replay. One failed attempt holds for explicit review. The new server endpoint checks the exact snapshot and commits the result with an idempotency record in the same transaction.
-- Jobs show the saved linked invoice number and saved work description. Invoice numbers open the exact document. Recorded receipts awaiting finalization have a distinct financial label.
+- Jobs list implements the final Nov 10 design freeze: bold job/customer, same-row underlined slate invoice link, vehicle/status row, wrench work summary, saved task progress, gray mechanic hours and no bottom-right indicators. Other job surfaces retain their layouts. Jobs show the saved linked invoice number and saved work description. Invoice numbers open the exact document. Recorded receipts awaiting finalization have a distinct financial label.
 - Existing completed-but-unpaid labor editing, mirrored Main Mechanic selector, per-person Already Paid controls and approved task colors remain. Historical prior-paid markers now travel in Owner ledger/snapshot transfer without creating payment or wage credit.
 - Invoice findings use the monochrome headings “Resolved on this job” and “Unresolved findings”. Existing Add to Job behavior is retained.
 - Receipt gateway, local photos, payee queues, recurring occurrence identities and prior history are preserved. No live invoice, payment, expense or payroll record was changed during this work. The new endpoint deployment added only schema and permissions; its operation log was verified empty afterward.
@@ -24,3 +24,17 @@
 | Multi-item grouped findings | Not delivered | Separate planned enhancement, not represented as implemented |
 
 This is a tested release candidate, not a claim that all phone-specific P0 records are resolved. Use the final workflow artifact and its verification evidence for the actual version, SHA, certificate and upgrade result.
+
+## Additional Owner recall audit
+
+| Recall item | Current evidence and limit |
+| --- | --- |
+| Offline sync warning / old last-sync date | Force Offline and retry protection are retained. Exact phone queue/warning cause is unverified; no forced sync performed. |
+| Main Mechanic empty label | Fixed label outside the dropdown and matching 50px controls retained in `job_tasks_access.dart`; enabled navigation test covers selector. |
+| J-45 historical completed work | Per-mechanic Already Paid markers and cross-device transfer are tested. Actual Jenny record requires Owner review; no automatic historical payment/closure. |
+| Global Tasks cards | Saved invoice/task description/assigned time sources retained; final phone screenshot acceptance pending. Jobs-list freeze does not replace the global Tasks layout. |
+| Work / Visit History | Completed work projections and freeform Work Notes retained; complete cross-visit customer history acceptance remains pending. |
+| Employee task-first profile | Existing original TEST functions preserved. Further task-first rearrangement is not claimed delivered in this candidate. |
+| Historical Friday expenses | Existing expenses are not recreated; Kam/Chris Nov 6 report linkage remains unresolved. |
+| Splits / duplicate mechanic / status colors | Existing split-hours and single mechanic display regressions pass. New Jobs-list progress reads the same active labor and general-task records in batched local queries. |
+| Grouped estimate findings | Still planned; saved findings and resolved/unresolved invoice text are delivered. |

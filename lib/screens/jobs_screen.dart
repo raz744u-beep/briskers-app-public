@@ -12,6 +12,7 @@ import '../core/module_modal_theme.dart';
 import '../services/briskers_api.dart';
 import '../services/employee_nickname_store.dart';
 import '../services/job_sync_service.dart';
+import '../services/job_task_summary.dart';
 import '../services/owner_job_retirement_service.dart';
 import '../services/job_summary_visibility.dart';
 import '../services/document_index_sync_service.dart';
@@ -76,6 +77,7 @@ class _JobsScreenState extends State<JobsScreen>
       widget.documentRepository ?? LocalDocumentRepository();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
   Map<String,Map<String,int>> _allocationHours = {};
+  Map<String,JobTaskProgress> _taskProgress = {};
   final _nicknameStore = EmployeeNicknameStore();
 
   List<Map<String, dynamic>>? _rows;
@@ -296,6 +298,7 @@ class _JobsScreenState extends State<JobsScreen>
       _search.clear();
       _rows = null;
       _allocationHours = {};
+      _taskProgress = {};
       _coldLocalReadScope = null;
       _documentMatches = const [];
       _statuses = const [];
@@ -422,6 +425,15 @@ class _JobsScreenState extends State<JobsScreen>
         _onlineReady = online;
         _error = null;
       });
+      unawaited(() async {
+        try {
+          final ids = visibleRows.map((row) => row['id']).whereType<String>().toList();
+          final progress = await _localJobs.taskProgress(businessId, ids);
+          if (mounted && visibility.isCurrent(generation)) setState(() => _taskProgress = progress);
+        } catch (_) {
+          if (mounted && visibility.isCurrent(generation)) setState(() => _taskProgress = {});
+        }
+      }());
       if (_canManage) {
         unawaited(() async {
           Map<String,Map<String,int>> hours;
@@ -772,7 +784,7 @@ class _JobsScreenState extends State<JobsScreen>
       _statuses;
 
   Widget _statusControl(Map<String, dynamic> job) {
-    final color = colorFromHex(job['status_color']?.toString());
+    final color = approvedJobListStatusColor(job);
     final label = jobStatusLabel(
       job['status']?.toString(),
       job['status_name']?.toString() ?? 'Status',
@@ -784,13 +796,20 @@ class _JobsScreenState extends State<JobsScreen>
       constraints: const BoxConstraints(maxWidth: 155),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.94),
+        color: color.withValues(alpha: 0.13),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.65)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          Icon(switch (job['status']?.toString()) {
+            'in_progress' => Icons.circle_outlined,
+            'completed' || 'closed' => Icons.check,
+            'awaiting_parts' || 'waiting_parts' => Icons.inventory_2_outlined,
+            'awaiting_payment' => Icons.credit_card,
+            _ => jobStatusIcon(job['status_icon']?.toString()),
+          }, size: 17, color: color),
+          const SizedBox(width: 4),
           Flexible(
             child: FittedBox(
               fit: BoxFit.scaleDown,
@@ -805,10 +824,6 @@ class _JobsScreenState extends State<JobsScreen>
               ),
             ),
           ),
-          if (_canManage && !busy) ...[
-            const SizedBox(width: 3),
-            Icon(Icons.chevron_right, size: 15, color: color),
-          ],
         ],
       ),
     );
@@ -956,6 +971,8 @@ class _JobsScreenState extends State<JobsScreen>
 
   Widget _jobCard(Map<String, dynamic> job) => JobCompactCard(
     job: job,
+    approvedListDesign: true,
+    taskProgress: _taskProgress[job['id']],
     statusControl: _statusControl(job),
     onOpen: () => _openJob(job),
     onOpenInvoice: job['invoice_id'] == null ? null : () async {

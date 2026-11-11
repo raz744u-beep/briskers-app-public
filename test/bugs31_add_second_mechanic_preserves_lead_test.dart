@@ -87,6 +87,11 @@ void main() {
     final chris=reassigned.singleWhere((r)=>r['employee_id']=='chris');
     await payroll.recordAllocatedTime(chris['id'] as String,'Done',540,540,'2026-11-08');
     expect((await summary.progress('shop','job')).done,1);
+    final batch = await summary.progressForJobs('shop', ['job', 'empty']);
+    expect(batch['job']!.done, 1);
+    expect(batch['job']!.total, 2);
+    expect(batch['empty']!.total, 0);
+    expect((await summary.progressForJobs('other-shop', ['job']))['job']!.total, 0);
     await expectLater(payroll.removeOpenAllocation(task,'chris'),throwsStateError);
     await db.customStatement("UPDATE local_documents SET document_date='2026-11-06' WHERE id='invoice'");
     expect((await payroll.work()).every((r)=>r['archived_labor']==1),isTrue);
