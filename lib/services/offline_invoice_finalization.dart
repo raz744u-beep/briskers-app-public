@@ -144,7 +144,9 @@ class OfflineInvoiceFinalization {
       if(invoice.startsWith('local-')) continue;
       if(await LocalJobQuarantine.isEntityBlocked(db,business,[invoice]) ||
           await LocalJobRetirement.isDocumentBlocked(db,business,invoice) ||
-          await LocalDocumentDetailCache(database:db).loadReadOnly(business,invoice)==null) continue;
+          await LocalDocumentDetailCache(database:db).loadReadOnly(business,invoice)==null) {
+        continue;
+      }
       final unresolved=await db.customSelect("SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? AND entity_type IN ('invoice_payment_received','invoice_pending_payment_edit','invoice_tax_edit','document_edit')",
         variables:[Variable(business),Variable(invoice)]).get();
       if(unresolved.isNotEmpty) continue;
