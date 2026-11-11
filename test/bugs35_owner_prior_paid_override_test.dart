@@ -1,3 +1,5 @@
+import 'package:briskers_app/services/payroll_owner_ledger.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
@@ -6,6 +8,7 @@ import 'package:briskers_app/services/local_mechanic_work_credit_repository.dart
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(()=>SharedPreferences.setMockInitialValues({}));
 
   test('Owner Already Paid settles one immutable allocation, no payroll post',
       () async {
@@ -59,6 +62,17 @@ void main() {
       "SELECT id FROM regular_payroll_audit "
       "WHERE event='owner_confirmed_historical_already_paid'").get();
     expect(audits,hasLength(1));
+    final second=BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(second.close);
+    final transferred=await PayrollOwnerLedger(db,'shop').export();
+    await PayrollOwnerLedger(second,'shop').mergeSnapshot(transferred,canonical:true);
+    await PayrollOwnerLedger(second,'shop').mergeSnapshot(transferred,canonical:true);
+    final otherRepo=LocalPayrollRepository(second,business:'shop',owner:true);
+    final transferredWork=await otherRepo.work(employee:'emp');
+    expect(transferredWork.single['pay_status'],'Already Paid');
+    expect(transferredWork.single['remaining_minutes'],0);
+    expect(await second.customSelect('SELECT * FROM regular_payroll_payments').get(),isEmpty);
+
 
     await expectLater(
       repo.setEstimatedMinutes('task','emp',120,reviseCompletedUnpaid:true),

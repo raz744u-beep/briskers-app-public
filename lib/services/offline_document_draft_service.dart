@@ -1,3 +1,4 @@
+import 'offline_invoice_finalization.dart';
 import 'sync_replay_fence.dart';
 import 'dart:convert';
 import 'local_number_allocator.dart';
@@ -1642,6 +1643,7 @@ class OfflineDocumentDraftService {
             }
           }
           if (payload['kind'] == 'invoice' || payload['kind'] == 'convert_invoice') {
+            await OfflineInvoiceFinalization(database:_database).remap(businessId,localId,serverId);
             await OfflineInvoicePaymentLedger(database: _database).remapInvoice(
               businessId,
               localId,

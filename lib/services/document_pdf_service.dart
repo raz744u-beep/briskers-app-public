@@ -351,17 +351,20 @@ class DocumentPdfService {
         signatureCurrent && signatureBytes is Uint8List;
     final memo = detail['memo']?.toString().trim() ?? '';
 
-    final findingNotes = List<dynamic>.from(
-      detail['finding_notes'] ?? const [],
-    )
-        .map((raw) => Map<String, dynamic>.from(raw as Map))
-        .map((finding) => finding['body']?.toString().trim() ?? '')
-        .where((text) => text.isNotEmpty)
-        .toList();
-
+    final findingNotes = (detail['finding_notes'] as List? ?? const [])
+        .whereType<Map>().where((f) => (f['body']?.toString().trim() ?? '').isNotEmpty).toList();
     final notes = <String>[
       if (memo.isNotEmpty) memo,
-      ...findingNotes,
+      ...findingNotes.where((f)=>f['invoice_resolution']==null)
+          .map((f)=>f['body'].toString().trim()),
+      if (findingNotes.any((f)=>f['invoice_resolution']=='resolved_on_job'))
+        'Resolved on this job',
+      ...findingNotes.where((f)=>f['invoice_resolution']=='resolved_on_job')
+          .map((f)=>f['body'].toString().trim()),
+      if (findingNotes.any((f)=>f['invoice_resolution']=='unresolved'))
+        'Unresolved findings',
+      ...findingNotes.where((f)=>f['invoice_resolution']=='unresolved')
+          .map((f)=>f['body'].toString().trim()),
     ];
 
     final subtotal =

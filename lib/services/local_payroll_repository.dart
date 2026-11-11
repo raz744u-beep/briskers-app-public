@@ -463,6 +463,7 @@ class LocalPayrollRepository {
   /// One immutable allocation/employee share is settled, not the entire job.
   Future<void> confirmHistoricalAlreadyPaid(String allocation) async {
     _authorize();
+    await assertLanWriter?.call();
     await prepare();
     await db.transaction(() async {
       final rows = await _read(
@@ -829,6 +830,7 @@ class LocalPayrollRepository {
     await prepare();
     final rows = await _read(
       'SELECT c.allocation_id AS credit,t.job_id AS job,c.rate_cents AS rate,'
+      '(SELECT confirmed_at FROM regular_payroll_owner_prior_paid_v1 h WHERE h.business_id=c.business_id AND h.allocation_id=c.allocation_id) AS prior_paid_at,'
       'c.task_id,c.job_id AS credit_job,c.labor_line_id AS credit_labor,'
       'c.actual_minutes AS total_credit_minutes,c.revision AS credit_revision,p.state,p.completed_date,'
       'COALESCE(at.minutes,c.actual_minutes) AS recorded_actual_minutes,'
@@ -1032,6 +1034,13 @@ class LocalPayrollRepository {
           );
         }
         await _applyCanonicalProgress(id, employee, payload);
+        final priorPaidAt=payload['prior_paid_at'];
+        if(priorPaidAt!=null) {
+          if(priorPaidAt is! String || DateTime.tryParse(priorPaidAt)==null || payload['state']!='Done') {
+            throw StateError('Invalid historical settlement snapshot.');
+          }
+          await db.customStatement('INSERT INTO regular_payroll_owner_prior_paid_v1 VALUES(?,?,?,?) ON CONFLICT(business_id,allocation_id) DO NOTHING',[business,id,employee,priorPaidAt]);
+        }
       case PayrollLanOperation.payment:
         if (owner || pairedEmployee != employee) {
           throw StateError('Payroll receipt is unavailable to this device.');
@@ -1166,7 +1175,7 @@ class LocalPayrollRepository {
     }
     final coverage=await _read('SELECT credit_id FROM regular_payroll_work_coverage WHERE business_id=? AND credit_id=?',[business,id]);
     if(coverage.isNotEmpty || row['paid_operation_id']!=null){throw StateError('Paid work history cannot be replaced.');}
-    if(state=='Done'){_date(value['completed_date'] as String);}
+    if(state=='Done' && value['prior_paid_at']==null){_date(value['completed_date'] as String);}
     await db.customStatement('UPDATE local_mechanic_work_credits_v1 SET actual_minutes=?,completed=?,revision=? WHERE business_id=? AND allocation_id=? AND employee_id=?',
       [minutes,state=='Done'?1:0,revision,business,id,employee]);
     await db.customStatement('UPDATE regular_payroll_portions SET state=?,completed_date=?,version=? WHERE business_id=? AND id=?',

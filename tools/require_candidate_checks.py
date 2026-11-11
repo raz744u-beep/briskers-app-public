@@ -44,6 +44,9 @@ def workflows_for_branch(branch):
         workflows["offline-recovery-android-check.yml"] = "Offline recovery Android debug verification"
         filename, name = GLORIA_RECOVERY_WORKFLOW
         workflows[filename] = name
+    if branch == BUGS33_RELEASE_BRANCH:
+        workflows["retry-storm-regression.yml"] = "Retry storm protection"
+        workflows["offline-recurring-component.yml"] = "Offline recurring component"
     if branch == GLORIA_RECOVERY_BRANCH:
         filename, name = GLORIA_RECOVERY_WORKFLOW
         workflows[filename] = name

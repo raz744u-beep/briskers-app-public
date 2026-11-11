@@ -11,6 +11,7 @@ class JobCompactCard extends StatelessWidget {
     required this.statusControl,
     required this.onOpen,
     this.onLongPress,
+    this.onOpenInvoice,
     this.mechanicMinutes,
     this.canOpen = true,
   });
@@ -19,6 +20,7 @@ class JobCompactCard extends StatelessWidget {
   final Widget statusControl;
   final VoidCallback onOpen;
   final VoidCallback? onLongPress;
+  final VoidCallback? onOpenInvoice;
   final Map<String,int>? mechanicMinutes;
   final bool canOpen;
 
@@ -43,6 +45,11 @@ class JobCompactCard extends StatelessWidget {
     final requested = job['requested_work']?.toString().trim() ?? '';
     final title = job['title']?.toString().trim() ?? '';
     final description = title.isNotEmpty ? title : requested;
+    final generic = description.isEmpty || const {'invoice','job'}.contains(description.toLowerCase());
+    final summary = job['work_summary']?.toString().trim() ?? '';
+    final displayDescription = generic
+        ? (requested.isNotEmpty ? requested : summary) : description;
+    final invoiceNumber = job['invoice_number']?.toString().trim() ?? '';
     final vehicle = job['vehicle']?.toString().trim() ?? '';
     final employee = (job['assigned_employee'] ?? job['mechanic'])
             ?.toString()
@@ -67,6 +74,7 @@ class JobCompactCard extends StatelessWidget {
         : null;
     final paymentLabel = switch (paymentState) {
       'paid' => 'Paid',
+      'recorded_pending' => 'Pending finalization',
       'awaiting_clearance' => 'Awaiting clearance',
       'awaiting_payment' => 'Awaiting payment',
       _ => null,
@@ -134,13 +142,26 @@ class JobCompactCard extends StatelessWidget {
                       statusControl,
                     ],
                   ),
+                  if (invoiceNumber.isNotEmpty)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: canOpen ? onOpenInvoice : null,
+                        child: Text('Invoice $invoiceNumber',
+                          style: const TextStyle(fontWeight: FontWeight.w800)),
+                      ),
+                    )
+                  else
+                    const Text('No invoice yet'),
                   const SizedBox(height: 8),
+                  if ((job['additional_work_count'] as int? ?? 0)>0)
+                    Text('+${job['additional_work_count']} more'),
                   Row(
                     children: [
                       Expanded(
                         child: Text(
-                          description.isEmpty ? 'No description' : description,
-                          maxLines: 1,
+                          displayDescription.isEmpty ? 'No description' : displayDescription,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: Theme.of(context)

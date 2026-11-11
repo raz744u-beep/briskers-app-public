@@ -42,9 +42,6 @@ void main() {
     for (final guard in [
       'if (!widget.isOwner) return;',
       "_number(_detail?['pending_payment']) <= 0.005",
-      'BriskersConnectionModeController.instance.forceOffline',
-      '_queuedPaymentOperationIds.isNotEmpty',
-      '_offlineDocumentDraft.isLocalDraftId(widget.documentId)',
     ]) {
       expect(action.indexOf(guard), inInclusiveRange(0, dialog - 1), reason: guard);
     }
@@ -54,6 +51,8 @@ void main() {
     final durableGuard = action.indexOf('InvoiceFinalizationGuard().run<void>(');
     final mutation = action.indexOf('await _api.finalizePendingInvoicePayment(');
     expect(consent, greaterThan(dialog));
+    expect(action.indexOf('OfflineInvoiceFinalization().save('), greaterThan(consent));
+    expect(action.indexOf('forceOffline'), greaterThan(consent));
     expect(durableGuard, greaterThan(consent));
     expect(mutation, greaterThan(durableGuard));
     expect(action, contains('invoiceIds: [widget.documentId], isOwner: widget.isOwner'));

@@ -1,3 +1,4 @@
+import '../../services/offline_invoice_payment_ledger.dart';
 import '../../services/job_task_summary.dart';
 import '../payroll/mechanic_labor_screen.dart';
 import '../payroll/owner_payroll_screen.dart';
@@ -514,9 +515,6 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         _job?['status']?.toString() != 'completed') {
       return;
     }
-    if (savedJobFinancialStatus(_job?['payment_state']) != null) {
-      return;
-    }
     final verified = <Map<String, dynamic>>[];
     for (final document in documents) {
       if (document['kind']?.toString() != 'invoice') {
@@ -536,7 +534,11 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           cached['job_id']?.toString() != widget.jobId) {
         return;
       }
-      verified.add(cached);
+      final queued = await OfflineInvoicePaymentLedger().pendingForInvoice(
+        widget.businessId, id,
+      );
+      if (!_currentLoad(epoch)) return;
+      verified.add(OfflineInvoicePaymentLedger.projectPendingPayments(cached, queued));
     }
     final state = cachedVerifiedJobPaymentState(verified);
     if (state == null || !_currentLoad(epoch) ||
@@ -3602,7 +3604,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     if (total <= 0) return null;
     if (paid >= total - 0.005) return 'Paid';
     if (pending > 0 && paid + pending >= total - 0.005) {
-      return 'Awaiting payment clearance';
+      return 'Recorded payment · Pending finalization';
     }
     return 'Awaiting payment';
   }

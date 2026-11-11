@@ -70,6 +70,7 @@ import '../../services/offline_invoice_tax_service.dart';
 import '../../services/local_tax_settings_cache.dart';
 import '../../services/offline_invoice_payment_ledger.dart';
 import '../../services/invoice_finalization_guard.dart';
+import '../../services/offline_invoice_finalization.dart';
 import '../../services/document_copy_plan.dart';
 import '../../services/pending_document_memo_projection.dart';
 import '../../services/local_payment_methods_cache.dart';
@@ -478,6 +479,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         findingsProjected, queuedReceipts);
     final projected = OfflineInvoicePaymentLedger.projectPendingEdits(
         withLocalReceipts, queuedEdits);
+    projected['_finalization_state'] = await OfflineInvoiceFinalization().state(widget.businessId,widget.documentId);
     final jobId = projected['job_id']?.toString().trim() ?? '';
     final jobNumber = projected['job_number']?.toString().trim() ?? '';
     if (jobId.isNotEmpty &&
@@ -1081,7 +1083,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       await _load(fastAfterMutation: true);
       return true;
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) setState(() => _error = error is StateError ? error.message.toString() : error.toString());
       return false;
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -3353,16 +3355,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     if (_estimate || _busy || _number(_detail?['pending_payment']) <= 0.005) {
       return;
     }
-    if (BriskersConnectionModeController.instance.forceOffline ||
-        _queuedPaymentOperationIds.isNotEmpty ||
-        _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
-      if (mounted) {
-        setState(() => _error =
-            'Connect and sync recorded payments before finalizing a payment.');
-      }
-      return;
-    }
-
     final amount = _number(_detail?['pending_payment']);
     if (!mounted) return;
     final confirmed = await showDialog<bool>(
@@ -3372,6 +3364,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         ) ??
         false;
     if (!confirmed || !mounted) return;
+    if (BriskersConnectionModeController.instance.forceOffline ||
+        _queuedPaymentOperationIds.isNotEmpty ||
+        _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+      final saved = await _run(() => OfflineInvoiceFinalization().save(
+        widget.businessId, [widget.documentId], isOwner:widget.isOwner,close:false));
+      if (saved && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text(
+          'Finalization saved on this device. Posting awaits synchronization; do not enter the payment again.')));
+      }
+      return;
+    }
     final succeeded = await _run(() async {
       // The confirmation can remain open while sync or connection mode changes.
       // Re-read durable receipt evidence at the action boundary, not the dialog.
@@ -6551,6 +6554,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 ),
               ),
             ),
+          ],
+          if (_detail?['_finalization_state'] == 'pending' || _detail?['_finalization_state'] == 'inflight')
+            const Text('Finalization saved · Awaiting synchronization'),
+          if (_detail?['_finalization_state'] == 'review') ...[
+            const Text('Saved finalization needs review. Do not enter the payment again.'),
+            if(widget.isOwner)
+              TextButton(onPressed:_busy ? null : () => _run(() => OfflineInvoiceFinalization().retry(
+                widget.businessId,widget.documentId,isOwner:widget.isOwner)),
+                child:const Text('Retry saved finalization')),
           ],
           const SizedBox(height: 18),
           Row(

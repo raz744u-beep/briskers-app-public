@@ -958,6 +958,17 @@ class _JobsScreenState extends State<JobsScreen>
     job: job,
     statusControl: _statusControl(job),
     onOpen: () => _openJob(job),
+    onOpenInvoice: job['invoice_id'] == null ? null : () async {
+      await Navigator.push<void>(context, MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: job['invoice_id'].toString(),
+          isOwner: widget.roleCode == 'owner',
+          roleCode: widget.roleCode,
+        ),
+      ));
+      if (mounted) unawaited(_load());
+    },
     onLongPress: () => _showJobActions(job),
     mechanicMinutes: _canManage ? _allocationHours[job['id']] : null,
     canOpen: _busyJobId != job['id']?.toString(),

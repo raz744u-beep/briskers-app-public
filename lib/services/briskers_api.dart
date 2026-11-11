@@ -4608,6 +4608,14 @@ class BriskersApi {
     );
   }
 
+  Future<Map<String,dynamic>> finalizeInvoiceOnce(String businessId,
+      String invoiceId,String operationId,Map<String,dynamic> request) async {
+    final result = await networkSupabase.rpc('briskers_finalize_invoice_once_v1',
+      params:{'p_business_id':businessId,'p_invoice_id':invoiceId,
+        'p_operation_id':operationId,'p_request':request});
+    return Map<String,dynamic>.from(result as Map);
+  }
+
   Future<String> finalizePendingInvoicePayment(
     String businessId,
     String invoiceId,

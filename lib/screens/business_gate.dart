@@ -1,3 +1,4 @@
+import '../services/offline_invoice_finalization.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -462,6 +463,12 @@ class _BusinessGateState extends State<BusinessGate> with WidgetsBindingObserver
     } catch (_) {
       // Corrections to existing pending receipts also remain durable.
       // An unverified server receipt is never silently overwritten.
+    }
+
+    try {
+      if (roleCode == 'owner') await OfflineInvoiceFinalization().flush(businessId);
+    } catch (_) {
+      // Durable finalizations remain available for reconciliation.
     }
 
     try {

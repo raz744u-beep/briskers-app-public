@@ -20,9 +20,11 @@ class PayrollOwnerLedger {
     'regular_payroll_paid_work', 'regular_payroll_paid_base',
     'regular_payroll_work_coverage', 'regular_payroll_weekly_defaults',
     'regular_payroll_audit', 'regular_payroll_sync_outbox',
+    'regular_payroll_owner_prior_paid_v1',
     'regular_payroll_assignment_meta', 'regular_payroll_task_policy', 'regular_payroll_actual_time', 'regular_payroll_job_lead',
   ];
   static const immutable = {
+    'regular_payroll_owner_prior_paid_v1',
     'regular_payroll_payments', 'regular_payroll_paid_work',
     'regular_payroll_paid_base', 'regular_payroll_work_coverage',
   };

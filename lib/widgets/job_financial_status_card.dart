@@ -7,6 +7,7 @@ String? savedJobFinancialStatus(Object? paymentState) {
   final value = paymentState?.toString().trim().toLowerCase() ?? '';
   return switch (value) {
     'paid' => 'Paid',
+    'recorded_pending' => 'Recorded payment · Pending finalization',
     'awaiting_clearance' => 'Awaiting payment clearance',
     'awaiting_payment' => 'Awaiting payment',
     'invoice_needed' => 'Invoice needed',
@@ -55,7 +56,7 @@ String? cachedVerifiedJobPaymentState(
     return 'paid';
   }
   if (pending > 0 && paid + pending >= total - 0.005) {
-    return 'awaiting_clearance';
+    return 'recorded_pending';
   }
   return 'awaiting_payment';
 }

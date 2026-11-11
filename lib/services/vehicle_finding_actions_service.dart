@@ -686,6 +686,9 @@ class VehicleFindingActionsService {
           'id': id,
           'finding_id': id,
           'body': finding['body'],
+          'invoice_resolution': finding['repair_job_id']?.toString() == documentJobId &&
+              const {'in_job','resolved'}.contains(finding['status'])
+              ? 'resolved_on_job' : 'unresolved',
           '_local_finding_projection': true,
         };
       }

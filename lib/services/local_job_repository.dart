@@ -1,3 +1,6 @@
+import 'local_document_repository.dart';
+import 'local_document_detail_cache.dart';
+import 'invoice_labor_work_summary.dart';
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
@@ -336,7 +339,23 @@ class LocalJobRepository {
           ],
         )
         .get();
-    return rows.map(_jobListMap).toList();
+    final result=rows.map(_jobListMap).toList();
+    final documents=LocalDocumentRepository(database:_database);
+    final cache=LocalDocumentDetailCache(database:_database);
+    for(final job in result) {
+      final invoices=(await documents.listByJob(businessId,job['id'] as String))
+        .where((d)=>d['kind']=='invoice' && !const {'void','cancelled'}.contains(d['status'])).toList();
+      if(invoices.isEmpty) continue;
+      final invoice=invoices.first;
+      job['invoice_id']=invoice['id'];
+      job['invoice_number']=invoice['document_number'];
+      final detail=await cache.loadReadOnly(businessId,invoice['id'] as String,includeLegacyPreferences:false);
+      if(detail==null || detail['job_id']!=job['id'] || detail['id']!=invoice['id']) continue;
+      final lines=invoiceLaborWorkSummary(detail).split('\n').where((s)=>s.trim().isNotEmpty).toList();
+      job['work_summary']=lines.take(2).join(' · ');
+      job['additional_work_count']=lines.length>2 ? lines.length-2 : 0;
+    }
+    return result;
   }
 
   /// Customer navigation uses the same card projection as the main Jobs list.
@@ -951,6 +970,8 @@ class LocalJobRepository {
       'assigned_employee': row.readNullable<String>('assigned_employee_name'),
       'assigned_employee_id': row.readNullable<String>('assigned_employee_id'),
       'assigned_position': row.readNullable<String>('assigned_position'),
+      'invoice_id': row.data['invoice_id'],
+      'invoice_number': row.data['invoice_number'],
       'open_findings': row.read<int>('open_findings'),
       'pending_requests': row.read<int>('pending_request_count'),
       'can_request': capabilities['request_job'] == true,

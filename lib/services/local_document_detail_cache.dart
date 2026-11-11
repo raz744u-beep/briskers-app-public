@@ -179,13 +179,19 @@ class LocalDocumentDetailCache {
   /// Read a saved invoice snapshot without reconciling or creating derived
   /// Tasks/Payroll sources. Used by historical and already-paid reviews.
   /// Retired/recovered identity fences still apply.
-  Future<Map<String,dynamic>?> loadReadOnly(String businessId,String documentId) {
+  Future<Map<String,dynamic>?> loadReadOnly(String businessId,String documentId, {bool includeLegacyPreferences=true}) {
     final key=_key(businessId,documentId);
     return _database.transaction(() => _serialized(key,() async {
       if(await _blocked(businessId,documentId))return null;
       if(await RecoveryCommitStore.isOriginal(_database,businessId,documentId))return null;
       final durable=await RecoveryCommitStore.snapshot(
         _database,businessId,documentId);
+      if (!includeLegacyPreferences && durable==null) {
+        final rows=await _database.customSelect('SELECT payload_json FROM local_document_details WHERE cache_key=?',variables:[Variable(key)]).get();
+        final detail=rows.isEmpty ? null : _decode(rows.single.readNullable<String>('payload_json'));
+        if(detail==null || await _blocked(businessId,documentId,detail)) return null;
+        return _projectRetiredConversion(businessId,detail);
+      }
       final prefs=await SharedPreferences.getInstance();
       final detail=durable==null
           ? _decode(sqliteWritesEnabled

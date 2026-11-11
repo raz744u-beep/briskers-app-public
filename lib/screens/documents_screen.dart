@@ -1,3 +1,4 @@
+import '../services/offline_invoice_finalization.dart';
 import 'jobs/owner_local_delete_action.dart';
 import 'dart:async';
 
@@ -1435,6 +1436,14 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     if (!ok || !mounted) return;
 
     try {
+      if (BriskersConnectionModeController.instance.forceOffline) {
+        await OfflineInvoiceFinalization().save(widget.businessId,selected,
+          isOwner:widget.isOwner,close:true);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text(
+          'Close requests saved on this device. Confirmation awaits synchronization; no payment needs re-entry.')));
+        return;
+      }
       // Check the entire selection before closing any invoice, then recheck
       // each RPC so a later receipt or connection-mode change cannot bypass it.
       await _finalizationGuard.check(
@@ -1474,7 +1483,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       );
     } catch (error) {
       if (!mounted) return;
-      setState(() => _error = error.toString());
+      setState(() => _error = error is StateError ? error.message.toString() : 'The invoices could not be closed. Saved payments are preserved.');
     }
   }
 
