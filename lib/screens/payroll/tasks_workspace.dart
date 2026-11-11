@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../services/service_task_order.dart';
+import '../../services/job_task_summary.dart';
+import '../../widgets/job_list_approved_card.dart';
 
 /// Tasks workspace. Only customer/job-linked records appear
 /// under Service Tasks. General Tasks can reference a job without billing it.
@@ -25,6 +27,7 @@ class TasksWorkspace extends StatefulWidget {
     this.onAddService,
     this.onAddRecheck,
     this.onRecoverHistory,
+    this.onOpenInvoice,
   });
 
   final List<Map<String, dynamic>> serviceTasks;
@@ -39,6 +42,7 @@ class TasksWorkspace extends StatefulWidget {
   final VoidCallback? onRecoverHistory;
   final Future<void> Function(int taskId, String status) onGeneralStatus;
   final ValueChanged<String> onOpenJob;
+  final ValueChanged<String>? onOpenInvoice;
   final ValueChanged<String> onEmployeeTap;
   final bool initialGeneral;
   final String? scopedJob;
@@ -408,30 +412,9 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                   ),
               ])),
         for(final entry in entries) ...[
-          Card(color:const Color(0xFFF0F5FA),margin:const EdgeInsets.only(bottom:9),
-            child:Column(children:[
-              ListTile(
-                onTap:()=>setState((){
-                  if(!_expandedJobs.add(entry.key)) {
-                    _expandedJobs.remove(entry.key);
-                  }
-                }),
-                title:Text(() {
-                  final jobNumber = entry.value.first['job_number']?.toString() ?? 'Job';
-                  final invoice = entry.value.map((row) =>
-                    row['invoice_number']?.toString().trim()).whereType<String>()
-                    .where((number) => number.isNotEmpty).firstOrNull;
-                  return invoice == null ? jobNumber : '$jobNumber · Invoice #$invoice';
-                }(),style:const TextStyle(fontWeight:FontWeight.w800)),
-                subtitle:Text([
-                  if (entry.value.first['customer_name'] case final String customer) customer,
-                  if (entry.value.first['vehicle_label'] case final String vehicle) vehicle,
-                  '${entry.value.length} tasks',
-                ].join(' · ')),
-                trailing:Icon(_expandedJobs.contains(entry.key)
-                  ? Icons.expand_less:Icons.expand_more),
-              ),
-              if(_expandedJobs.contains(entry.key)) ...[
+          _serviceJobCard(entry,
+            expandedDetails: _expandedJobs.contains(entry.key) ? Column(children: [
+
                 const Divider(height:1),
                 // Match the approved isolated Tasks TEST: a distinct white
                 // rounded work card sits inside each tinted Job group.
@@ -464,11 +447,43 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                     ),
                 ],
                 const SizedBox(height:5),
-              ],
-            ]),
+            ]) : null,
           ),
         ],
       ],
+    );
+  }
+
+  Widget _serviceJobCard(MapEntry<String,List<Map<String,dynamic>>> entry, {Widget? expandedDetails}) {
+    final tasks=entry.value;
+    final first=tasks.first;
+    final jobTasks=widget.serviceTasks.where((t)=>(t['job_id']?.toString()??'Unlinked Job')==entry.key).toList();
+    final progressTasks=jobTasks.isEmpty?tasks:jobTasks;
+    final done=progressTasks.where((t)=>t['status']=='done').length;
+    final status=done==progressTasks.length?'completed':progressTasks.any((t)=>t['status']=='in_progress')?'in_progress':'open';
+    final color=status=='open'?const Color(0xFFF58A00):approvedJobListStatusColor({'status':status});
+    final people=<String,int>{};
+    final seen=<String>{};
+    for(final task in progressTasks) {
+      for(final person in widget.allocationsByLine[task['line_id']]??const <Map<String,dynamic>>[]) {
+        if(!seen.add(person['id']?.toString()??'${task['line_id']}:${person['employee_id']}'))continue;
+        final label=widget.employeeName(person['employee_id']?.toString());
+        people[label]=(people[label]??0)+(person['estimated_minutes'] as int? ?? 0);
+      }
+    }
+    final invoice=tasks.map((t)=>t['invoice_number']?.toString()??'').where((s)=>s.isNotEmpty).firstOrNull??'';
+    final invoiceId=tasks.map((t)=>t['invoice_id']?.toString()??t['document_id']?.toString()??'').where((s)=>s.isNotEmpty).firstOrNull;
+    final descriptions=tasks.map((t)=>(t['source_description']??t['description']??'').toString()).where((s)=>s.isNotEmpty).toList();
+    return JobListApprovedCard(
+      job:{'status':status,'status_color':'#F58A00','additional_work_count':descriptions.length>2?descriptions.length-2:0},
+      number:first['job_number']?.toString()??'',customer:first['customer_name']?.toString()??'',
+      invoiceNumber:invoice,vehicle:first['vehicle_label']?.toString()??'',
+      description:descriptions.take(2).join(' · '),mechanic:'Unassigned',employee:'',mechanicMinutes:people,
+      progress:JobTaskProgress(done,progressTasks.length),
+      statusControl:ApprovedListStatusBadge(label:done==progressTasks.length?'Done':status=='in_progress'?'In Progress':'Not Started',color:color,icon:done==progressTasks.length?Icons.check:status=='in_progress'?Icons.circle_outlined:Icons.schedule),
+      onOpen:()=>setState((){if(!_expandedJobs.add(entry.key))_expandedJobs.remove(entry.key);}),
+      onOpenInvoice:invoiceId==null || widget.onOpenInvoice==null?null:()=>widget.onOpenInvoice!(invoiceId),
+      expandedDetails:expandedDetails,
     );
   }
 

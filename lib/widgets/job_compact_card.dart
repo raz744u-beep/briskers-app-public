@@ -5,7 +5,7 @@ import '../core/briskers_i18n.dart';
 import '../core/job_status_style.dart';
 import '../services/job_task_summary.dart';
 import 'job_list_approved_card.dart';
-export 'job_list_approved_card.dart' show approvedJobListStatusColor;
+export 'job_list_approved_card.dart' show approvedJobListStatusColor, ApprovedListStatusBadge;
 
 class JobCompactCard extends StatelessWidget {
   const JobCompactCard({

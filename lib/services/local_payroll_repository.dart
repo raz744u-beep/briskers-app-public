@@ -10,6 +10,7 @@ import 'payroll_lan_peer.dart';
 import 'local_invoice_task_store.dart';
 import 'invoice_labor_work_summary.dart';
 import 'local_document_detail_cache.dart';
+import 'verified_paid_labor.dart';
 
 /// Business-scoped local payroll ledger. Payment recording never sends money
 /// or connects to the general financial sync queue.
@@ -1333,6 +1334,7 @@ class LocalPayrollRepository {
       [business, ?employee, ?job],
     );
     _authorize();
+    final verifiedPaid=await VerifiedPaidLabor(db).allocations(business);
     return rows.map((row) {
       final total = row['actual_minutes'] as int;
       final ownerPriorPaid = row['owner_prior_paid'] == 1;
@@ -1341,7 +1343,9 @@ class LocalPayrollRepository {
       if (paid < 0 || paid > total) throw StateError('Conflicting payroll coverage.');
       final remaining = total - paid;
       return {
-        ...row, 'hours_hundredths': (total * 100 + 30) ~/ 60,
+        ...row,
+        if(verifiedPaid.contains(row['id'])) 'state':'Done',
+        'hours_hundredths': (total * 100 + 30) ~/ 60,
         'paid_minutes': paid,
         'paid_cents': ownerPriorPaid ? ((total * rate + 30) ~/ 60) : row['paid_cents'],
         'remaining_minutes': remaining,

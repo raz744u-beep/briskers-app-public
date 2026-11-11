@@ -129,9 +129,8 @@ void main(){
       ).getSingle();
       return row.read<String>('job_id');
     }))!;
-    navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>
-      JobDetailScreen(businessId:'shop',jobId:jobId,roleCode:'owner')));
-    await tester.pumpAndSettle();
+    // Use the real invoice link so returning exercises its refresh callback.
+    await click(find.text('Job J-1'));
     await until(find.text('Main Mechanic'));
     expect(find.text('Job Tasks'),findsWidgets);
     await capture('job-detail-main-mechanic');
@@ -145,6 +144,8 @@ void main(){
     expect(find.text('Main Mechanic'),findsOneWidget,
       reason:'Invoice mirrors the same saved Job Main Mechanic selector.');
     await until(laborPencils());
+    await until(find.text('Total 9.0 hrs'));
+    await capture('bugs35-invoice-details-main-mechanic');
     await click(laborPencils().first);
     
     await click(find.text('Add mechanic'));

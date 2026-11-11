@@ -194,7 +194,7 @@ void main() {
       heldDocuments.gate.complete();
       await tester.pump();
       await tester.pump();
-      expect(find.text('I-2467'), findsOneWidget);
+      expect(find.text('Invoice #2467'), findsOneWidget);
       expect(heldPayments.requested, isTrue);
       expect(api.reads, 1);
       expect(find.byType(CircularProgressIndicator), findsNothing,
@@ -256,7 +256,7 @@ void main() {
       pendingDocuments.gate.complete();
       await tester.pump();
       await tester.pump();
-      expect(find.text('I-6390'), findsOneWidget,
+      expect(find.text('Invoice #6390'), findsOneWidget,
           reason: 'Saved invoice must paint ahead of the pending HTTP refresh');
       expect(find.byType(CircularProgressIndicator), findsNothing);
 
@@ -450,7 +450,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('I-200'), findsOneWidget);
+    expect(find.text('Invoice #200'), findsOneWidget);
     // No Supabase client is initialized: Auto exercises a failed online
     // refresh, without contacting any backend.
     await BriskersConnectionModeController.instance.setMode(
@@ -460,7 +460,7 @@ void main() {
     documents.failRead = true;
     LocalJobRetirement.notify(database, 'synthetic-shop', ['retired-job']);
     await tester.pumpAndSettle();
-    expect(find.text('I-200'), findsNothing);
+    expect(find.text('Invoice #200'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -542,13 +542,13 @@ void main() {
       await tester.pump();
       expect(api.reads, 1);
       expect(documents.reads, 0);
-      expect(find.text('I-200'), findsNothing);
+      expect(find.text('Invoice #200'), findsNothing);
       await BriskersConnectionModeController.instance.setMode(
         BriskersConnectionMode.offline,
       );
       await tester.pumpAndSettle();
       expect(api.response.isCompleted, isFalse);
-      expect(find.text('I-200'), findsOneWidget);
+      expect(find.text('Invoice #200'), findsOneWidget);
       expect(find.text('Open'), findsOneWidget);
       api.response.complete([
         {
@@ -693,8 +693,8 @@ void main() {
       );
       await tester.pumpWidget(screen(0));
       await tester.pumpAndSettle();
-      expect(find.text('I-200'), findsOneWidget);
-      expect(find.text('I-999'), findsNothing);
+      expect(find.text('Invoice #200'), findsOneWidget);
+      expect(find.text('Invoice #999'), findsNothing);
       expect(find.text('Open'), findsOneWidget);
       expect(api.reads, 1);
       expect(documents.reads, 0);

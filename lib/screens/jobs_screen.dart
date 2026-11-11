@@ -792,41 +792,13 @@ class _JobsScreenState extends State<JobsScreen>
     final busy = _busyJobId == job['id']?.toString() ||
         _pendingStatusIds.contains(job['id']?.toString());
 
-    final child = Container(
-      constraints: const BoxConstraints(maxWidth: 155),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.13),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(switch (job['status']?.toString()) {
-            'in_progress' => Icons.circle_outlined,
-            'completed' || 'closed' => Icons.check,
-            'awaiting_parts' || 'waiting_parts' => Icons.inventory_2_outlined,
-            'awaiting_payment' => Icons.credit_card,
-            _ => jobStatusIcon(job['status_icon']?.toString()),
-          }, size: 17, color: color),
-          const SizedBox(width: 4),
-          Flexible(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                label,
-                maxLines: 1,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+    final child = ApprovedListStatusBadge(label:label,color:color,icon:switch(job['status']?.toString()) {
+      'in_progress'=>Icons.circle_outlined,
+      'completed' || 'closed'=>Icons.check,
+      'awaiting_parts' || 'waiting_parts'=>Icons.inventory_2_outlined,
+      'awaiting_payment'=>Icons.credit_card,
+      _=>jobStatusIcon(job['status_icon']?.toString()),
+    });
 
     if (!_canManage || busy) return child;
 

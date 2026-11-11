@@ -81,6 +81,7 @@ import '../customers/customer_vehicle_findings_section.dart';
 import '../customers/customer_quick_actions.dart';
 import 'customer_invoice_signature_screen.dart';
 import 'invoice_warranty_panel.dart';
+import '../../widgets/invoice_labor_summary.dart';
 import 'invoice_header_warranty_fields.dart';
 import 'invoice_note_draft_rules.dart';
 import '../../widgets/document_tab_label.dart';
@@ -6045,27 +6046,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
-          // Mirror the SAME saved job-level lead from Job Details. This is
-          // one assignment with two entry points, not a labor-line selector.
-          if (!_estimate && widget.isOwner && OwnerPayrollScreen.enabled &&
-              (_detail?['job_id']?.toString().isNotEmpty ?? false))
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: SizedBox(
-                  width: 220,
-                  child: JobTasksAccess(
-                    business: widget.businessId,
-                    job: _detail!['job_id'].toString(),
-                    invoice: widget.documentId,
-                    selectorOnly: true,
-                    revision: _loadGeneration,
-                    onChanged: () => unawaited(_load()),
-                  ),
-                ),
-              ),
-            ),
           if (identifixImported)
             Container(
               margin: const EdgeInsets.fromLTRB(12, 12, 12, 10),
@@ -8341,6 +8321,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     ),
                   if (!_estimate)
                     InvoiceWarrantyPanel(
+                      mainMechanic: widget.isOwner && OwnerPayrollScreen.enabled &&
+                          (_detail?['job_id']?.toString().isNotEmpty ?? false)
+                        ? JobTasksAccess(
+                            business:widget.businessId,job: _detail!['job_id'].toString(),
+                            invoice:widget.documentId,selectorOnly: true,revision:_loadGeneration,
+                            onChanged:()=>unawaited(_load())) : null,
+                      laborSummary: OwnerPayrollScreen.enabled
+                        ? InvoiceLaborSummary(business:widget.businessId,invoice:widget.documentId,revision:_loadGeneration) : null,
                       businessId: widget.businessId,
                       documentId: widget.documentId,
                       expectedVersion: _version,

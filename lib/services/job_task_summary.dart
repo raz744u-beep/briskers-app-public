@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart' show Variable;
 import '../local/briskers_local_database.dart';
+import 'verified_paid_labor.dart';
 
 class JobTaskProgress {
   const JobTaskProgress(this.done, this.total);
@@ -29,6 +30,7 @@ class JobTaskSummary {
     List<String> jobs,
   ) async {
     final result = {for (final id in jobs) id: const JobTaskProgress(0, 0)};
+    final verifiedPaid=await VerifiedPaidLabor(db).allocations(business);
     final laborReady = await _has('regular_payroll_tasks');
     final generalReady = await _has('regular_payroll_shop_task_jobs');
     for (var offset = 0; offset < jobs.length; offset += 300) {
@@ -38,7 +40,8 @@ class JobTaskSummary {
       if (laborReady) {
         final tasks = await db.customSelect("""
           SELECT t.job_id, t.id, COUNT(p.id) AS portions,
-                 COUNT(CASE WHEN p.state='Done' THEN 1 END) AS finished
+                 COUNT(CASE WHEN p.state='Done' THEN 1 END) AS finished,
+                 GROUP_CONCAT(CASE WHEN p.state!='Done' THEN p.id END, '|') AS unfinished_ids
           FROM regular_payroll_tasks t
           JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id AND s.active=1
           LEFT JOIN regular_payroll_portions p ON p.business_id=t.business_id AND p.task_id=t.id
@@ -49,9 +52,10 @@ class JobTaskSummary {
         for (final row in tasks) {
           final id = row.read<String>('job_id');
           final old = result[id]!;
-          final done =
-              row.read<int>('portions') > 0 &&
-              row.read<int>('portions') == row.read<int>('finished');
+          final unfinished=(row.readNullable<String>('unfinished_ids')??'').split('|').where((s)=>s.isNotEmpty);
+          final done = row.read<int>('portions') > 0 &&
+              (row.read<int>('portions') == row.read<int>('finished') ||
+               unfinished.isNotEmpty && unfinished.every(verifiedPaid.contains));
           result[id] = JobTaskProgress(
             old.done + (done ? 1 : 0),
             old.total + 1,

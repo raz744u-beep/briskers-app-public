@@ -2200,6 +2200,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               await _changeGeneralTaskStatus(row['employee_id'] as String, id, status);
             },
             onOpenJob: (id) => _openRecordedWork(id, invoice: false),
+            onOpenInvoice: (id) => _openRecordedWork(id, invoice: true),
             onEmployeeTap: (id) => _openEmployeeProfile(id,_week,0),
           )),
       ]),

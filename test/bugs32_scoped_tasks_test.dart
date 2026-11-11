@@ -26,11 +26,11 @@ void main() {
       onEmployeeTap: (_) {}, onOpenJob: (_) {}, onGeneralStatus: (_, _) async {},
     ))));
     expect(find.text('J-46'), findsNothing);
-    expect(find.text('Labor 45'), findsNothing);
+    expect(find.text('Labor 45'), findsOneWidget); // Approved closed card description.
     await tester.tap(find.text('J-45'));
     await tester.pumpAndSettle();
     expect(find.text('Allocation details'), findsNothing);
-    await tester.tap(find.text('Labor 45'));
+    await tester.tap(find.text('Labor 45').last);
     await tester.pumpAndSettle();
     expect(find.text('Allocation details'), findsOneWidget);
     await tester.tap(find.text('Labor Task'));

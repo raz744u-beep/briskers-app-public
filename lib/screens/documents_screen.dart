@@ -20,6 +20,7 @@ import '../core/document_presentation.dart';
 import '../core/estimate_list_description.dart';
 import '../services/briskers_api.dart';
 import '../services/invoice_payment_feed.dart';
+import '../services/job_task_summary.dart';
 import '../services/local_job_retirement.dart';
 import '../local/local_database_provider.dart';
 import '../services/local_financial_cache.dart';
@@ -32,6 +33,7 @@ import '../services/offline_document_draft_service.dart';
 import '../services/local_invoice_status_styles_cache.dart';
 import '../services/invoice_finalization_guard.dart';
 import '../widgets/briskers_page_header.dart';
+import '../widgets/job_list_approved_card.dart';
 import '../widgets/connection_header_toggle.dart';
 import '../widgets/stale_keyboard_inset_guard.dart';
 import 'jobs/blank_invoice_setup_screen.dart';
@@ -197,6 +199,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
   Map<String, num> _receiptTotals = const {};
+  Map<String, Map<String, int>> _mechanicHours = const {};
   late final InvoicePaymentFeed _paymentFeed =
       widget.paymentFeed ?? InvoicePaymentFeed();
   bool _futureDatedOnly = false;
@@ -492,6 +495,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       _indexRows = null;
       _savedRows = null;
       _receiptTotals = const {};
+      _mechanicHours = const {};
       _verifiedFullyPaidInvoiceIds.clear();
       _locallyCoveredInvoiceIds.clear();
       _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
@@ -604,7 +608,19 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       // Receipt work participates in coalescing and cannot outlive the pass
       // that promises fresh status/payment state to the caller.
       await receipts;
+      if (!estimate) unawaited(_refreshMechanicHours(epoch, businessId));
     }
+  }
+
+  Future<void> _refreshMechanicHours(int epoch, String businessId) async {
+    final jobs = (_rows ?? const <Map<String,dynamic>>[]).map((r)=>r['job_id']?.toString()??'').where((id)=>id.isNotEmpty).toSet().toList();
+    try {
+      final result = <String,Map<String,int>>{};
+      for(var start=0; start<jobs.length; start+=300) {
+        result.addAll(await JobTaskSummary(localDatabase).hours(businessId,jobs.skip(start).take(300).toList()));
+      }
+      if(mounted && epoch==_loadEpoch) setState(()=>_mechanicHours=result);
+    } catch (_) { /* Optional labels cannot block saved invoice cards. */ }
   }
 
   Future<void> _loadRows(
@@ -2154,6 +2170,31 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               : (number.toUpperCase().startsWith('I-')
                     ? number
                     : 'I-$number'));
+
+    if (!_estimate) {
+      final presentation=DocumentPresentation(row);
+      final total=num.tryParse(row['total_amount']?.toString()??'');
+      final received=_receiptTotals[row['id']?.toString()];
+      final knownBalance=presentation.balanceDueCents;
+      final receiptBalance=received!=null && total!=null && total>=0
+          ? (total-received).clamp(0,total) : null;
+      final balance=presentation.requiresReconciliation || presentation.isVoid ? null
+          : knownBalance!=null ? (receiptBalance!=null && receiptBalance<knownBalance/100
+              ? receiptBalance : knownBalance/100) : receiptBalance;
+      return JobListApprovedCard(
+        job:{'status_color':'#${color.toARGB32().toRadixString(16).substring(2)}'},
+        number:jobNumber,customer:customer,invoiceNumber:number,vehicle:vehicle,
+        description:documentTitle,mechanic:'',employee:'',mechanicMinutes:null,progress:null,
+        statusControl:ApprovedListStatusBadge(label:statusLabel,color:color,icon:status=='Closed'?Icons.check:status=='Void'?Icons.block:Icons.credit_card),
+        financialSummary:Wrap(alignment:WrapAlignment.spaceBetween,spacing:12,children:[
+          Text(total==null?'Total: unavailable':'Total: ${_money(total)}',style:const TextStyle(fontWeight:FontWeight.w700,fontSize:13)),
+          Text(balance==null?'Balance: unavailable':'Balance due: ${_money(balance)}',style:const TextStyle(fontWeight:FontWeight.w700,fontSize:13)),
+          if(balance!=null && status!='Void') Text(balance==0?(presentation.paymentDetailsKnown && (presentation.finalizedCents??0)>=(presentation.totalCents??1)?'Paid':'Payment recorded'):total!=null && balance<total?'Partial payment recorded':'Unpaid',style:const TextStyle(color:Color(0xFF526171),fontSize:13)),
+        ]),
+        footer:Wrap(spacing:6,children:[for(final person in (_mechanicHours[row['job_id']]??const <String,int>{}).entries) Text('${person.key} · ${(person.value/60).toStringAsFixed(1)} hrs',style:const TextStyle(color:Color(0xFF526171),fontSize:13,fontWeight:FontWeight.w700)),if(row['customer_problem_flag']==true)const Icon(Icons.flag,color:Colors.red,size:18),Text([documentDate,if(_hasFutureDateTag(row))'Future-dated'].where((s)=>s.isNotEmpty).join(' · '),style:const TextStyle(color:Color(0xFF526171),fontSize:13))]),
+        onOpen:()=>_open(row),onOpenInvoice:()=>_open(row),onLongPress:()=>_showDocumentActions(row),
+      );
+    }
 
     return Card(
       margin: const EdgeInsets.only(bottom: 9),
