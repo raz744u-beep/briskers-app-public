@@ -8,6 +8,7 @@ import 'briskers_api.dart';
 import 'local_document_detail_cache.dart';
 import 'offline_invoice_payment_ledger.dart';
 import 'local_job_quarantine.dart';
+import 'local_job_retirement.dart';
 
 /// Owner-confirmed intents, separate from received payments and server posting.
 /// A queued intent never fabricates a posted payment or a server-confirmed close.
@@ -141,13 +142,16 @@ class OfflineInvoiceFinalization {
       if (BriskersConnectionModeController.instance.forceOffline) return;
       final invoice=row.read<String>('invoice_id');
       if(invoice.startsWith('local-')) continue;
-      if(await LocalJobQuarantine.isEntityBlocked(db,business,[invoice])) continue;
+      if(await LocalJobQuarantine.isEntityBlocked(db,business,[invoice]) ||
+          await LocalJobRetirement.isDocumentBlocked(db,business,invoice) ||
+          await LocalDocumentDetailCache(database:db).loadReadOnly(business,invoice)==null) continue;
       final unresolved=await db.customSelect("SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? AND entity_type IN ('invoice_payment_received','invoice_pending_payment_edit','invoice_tax_edit','document_edit')",
         variables:[Variable(business),Variable(invoice)]).get();
       if(unresolved.isNotEmpty) continue;
       final operation=row.read<String>('operation_id');
       await db.customStatement("UPDATE invoice_finalization_intents_v1 SET state='inflight' WHERE business_id=? AND invoice_id=?",[business,invoice]);
       try {
+        if (BriskersConnectionModeController.instance.forceOffline) return;
         final response=await api.finalizeInvoiceOnce(business,invoice,operation,
           Map<String,dynamic>.from(jsonDecode(row.read<String>('payload')) as Map));
         if(response['operation_id']!=operation || response['invoice_id']!=invoice || response['finalized']!=true) {

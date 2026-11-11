@@ -1,3 +1,5 @@
+import 'package:briskers_app/services/briskers_api.dart';
+import 'package:briskers_app/services/local_job_retirement.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:briskers_app/widgets/job_compact_card.dart';
@@ -8,6 +10,14 @@ import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/offline_invoice_finalization.dart';
 
+class RecordingApi extends BriskersApi {
+  int calls=0;
+  @override
+  Future<Map<String,dynamic>> finalizeInvoiceOnce(String businessId,String invoiceId,String operationId,Map<String,dynamic> request) async {
+    calls++;
+    return {'operation_id':operationId,'invoice_id':invoiceId,'finalized':true};
+  }
+}
 Map<String,dynamic> invoice(String id,{int total=100}) => {
   'id':id,'kind':'invoice','job_id':'job','total_amount':total,
   'paid_amount':0,'pending_payment':100,'status':'issued',
@@ -60,6 +70,20 @@ void main() {
     await tester.tap(find.text('Invoice 6367'));
     expect(opened,isTrue);
     expect(tester.takeException(),isNull);
+  });
+
+  test('a retired invoice never replays its earlier finalization intent',() async {
+    final db=BriskersLocalDatabase(NativeDatabase.memory()); addTearDown(db.close);
+    await LocalDocumentDetailCache.initialize(db);
+    await LocalDocumentDetailCache(database:db).save('shop','invoice',invoice('invoice'));
+    final api=RecordingApi();
+    final service=OfflineInvoiceFinalization(database:db,api:api);
+    await service.save('shop',['invoice'],isOwner:true,close:true);
+    await LocalJobRetirement.ensureSchema(db);
+    await db.customStatement("INSERT INTO local_job_retirement_entities VALUES('shop','job','invoice','invoice','retire','pending')");
+    await service.flush('shop');
+    expect(api.calls,0);
+    expect(await service.state('shop','invoice'),'pending');
   });
 
 }
