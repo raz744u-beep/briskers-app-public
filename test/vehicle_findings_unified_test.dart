@@ -656,6 +656,26 @@ void main() {
     },
   );
 
+  test('saved invoice note keeps its text while finding classification follows Add to Job', () async {
+    final saved = {...finding('fixture-f1'), 'include_on_invoice': true};
+    api.rows['fixture-f1'] = saved;
+    await work.seedServerFindingsIfClean(business, vehicle, [saved]);
+    await actions.addToJob(business, saved, job);
+    await actions.flush(business);
+    final detail = {...invoice(), 'finding_notes': [
+      {'id':'saved-note', 'finding_id':'fixture-f1', 'body':'Preserve saved wording'},
+    ]};
+    final resolved = (await actions.projectInvoiceNotes(business, detail))['finding_notes'] as List;
+    expect(resolved.single['invoice_resolution'], 'resolved_on_job');
+    expect(resolved.single['body'], 'Preserve saved wording');
+    expect(resolved.single['id'], 'saved-note');
+    await actions.removeFromJob(business, api.rows['fixture-f1']!, job);
+    await actions.flush(business);
+    final open = (await actions.projectInvoiceNotes(business, detail))['finding_notes'] as List;
+    expect(open.single['invoice_resolution'], 'unresolved');
+    expect(open.single['body'], 'Preserve saved wording');
+  });
+
   test(
     'invoice inclusion is identity based and untoggle preserves identical manual memo',
     () async {

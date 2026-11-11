@@ -675,9 +675,15 @@ class VehicleFindingActionsService {
       final locallyChanged =
           pendingFields.contains('include_on_invoice') ||
           finding['sync_state'] == 'pending';
+      final resolution = finding['repair_job_id']?.toString() == documentJobId &&
+              const {'in_job','resolved'}.contains(finding['status'])
+          ? 'resolved_on_job' : 'unresolved';
       if (existing != null &&
           existing['_local_finding_projection'] != true &&
           !locallyChanged) {
+        // Keep the saved note body and identity; classification follows the
+        // matching finding on this editable invoice, including after sync.
+        notes[id] = {...existing, 'invoice_resolution': resolution};
         continue;
       }
       notes.remove(id);
@@ -686,9 +692,7 @@ class VehicleFindingActionsService {
           'id': id,
           'finding_id': id,
           'body': finding['body'],
-          'invoice_resolution': finding['repair_job_id']?.toString() == documentJobId &&
-              const {'in_job','resolved'}.contains(finding['status'])
-              ? 'resolved_on_job' : 'unresolved',
+          'invoice_resolution': resolution,
           '_local_finding_projection': true,
         };
       }
