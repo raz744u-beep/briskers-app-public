@@ -1,4 +1,5 @@
 import 'package:briskers_app/services/briskers_api.dart';
+import 'package:briskers_app/core/connection_mode.dart';
 import 'package:briskers_app/services/local_job_retirement.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -12,9 +13,13 @@ import 'package:briskers_app/services/offline_invoice_finalization.dart';
 
 class RecordingApi extends BriskersApi {
   int calls=0;
+  bool fail=false;
+  final operations=<String>[];
   @override
   Future<Map<String,dynamic>> finalizeInvoiceOnce(String businessId,String invoiceId,String operationId,Map<String,dynamic> request) async {
     calls++;
+    operations.add(operationId);
+    if(fail) throw StateError('Synthetic conflict');
     return {'operation_id':operationId,'invoice_id':invoiceId,'finalized':true};
   }
 }
@@ -26,7 +31,10 @@ Map<String,dynamic> invoice(String id,{int total=100}) => {
 };
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  setUp(()=>SharedPreferences.setMockInitialValues({}));
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+    await BriskersConnectionModeController.instance.setMode(BriskersConnectionMode.auto);
+  });
   test('offline intent survives restart and repeated confirm, bulk eligibility is atomic',() async {
     final dir=await Directory.systemTemp.createTemp('finalization-');
     final file=File('${dir.path}/shop.sqlite');
@@ -84,6 +92,43 @@ void main() {
     await service.flush('shop');
     expect(api.calls,0);
     expect(await service.state('shop','invoice'),'pending');
+  });
+
+  test('offline replay makes no request; conflicts hold and explicit retry keeps identity',() async {
+    final db=BriskersLocalDatabase(NativeDatabase.memory()); addTearDown(db.close);
+    await LocalDocumentDetailCache.initialize(db);
+    await LocalDocumentDetailCache(database:db).save('shop','invoice',invoice('invoice'));
+    final api=RecordingApi()..fail=true;
+    final service=OfflineInvoiceFinalization(database:db,api:api);
+    await service.save('shop',['invoice'],isOwner:true,close:false);
+    await BriskersConnectionModeController.instance.setMode(BriskersConnectionMode.offline);
+    await service.flush('shop');
+    expect(api.calls,0);
+    await BriskersConnectionModeController.instance.setMode(BriskersConnectionMode.auto);
+    await service.flush('shop');
+    expect(await service.state('shop','invoice'),'review');
+    await service.flush('shop');
+    expect(api.calls,1);
+    api.fail=false;
+    await service.retry('shop','invoice',isOwner:true);
+    expect(api.operations.toSet(),hasLength(1));
+    expect(await service.state('shop','invoice'),'confirmed');
+    await service.flush('shop');
+    expect(api.calls,2);
+  });
+
+  test('partial receipts can finalize but cannot close; changed saved receipts cannot replace intent',() async {
+    final db=BriskersLocalDatabase(NativeDatabase.memory()); addTearDown(db.close);
+    await LocalDocumentDetailCache.initialize(db);
+    final cache=LocalDocumentDetailCache(database:db);
+    await cache.save('shop','invoice',invoice('invoice',total:200));
+    final service=OfflineInvoiceFinalization(database:db);
+    await service.save('shop',['invoice'],isOwner:true,close:false);
+    final before=(await db.customSelect('SELECT operation_id,payload FROM invoice_finalization_intents_v1').getSingle()).data;
+    await cache.save('shop','invoice',invoice('invoice',total:250));
+    await expectLater(service.save('shop',['invoice'],isOwner:true,close:false),throwsStateError);
+    expect((await db.customSelect('SELECT operation_id,payload FROM invoice_finalization_intents_v1').getSingle()).data,before);
+    await expectLater(service.save('shop',['invoice'],isOwner:true,close:true),throwsStateError);
   });
 
 }
