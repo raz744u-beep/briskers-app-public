@@ -180,6 +180,8 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
 
   Future<void> load()async{
     try{
+      await LocalPayrollRepository(db,business:widget.business,owner:true)
+          .recoverJobAssignments(widget.job);
       final roster=await OfflineJobAdminService(database:db).cachedEmployees(widget.business).timeout(const Duration(seconds:3));
       final row=await db.customSelect('SELECT assigned_employee_id,assigned_employee_name FROM local_jobs WHERE business_id=? AND id=?',
         variables:[Variable(widget.business),Variable(widget.job)]).getSingleOrNull();

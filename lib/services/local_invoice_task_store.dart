@@ -40,7 +40,7 @@ class LocalInvoiceTaskStore {
       'PRIMARY KEY(business_id,task_id))');
   }
 
-  Future<void> save(String business, String document, Map<String, dynamic> detail, {bool ownerAssignedOpenDocument = false}) async {
+  Future<void> save(String business, String document, Map<String, dynamic> detail, {bool ownerAssignedOpenDocument = false, String? selectedServiceLine}) async {
     if (detail['id'] != document ||
         (detail['business_id'] != null && detail['business_id'] != business)) {
       return;
@@ -67,12 +67,8 @@ class LocalInvoiceTaskStore {
       await db.customStatement("UPDATE regular_payroll_task_sources SET active=0 WHERE business_id=? AND invoice_id=? AND source_kind='invoice'",[business,document]);
       return;
     }
-    final date = source.readNullable<String>('document_date');
-    if (!currentPayrollDate(date) && !ownerAssignedOpenDocument) {
-      // Reading an archived invoice must never reconstruct its labor as new work.
-      // Existing tasks, payments and invoice lines remain available as history.
-      return;
-    }
+    // Task visibility and assignment are independent of payroll eligibility.
+    // Pre-cutover sources remain archived in the payroll ledger.
     await db.transaction(() async {
       await db.customStatement(
         'INSERT INTO regular_payroll_jobs VALUES(?,?,?) '
@@ -84,7 +80,14 @@ class LocalInvoiceTaskStore {
         "WHERE business_id=? AND invoice_id=? AND source_kind='invoice'",
         [business, document],
       );
-      for (final line in rows.where(isInvoiceLaborLine)) {
+      final linked = await db.customSelect(
+        'SELECT line_id FROM regular_payroll_task_sources WHERE business_id=? AND invoice_id=?',
+        variables: [Variable(business), Variable(document)],
+      ).get();
+      final selected = linked.map((r) => r.data['line_id']).toSet();
+      if (selectedServiceLine != null) selected.add(selectedServiceLine);
+      final taskLines = rows.where((r) => isInvoiceLaborLine(r) || selected.contains(r['id']));
+      for (final line in taskLines) {
         final id = line['id'] as String;
         final retained = await db.customSelect(
           'SELECT task_id FROM regular_payroll_task_sources '
@@ -98,7 +101,7 @@ class LocalInvoiceTaskStore {
         if(canonical.length>1) { throw StateError('Invoice labor identity needs review.'); }
         final task = retained.isNotEmpty ? retained.single.read<String>('task_id')
           : canonical.isNotEmpty ? canonical.single.read<String>('id') : jsonEncode([job, document, id]);
-        final hours = invoiceLaborHours(line);
+        final hours = isInvoiceLaborLine(line) ? invoiceLaborHours(line) : null;
         final description = (line['description'] ?? line['name'] ?? 'Invoice labor').toString();
         await db.customStatement(
           'INSERT INTO regular_payroll_tasks VALUES(?,?,?,?,?,?) '
@@ -114,7 +117,7 @@ class LocalInvoiceTaskStore {
       }
       for (var position=0;position<rows.length;position++) {
         final line=rows[position];
-        if(!isInvoiceLaborLine(line)) continue;
+        if(!isInvoiceLaborLine(line) && !selected.contains(line['id'])) continue;
         await db.customStatement('INSERT INTO regular_payroll_task_order(business_id,task_id,line_position) '
           'SELECT business_id,task_id,? FROM regular_payroll_task_sources WHERE business_id=? AND invoice_id=? AND line_id=? '
           'ON CONFLICT(business_id,task_id) DO UPDATE SET line_position=excluded.line_position',
@@ -139,9 +142,12 @@ class LocalInvoiceTaskStore {
       'LEFT JOIN regular_payroll_task_order o ON o.business_id=s.business_id AND o.task_id=s.task_id '
       "WHERE s.business_id=? AND s.invoice_id=? AND s.source_kind='invoice' AND s.active=1",
       variables:[Variable(business),Variable(document)]).get();
-    final expected={for(var i=0;i<rows.length;i++) if(isInvoiceLaborLine(rows[i])) rows[i]['id']:i};
+    final linked=actual.map((r)=>r.data['line_id']).toSet();
+    final expected={for(var i=0;i<rows.length;i++) if(isInvoiceLaborLine(rows[i]) || linked.contains(rows[i]['id'])) rows[i]['id']:i};
     if(actual.length!=expected.length || actual.any((r)=>expected[r.data['line_id']]!=r.data['line_position'])) {
       await save(business,document,detail);
+    } else if (detail['job_id'] is String) {
+      await LocalTaskAssignmentStore(db).inherit(business, detail['job_id'] as String);
     }
   }
 

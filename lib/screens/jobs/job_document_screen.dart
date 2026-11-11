@@ -1,3 +1,4 @@
+import '../../services/local_payroll_repository.dart';
 import '../payroll/owner_payroll_screen.dart';
 import '../payroll/job_tasks_access.dart';
 import 'owner_local_delete_action.dart';
@@ -544,6 +545,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         localDatabase, widget.businessId, widget.documentId)) {
       if (mounted && generation == _loadGeneration) _blockRetiredDocument();
       return;
+    }
+    if (OwnerPayrollScreen.enabled && widget.isOwner) {
+      await LocalPayrollRepository(localDatabase,business:widget.businessId,owner:true).prepare();
     }
     final loadWatch = Stopwatch()..start();
     final forceOffline =

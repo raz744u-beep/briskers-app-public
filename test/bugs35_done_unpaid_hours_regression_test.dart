@@ -12,7 +12,7 @@ void main() {
 
     // The task's completed state alone must not disable its pencil.
     expect(ui, isNot(contains("onPressed: _busy || conflict || removed || state=='Done'")));
-    expect(ui, contains('onPressed: _busy || conflict || removed || archived'));
+    expect(ui, contains('onPressed: _busy || conflict || removed'));
 
     // The Owner correction reuses the existing immutable allocation. Its
     // earned/credited minutes and estimates update atomically, without

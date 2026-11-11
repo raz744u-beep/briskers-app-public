@@ -103,7 +103,6 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
   Future<void> _longPress(String key, Map<String, dynamic> row,
       bool general) async {
     final editableLabor = !general &&
-        row['archived_labor'] != 1 &&
         row['invoice_id'] is String &&
         row['source_line_id'] is String &&
         widget.onManageLabor != null;

@@ -60,7 +60,7 @@ void main() {
     final write = assign.substring(assign.indexOf('final employee = await showDialog'));
     expect(write, contains('await _runOwnerTaskEdit(() => assign(pairedDevice: false))'));
     expect(write, contains('await _run(() => assign(pairedDevice: true))'));
-    expect(write, contains('_taskEditRepository.registerAssignedLabor('));
+    expect(write, contains('_taskEditRepository.assignExistingService('));
     expect(write, contains('await _db.transaction(apply)'));
     expect(write, contains('await workflow.assign('));
     expect(write, contains('if (pairedDevice) {'));

@@ -1,3 +1,4 @@
+import '../../services/local_document_detail_cache.dart';
 import '../../services/local_invoice_task_store.dart';
 import 'dart:async';
 import 'dart:math';
@@ -393,6 +394,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final pendingPayments = await PayrollOwnerLedger(_db, widget.businessId).pending();
     _loadStage = 'tasks'; // Invoice saves maintain task identities incrementally.
     final job = widget.jobId;
+    if (job != null) await repository.recoverJobAssignments(job);
     // Keep historical invoice task sources visible in the Tasks UI.
     // A pre-cutover source is read-only history, never a new payable credit.
     final sources = (await repository.tasks()).map((r) => <String,dynamic>{
@@ -526,7 +528,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     }, verifyPayment: pair);
   }
 
-  Future<void> _assign(String invoiceId, Map<String, dynamic> line, {String? jobId}) async {
+  Future<void> _assign(String invoiceId, Map<String, dynamic> line, {String? jobId, bool enterHours = false}) async {
     final job = jobId ?? widget.jobId;
     if (job == null) return;
     var candidates = <Map<String, dynamic>>[];
@@ -570,6 +572,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     // basis, NOT an automatic rate; actual payment remains unavailable until
     // the Owner configures and reviews compensation in Employee Details.
     final rate = employee['rate'] as int? ?? 0;
+    int? assignedMinutes;
+    if (enterHours) {
+      final value = await payrollLanInput(context, 'Assign labor', 'Mechanic hours');
+      final hours = double.tryParse(value ?? '');
+      if (hours == null || !hours.isFinite || hours < 0 || hours > 10000 || !mounted) return;
+      assignedMinutes = (hours * 60).round();
+    }
+
     if (!_canView) return;
     // Detect the saved shop link before editing. A failed peer read must
     // never be silently interpreted as an unpaired, local-only device.
@@ -578,6 +588,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       final identity = await PayrollLanIdentity.load();
       paired = await PayrollLanEnrollment(identity)
           .ownerPeer(widget.businessId, employeeId) != null;
+      final document = await _db.customSelect(
+        'SELECT document_date FROM local_documents WHERE business_id=? AND id=?',
+        variables:[Variable(widget.businessId),Variable(invoiceId)],
+      ).getSingleOrNull();
+      // Historical recordkeeping must not enqueue a fresh work assignment.
+      if (!LocalInvoiceTaskStore.currentPayrollDate(document?.data['document_date'])) paired=false;
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
       return;
@@ -595,11 +611,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         // Explicit reassignment is a distinct Owner operation, never an
         // accidental consequence of adding a second person.
         if (!pairedDevice) {
-          await _taskEditRepository.registerAssignedLabor(
-            jobId: job, invoiceId: invoiceId, lineId: line['id'] as String,
-            employeeId: employeeId, employeeName: name, rateCents: rate,
+          await _taskEditRepository.assignExistingService(
+            job: job, invoice: invoiceId, line: line['id'] as String,
+            employee: employeeId, name: name, rate: rate, minutes: assignedMinutes,
           );
         } else {
+          await _taskEditRepository.assignExistingService(
+            job: job, invoice: invoiceId, line: line['id'] as String,
+            employee: employeeId, name: name, rate: rate, minutes: assignedMinutes,
+          );
           final workflow = await _workflow(employeeId);
           await workflow.assign(
             job: job, invoice: invoiceId, line: line['id'] as String,
@@ -810,7 +830,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                 tooltip: 'Edit Assignment',
                 icon: const Icon(Icons.edit_outlined,size:19,
                   color: Color(0xFF00897E)),
-                onPressed: _busy || conflict || removed || archived
+                onPressed: _busy || conflict || removed
                   ? null : () => _editEstimated(row),
                 visualDensity: VisualDensity.compact,
                 constraints: const BoxConstraints(minWidth:34,minHeight:34),
@@ -1637,9 +1657,24 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                   child: Text('Invoice ${invoice['document_number'] ?? ''}')),
             ]));
       if (!mounted || !_canView || id == null) return;
-      await Navigator.push<void>(context, MaterialPageRoute(builder: (_) =>
-        JobDocumentScreen(businessId: widget.businessId, documentId: id,
-          isOwner: true, roleCode: 'owner', initialAction: 'add_labor')));
+      final detail = await LocalDocumentDetailCache(database:_db).load(widget.businessId,id);
+      if (!mounted || !_canView) return;
+      final raw = detail?['lines'] ?? detail?['items'];
+      final lines = raw is List ? raw.whereType<Map>().map(Map<String,dynamic>.from)
+          .where((r)=>r['id'] is String && r['line_kind']!='discount').toList()
+          : <Map<String,dynamic>>[];
+      if (lines.isEmpty) {
+        setState(()=>_error='No saved service items are available on this invoice.');
+        return;
+      }
+      final line = await showDialog<Map<String,dynamic>>(context:context,
+        builder:(dialog)=>SimpleDialog(title:const Text('Choose existing service'),children:[
+          for(final row in lines) SimpleDialogOption(
+            onPressed:()=>Navigator.pop(dialog,row),
+            child:Text((row['description'] ?? row['name'] ?? 'Service').toString())),
+        ]));
+      if (!mounted || !_canView || line == null) return;
+      await _assign(id,line,enterHours:true);
       if (mounted && _canView) await _load();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());

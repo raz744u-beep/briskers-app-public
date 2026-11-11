@@ -615,17 +615,11 @@ class LocalPayrollRepository {
         'ON CONFLICT(business_id,job_id) DO UPDATE SET employee_id=excluded.employee_id,employee_name=excluded.employee_name,revision=revision+1 '
         'WHERE employee_id IS NOT excluded.employee_id OR employee_name IS NOT excluded.employee_name',[business,job,employee,name]);
       if (employee != null) {
-        // Explicit lead selection on an open, older job can assign operational
-        // hours. The payroll cutover still archives every credit until reviewed.
+        // Recover saved sources regardless of invoice age or paid/closed status.
+        // This does not authorize historical carry-forward.
         final older = await _read(
-          "SELECT d.id FROM local_documents d JOIN local_jobs j "
-          "ON j.business_id=d.business_id AND j.id=d.job_id "
-          "WHERE d.business_id=? AND d.job_id=? AND d.kind='invoice' "
-          "AND d.closed_at IS NULL AND j.completed_at IS NULL "
-          "AND j.status IN ('open','in_progress') "
-          "AND lower(coalesce(d.status,'')) IN ('draft','open','issued','pending') "
-          "AND date(d.document_date)=d.document_date AND d.document_date < ?",
-          [business,job,LocalInvoiceTaskStore.payrollCutover]);
+          "SELECT id FROM local_documents WHERE business_id=? AND job_id=? AND kind='invoice'",
+          [business,job]);
         for (final row in older) {
           final id = row['id'] as String;
           final detail = await LocalDocumentDetailCache(database:db).load(business,id);
@@ -639,6 +633,45 @@ class LocalPayrollRepository {
           if(task['job_id']==job)await LocalTaskAssignmentStore(db).retireInherited(business,task['id'] as String);
         }
       }
+      _authorize();
+    });
+  }
+
+  Future<void> recoverJobAssignments(String job) async {
+    _authorize();
+    await prepare();
+    final documents = await _read(
+      "SELECT id FROM local_documents WHERE business_id=? AND job_id=? AND kind='invoice'",
+      [business,job]);
+    for (final document in documents) {
+      await LocalDocumentDetailCache(database:db).load(business,document['id'] as String);
+    }
+    await LocalTaskAssignmentStore(db).inherit(business,job);
+  }
+
+  /// Assign an existing service, without creating or editing a billed item.
+  Future<void> assignExistingService({required String job, required String invoice,
+    required String line, required String employee, required String name,
+    required int rate, int? minutes}) async {
+    _authorize();
+    await prepare();
+    await db.transaction(() async {
+      final detail = await LocalDocumentDetailCache(database:db).load(business,invoice);
+      if (detail == null || detail['job_id'] != job || detail['kind'] != 'invoice') {
+        throw StateError('Saved invoice is unavailable.');
+      }
+      final raw = detail['lines'] ?? detail['items'];
+      if (raw is! List || raw.whereType<Map>().where((r)=>r['id']==line).length != 1) {
+        throw StateError('Saved service is unavailable.');
+      }
+      await LocalInvoiceTaskStore(db).save(business,invoice,detail,selectedServiceLine:line);
+      final task = (await tasks()).where((r)=>r['invoice_id']==invoice && r['source_line_id']==line && r['source_active']!=0).single;
+      final staff = await employees();
+      if (!staff.any((r)=>r['id']==employee)) {
+        await saveEmployeeCompensation(employee:employee,name:name,rate:rate,weeklyBase:false);
+      }
+      await LocalTaskAssignmentStore(db).allocate(business,task['id'] as String,employee,inherited:false);
+      if (minutes != null) await setEstimatedMinutes(task['id'] as String,employee,minutes);
       _authorize();
     });
   }
@@ -1221,6 +1254,21 @@ class LocalPayrollRepository {
         'SELECT c.*,p.state FROM local_mechanic_work_credits_v1 c JOIN regular_payroll_portions p ON p.business_id=c.business_id AND p.id=c.allocation_id WHERE c.business_id=? AND c.allocation_id=?',
         [business, id],
       );
+      final covered = await _read(
+        'SELECT credit_id FROM regular_payroll_work_coverage WHERE business_id=? AND credit_id=?',
+        [business,id]);
+      if (covered.isNotEmpty) throw StateError('Paid work is immutable');
+      final historical = await _read(
+        "SELECT s.task_id FROM regular_payroll_task_sources s "
+        "JOIN local_documents d ON d.business_id=s.business_id AND d.id=s.invoice_id "
+        "WHERE s.business_id=? AND s.task_id=? AND s.source_kind='invoice' "
+        "AND (date(d.document_date) IS NULL OR date(d.document_date)!=d.document_date OR d.document_date<?) "
+        "AND NOT EXISTS(SELECT 1 FROM regular_payroll_audit a WHERE a.business_id=s.business_id "
+        "AND a.operation_id=? AND a.event='owner_reviewed_unpaid_carry')",
+        [business,rows.firstOrNull?['task_id']?.toString() ?? '',LocalInvoiceTaskStore.payrollCutover,id]);
+      if (historical.isNotEmpty) {
+        throw StateError('Historical labor requires separate Owner carry-forward before recording new work.');
+      }
       final retired = await _read('SELECT active FROM regular_payroll_assignment_meta WHERE business_id=? AND task_id=? AND employee_id=?',
         [business, rows.firstOrNull?['task_id']?.toString() ?? '', rows.firstOrNull?['employee_id']?.toString() ?? '']);
       if (!allowRetiredProgress && retired.firstOrNull?['active'] == 0){throw StateError('This inherited assignment changed. Refresh tasks.');}
