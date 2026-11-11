@@ -137,7 +137,7 @@ void main() {
     expect(start,greaterThanOrEqualTo(0));
     expect(end,greaterThan(start));
     final handler=screen.substring(start,end);
-    expect(handler,contains("title: const Text('Add mechanic to invoice labor')"));
+    expect(handler,contains("title: 'Add mechanic to invoice labor'"));
     expect(handler,isNot(contains('assignments.retireInherited(')));
     expect(handler,contains('await assignments.allocate('));
     expect(handler,contains('inherited: false'));

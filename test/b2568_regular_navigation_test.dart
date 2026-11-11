@@ -150,6 +150,7 @@ void main(){
     
     await click(find.text('Add mechanic'));
     await click(find.text('Beta'));
+    await click(find.text('Continue'));
     // The second mechanic starts at zero allocated hours. The Owner sets
     // the approved credit once, before completing the task.
     final turboCard=await creditCard('b','Replace turbocharger and gaskets');
@@ -185,7 +186,7 @@ void main(){
     
     // Keep Alpha explicitly assigned, then add Beta to the same task identity.
     for(final name in ['Alpha','Beta']){
-      await click(find.text('Add mechanic').last);await click(find.text(name).last);
+      await click(find.text('Add mechanic').last);await click(find.text(name).last);await click(find.text('Continue'));
       await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:400)));await tester.pump();
     }
     // Two independent assigned-hours choices on the shared labor line.

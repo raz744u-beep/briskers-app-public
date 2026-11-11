@@ -18,8 +18,10 @@ class JobScopedTasks extends StatefulWidget {
     required this.onGeneralProgress,
     this.onManageLabor,
     this.onManageGeneral,
+    this.laborActions,
   });
 
+  final Widget Function(Map<String, dynamic>)? laborActions;
   final String jobId;
   final List<Map<String, dynamic>> serviceTasks;
   final List<Map<String, dynamic>> generalTasks;
@@ -213,7 +215,8 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
           for (final allocation in allocations)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 5),
-              child: Row(children: [
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
                 Expanded(child: Text(
                   widget.employeeName(allocation['employee_id']?.toString()) +
                   ' · ' +
@@ -229,8 +232,17 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
                       allocation['state']?.toString() == 'In Progress'
                         ? 'In Progress' : 'Not Started',
                     allocation: allocation),
+                ]),
+                if (widget.laborActions != null) widget.laborActions!(allocation),
               ]),
             ),
+        if (!general && widget.onManageLabor != null &&
+            row['invoice_id'] is String && row['source_line_id'] is String)
+          TextButton.icon(
+            onPressed: _running != null ? null : () => widget.onManageLabor!(row),
+            icon: const Icon(Icons.edit_outlined),
+            label: const Text('Edit Assignment'),
+          ),
         if (notes.isNotEmpty) ...[
           const SizedBox(height: 5),
           Text('Notes: ' + notes),

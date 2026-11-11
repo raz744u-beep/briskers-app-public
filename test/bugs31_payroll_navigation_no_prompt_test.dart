@@ -50,14 +50,14 @@ void main() {
     expect(start, greaterThanOrEqualTo(0));
     expect(end, greaterThan(start));
     final assign = source.substring(start, end);
-    final picker = assign.substring(0, assign.indexOf('final employee = await showDialog'));
+    final picker = assign.substring(0, assign.indexOf('final employee = await showTaskSelection'));
     expect(picker, contains('if (!_canView) return;'));
     expect(picker, contains('_viewRepository.employees()'));
     expect(picker, isNot(contains('_run(')));
     expect(picker, isNot(contains('authorizeLocal')));
     // The original TEST's local assignment is an Owner task edit.
     // Only the paired LAN writer uses the extra OS payment grant.
-    final write = assign.substring(assign.indexOf('final employee = await showDialog'));
+    final write = assign.substring(assign.indexOf('final employee = await showTaskSelection'));
     expect(write, contains('await _runOwnerTaskEdit(() => assign(pairedDevice: false))'));
     expect(write, contains('await _run(() => assign(pairedDevice: true))'));
     expect(write, contains('_taskEditRepository.assignExistingService('));

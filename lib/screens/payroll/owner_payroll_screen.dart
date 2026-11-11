@@ -44,6 +44,7 @@ import 'payroll_lan_controls.dart';
 import 'weekly_labor_review_screen.dart';
 import 'tasks_workspace.dart';
 import 'job_scoped_tasks.dart';
+import 'task_selection_dialog.dart';
 import 'payroll_overview.dart';
 
 class OwnerPayrollScreen extends StatefulWidget {
@@ -551,19 +552,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       setState(() => _error = 'Assign mechanics to this Job first.');
       return;
     }
-    final employee = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('Add mechanic to invoice labor'),
-        // Adding another mechanic keeps all existing allocations and hours.
-        children: [
-          for (final employee in candidates)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(context, employee),
-              child: Text(_employeeLabel((employee['id']??employee['employee_id'])?.toString())),
-            ),
-        ],
-      ),
+    final employee = await showTaskSelection<Map<String, dynamic>>(
+      context, title: 'Add mechanic to invoice labor', options: candidates,
+      label: (employee) => _employeeLabel((employee['id'] ?? employee['employee_id'])?.toString()),
+      description: (_) => '',
     );
     if (employee == null || !mounted) return;
     final employeeId = employee['employee_id'] as String;
@@ -574,7 +566,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final rate = employee['rate'] as int? ?? 0;
     int? assignedMinutes;
     if (enterHours) {
-      final value = await payrollLanInput(context, 'Assign labor', 'Mechanic hours');
+      final value = await showTaskHours(context);
       final hours = double.tryParse(value ?? '');
       if (hours == null || !hours.isFinite || hours < 0 || hours > 10000 || !mounted) return;
       assignedMinutes = (hours * 60).round();
@@ -682,6 +674,33 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     ));
   }
 
+  Widget _quickLaborActions(Map<String, dynamic> row, {bool markDone = true}) {
+    final settled = row['owner_prior_paid'] == 1 || row['paid'] == 1 ||
+        (row['paid_minutes'] as int? ?? 0) > 0;
+    final editable = !settled && row['assignment_conflict'] != 1 &&
+        row['source_active'] != 0;
+    return Wrap(spacing: 8, runSpacing: 4, children: [
+      if (markDone && editable && row['archived_labor'] != 1 && row['state'] != 'Done')
+        FilledButton.icon(
+          onPressed: _busy ? null : () => _recordTaskProgress(row, markDone: true),
+          icon: const Icon(Icons.done, size: 18),
+          label: const Text('Mark Done'),
+        ),
+      if (editable)
+        TextButton.icon(
+          onPressed: _busy ? null : () => _confirmHistoricalPaid(row),
+          icon: const Icon(Icons.verified_outlined, size: 18),
+          label: const Text('Already Paid'),
+        ),
+      if (markDone && editable && row['archived_labor'] == 1)
+        TextButton.icon(
+          onPressed: _busy ? null : () => _reviewCarry(row),
+          icon: const Icon(Icons.manage_search, size: 18),
+          label: const Text('Review unpaid work'),
+        ),
+    ]);
+  }
+
   Future<void> _editEstimated(Map<String, dynamic> row) async {
     final previous = row['employee_id'] as String;
     var selected = previous;
@@ -690,7 +709,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final hours = await showDialog<double>(context: context, builder: (dialog) =>
       StatefulBuilder(builder: (context, update) {
         final parsed = double.tryParse(input.text.trim());
-        return AlertDialog(title: const Text('Edit Assignment'), backgroundColor: Theme.of(context).colorScheme.surface,
+        return AlertDialog(title: const Text('Edit Assignment',style:TextStyle(color:Color(0xFF00897E),fontWeight:FontWeight.w700)), backgroundColor: Colors.white,
           scrollable:true, content: Column(mainAxisSize: MainAxisSize.min, children: [
             DropdownButtonFormField<String>(initialValue: selected, isExpanded:true,
               decoration:const InputDecoration(labelText:'Replace mechanic',border:OutlineInputBorder()),
@@ -900,6 +919,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                           style:TextStyle(fontWeight:FontWeight.w700,
                             color:Color(0xFF64748B))),
                       ]),
+                  if (widget.focusLineId == null) _quickLaborActions(row, markDone: false),
                   if (actual > 0 || credited > 0)
                     Text('Actual: ${(actual/60).toStringAsFixed(2)}h · '
                       'Credited: ${(credited/60).toStringAsFixed(2)}h',
@@ -1667,12 +1687,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         setState(()=>_error='No saved service items are available on this invoice.');
         return;
       }
-      final line = await showDialog<Map<String,dynamic>>(context:context,
-        builder:(dialog)=>SimpleDialog(title:const Text('Choose existing service'),children:[
-          for(final row in lines) SimpleDialogOption(
-            onPressed:()=>Navigator.pop(dialog,row),
-            child:Text((row['description'] ?? row['name'] ?? 'Service').toString())),
-        ]));
+      final line = await showTaskSelection<Map<String, dynamic>>(
+        context, title: 'Choose existing service', options: lines,
+        label: (row) => (row['name'] ?? row['description'] ?? 'Service').toString(),
+        description: (row) => (row['description'] ?? '').toString(),
+      );
       if (!mounted || !_canView || line == null) return;
       await _assign(id,line,enterHours:true);
       if (mounted && _canView) await _load();
@@ -2196,6 +2215,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                       task['employee_id'] as String, id, status);
                   }
                 },
+                laborActions: (row) => _quickLaborActions(row),
                 onManageLabor: (row) => unawaited(_openAssignments(row)),
                 onManageGeneral: (row) =>
                     unawaited(_editJobGeneralTask(row)),
@@ -2213,9 +2233,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             serviceTaskCard: (row) => byTask.containsKey(row['line_id'])
                 ? Column(children: [
                     for (final allocation in byTask[row['line_id']]!) _taskCard(allocation, manage:row['invoice_id'] is! String),
-                    if (row['archived_labor']!=1 && row['invoice_id'] is String && row['source_line_id'] is String && row['source_active'] != 0)
-                      IconButton(tooltip:'Manage Labor Assignments',icon:const Icon(Icons.edit_outlined),
-                        onPressed:()=>_openAssignments(row)),
+                    if (row['invoice_id'] is String && row['source_line_id'] is String && row['source_active'] != 0)
+                      TextButton.icon(icon:const Icon(Icons.edit_outlined),
+                        label:const Text('Edit Assignment'),
+                        onPressed:_busy?null:()=>_openAssignments(row)),
                   ])
                 : ListTile(
                     title: Text(row['description'] as String),
@@ -2223,7 +2244,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                       ? 'Historical invoice labor · view only' : 'Unassigned · Planned'),
                     trailing: row['archived_labor']==1 ? const Icon(Icons.lock_outline)
                       : const Icon(Icons.edit_outlined),
-                    onTap: row['archived_labor']!=1 && row['invoice_id'] is String && row['source_line_id'] is String
+                    onTap: row['invoice_id'] is String && row['source_line_id'] is String
                       ? () => _openAssignments(row) : null,
                   ),
             onAddService: _jobMode ? _newJobLabor : _newServiceTask,

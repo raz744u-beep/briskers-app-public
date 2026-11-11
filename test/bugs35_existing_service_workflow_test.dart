@@ -44,7 +44,7 @@ void main() {
     final detail=<String,dynamic>{'id':'invoice','kind':'invoice','job_id':'job','total':192.06,'paid_amount':192.06,'payments':[{'id':'payment','amount':192.06}], 'lines':[{'id':'oil','name':'Oil Change','line_kind':'item','quantity':1,'unit_price':175}]};
     await tester.runAsync(()async{
       await repo.prepare();await LocalDocumentDetailCache.initialize(db);
-      await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status,job_number,assigned_employee_id,assigned_employee_name) VALUES('job','shop','owner','Ireona fixture','open','J-51','kam','Kam')");
+      await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,customer_name,status,job_number,assigned_employee_id,assigned_employee_name) VALUES('job','shop','owner','Marzel Stafford','Marzel Stafford','open','J-50','kam','Kam')");
       await db.customStatement("INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) VALUES('2026-11-11','invoice','shop','job','invoice','6370')");
       await LocalDocumentDetailCache(database:db).save('shop','invoice',detail);
     });
@@ -63,8 +63,10 @@ void main() {
     await until(find.text('Choose existing service'));
     expect(find.text('Add Labor Task'),findsNothing);
     await click(find.text('Oil Change'));
+    await click(find.text('Continue'));
     await until(find.text('Add mechanic to invoice labor'));
-    await click(find.descendant(of:find.byType(SimpleDialog),matching:find.text('Kam')));
+    await click(find.descendant(of:find.byType(AlertDialog),matching:find.text('Kam')));
+    await click(find.text('Continue'));
     await until(find.text('Mechanic hours'));
     await tester.enterText(find.byType(TextField),'1.0');
     await click(find.text('Continue'));
@@ -77,6 +79,34 @@ void main() {
     expect(work,hasLength(1));expect(work.single['employee_id'],'kam');expect(work.single['estimated_minutes'],60);
     expect(await tester.runAsync(()=>LocalDocumentDetailCache(database:db).load('shop','invoice')),detail);
     expect(find.textContaining('Oil Change'),findsWidgets);
+    // J-50 equivalent: the customer paid, but Kam has not. Direct Done
+    // must preserve the allocation and credit exactly one unpaid hour.
+    await click(find.text('Oil Change').first);
+    await click(find.text('Mark Done'));
+    await until(find.text('Done').first);
+    var earned=(await tester.runAsync(()=>repo.work()))!.single;
+    expect(earned['id'],work.single['id']);
+    expect(earned['estimated_minutes'],60);
+    expect(earned['actual_minutes'],60);
+    expect(earned['remaining_minutes'],60);
+    expect(earned['paid_minutes'],0);
+    await click(find.text('Edit Assignment'));
+    await until(find.text('Manage Labor Assignments'));
+    await click(find.byTooltip('Edit Assignment'));
+    await tester.enterText(find.byType(TextField),'1.5');
+    await click(find.text('Save'));
+    for(var i=0;i<100;i++) {
+      await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:20)));
+      await tester.pump(const Duration(milliseconds:20));
+      earned=(await tester.runAsync(()=>repo.work()))!.single;
+      if(earned['estimated_minutes']==90) break;
+    }
+    expect(earned['id'],work.single['id']);
+    expect(earned['actual_minutes'],90);
+    expect(earned['remaining_minutes'],90);
+    expect(earned['paid_minutes'],0);
+    expect(await tester.runAsync(()=>LocalDocumentDetailCache(database:db).load('shop','invoice')),detail);
+    expect(await tester.runAsync(()=>db.customSelect('SELECT * FROM regular_payroll_payments').get()),isEmpty);
     expect(tester.takeException(),isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
