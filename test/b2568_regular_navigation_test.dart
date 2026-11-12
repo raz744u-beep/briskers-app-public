@@ -132,7 +132,8 @@ void main(){
     // Use the real invoice link so returning exercises its refresh callback.
     await click(find.text('Job J-1'));
     await until(find.text('Main Mechanic'));
-    expect(find.text('Job Tasks'),findsWidgets);
+    expect(find.text('Job Tasks'),findsNothing,reason:'One task navigation control remains on Job Details.');
+    expect(find.textContaining('View Tasks'),findsOneWidget);
     await capture('job-detail-main-mechanic');
     await click(find.byType(DropdownButton<String>).first);
     await click(find.text('Alpha').last);
@@ -307,7 +308,7 @@ void main(){
     await click(chip);
     expect(tester.widget<JobDocumentScreen>(find.byType(JobDocumentScreen)).documentId,invoice);
     navigator.currentState!.pop();await tester.pumpAndSettle();
-    await click(find.descendant(of:jobPage,matching:find.widgetWithText(OutlinedButton,'Job Tasks')));
+    await click(find.descendant(of:jobPage,matching:find.textContaining('View Tasks')));
     // Job-specific Tasks intentionally uses the approved compact view.
     // Global Tasks above retains its existing filterable workspace.
     await until(find.byType(JobScopedTasks));
