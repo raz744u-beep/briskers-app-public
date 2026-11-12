@@ -1,3 +1,4 @@
+import '../../services/local_recurring_expense_edit.dart';
 import '../../services/receipt_scanning_notice.dart';
 import 'dart:async';
 
@@ -136,6 +137,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
   DateTime? _endDate;
   String? _recurringRuleId;
 
+  bool _localRecurring = false;
+  bool _editTargetLoaded = false;
   bool _loading = true;
   bool _optionsLoading = true;
   bool _saving = false;
@@ -243,7 +246,17 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       data['quick_templates'] ?? const [],
     ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
 
+    if(detail!=null) {
+      for(final spec in [(accounts,'account_id','account'),(categories,'category_id','category'),(counterparties,'counterparty_id','counterparty')]) {
+        final id=detail[spec.$2]?.toString();
+        if(id!=null && id.isNotEmpty && !spec.$1.any((r)=>r['id']==id)) {
+          spec.$1.add({'id':id,'name':detail[spec.$3]?.toString()??'Saved selection'});
+        }
+      }
+    }
     setState(() {
+      _editTargetLoaded=detail!=null;
+      _localRecurring=_editing && detail!=null && (detail['recurring_rule_id']!=null || detail['recurring_engine_owned']==true);
       _accounts = accounts;
       _categories = categories;
       _counterparties = counterparties;
@@ -354,12 +367,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
         final data = await _localFinancial.loadOptions(widget.businessId);
         Map<String, dynamic>? detail;
         if (sourceId != null) {
-          detail = await _localFinancial.loadTransactionDetail(
+          detail = await _localFinancial.loadTransactionForEdit(
             widget.businessId,
             sourceId,
           );
         }
-        if (data.isNotEmpty) {
+        if ((data.isNotEmpty || detail!=null) && (sourceId==null || detail!=null)) {
           localShown = true;
           if (mounted) _applyLoadedOptions(data, detail);
         }
@@ -368,6 +381,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       }
     }
 
+    if (_localRecurring && localShown) return;
     if (forceOffline) {
       // AI Scan Receipt must open the camera from the existing expenses
       // shortcut even when all app synchronization remains Force Offline.
@@ -384,7 +398,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
         setState(() {
           _loading = false;
           _optionsLoading = false;
-          _error = 'Expense setup has not been cached yet. Go online once to sync accounts and categories.';
+          _error = sourceId!=null ? 'Saved expense details are unavailable. Nothing has been changed. Recover the existing recurring schedule to load this record.' : 'Expense setup has not been cached yet. Go online once to sync accounts and categories.';
         });
       }
       return;
@@ -1205,7 +1219,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
   }
 
   Future<void> _save() async {
-    if (_saving) return;
+    if (_saving || (_editing && !_editTargetLoaded)) return;
     final amount = num.tryParse(_amountController.text.trim());
     if (amount == null || amount <= 0) {
       setState(() => _error = 'Enter a valid amount.');
@@ -1224,6 +1238,21 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     try {
       final rounded = num.parse(amount.toStringAsFixed(2));
       final counterpartyName = _counterpartyController.text.trim();
+
+      if(_localRecurring) {
+        final receipts=<Map<String,dynamic>>[];
+        for(final photo in _receipts) {
+          receipts.add({'filename':photo.name,'mime_type':_mimeType(photo.name),'bytes':await photo.readAsBytes()});
+        }
+        await LocalRecurringExpenseEdit.save(widget.businessId,widget.editTransactionId!,{
+          'amount_minor':(rounded*100).round(),'account_id':_accountId,'account':_selectedAccountName(),
+          'category_id':_categoryId,'category':_selectedCategoryName(),'vendor_id':_counterpartyId,
+          'counterparty':counterpartyName,'date':_date.toIso8601String().substring(0,10),
+          'remarks':_remarksController.text.trim(),'job_id':_jobId,'document_id':_documentId,
+        },receipts,extraction:_receiptExtraction==null?null:{..._receiptExtraction!,'review_confirmed':true,'extraction_source':'independent_online_ai'});
+        if(mounted)Navigator.pop(context,true);
+        return;
+      }
 
       // Ordinary income and expenses are local-first even in Auto mode.
       // Recurring rules still require online operations. Reviewed receipt
@@ -1384,7 +1413,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
         );
       }
 
-      if (widget.allowRecurring && !_linked && !_copying) {
+      if (widget.allowRecurring && !_linked && !_copying && !_localRecurring) {
         if (_repeat) {
           var recurringVendorId = _counterpartyId;
           if (recurringVendorId == null && counterpartyName.isNotEmpty) {
@@ -1530,6 +1559,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                 ),
                 onPressed:
                     _saving ||
+                        (_editing && !_editTargetLoaded) ||
                         _optionsLoading ||
                         _accounts.isEmpty ||
                         _categories.isEmpty
@@ -1873,7 +1903,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                   ),
                 ),
 
-                if (widget.allowRecurring && !_linked && !_copying) ...[
+                if (widget.allowRecurring && !_linked && !_copying && !_localRecurring) ...[
                   const SizedBox(height: 8),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,

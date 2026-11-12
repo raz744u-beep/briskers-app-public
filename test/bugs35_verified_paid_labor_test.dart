@@ -43,6 +43,7 @@ void main() {
         "INSERT INTO regular_payroll_task_sources VALUES('shop',?,?,?,'invoice',1)",
         [id, id, id],
       );
+      await db.customStatement("INSERT INTO local_documents(id,business_id,kind,document_date) VALUES(?,'shop','invoice','2026-11-10')",[id]);
       await credits.createAssignment(
         businessId: 'shop',
         allocationId: id,

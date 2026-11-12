@@ -354,7 +354,7 @@ void main() {
       ];
       await tester.pumpWidget(screen(1));
       await tester.pumpAndSettle();
-      expect(find.text('Pending Close'), findsOneWidget);
+      expect(find.text('Paid'), findsOneWidget);
       expect(find.text('Open'), findsNothing);
       expect(documents.reads, 2);
       expect(payments.reads, 2);
@@ -365,7 +365,7 @@ void main() {
       await tester.pumpWidget(screen(2));
       await tester.pumpAndSettle();
       expect(find.text('Closed'), findsOneWidget);
-      expect(find.text('Pending Close'), findsNothing);
+      expect(find.text('Paid'), findsNothing);
       expect(documents.reads, 3);
       expect(payments.reads, 3);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -643,7 +643,7 @@ void main() {
       expect(api.reads, 2);
       expect(payments.reads, 2);
       expect(documents.saves, 1);
-      expect(find.text('Pending Close'), findsOneWidget);
+      expect(find.text('Paid'), findsOneWidget);
       expect(find.text('Open'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -718,7 +718,7 @@ void main() {
       live['pending_payment'] = 100;
       await tester.pumpWidget(screen(2));
       await tester.pumpAndSettle();
-      expect(find.text('Pending Close'), findsOneWidget);
+      expect(find.text('Paid'), findsOneWidget);
       expect(find.text('Open'), findsNothing);
       expect(documents.saves, 2);
       expect(documents.savedRows.single['pending_payment'], 100);
@@ -728,7 +728,7 @@ void main() {
       await tester.pumpWidget(screen(3));
       await tester.pumpAndSettle();
       expect(find.text('Closed'), findsOneWidget);
-      expect(find.text('Pending Close'), findsNothing);
+      expect(find.text('Paid'), findsNothing);
       expect(documents.saves, 3);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -789,7 +789,7 @@ void main() {
       );
       expect(documents.savedRows.single['pending_payment'], 0);
       expect(find.text('Open'), findsOneWidget);
-      expect(find.text('Pending Close'), findsNothing);
+      expect(find.text('Paid'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );

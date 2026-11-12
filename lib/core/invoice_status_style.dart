@@ -21,20 +21,20 @@ String _normalizedInvoiceStatus(String? value) =>
 Color invoiceStatusDefaultColor(String? statusOrCode) {
   switch (_normalizedInvoiceStatus(statusOrCode)) {
     case 'paid':
-      return const Color(0xFFE58A00);
+      return const Color(0xFF078C49);
     case 'partial':
       return const Color(0xFF1976D2);
     case 'pending_close':
     case 'pending':
       return const Color(0xFFE58A00);
     case 'closed':
-      return const Color(0xFF169B62);
+      return const Color(0xFF757575);
     case 'void':
       return const Color(0xFFC62828);
     case 'draft':
       return const Color(0xFF667085);
     case 'open':
-      return const Color(0xFF1976D2);
+      return const Color(0xFF0066FF);
     case 'reopened':
       return const Color(0xFFC62828);
     default:

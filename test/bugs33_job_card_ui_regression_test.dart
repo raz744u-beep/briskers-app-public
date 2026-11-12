@@ -12,7 +12,7 @@ void main() {
     expect(card, isNot(contains('mechanicMinutes!.values.fold')));
     expect(card, isNot(contains('Widget separator()')));
     expect(summary, contains('local_employee_nicknames'));
-    expect(summary, contains('n.employee_id=p.employee_id'));
+    expect(summary, contains('n.employee_id=COALESCE(h.employee_id,p.employee_id)'));
     expect(summary, contains('savedNickname.isNotEmpty'));
   });
 

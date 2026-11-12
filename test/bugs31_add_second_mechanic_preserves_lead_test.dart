@@ -27,7 +27,7 @@ void main() {
       "VALUES('job','shop','owner','Supercharger replacement','open','J-TEST')");
     await db.customStatement(
       "INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) "
-      "VALUES('2026-11-07','invoice','shop','job','invoice','6365')");
+      "VALUES('2026-11-09','invoice','shop','job','invoice','6365')");
     await LocalDocumentDetailCache(database:db).save('shop','invoice',{
       'id':'invoice','kind':'invoice','job_id':'job',
       'lines':[{'id':'labor','name':'Labor','line_kind':'labor',

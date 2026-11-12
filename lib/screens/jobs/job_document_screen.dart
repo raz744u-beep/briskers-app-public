@@ -5194,23 +5194,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     required num finalizedPaid,
     required num pendingPaid,
   }) {
-    final rawStatus = _detail?['status']?.toString() ?? 'draft';
-    if (rawStatus == 'void') return 'void';
-    // Legacy server rows retain status=issued after close; closed_at is the
-    // authoritative marker and must override the derived Paid status pill.
-    if (DocumentPresentation(_detail ?? const <String, dynamic>{})
-        .isClosed) {
-      return 'closed';
-    }
-    final shownPaid = finalizedPaid + pendingPaid;
-    if (pendingPaid > 0 &&
-        total > 0 &&
-        shownPaid >= total - 0.005) {
-      return 'pending_close';
-    }
-    if (total > 0 && finalizedPaid >= total - 0.005) return 'paid';
-    if (shownPaid > 0) return 'partial';
-    return 'open';
+    return DocumentPresentation({
+      ...?_detail, 'kind': 'invoice', 'total_amount': total,
+      'paid_amount': finalizedPaid, 'pending_payment': pendingPaid,
+    }).statusCode;
   }
 
   String _statusLabel({
@@ -5838,7 +5825,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         Padding(
           padding: const EdgeInsets.only(left:30,top:5),
           child: Text(
-            vin.isNotEmpty?'VIN: $vin':'VIN: Not available locally',
+            vin.isNotEmpty?'VIN: $vin':'VIN: Not entered',
             style:const TextStyle(fontSize:12.5,
               color:Color(0xFF405064),height:1.2),
             softWrap:true,
@@ -5939,7 +5926,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 ),
                 Padding(
                   padding:const EdgeInsets.only(left:30,top:5),
-                  child:Text(vin.isNotEmpty?'VIN: $vin':'VIN: Not available locally',
+                  child:Text(vin.isNotEmpty?'VIN: $vin':'VIN: Not entered',
                     maxLines:2,overflow:TextOverflow.ellipsis,
                     style:const TextStyle(fontSize:11.5,
                       color:Color(0xFF405064),height:1.15)),

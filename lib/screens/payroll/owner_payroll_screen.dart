@@ -715,10 +715,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               decoration:const InputDecoration(labelText:'Replace mechanic',border:OutlineInputBorder()),
               items:[for(final id in {previous,...staff.keys})
                 DropdownMenuItem(value:id,child:Text(_employeeLabel(id)))],
-              onChanged: (row['actual_minutes'] as int? ?? 0)>0 || (row['recorded_actual_minutes'] as int? ?? 0)>0 ? null :
+              onChanged: row['archived_labor']!=1 && ((row['actual_minutes'] as int? ?? 0)>0 || (row['recorded_actual_minutes'] as int? ?? 0)>0) ? null :
                 (id) { if(id!=null) update(()=>selected=id); }),
             if(row['state'] != 'Open') Padding(padding:const EdgeInsets.only(top:8),
-              child:Text(row['state']=='Done'
+              child:Text(row['archived_labor']==1
+                ? 'Historical recordkeeping only. Existing payroll payments and credits remain unchanged.'
+                : row['state']=='Done'
                 ? 'Completed but unpaid: changing assigned hours also corrects credited work time. The mechanic cannot be replaced after work was earned.'
                 : 'Work has started. Replacement is available only before time is earned. Paid work remains locked.')),
             const SizedBox(height:18),
@@ -845,7 +847,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                 padding: EdgeInsets.only(left: 6),
                 child: Icon(Icons.lock_outline,size:20,
                   color: Color(0xFF64748B))),
-              if (manage && !paid) IconButton(
+              if (manage && (!paid || archived)) IconButton(
                 tooltip: 'Edit Assignment',
                 icon: const Icon(Icons.edit_outlined,size:19,
                   color: Color(0xFF00897E)),
@@ -2172,7 +2174,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       if (byTask.containsKey(task['id']) || task['source_active'] == 0) continue;
       service.add({
         ...task, 'line_id': task['id'], 'document_id': task['invoice_id'],
-        'source_description': task['description'], 'status': 'planned',
+        'source_description': task['description'], 'status': task['source_kind']=='invoice' && !LocalInvoiceTaskStore.currentPayrollDate(task['invoice_date']) ? 'done' : 'planned',
       });
     }
     return Scaffold(

@@ -124,11 +124,6 @@ class JobListApprovedCard extends StatelessWidget {
                                     decorationColor: slate,
                                   ),
                                 ),
-                                const Icon(
-                                  Icons.chevron_right,
-                                  size: 17,
-                                  color: black,
-                                ),
                               ],
                             ),
                           ),
@@ -175,7 +170,7 @@ class JobListApprovedCard extends StatelessWidget {
                     Expanded(
                       child: Text(
                         description.isEmpty ? 'No description' : description,
-                        maxLines: 2,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 14,
@@ -304,13 +299,13 @@ class ApprovedListStatusBadge extends StatelessWidget {
     constraints: const BoxConstraints(maxWidth: 155),
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
     decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.13),
+      color: const {'Paid', 'Closed', 'Done'}.contains(label) ? color : color.withValues(alpha: 0.13),
       borderRadius: BorderRadius.circular(999),
     ),
     child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 17, color: color),
+        Icon(icon, size: 17, color: const {'Paid', 'Closed', 'Done'}.contains(label) ? Colors.white : color),
         const SizedBox(width: 4),
         Flexible(
           child: FittedBox(
@@ -319,7 +314,7 @@ class ApprovedListStatusBadge extends StatelessWidget {
               label,
               maxLines: 1,
               style: TextStyle(
-                color: color,
+                color: const {'Paid', 'Closed', 'Done'}.contains(label) ? Colors.white : color,
                 fontSize: 11.5,
                 fontWeight: FontWeight.w800,
               ),

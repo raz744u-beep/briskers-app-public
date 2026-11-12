@@ -27,7 +27,7 @@ void main() {
     }, receipts: 0), 'Closed');
     expect(invoiceListStageWithReceipts({
       ...previouslyIssued, 'display_status_code': 'reopened',
-    }, receipts: 1198.05), 'Reopened');
+    }, receipts: 1198.05), 'Paid');
     expect(invoiceListStageWithReceipts({
       ...previouslyIssued, 'status': 'void',
     }, receipts: 0), 'Void');

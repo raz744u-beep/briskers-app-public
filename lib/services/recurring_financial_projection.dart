@@ -54,8 +54,8 @@ class RecurringFinancialProjection {
       for (final raw in (source?['attachments'] as List? ?? const [])) {
         if (raw is! Map) continue;
         final photo = Map<String, dynamic>.from(raw);
-        final key = photo['id']?.toString() ?? photo['local_file_path']?.toString();
-        if (key == null || !seen.add(key)) continue;
+        final key = photo['id']?.toString() ?? photo['attachment_id']?.toString() ?? photo['local_file_path']?.toString() ?? photo['storage_key']?.toString() ?? jsonEncode(photo);
+        if (!seen.add(key)) continue;
         attachments.add({...photo, 'transaction_id': id});
       }
     }
@@ -76,7 +76,7 @@ class RecurringFinancialProjection {
       'sync_state': pending ? 'pending' : 'synced',
       'attachments': attachments,
       'receipt_count': attachments.length,
-      'editable': false,
+      'editable': true,
       'deletable': false,
     };
     final pendingMetadata = await database.customSelect('''

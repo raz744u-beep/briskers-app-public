@@ -180,6 +180,53 @@ class OfflineRecurringRepository {
   Future<List<RecurringRow>> rules() => _atomic(() => _rows('rule'));
   Future<List<RecurringRow>> occurrences() => _atomic(() => _rows('occurrence'));
 
+  /// Adopt a complete already-saved expense using its original identity. This
+  /// is a local migration, never a new expense, historical delete or network call.
+  Future<void> adoptSavedExpense(RecurringRow detail) => _atomic(() async {
+    final ruleId=detail['recurring_rule_id']?.toString();
+    final due=detail['recurring_occurrence_date']?.toString();
+    if(ruleId==null || due==null)throw StateError('Saved recurrence linkage is missing. Download the existing schedule once; do not recreate the expense.');
+    final key=occurrenceKey(ruleId,due);
+    final existing=(await _rows('occurrence')).where((r)=>r['_key']==key).toList();
+    if(existing.isNotEmpty) {
+      if(existing.single['id']!=detail['id'])throw StateError('This occurrence already has a different saved identity. Reconcile it before editing.');
+      return;
+    }
+    final row=<String,dynamic>{...detail,
+      'vendor_id':detail['vendor_id']??detail['counterparty_id'],
+      'amount_minor':detail['amount_minor']??((num.parse(detail['amount'].toString()))*100).round(),
+      'date':detail['date']??detail['transaction_date'],
+    };
+    _validate(row,rule:false);
+    final savedRules=await _rows('rule');
+    final raw=detail['recurring_rule'];
+    if(!savedRules.any((r)=>r['id']==ruleId) && raw is Map) {
+      final rule=<String,dynamic>{...row,...Map<String,dynamic>.from(raw),
+        'id':ruleId,'business_id':businessId};
+      _validate(rule,rule:true);
+      await _put('rule',ruleId,rule,1,'synced');
+    }
+    await _put('occurrence',key,row,1,'synced');
+    await projectOccurrence(database,detail,{...row,'_state':'synced'});
+  },write:true);
+
+  Future<void> editSavedExpense(String transaction,RecurringRow changes) => _atomic(() async {
+    final matches=(await _rows('occurrence')).where((r)=>r['id']==transaction).toList();
+    if(matches.length!=1)throw StateError('Saved recurring expense identity needs review.');
+    final old=matches.single;
+    final updated=<String,dynamic>{...old,
+      for(final field in ['amount_minor','account_id','category_id','vendor_id',
+        'account','category','counterparty','date','remarks','job_id','document_id'])
+        if(changes.containsKey(field))field:changes[field]};
+    _validate(updated,rule:false);
+    // A server disagreement stays held for explicit reconciliation, while
+    // the Owner can still save the local expense and receipt offline.
+    final state=old['_state']=='conflict'?'conflict':'pending';
+    await _put('occurrence',old['_key'] as String,updated,(old['_revision'] as int)+1,state,
+      server:old['_server'] is Map?Map<String,dynamic>.from(old['_server'] as Map):null);
+    await projectOccurrence(database,old,{...updated,'_state':state});
+  },write:true);
+
   /// Includes stopped rules. Callers send base row_version and _revision;
   /// never send these operations through the manual-expense creation endpoint.
   Future<List<RecurringRow>> pending() => _atomic(() async => [

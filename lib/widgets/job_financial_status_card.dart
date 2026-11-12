@@ -7,7 +7,7 @@ String? savedJobFinancialStatus(Object? paymentState) {
   final value = paymentState?.toString().trim().toLowerCase() ?? '';
   return switch (value) {
     'paid' => 'Paid',
-    'recorded_pending' => 'Recorded payment · Pending finalization',
+    'recorded_pending' => 'Paid',
     'awaiting_clearance' => 'Awaiting payment clearance',
     'awaiting_payment' => 'Awaiting payment',
     'invoice_needed' => 'Invoice needed',

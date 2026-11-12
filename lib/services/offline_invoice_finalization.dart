@@ -19,10 +19,15 @@ class OfflineInvoiceFinalization {
   final BriskersLocalDatabase db;
   final BriskersApi api;
 
-  Future<void> prepare() => db.customStatement('''CREATE TABLE IF NOT EXISTS
+  Future<void> prepare() async {
+    await db.customStatement('''CREATE TABLE IF NOT EXISTS
     invoice_finalization_intents_v1(business_id TEXT NOT NULL,invoice_id TEXT NOT NULL,
     operation_id TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL,
     error TEXT,PRIMARY KEY(business_id,invoice_id))''');
+    await db.customStatement('''CREATE TABLE IF NOT EXISTS invoice_finalization_close_followups_v1(
+      business_id TEXT NOT NULL,invoice_id TEXT NOT NULL,operation_id TEXT NOT NULL,payload TEXT NOT NULL,
+      PRIMARY KEY(business_id,invoice_id))''');
+  }
 
   static int money(Object? value) {
     final n = num.tryParse(value?.toString() ?? '');
@@ -89,27 +94,48 @@ class OfflineInvoiceFinalization {
         final projected = OfflineInvoicePaymentLedger.projectPendingPayments(detail,
           await OfflineInvoicePaymentLedger(database:db).pendingForInvoice(business,id));
         final payload = jsonEncode(snapshot(projected,close));
-        final previous = await db.customSelect('SELECT payload,state FROM invoice_finalization_intents_v1 WHERE business_id=? AND invoice_id=?',
+        final previous = await db.customSelect('SELECT payload,state,operation_id FROM invoice_finalization_intents_v1 WHERE business_id=? AND invoice_id=?',
           variables:[Variable(business),Variable(id)]).get();
         if (previous.isNotEmpty) {
-          if (previous.single.read<String>('state') == 'confirmed' && previous.single.read<String>('payload') != payload) {
-            await db.customStatement('DELETE FROM invoice_finalization_intents_v1 WHERE business_id=? AND invoice_id=?',[business,id]);
-          } else {
-          if (previous.single.read<String>('payload') != payload) {
-            throw StateError('This invoice has a different finalization awaiting reconciliation.');
+          final old=Map<String,dynamic>.from(jsonDecode(previous.single.read<String>('payload')) as Map);
+          final current=Map<String,dynamic>.from(jsonDecode(payload) as Map);
+          final oldPaid=(old['paid_cents'] as int)+(old['receipts'] as List).fold<int>(0,(n,r)=>n+(r['amount_cents'] as int));
+          final same=old['total_cents']==current['total_cents'] &&
+            ((old['paid_cents']==current['paid_cents'] && jsonEncode(old['receipts'])==jsonEncode(current['receipts'])) ||
+             ((current['receipts'] as List).isEmpty && current['paid_cents']==oldPaid));
+          if(same) {
+            if(close && old['close']!=true) {
+              // Preserve the first operation and its immutable request even
+              // after an ambiguous network result. Closing is a second durable
+              // operation with NO receipts, after the first is acknowledged.
+              await db.customStatement('INSERT OR IGNORE INTO invoice_finalization_close_followups_v1 VALUES(?,?,?,?)',
+                [business,id,_operationId(),jsonEncode({'total_cents':old['total_cents'],
+                  'paid_cents':oldPaid,'receipts':<dynamic>[],'close':true})]);
+              if(const {'confirmed','review'}.contains(previous.single.read<String>('state'))) {
+                await db.customStatement("UPDATE invoice_finalization_intents_v1 SET state='pending' WHERE business_id=? AND invoice_id=?",[business,id]);
+              }
+            }
+            continue;
           }
-          continue;
+          if(previous.single.read<String>('state')!='confirmed') {
+            throw StateError('The earlier saved request must finish before changed payments can be finalized. Your payments are safe. Use Retry saved finalization when connected; do not enter them again.');
           }
+          await db.customStatement('DELETE FROM invoice_finalization_intents_v1 WHERE business_id=? AND invoice_id=?',[business,id]);
+          await db.customStatement('DELETE FROM invoice_finalization_close_followups_v1 WHERE business_id=? AND invoice_id=?',[business,id]);
         }
-        final random = Random.secure();
-        final bytes=List.generate(16,(_)=>random.nextInt(256));
-        bytes[6]=(bytes[6]&15)|64; bytes[8]=(bytes[8]&63)|128;
-        final h=bytes.map((b)=>b.toRadixString(16).padLeft(2,'0')).join();
-        final op='${h.substring(0,8)}-${h.substring(8,12)}-${h.substring(12,16)}-${h.substring(16,20)}-${h.substring(20)}';
+        final op=_operationId();
         await db.customStatement('INSERT INTO invoice_finalization_intents_v1 VALUES(?,?,?,?,?,NULL)',
           [business,id,op,payload,'pending']);
       }
     });
+  }
+
+  static String _operationId() {
+    final random=Random.secure();
+    final bytes=List.generate(16,(_)=>random.nextInt(256));
+    bytes[6]=(bytes[6]&15)|64; bytes[8]=(bytes[8]&63)|128;
+    final h=bytes.map((b)=>b.toRadixString(16).padLeft(2,'0')).join();
+    return '${h.substring(0,8)}-${h.substring(8,12)}-${h.substring(12,16)}-${h.substring(16,20)}-${h.substring(20)}';
   }
 
   Future<String?> state(String business,String invoice) async {
@@ -131,6 +157,7 @@ class OfflineInvoiceFinalization {
   Future<void> remap(String business,String local,String server) async {
     await prepare();
     await db.customStatement('UPDATE invoice_finalization_intents_v1 SET invoice_id=? WHERE business_id=? AND invoice_id=?',[server,business,local]);
+    await db.customStatement('UPDATE invoice_finalization_close_followups_v1 SET invoice_id=? WHERE business_id=? AND invoice_id=?',[server,business,local]);
   }
 
   Future<void> flush(String business) async {
@@ -154,10 +181,21 @@ class OfflineInvoiceFinalization {
       await db.customStatement("UPDATE invoice_finalization_intents_v1 SET state='inflight' WHERE business_id=? AND invoice_id=?",[business,invoice]);
       try {
         if (BriskersConnectionModeController.instance.forceOffline) return;
-        final response=await api.finalizeInvoiceOnce(business,invoice,operation,
-          Map<String,dynamic>.from(jsonDecode(row.read<String>('payload')) as Map));
-        if(response['operation_id']!=operation || response['invoice_id']!=invoice || response['finalized']!=true) {
+        final request=Map<String,dynamic>.from(jsonDecode(row.read<String>('payload')) as Map);
+        final response=await api.finalizeInvoiceOnce(business,invoice,operation,request);
+        if(response['operation_id']!=operation || response['invoice_id']!=invoice || response['finalized']!=true || (request['close']==true && response['closed']!=true)) {
           throw StateError('Finalization response requires review.');
+        }
+        final followups=await db.customSelect('SELECT operation_id,payload FROM invoice_finalization_close_followups_v1 WHERE business_id=? AND invoice_id=?',variables:[Variable(business),Variable(invoice)]).get();
+        if(followups.isNotEmpty) {
+          if(BriskersConnectionModeController.instance.forceOffline)return;
+          final followup=followups.single;
+          final key=followup.read<String>('operation_id');
+          final closed=await api.finalizeInvoiceOnce(business,invoice,key,
+            Map<String,dynamic>.from(jsonDecode(followup.read<String>('payload')) as Map));
+          if(closed['operation_id']!=key || closed['invoice_id']!=invoice || closed['finalized']!=true || closed['closed']!=true) {
+            throw StateError('Saved closure needs reconciliation. Payments remain preserved.');
+          }
         }
         await db.customStatement("UPDATE invoice_finalization_intents_v1 SET state='confirmed',error=NULL WHERE business_id=? AND invoice_id=?",[business,invoice]);
       } catch(error) {

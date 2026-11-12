@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import '../services/employee_nickname_store.dart';
+import '../services/historical_task_recordkeeping.dart';
 import '../services/offline_job_admin_service.dart';
 
 /// Read-only sum of this invoice's active saved mechanic allocations.
@@ -61,17 +62,19 @@ class _InvoiceLaborSummaryState extends State<InvoiceLaborSummary> {
         final roster = await OfflineJobAdminService(
           database: db,
         ).cachedEmployees(widget.business);
+        await HistoricalTaskRecordkeeping(db).prepare();
         final rows = await db
             .customSelect(
               '''
-          SELECT p.employee_id,e.name,SUM(COALESCE(v.minutes,0)) AS minutes
+          SELECT COALESCE(h.employee_id,p.employee_id) AS employee_id,COALESCE(h.employee_name,e.name) AS name,SUM(COALESCE(h.minutes,v.minutes,0)) AS minutes
           FROM regular_payroll_task_sources s
           JOIN regular_payroll_portions p ON p.business_id=s.business_id AND p.task_id=s.task_id
           JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id
+          LEFT JOIN historical_task_recordkeeping_v1 h ON h.business_id=p.business_id AND h.allocation_id=p.id
           LEFT JOIN regular_payroll_estimates v ON v.business_id=p.business_id AND v.task_id=p.task_id AND v.employee_id=p.employee_id
           LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id
           WHERE s.business_id=? AND s.invoice_id=? AND s.active=1 AND (COALESCE(m.active,1)=1 OR p.state='Done')
-          GROUP BY p.employee_id,e.name ORDER BY e.name,p.employee_id
+          GROUP BY COALESCE(h.employee_id,p.employee_id),COALESCE(h.employee_name,e.name) ORDER BY name,employee_id
         ''',
               variables: [Variable(widget.business), Variable(widget.invoice)],
             )

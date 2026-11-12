@@ -83,11 +83,11 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byType(JobListApprovedCard), findsNWidgets(2));
-      expect(find.text('Balance: unavailable'), findsOneWidget);
+      expect(find.text('Total: \$100.00'), findsOneWidget);
       expect(find.text('Unpaid'), findsNothing);
       expect(find.text('Invoice #6372'), findsOneWidget);
-      expect(find.textContaining('Balance due:'), findsOneWidget);
-      expect(find.text('Partial payment recorded'), findsOneWidget);
+      expect(find.text('Total: \$600.00'), findsOneWidget);
+      expect(find.descendant(of:find.byType(JobListApprovedCard),matching:find.byIcon(Icons.chevron_right)), findsNothing);
       expect(find.byType(LinearProgressIndicator), findsNothing);
       expect(tester.takeException(), isNull);
       await capture(tester, key, 'invoices');

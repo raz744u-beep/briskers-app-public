@@ -428,6 +428,26 @@ class LocalFinancialCache {
     );
   }
 
+  /// Recurring list rows can be complete saved records even when the generic
+  /// manual-transaction RPC never supplied a detail cache. Never open an empty
+  /// new form for a missing edit target, or invent its financial references.
+  Future<Map<String,dynamic>?> loadTransactionForEdit(String business,String id) async {
+    final detail=await loadTransactionDetail(business,id);
+    final rows=await loadTransactions(business);
+    final summary=rows.where((r)=>r['id']==id && matchesTransaction(r,business,id)).firstOrNull;
+    if(detail==null && summary==null)return null;
+    final saved=<String,dynamic>{...?summary,
+      if(detail!=null) for(final field in detail.entries)
+        if(field.value!=null)field.key:field.value};
+    final recurring=saved['recurring_rule_id']!=null || saved['recurring_engine_owned']==true;
+    if(!recurring)return detail;
+    final amount=saved['amount'] ?? (saved['amount_minor'] is int ? (saved['amount_minor'] as int)/100 : null);
+    if(amount==null || saved['account_id']==null || saved['category_id']==null ||
+       (saved['date']??saved['transaction_date'])==null) { return null; }
+    return {...saved,'id':id,'business_id':business,'amount':amount,
+      'counterparty_id':saved['counterparty_id']??saved['vendor_id']};
+  }
+
   Future<Map<String, dynamic>?> loadTransactionDetail(
     String businessId,
     String transactionId,

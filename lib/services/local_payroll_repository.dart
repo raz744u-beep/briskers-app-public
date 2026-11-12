@@ -1,3 +1,5 @@
+import 'historical_general_tasks.dart';
+import 'historical_task_recordkeeping.dart';
 import 'dart:convert';
 import 'payroll_owner_lease.dart';
 import 'package:drift/drift.dart';
@@ -389,6 +391,7 @@ class LocalPayrollRepository {
     await prepare();
     await db.transaction(() async {
       final row = (await work(employee:employee)).where((r)=>r['id']==allocation).single;
+      if(row['recordkeeping_only']==true) throw StateError('Reconcile the original mechanic allocation before carrying this corrected historical record into payroll.');
       if(row['archived_labor']!=1 || row['paid_minutes']!=0 || row['assignment_conflict']==1) {
         throw StateError('Only unreviewed unpaid historical work can be carried forward.');
       }
@@ -422,6 +425,20 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     await db.transaction(() async {
+      final historical = (await work()).where((r) => r['task_id']==task &&
+        r['employee_id']==previous && r['archived_labor']==1 && r['source_active']!=0).toList();
+      if(historical.length==1) {
+        if(previous!=employee && (await work()).any((r)=>r['task_id']==task && r['employee_id']==employee)) {
+          throw StateError('This mechanic already has an allocation on this task.');
+        }
+        await HistoricalTaskRecordkeeping(db).save(business,
+          historical.single['id'] as String,employee,name,minutes);
+        await db.customStatement('INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) VALUES(?,?,?,?)',
+          [business,historical.single['id'],'historical_recordkeeping_only',
+            jsonEncode({'employee':employee,'minutes':minutes})]);
+        _authorize();
+        return;
+      }
       if (previous != employee) {
         final open = await _read(
           "SELECT p.id,p.state FROM regular_payroll_portions p "
@@ -1377,12 +1394,13 @@ class LocalPayrollRepository {
       "LEFT JOIN regular_payroll_task_order o ON o.business_id=t.business_id AND o.task_id=t.id "
       "LEFT JOIN regular_payroll_estimates est ON est.business_id=p.business_id "
       "AND est.task_id=p.task_id AND est.employee_id=p.employee_id "
-      "WHERE (COALESCE(m.active,1)=1 OR p.state<>'Open' OR c.actual_minutes>0 OR c.paid_operation_id IS NOT NULL) AND p.business_id=? ${employee == null ? '' : 'AND p.employee_id=?'} "
+      "WHERE (COALESCE(m.active,1)=1 OR p.state<>'Open' OR c.actual_minutes>0 OR c.paid_operation_id IS NOT NULL) AND p.business_id=?  "
       "${job == null ? '' : 'AND t.job_id=?'} ORDER BY p.id",
-      [business, ?employee, ?job],
+      [business, ?job],
     );
     _authorize();
     final verifiedPaid=await VerifiedPaidLabor(db).allocations(business);
+    final notes=await HistoricalTaskRecordkeeping(db).read(business);
     return rows.map((row) {
       final total = row['actual_minutes'] as int;
       final ownerPriorPaid = row['owner_prior_paid'] == 1;
@@ -1392,7 +1410,13 @@ class LocalPayrollRepository {
       final remaining = total - paid;
       return {
         ...row,
-        if(verifiedPaid.contains(row['id'])) 'state':'Done',
+        if(verifiedPaid.contains(row['id']) || row['archived_labor']==1) 'state':'Done',
+        if(row['archived_labor']==1 && notes[row['id']]!=null) ...{
+          'employee_id':notes[row['id']]!['employee_id'],
+          'employee_name':notes[row['id']]!['employee_name'],
+          'estimated_minutes':notes[row['id']]!['minutes'],
+          'recordkeeping_only':true,
+        },
         'hours_hundredths': (total * 100 + 30) ~/ 60,
         'paid_minutes': paid,
         'paid_cents': ownerPriorPaid ? ((total * rate + 30) ~/ 60) : row['paid_cents'],
@@ -1403,7 +1427,7 @@ class LocalPayrollRepository {
         'pay_status': ownerPriorPaid ? 'Already Paid' :
             paid == 0 ? 'Unpaid' : remaining == 0 ? 'Paid' : 'Partially Paid',
       };
-    }).toList();
+    }).where((row)=>employee==null || row['employee_id']==employee).toList();
   }
 
   Future<void> enableWeeklyBase(String employee, String name) async {
@@ -1469,7 +1493,8 @@ class LocalPayrollRepository {
       [business, ?employee],
     );
     _authorize();
-    return rows;
+    final historical=await HistoricalGeneralTasks(db).completed(business);
+    return rows.map((r)=><String,dynamic>{...r,if(historical.contains(r['id'])) 'status':'done'}).toList();
   }
 
   Future<void> addShopTask(
@@ -1480,6 +1505,7 @@ class LocalPayrollRepository {
       throw ArgumentError('Employee and task description are required.');
     }
     await prepare();
+    await HistoricalGeneralTasks(db).completed(business);
     await db.transaction(() async {
       _authorize();
       await db.customStatement(
@@ -1504,6 +1530,8 @@ class LocalPayrollRepository {
     await prepare();
     await db.transaction(() async {
       _authorize();
+      await HistoricalGeneralTasks(db).completed(business);
+      await db.customStatement('DELETE FROM historical_general_tasks_v1 WHERE business_id=? AND task_id=?',[business,id]);
       await db.customStatement(
         'UPDATE regular_payroll_shop_tasks SET status=? WHERE business_id=? AND employee_id=? AND id=?',
         [status, business, employee, id],

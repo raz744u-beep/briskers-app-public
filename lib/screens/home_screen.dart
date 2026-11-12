@@ -8,6 +8,7 @@ import '../core/connection_mode.dart';
 import '../core/supabase_config.dart';
 import '../local/local_database_provider.dart';
 import '../services/offline_recurring_repository.dart';
+import '../services/local_financial_cache.dart';
 import '../services/recurring_financial_projection.dart';
 import '../services/briskers_api.dart';
 import '../services/local_job_repository.dart';
@@ -86,6 +87,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // Same local calendar convention used by the shop's expense entry screen.
       // This only processes previously saved rules and never opens the network.
       final date = OfflineRecurringRepository.dateText(DateTime.now());
+      final cache=LocalFinancialCache();
+      for(final row in await cache.loadTransactions(business)) {
+        if(row['recurring_rule_id']==null || row['recurring_occurrence_date']==null)continue;
+        final detail=await cache.loadTransactionForEdit(business,row['id'].toString());
+        if(detail!=null) {
+          try { await repository.adoptSavedExpense(detail); } on ArgumentError { continue; }
+        }
+      }
       await repository.generateThrough(date);
     } catch (error) {
       if (mounted) {

@@ -1,3 +1,4 @@
+import '../../services/local_recurring_expense_edit.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
@@ -256,7 +257,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         return;
       }
       final detail = _normalizedDetail(rawDetail)
-        ..['editable'] = saved != null && saved['recurring_engine_owned'] != true
+        ..['editable'] = saved != null
         ..['deletable'] = false;
       setState(() {
         _detail = detail;
@@ -301,7 +302,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         return;
       }
       final detail = _normalizedDetail(saved)
-        ..['editable'] = false
+        ..['editable'] = saved['recurring_engine_owned'] == true
         ..['deletable'] = false;
       setState(() {
         _detail = detail;
@@ -763,6 +764,11 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     });
 
     try {
+      if (_detail?['recurring_engine_owned']==true) {
+        await LocalRecurringExpenseEdit.save(businessId,transactionId,{},[
+          for(final file in files) {'filename':file.name,'mime_type':_mimeType(file.name),'bytes':await file.readAsBytes()},
+        ]);
+      } else {
       for (final file in files) {
         if (!_isCurrent(actionGeneration)) return;
         await api.uploadExpensePhoto(
@@ -772,6 +778,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
           mimeType: _mimeType(file.name),
           bytes: await file.readAsBytes(),
         );
+      }
       }
       widget.onChanged?.call();
       if (_isCurrent(actionGeneration)) await _load();
@@ -787,6 +794,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   }
 
   Future<void> _replaceReceipt(Map<String, dynamic> attachment) async {
+    if(_detail?['recurring_engine_owned']==true) { await _addReceipt(); return; }
     final editable = _detail?['editable'] == true;
     final generation = _loadGeneration;
     if (!editable || _uploading || _deletingAttachmentId != null) {

@@ -50,8 +50,8 @@ String documentListStage(Map<String, dynamic> row, {required bool estimate}) {
   switch (presentation.statusCode) {
     case 'closed':
       return 'Closed';
-    case 'pending_close':
-      return 'Pending Close';
+    case 'paid':
+      return 'Paid';
     case 'reopened':
       return 'Reopened';
     case 'void':
@@ -75,16 +75,14 @@ String invoiceListStageWithReceipts(
   if (invoiceNeedsPayment(row, receipts: receipts)) {
     return 'Open';
   }
-  return existing == 'Open' ? 'Pending Close' : existing;
+  return existing == 'Open' ? 'Paid' : existing;
 }
 
 const invoiceListStatusFilters = [
   'Open',
-  'Pending Close',
+  'Paid',
   'Closed',
-  'Reopened',
-  'Void',
-];
+ ];
 const estimateListStatusFilters = [
   'Open',
   'Draft',
@@ -220,7 +218,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     if ((_verifiedFullyPaidInvoiceIds.contains(row['id']?.toString()) ||
           _locallyCoveredInvoiceIds.contains(row['id']?.toString())) &&
         status != 'Closed' && status != 'Void' && status != 'Reopened') {
-      return 'Pending Close';
+      return 'Paid';
     }
     return invoiceListStageWithReceipts(
       row, receipts: _receiptTotals[row['id']?.toString()] ?? 0,
@@ -267,8 +265,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     switch (status) {
       case 'Open':
         return tr('invoiceOpen');
-      case 'Pending Close':
-        return tr('invoicePendingClose');
       case 'Paid':
         return tr('invoicePaid');
       case 'Closed':
@@ -302,7 +298,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   }
 
   Color _statusColor(String status) {
-    if (!_estimate && const {'Open', 'Pending Close', 'Closed', 'Reopened'}.contains(status)) {
+    if (!_estimate && const {'Open', 'Paid', 'Closed', 'Reopened'}.contains(status)) {
       return invoiceStatusDefaultColor(status);
     }
     if (!_estimate) {
@@ -1240,7 +1236,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     if (_estimate || !widget.isOwner) return;
 
     final eligible = (_rows ?? const <Map<String, dynamic>>[])
-        .where((row) => _invoiceStage(row) == 'Pending Close')
+        .where((row) => _invoiceStage(row) == 'Paid')
         .toList();
 
     if (eligible.isEmpty) {
@@ -2172,26 +2168,18 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                     : 'I-$number'));
 
     if (!_estimate) {
-      final presentation=DocumentPresentation(row);
       final total=num.tryParse(row['total_amount']?.toString()??'');
-      final received=_receiptTotals[row['id']?.toString()];
-      final knownBalance=presentation.balanceDueCents;
-      final receiptBalance=received!=null && total!=null && total>=0
-          ? (total-received).clamp(0,total) : null;
-      final balance=presentation.requiresReconciliation || presentation.isVoid ? null
-          : knownBalance!=null ? (receiptBalance!=null && receiptBalance<knownBalance/100
-              ? receiptBalance : knownBalance/100) : receiptBalance;
       return JobListApprovedCard(
         job:{'status_color':'#${color.toARGB32().toRadixString(16).substring(2)}'},
         number:jobNumber,customer:customer,invoiceNumber:number,vehicle:vehicle,
         description:documentTitle,mechanic:'',employee:'',mechanicMinutes:null,progress:null,
-        statusControl:ApprovedListStatusBadge(label:statusLabel,color:color,icon:status=='Closed'?Icons.check:status=='Void'?Icons.block:Icons.credit_card),
-        financialSummary:Wrap(alignment:WrapAlignment.spaceBetween,spacing:12,children:[
-          Text(total==null?'Total: unavailable':'Total: ${_money(total)}',style:const TextStyle(fontWeight:FontWeight.w700,fontSize:13)),
-          Text(balance==null?'Balance: unavailable':'Balance due: ${_money(balance)}',style:const TextStyle(fontWeight:FontWeight.w700,fontSize:13)),
-          if(balance!=null && status!='Void') Text(balance==0?(presentation.paymentDetailsKnown && (presentation.finalizedCents??0)>=(presentation.totalCents??1)?'Paid':'Payment recorded'):total!=null && balance<total?'Partial payment recorded':'Unpaid',style:const TextStyle(color:Color(0xFF526171),fontSize:13)),
+        statusControl:ApprovedListStatusBadge(label:statusLabel,color:color,icon:status=='Closed'||status=='Paid'?Icons.check_circle_outline:status=='Void'?Icons.block:Icons.receipt_long_outlined),
+        financialSummary:const SizedBox.shrink(),
+        footer:Wrap(alignment:WrapAlignment.spaceBetween,spacing:8,runSpacing:2,children:[
+          Text(total==null?'Total: unavailable':'Total: ${_money(total)}',style:const TextStyle(fontWeight:FontWeight.w800,fontSize:14)),
+          Text([for(final person in (_mechanicHours[row['job_id']]??const <String,int>{}).entries) '${person.key} · ${(person.value/60).toStringAsFixed(1)} hrs',documentDate,if(_hasFutureDateTag(row))'Future-dated'].where((s)=>s.isNotEmpty).join('  |  '),style:const TextStyle(color:Color(0xFF526171),fontSize:13,fontWeight:FontWeight.w700)),
+          if(row['customer_problem_flag']==true)const Icon(Icons.flag,color:Colors.red,size:18),
         ]),
-        footer:Wrap(spacing:6,children:[for(final person in (_mechanicHours[row['job_id']]??const <String,int>{}).entries) Text('${person.key} · ${(person.value/60).toStringAsFixed(1)} hrs',style:const TextStyle(color:Color(0xFF526171),fontSize:13,fontWeight:FontWeight.w700)),if(row['customer_problem_flag']==true)const Icon(Icons.flag,color:Colors.red,size:18),Text([documentDate,if(_hasFutureDateTag(row))'Future-dated'].where((s)=>s.isNotEmpty).join(' · '),style:const TextStyle(color:Color(0xFF526171),fontSize:13))]),
         onOpen:()=>_open(row),onOpenInvoice:()=>_open(row),onLongPress:()=>_showDocumentActions(row),
       );
     }

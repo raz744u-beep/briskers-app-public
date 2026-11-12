@@ -1,3 +1,6 @@
+import 'historical_general_tasks.dart';
+import 'historical_task_recordkeeping.dart';
+import 'local_invoice_task_store.dart';
 import 'package:drift/drift.dart' show Variable;
 import '../local/briskers_local_database.dart';
 import 'verified_paid_labor.dart';
@@ -32,6 +35,7 @@ class JobTaskSummary {
     final result = {for (final id in jobs) id: const JobTaskProgress(0, 0)};
     final verifiedPaid=await VerifiedPaidLabor(db).allocations(business);
     final laborReady = await _has('regular_payroll_tasks');
+    final auditReady = await _has('regular_payroll_audit');
     final generalReady = await _has('regular_payroll_shop_task_jobs');
     for (var offset = 0; offset < jobs.length; offset += 300) {
       final batch = jobs.skip(offset).take(300).toList();
@@ -39,11 +43,14 @@ class JobTaskSummary {
       final args = [Variable(business), ...batch.map(Variable<String>.new)];
       if (laborReady) {
         final tasks = await db.customSelect("""
-          SELECT t.job_id, t.id, COUNT(p.id) AS portions,
+          SELECT t.job_id, t.id, d.document_date,s.source_kind,
+                 ${auditReady ? "MAX(CASE WHEN EXISTS(SELECT 1 FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id AND a.event='owner_reviewed_unpaid_carry') THEN 1 ELSE 0 END)" : "0"} AS carried,
+                 COUNT(p.id) AS portions,
                  COUNT(CASE WHEN p.state='Done' THEN 1 END) AS finished,
                  GROUP_CONCAT(CASE WHEN p.state!='Done' THEN p.id END, '|') AS unfinished_ids
           FROM regular_payroll_tasks t
           JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id AND s.active=1
+          LEFT JOIN local_documents d ON d.business_id=s.business_id AND d.id=s.invoice_id
           LEFT JOIN regular_payroll_portions p ON p.business_id=t.business_id AND p.task_id=t.id
             AND NOT EXISTS (SELECT 1 FROM regular_payroll_assignment_meta m WHERE
               m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id AND m.active=0 AND p.state!='Done')
@@ -53,7 +60,8 @@ class JobTaskSummary {
           final id = row.read<String>('job_id');
           final old = result[id]!;
           final unfinished=(row.readNullable<String>('unfinished_ids')??'').split('|').where((s)=>s.isNotEmpty);
-          final done = row.read<int>('portions') > 0 &&
+          final historical=row.data['source_kind']=='invoice' && !LocalInvoiceTaskStore.currentPayrollDate(row.data['document_date']) && row.data['carried']!=1;
+          final done = historical || row.read<int>('portions') > 0 &&
               (row.read<int>('portions') == row.read<int>('finished') ||
                unfinished.isNotEmpty && unfinished.every(verifiedPaid.contains));
           result[id] = JobTaskProgress(
@@ -64,15 +72,16 @@ class JobTaskSummary {
       }
       if (generalReady) {
         final general = await db.customSelect("""
-          SELECT j.job_id,t.status FROM regular_payroll_shop_tasks t
+          SELECT j.job_id,t.id,t.status FROM regular_payroll_shop_tasks t
           JOIN regular_payroll_shop_task_jobs j ON j.business_id=t.business_id AND j.task_id=t.id
           WHERE j.business_id=? AND j.job_id IN ($marks)
         """, variables: args).get();
+        final historical=await HistoricalGeneralTasks(db).completed(business);
         for (final row in general) {
           final id = row.read<String>('job_id');
           final old = result[id]!;
           result[id] = JobTaskProgress(
-            old.done + (row.read<String>('status') == 'done' ? 1 : 0),
+            old.done + (row.read<String>('status') == 'done' || historical.contains(row.read<int>('id')) ? 1 : 0),
             old.total + 1,
           );
         }
@@ -92,22 +101,24 @@ class JobTaskSummary {
     // Nicknames are keyed by immutable employee ID in the local shop DB.
     // Use them for display only; never rewrite assignment or payroll identity.
     final nicknamesReady = await _has('local_employee_nicknames');
+    await HistoricalTaskRecordkeeping(db).prepare();
     final rows = await db
         .customSelect(
           """
-      SELECT t.job_id,p.employee_id,e.name,
+      SELECT t.job_id,COALESCE(h.employee_id,p.employee_id) AS employee_id,COALESCE(h.employee_name,e.name) AS name,
         ${nicknamesReady ? "n.nickname" : "NULL"} AS nickname,
-        SUM(COALESCE(v.minutes,0)) AS minutes
+        SUM(COALESCE(h.minutes,v.minutes,0)) AS minutes
       FROM regular_payroll_tasks t
       JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id AND s.active=1
       JOIN regular_payroll_portions p ON p.business_id=t.business_id AND p.task_id=t.id
       JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id
-      ${nicknamesReady ? "LEFT JOIN local_employee_nicknames n ON n.business_id=p.business_id AND n.employee_id=p.employee_id" : ""}
+      LEFT JOIN historical_task_recordkeeping_v1 h ON h.business_id=p.business_id AND h.allocation_id=p.id
+      ${nicknamesReady ? "LEFT JOIN local_employee_nicknames n ON n.business_id=p.business_id AND n.employee_id=COALESCE(h.employee_id,p.employee_id)" : ""}
       LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id
       LEFT JOIN regular_payroll_estimates v ON v.business_id=p.business_id AND v.task_id=p.task_id AND v.employee_id=p.employee_id
       WHERE t.business_id=? AND t.job_id IN (${List.filled(jobs.length, '?').join(',')})
         AND (COALESCE(m.active,1)=1 OR p.state='Done')
-      GROUP BY t.job_id,p.employee_id,e.name${nicknamesReady ? ",n.nickname" : ""} ORDER BY e.name,p.employee_id
+      GROUP BY t.job_id,COALESCE(h.employee_id,p.employee_id),COALESCE(h.employee_name,e.name)${nicknamesReady ? ",n.nickname" : ""} ORDER BY e.name,p.employee_id
     """,
           variables: [Variable(business), ...jobs.map(Variable<String>.new)],
         )
