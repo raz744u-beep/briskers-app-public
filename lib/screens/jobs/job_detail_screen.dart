@@ -195,6 +195,11 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                     child: Text('0%', style: TextStyle(
                       color: Color(0xFF17243B),fontWeight: FontWeight.w800)))),
               ]))),
+          if (_canQuickAdmin && progress != null && progress.total > 0 &&
+              progress.done == progress.total &&
+              const {'open','in_progress'}.contains(_job?['status']))
+            TextButton.icon(onPressed: _busy ? null : _confirmCompletedWork,
+              icon: const Icon(Icons.task_alt), label: const Text('Complete job')),
           TextButton(onPressed: _openJobLaborTasks,
             style: TextButton.styleFrom(
               foregroundColor: const Color(0xFF006D58)),
@@ -209,6 +214,15 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         ]),
       ),
     );
+  }
+
+  Future<void> _confirmCompletedWork() async {
+    final confirmed=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
+      title:const Text('Complete this job?'),
+      content:const Text('All tasks are Done. Confirm the repair work is completed. Invoice payments and mechanic wages will not change.'),
+      actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Cancel')),
+        FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('Complete job'))]));
+    if(confirmed==true && mounted) await _changeStatus('completed');
   }
 
   bool _contentBlocked = false;
@@ -511,8 +525,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     int epoch,
     List<Map<String, dynamic>> documents,
   ) async {
-    if (!_currentLoad(epoch) || !_canSeeFinancial ||
-        _job?['status']?.toString() != 'completed') {
+    if (!_currentLoad(epoch) || !_canSeeFinancial) {
       return;
     }
     final verified = <Map<String, dynamic>>[];
@@ -541,8 +554,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       verified.add(OfflineInvoicePaymentLedger.projectPendingPayments(cached, queued));
     }
     final state = cachedVerifiedJobPaymentState(verified);
-    if (state == null || !_currentLoad(epoch) ||
-        _job?['status']?.toString() != 'completed') {
+    if (state == null || !_currentLoad(epoch)) {
       return;
     }
     try {
@@ -1027,30 +1039,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       // authorized server document response. No payment/ledger mutation.
       // Do not persist a fabricated Paid state from a zero-amount invoice or
       // a failed jobDocuments request.
-      if (canSeeFinancial && documentsVerified &&
-          job['status']?.toString() == 'completed') {
-        final invoices = documents.where(
-          (row) => row['kind']?.toString() == 'invoice',
-        ).toList();
-        num total = 0;
-        num paid = 0;
-        num pending = 0;
-        for (final invoice in invoices) {
-          total += num.tryParse(invoice['total_amount']?.toString() ?? '') ?? 0;
-          paid += num.tryParse(invoice['paid_amount']?.toString() ?? '') ?? 0;
-          pending += num.tryParse(invoice['pending_payment']?.toString() ?? '') ?? 0;
-        }
-        final verifiedState = invoices.isEmpty
-            ? 'invoice_needed'
-            : total <= 0 ? null
-            : paid >= total - 0.005 ? 'paid'
-            : pending > 0 && paid + pending >= total - 0.005
-                ? 'awaiting_clearance' : 'awaiting_payment';
-        if (verifiedState != null) {
-          unawaited(_localJobs.saveVerifiedPaymentState(
-            widget.businessId, widget.jobId, verifiedState,
-          ).catchError((Object _) {}));
-        }
+      if (canSeeFinancial && documentsVerified) {
+        unawaited(_hydrateCachedFinancialStatus(epoch,documents));
       }
       if (canSeeFinancial) unawaited(_hydrateMileageOut(epoch, documents));
       _modalRefresh?.call();
@@ -3617,7 +3607,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     final saved = savedJobFinancialStatus(
       _job?['payment_state'] ?? widget.initialJobSummary?['payment_state'],
     );
-    final status = _onlineReady ? (_completedPaymentLabel() ?? saved) : saved;
+    final status = saved ?? (_onlineReady ? _completedPaymentLabel() : null);
     return JobFinancialStatusCard(
       status: status,
       offline: BriskersConnectionModeController.instance.forceOffline,
@@ -5493,7 +5483,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       case 'history':
         return const Color(0xFF2585D8);
       case 'documents':
-        return const Color(0xFFE5A400);
+        return BriskersColors.invoices;
       case 'expenses':
         return const Color(0xFFC62828);
       default:
@@ -6049,9 +6039,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
             assignment: assignment,
           ),
           if (OwnerPayrollScreen.enabled && _owner)
-            Padding(padding:const EdgeInsets.all(8),child:JobTasksAccess(business:widget.businessId,job:widget.jobId,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);})),
-          if (_canSeeFinancial &&
-              _job?['status']?.toString() == 'completed') ...[
+            Padding(padding:const EdgeInsets.all(8),child:JobTasksAccess(business:widget.businessId,job:widget.jobId,selectorOnly:true,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);})),
+          if (_canSeeFinancial) ...[
             const SizedBox(height: 8),
             _completedPaymentBanner(),
           ],
@@ -6170,7 +6159,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                       'documents',
                       tr('jobDocuments'),
                       Icons.receipt_long_outlined,
-                      const Color(0xFFE5A400),
+                      BriskersColors.invoices,
                       badge(_documents.length),
                     ),
                   ),

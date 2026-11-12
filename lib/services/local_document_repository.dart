@@ -1,3 +1,4 @@
+import 'local_invoice_closure.dart';
 import 'package:drift/drift.dart';
 
 import '../core/document_presentation.dart';
@@ -39,6 +40,7 @@ class LocalDocumentRepository {
     : _database = database ?? localDatabase;
 
   final BriskersLocalDatabase _database;
+  BriskersLocalDatabase get database => _database;
 
   // Estimates and accounting are retained. A retired Job only hides invoices;
   // an exact invoice tombstone also applies after a stale reassignment response.
@@ -351,7 +353,7 @@ class LocalDocumentRepository {
         }
       }
     }
-    return result;
+    return Future.wait(result.map((row) => LocalInvoiceClosureStore(_database).project(businessId,row)));
   }
 
   Future<String?> createdAtForDocument(

@@ -795,13 +795,13 @@ class LocalJobRepository {
     String jobId,
     String state,
   ) async {
-    if (!const {'paid', 'awaiting_clearance', 'awaiting_payment',
+    if (!const {'paid', 'recorded_pending', 'closed', 'awaiting_clearance', 'awaiting_payment',
                 'invoice_needed'}.contains(state)) {
       throw ArgumentError.value(state, 'state');
     }
     await _database.customStatement(
       "UPDATE local_jobs SET payment_state = ? "
-      "WHERE business_id = ? AND id = ? AND status = 'completed'",
+      "WHERE business_id = ? AND id = ?",
       [state, businessId, jobId],
     );
   }

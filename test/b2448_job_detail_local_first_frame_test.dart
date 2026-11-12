@@ -81,6 +81,9 @@ void main() {
     expect(screen, contains('documentsVerified = true;'));
     expect(screen, contains('_localJobs.saveVerifiedPaymentState('));
     expect(jobs, contains('Future<void> saveVerifiedPaymentState('));
-    expect(jobs, contains("AND status = 'completed'"));
+    final financial=jobs.split('Future<void> saveVerifiedPaymentState(').last.split('Future<LocalJobDetailSnapshot?>').first;
+    expect(financial,contains('WHERE business_id = ? AND id = ?'));
+    expect(financial,isNot(contains("AND status = 'completed'")));
+    expect(financial,contains("'recorded_pending'"));
   });
 }

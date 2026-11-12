@@ -1,3 +1,4 @@
+import 'local_invoice_closure.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:drift/drift.dart' show Variable;
@@ -171,7 +172,7 @@ class LocalDocumentDetailCache {
         if(detail['kind']=='invoice'){
           await LocalInvoiceTaskStore(_database).reconcileCached(businessId,documentId,detail);
         }
-        return _projectRetiredConversion(businessId, detail);
+        return LocalInvoiceClosureStore(_database).project(businessId, await _projectRetiredConversion(businessId, detail));
       }),
     );
   }
@@ -190,7 +191,7 @@ class LocalDocumentDetailCache {
         final rows=await _database.customSelect('SELECT payload_json FROM local_document_details WHERE cache_key=?',variables:[Variable(key)]).get();
         final detail=rows.isEmpty ? null : _decode(rows.single.readNullable<String>('payload_json'));
         if(detail==null || await _blocked(businessId,documentId,detail)) return null;
-        return _projectRetiredConversion(businessId,detail);
+        return LocalInvoiceClosureStore(_database).project(businessId, await _projectRetiredConversion(businessId,detail));
       }
       final prefs=await SharedPreferences.getInstance();
       final detail=durable==null
@@ -199,7 +200,7 @@ class LocalDocumentDetailCache {
               : prefs.getString(key))
           : _decode(durable.readNullable<String>('payload_json'));
       if(detail==null || await _blocked(businessId,documentId,detail))return null;
-      return _projectRetiredConversion(businessId,detail);
+      return LocalInvoiceClosureStore(_database).project(businessId, await _projectRetiredConversion(businessId,detail));
     }));
   }
 

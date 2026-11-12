@@ -713,7 +713,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         TextButton.icon(
           onPressed: _busy ? null : () => _confirmHistoricalPaid(row),
           icon: const Icon(Icons.verified_outlined, size: 18),
-          label: const Text('Already Paid'),
+          label: const Text('Reconcile historical wages'),
         ),
       if (markDone && editable && row['archived_labor'] == 1)
         TextButton.icon(
@@ -771,7 +771,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if (!_canView || _busy) return;
     final mechanic=_employeeLabel(row['employee_id']?.toString());
     final ok=await showDialog<bool>(context:context,builder:(dialog)=>AlertDialog(
-      title:const Text('Already Paid — mark Done?'),
+      title:const Text('Confirm previously paid wages?'),
       content:Text(
         'Confirm that $mechanic was already paid for this labor before '
         'it was entered into the new payroll workflow. This marks only '
@@ -781,7 +781,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         TextButton(onPressed:()=>Navigator.pop(dialog,false),
           child:const Text('Cancel')),
         FilledButton(onPressed:()=>Navigator.pop(dialog,true),
-          child:const Text('Confirm Already Paid')),
+          child:const Text('Confirm historical payment')),
       ],
     ));
     if (ok != true || !mounted || !_canView) return;
@@ -2429,7 +2429,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             const ListTile(
               dense:true,
               leading:Icon(Icons.verified,color:Color(0xFF078C49)),
-              title:Text('Already Paid · Done'),
+              title:Text('Historical wages reconciled · Done'),
               subtitle:Text('Owner-confirmed historical settlement'),
             )
           else if ((row['paid_minutes'] as int? ?? 0)==0 &&
@@ -2438,7 +2438,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               value:false,
               dense:true,
               controlAffinity:ListTileControlAffinity.leading,
-              title:const Text('Already Paid — exclude from payroll'),
+              title:const Text('Reconcile previously paid wages'),
               subtitle:const Text('Owner confirmation also marks this labor Done'),
               onChanged:_busy?null:(checked){
                 if(checked==true)unawaited(_confirmHistoricalPaid(row));

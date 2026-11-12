@@ -3,8 +3,9 @@ import '../core/job_status_style.dart';
 import '../services/job_task_summary.dart';
 
 Color approvedJobListStatusColor(Map<String, dynamic> job) {
-  final status = job['status']?.toString();
+  final status = job['status']?.toString().trim().toLowerCase().replaceAll(' ', '_');
   return switch (status) {
+    'open' || 'not_started' => const Color(0xFF0066FF),
     'in_progress' => const Color(0xFF0066FF),
     'awaiting_parts' || 'waiting_parts' => const Color(0xFFF58A00),
     'awaiting_payment' => const Color(0xFF7A16EE),

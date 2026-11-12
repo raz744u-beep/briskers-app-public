@@ -1,3 +1,4 @@
+import '../core/document_presentation.dart';
 import 'package:flutter/material.dart';
 
 /// Convert the last synchronized payment state already shown on the Jobs list
@@ -7,6 +8,7 @@ String? savedJobFinancialStatus(Object? paymentState) {
   final value = paymentState?.toString().trim().toLowerCase() ?? '';
   return switch (value) {
     'paid' => 'Paid',
+    'closed' => 'Closed',
     'recorded_pending' => 'Paid',
     'awaiting_clearance' => 'Awaiting payment clearance',
     'awaiting_payment' => 'Awaiting payment',
@@ -27,6 +29,8 @@ String? cachedVerifiedJobPaymentState(
   if (invoices.isEmpty) {
     return null;
   }
+  if(invoices.every((invoice)=>DocumentPresentation(invoice).isClosed)) return 'closed';
+  if(invoices.any((invoice)=>DocumentPresentation(invoice).requiresReconciliation)) return null;
   num total = 0;
   num paid = 0;
   num pending = 0;

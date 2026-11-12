@@ -28,7 +28,7 @@ void main() {
     expect(begin, greaterThan(0));
     expect(end, greaterThan(begin));
     final flow = code.substring(begin, end);
-    final finalization = flow.indexOf('await _api.finalizePendingInvoicePayment(');
+    final finalization = flow.indexOf('OfflineInvoiceFinalization().save(');
     final close = flow.indexOf('await _autoCloseOwnerInvoiceIfReady();');
     final refresh = flow.indexOf('await _load(fastAfterMutation: true);');
     expect(finalization, greaterThan(0));

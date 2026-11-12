@@ -30,6 +30,17 @@ assert.deepEqual(first,second);
 assert.equal((await db.query('SELECT count(*)::int AS n FROM briskers.financial_transactions')).rows[0].n,1);
 await assert.rejects(()=>call({...request,close:false}),e=>e.code==='23505');
 assert.equal((await db.query('SELECT count(*)::int AS n FROM briskers.invoice_finalization_operations_v1')).rows[0].n,1);
+// The local-first close queue must use an empty receipt set. The locked RPC
+// closes the document without modifying any existing payment/allocation row.
+const closeOnly={total_cents:10000,paid_cents:10000,receipts:[],close:true};
+const financial=async()=>({transactions:(await db.query('SELECT * FROM briskers.financial_transactions ORDER BY id')).rows,
+  allocations:(await db.query('SELECT * FROM briskers.payment_allocations ORDER BY transaction_id')).rows,
+  pending:(await db.query('SELECT * FROM briskers.invoice_pending_payments ORDER BY id')).rows});
+const history=await financial();
+await db.exec('UPDATE briskers.sales_documents SET closed_at=NULL');
+await call(closeOnly,method); await call(closeOnly,method);
+assert.deepEqual(await financial(),history);
+assert.ok((await db.query('SELECT closed_at FROM briskers.sales_documents')).rows[0].closed_at);
 // Mixed existing posted payments and a new partial receipt remain distinct.
 await db.exec(`UPDATE briskers.sales_documents SET total_amount=200,closed_at=NULL;
 INSERT INTO briskers.invoice_pending_payments VALUES('${receipt}','${shop}','${invoice}',30,'${method}','2026-11-10',now());

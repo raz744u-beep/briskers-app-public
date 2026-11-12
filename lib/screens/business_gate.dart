@@ -1,3 +1,4 @@
+import '../services/local_invoice_closure.dart';
 import '../services/offline_invoice_finalization.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -466,7 +467,10 @@ class _BusinessGateState extends State<BusinessGate> with WidgetsBindingObserver
     }
 
     try {
-      if (roleCode == 'owner') await OfflineInvoiceFinalization().flush(businessId);
+      if (roleCode == 'owner') {
+        await OfflineInvoiceFinalization().flush(businessId);
+        await LocalInvoiceClosure().flush(businessId);
+      }
     } catch (_) {
       // Durable finalizations remain available for reconciliation.
     }

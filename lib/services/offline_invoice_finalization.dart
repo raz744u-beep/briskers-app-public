@@ -1,3 +1,4 @@
+import 'local_invoice_closure.dart';
 import 'dart:convert';
 import 'dart:math';
 import 'package:drift/drift.dart';
@@ -109,7 +110,7 @@ class OfflineInvoiceFinalization {
               // after an ambiguous network result. Closing is a second durable
               // operation with NO receipts, after the first is acknowledged.
               await db.customStatement('INSERT OR IGNORE INTO invoice_finalization_close_followups_v1 VALUES(?,?,?,?)',
-                [business,id,_operationId(),jsonEncode({'total_cents':old['total_cents'],
+                [business,id,operationId(),jsonEncode({'total_cents':old['total_cents'],
                   'paid_cents':oldPaid,'receipts':<dynamic>[],'close':true})]);
               if(const {'confirmed','review'}.contains(previous.single.read<String>('state'))) {
                 await db.customStatement("UPDATE invoice_finalization_intents_v1 SET state='pending' WHERE business_id=? AND invoice_id=?",[business,id]);
@@ -123,14 +124,14 @@ class OfflineInvoiceFinalization {
           await db.customStatement('DELETE FROM invoice_finalization_intents_v1 WHERE business_id=? AND invoice_id=?',[business,id]);
           await db.customStatement('DELETE FROM invoice_finalization_close_followups_v1 WHERE business_id=? AND invoice_id=?',[business,id]);
         }
-        final op=_operationId();
+        final op=operationId();
         await db.customStatement('INSERT INTO invoice_finalization_intents_v1 VALUES(?,?,?,?,?,NULL)',
           [business,id,op,payload,'pending']);
       }
     });
   }
 
-  static String _operationId() {
+  static String operationId() {
     final random=Random.secure();
     final bytes=List.generate(16,(_)=>random.nextInt(256));
     bytes[6]=(bytes[6]&15)|64; bytes[8]=(bytes[8]&63)|128;
@@ -144,6 +145,22 @@ class OfflineInvoiceFinalization {
       variables:[Variable(business),Variable(invoice)]).get();
     return rows.firstOrNull?.read<String>('state');
   }
+  /// Pending/review intents always block new submissions. A confirmed intent
+  /// blocks only the same receipt identities; a later payment is independent.
+  Future<String?> stateForDetail(String business,String invoice,Map<String,dynamic> detail) async {
+    await prepare();
+    final rows=await db.customSelect('SELECT state,payload FROM invoice_finalization_intents_v1 WHERE business_id=? AND invoice_id=?',
+      variables:[Variable(business),Variable(invoice)]).get();
+    if(rows.isEmpty) return null;
+    final state=rows.single.read<String>('state');
+    if(state!='confirmed') return state;
+    final old=jsonDecode(rows.single.read<String>('payload')) as Map;
+    final identities=(old['receipts'] as List).map((r)=>r['operation_id'] ?? r['id']).toSet();
+    final pending=(detail['payments'] as List? ?? []).whereType<Map>().where((p)=>p['state']=='pending');
+    if(pending.every((p)=>identities.contains(p['operation_id'] ?? p['id']))) return 'confirmed';
+    return null;
+  }
+
   Future<void> retry(String business,String invoice,{required bool isOwner}) async {
     if(!isOwner) throw StateError('Owner access required.');
     if(BriskersConnectionModeController.instance.forceOffline) {
@@ -156,6 +173,8 @@ class OfflineInvoiceFinalization {
 
   Future<void> remap(String business,String local,String server) async {
     await prepare();
+    await LocalInvoiceClosureStore(db).prepare();
+    await db.customStatement('UPDATE local_invoice_closures SET invoice_id=? WHERE business_id=? AND invoice_id=?',[server,business,local]);
     await db.customStatement('UPDATE invoice_finalization_intents_v1 SET invoice_id=? WHERE business_id=? AND invoice_id=?',[server,business,local]);
     await db.customStatement('UPDATE invoice_finalization_close_followups_v1 SET invoice_id=? WHERE business_id=? AND invoice_id=?',[server,business,local]);
   }
