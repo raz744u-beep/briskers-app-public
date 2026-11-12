@@ -4,6 +4,8 @@ Continues PR #447 / issue #454 on `fix/bugs33-preserve-offline-financial-history
 
 ## Included
 
+- Job-specific Tasks has a compact Mark All Done action immediately below the job header. One count confirmation completes eligible current unpaid allocations and due general tasks in an atomic local transaction using existing completion APIs. Exact mechanics/hours are retained, paid coverage is untouched, and historical invoice tasks/future reminders are excluded. Changed assignments require reconfirmation; repeated requests are no-ops. The six-task Kam fixture verifies 11.5 credited hours with no wages marked Paid.
+
 - Historical invoice labor through November 8, 2026 displays Done and is excluded from new payroll unless explicitly carried forward. Current work begins November 9. Existing general tasks on historical jobs display Done except future reminders; new reminders remain active.
 - Owner assignment/hour corrections on historical Done/Paid/Closed work are stored separately from immutable payroll credits and payments. A second mechanic can be added without creating wages. Job and invoice hour summaries show corrected records.
 - Invoice list/detail presentation uses Open, Paid and Closed, calculated from saved coverage and confirmed closure. Pending local receipts may cover the customer balance; they are not represented as posted income. Voided records retain their administrative Void identity, outside the three active filters.

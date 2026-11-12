@@ -1,3 +1,4 @@
+import '../../services/job_task_bulk_completion.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_invoice_task_store.dart';
 import 'dart:async';
@@ -648,6 +649,28 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         content:Text('Labor assigned. Set the employee pay rate in Details before paying.'),
       ));
     }
+  }
+
+  Future<void> _markAllJobTasksDone() async {
+    if(_busy || !_canView || widget.jobId==null) return;
+    try {
+      final service=JobTaskBulkCompletion(_taskEditRepository);
+      final plan=await service.plan(widget.jobId!,DateTime.now());
+      if(!mounted || !_canView) return;
+      if(plan.count==0) { await _load(); return; }
+      final confirmed=await showDialog<bool>(context:context,builder:(dialog)=>AlertDialog(
+        title:const Text('Mark All Done?'),
+        content:Text('Complete ${plan.count} ${plan.count==1?'task':'tasks'} for this job? Assigned mechanics and hours stay unchanged. Future reminders are excluded. This does not mark wages Paid.'),
+        actions:[TextButton(onPressed:()=>Navigator.pop(dialog,false),child:const Text('Cancel')),
+          FilledButton(onPressed:()=>Navigator.pop(dialog,true),child:const Text('Mark All Done'))],
+      ));
+      if(confirmed!=true || !mounted || !_canView) return;
+      await _runOwnerTaskEdit(() async {
+        final completed=await service.complete(plan,DateTime.now());
+        if(mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:
+          Text(completed==0?'These tasks are already Done.':'$completed ${completed==1?'task marked':'tasks marked'} Done.'))); }
+      });
+    } catch(error) { if(mounted) setState(()=>_error=error.toString()); }
   }
 
   Future<void> _recordTaskProgress(Map<String, dynamic> row,
@@ -2202,6 +2225,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           Expanded(child: _jobMode && widget.invoiceId == null
             ? JobScopedTasks(
                 jobId: widget.jobId!,
+                onMarkAllDone: _markAllJobTasksDone,
+                markAllDoneCount: JobTaskCompletionPlan.fromRows(widget.jobId!,
+                  _work,_generalTasks,DateTime.now()).count,
                 serviceTasks: service,
                 generalTasks: _generalTasks,
                 allocationsByLine: byTask,

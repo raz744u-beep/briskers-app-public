@@ -38,10 +38,11 @@ class LocalRecurringExpenseEdit {
       business,
       transaction,
     );
-    if (detail == null)
+    if (detail == null) {
       throw StateError(
         'Saved recurring expense details are unavailable. No changes were made.',
       );
+    }
     await localDatabase.transaction(() async {
       await repo.adoptSavedExpense(detail);
       await repo.editSavedExpense(transaction, changes);

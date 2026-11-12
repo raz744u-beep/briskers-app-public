@@ -19,10 +19,14 @@ class JobScopedTasks extends StatefulWidget {
     this.onManageLabor,
     this.onManageGeneral,
     this.laborActions,
+    this.onMarkAllDone,
+    this.markAllDoneCount = 0,
   });
 
   final Widget Function(Map<String, dynamic>)? laborActions;
   final String jobId;
+  final Future<void> Function()? onMarkAllDone;
+  final int markAllDoneCount;
   final List<Map<String, dynamic>> serviceTasks;
   final List<Map<String, dynamic>> generalTasks;
   final Map<String, List<Map<String, dynamic>>> allocationsByLine;
@@ -414,6 +418,19 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
               ]),
             ),
           ],
+          if(widget.markAllDoneCount>0 && widget.onMarkAllDone!=null)
+            Align(alignment:Alignment.centerLeft,child:Padding(
+              padding:const EdgeInsets.only(top:6),
+              child:FilledButton.icon(
+                key:const Key('job-mark-all-done'),
+                onPressed:_running!=null?null:()=>_act('bulk-done',widget.onMarkAllDone!),
+                style:FilledButton.styleFrom(backgroundColor:green,
+                  foregroundColor:Colors.white,visualDensity:VisualDensity.compact,
+                  padding:const EdgeInsets.symmetric(horizontal:12,vertical:8)),
+                icon:const Icon(Icons.done_all,size:18),
+                label:const Text('Mark All Done'),
+              ),
+            )),
         ]),
       ),
       Expanded(child: ListView(
