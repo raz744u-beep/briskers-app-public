@@ -1,4 +1,4 @@
-name: Build Android debug APK
+name: Build permanently signed Android APK
 
 on:
   workflow_dispatch:
