@@ -4,7 +4,7 @@ Continues installed 0.10.9 (4635), source f5d313a54f5a9a93997b08d176330c9ace0ec7
 
 ## Included
 
-- Owner individual/bulk invoice close commits a separate local lifecycle decision and index update atomically. Closed is immediately visible, excluded from close eligibility, survives restart, and overrides stale server detail/index responses. Closing never creates a payment or finalization intent. Explicit confirmed Owner reopening supersedes the closure.
+- Owner individual/bulk invoice close commits a separate local lifecycle decision and index update atomically. Closed is immediately visible, excluded from close eligibility, survives restart, and overrides stale server detail/index responses. Closing never creates a payment or finalization intent. Fully covered historical read-only invoices can close without unlocking or editing them. Explicit confirmed Owner reopening supersedes the closure.
 - Background closure uses the existing idempotent endpoint with an immutable EMPTY receipt set. Its transactional payment-set check prevents the legacy close RPC from posting pending receipts. Original payment/finalization operations remain untouched. Failed closure sync backs off at least one minute; it does not reverse local Closed.
 - Finalization always saves an existing durable intent before network work, including while online. Pending/inflight/review and already-confirmed matching receipts disable repeat submission and show their actual state. Later distinct receipts remain eligible after the prior operation is confirmed.
 - Invoice cards use cached local paid/pending amounts and saved service descriptions without delaying first local paint. Generic Invoice / Invoice-number titles no longer replace saved labor descriptions.

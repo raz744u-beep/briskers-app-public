@@ -120,6 +120,16 @@ void main() {
     expect((await db.customSelect('SELECT operation_id FROM local_invoice_closures').getSingle()).data,isNot(original));
     expect(DocumentPresentation((await LocalDocumentDetailCache(database:db).loadReadOnly('shop','6359'))!).isClosed,isTrue);
   });
+  test('historical read-only invoice can close without unlocking or editing its payment history',() async {
+    final cache=LocalDocumentDetailCache(database:db);
+    await cache.save('shop','6359',{...detail('6359',7882.11,pending:false),'legacy_read_only':true});
+    final before=await paymentHistory();
+    await LocalInvoiceClosure(database:db,api:api).close('shop',['6359'],isOwner:true);
+    final after=(await cache.loadReadOnly('shop','6359'))!;
+    expect(after['legacy_read_only'],isTrue);
+    expect(DocumentPresentation(after).isClosed,isTrue);
+    expect(await paymentHistory(),before);
+  });
   test('recorded customer payment and explicit operational completion stay independent',() async {
     final cached=(await LocalDocumentDetailCache(database:db).loadReadOnly('shop','6368'))!;
     final state=cachedVerifiedJobPaymentState([cached]);

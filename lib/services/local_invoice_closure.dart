@@ -61,7 +61,7 @@ class LocalInvoiceClosure {
         final existing=await db.customSelect('SELECT 1 FROM local_invoice_closures WHERE business_id=? AND invoice_id=? AND reopened_at IS NULL',variables:[Variable(business),Variable(id)]).get();
         if(existing.isNotEmpty) continue;
         final saved=await LocalDocumentDetailCache(database:db).loadReadOnly(business,id);
-        if(saved==null || saved['id']!=id || saved['kind']!='invoice' || saved['legacy_read_only']==true) {
+        if(saved==null || saved['id']!=id || saved['kind']!='invoice' || const {'void','voided','cancelled','canceled'}.contains(saved['status']?.toString().toLowerCase())) {
           throw StateError('Open this invoice once to verify its saved payment details.');
         }
         final edits=await db.customSelect("SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? AND entity_type IN ('invoice_pending_payment_edit','invoice_tax_edit','document_edit')",variables:[Variable(business),Variable(id)]).get();
