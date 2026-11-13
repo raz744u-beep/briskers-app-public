@@ -7,6 +7,8 @@ String estimateListDescription(
 }) {
   final labor=detail==null ? '' : invoiceLaborWorkSummary(detail).replaceAll(RegExp(r'\s+'),' ').trim();
   if(labor.isNotEmpty) return labor;
+  final isInvoice=index['kind']=='invoice' || detail?['kind']=='invoice';
+  final title=(index['title'] ?? index['job_title'] ?? '').toString().trim();
   final candidates = <Object?>[
     index['estimate_description'],
     index['description'],
@@ -15,12 +17,10 @@ String estimateListDescription(
     detail?['estimate_description'],
     detail?['description'],
     detail?['work_summary'],
-    index['title'],
-    index['job_title'],
   ];
   for (final raw in candidates) {
     final value = raw?.toString().replaceAll(RegExp(r'\s+'), ' ').trim() ?? '';
-    if (value.isNotEmpty && !RegExp(r'^(invoice|estimate)(\s*#?\s*[\w-]+)?$',caseSensitive:false).hasMatch(value)) {
+    if (value.isNotEmpty && (isInvoice || value!=title) && !RegExp(r'^(invoice|estimate)(\s*#?\s*[\w-]+)?$',caseSensitive:false).hasMatch(value)) {
       return value;
     }
   }

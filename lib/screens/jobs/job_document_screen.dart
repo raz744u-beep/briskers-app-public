@@ -3358,7 +3358,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   bool _startingFinalization = false;
   Future<void> _finalizeEnteredPayments() async {
-    if (!widget.isOwner || _startingFinalization) return;
+    if (!widget.isOwner) return;
+    if (_startingFinalization) return;
     setState(() => _startingFinalization = true);
     try {
     await _collapseWorkspaceHeader();

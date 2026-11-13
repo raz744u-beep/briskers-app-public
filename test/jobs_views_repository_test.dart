@@ -8,8 +8,10 @@ import 'package:briskers_app/services/offline_invoice_payment_ledger.dart';
 import 'package:briskers_app/services/offline_job_admin_service.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   late BriskersLocalDatabase db;
   late LocalJobRepository repository;
   late LocalJobAccessHistory history;
@@ -17,6 +19,7 @@ void main() {
   final todaySeconds = today.millisecondsSinceEpoch ~/ 1000;
 
   setUp(() {
+    SharedPreferences.setMockInitialValues({});
     db = BriskersLocalDatabase(NativeDatabase.memory());
     repository = LocalJobRepository(database: db);
     history = LocalJobAccessHistory(database: db);

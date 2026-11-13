@@ -76,7 +76,7 @@ void main() {
     expect(jsonEncode((await cache.loadReadOnly('shop','6368'))!['payments']),jsonEncode(mixed['payments']));
   });
   test('description retains meaningful title and description equal to title',() {
-    expect(estimateListDescription({'title':'Replace thermostat','description':'Replace thermostat'}),'Replace thermostat');
+    expect(estimateListDescription({'kind':'invoice','title':'Replace thermostat','description':'Replace thermostat'}),'Replace thermostat');
     expect(estimateListDescription({'title':'Invoice #6372'},detail:{'lines':[{'name':'Labor','description':'Replace thermostat'}]}),'Replace thermostat');
     expect(estimateListDescription({'title':'Invoice #6372'}),'');
   });

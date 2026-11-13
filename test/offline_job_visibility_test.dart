@@ -2,16 +2,19 @@ import 'dart:convert';
 
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/core/job_list_options.dart';
 import 'package:briskers_app/services/local_job_repository.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   late BriskersLocalDatabase db;
   late LocalJobRepository jobs;
 
   setUp(() {
+    SharedPreferences.setMockInitialValues({});
     db = BriskersLocalDatabase(NativeDatabase.memory());
     jobs = LocalJobRepository(database: db);
   });
