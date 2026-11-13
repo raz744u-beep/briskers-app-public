@@ -21,7 +21,7 @@ void main(){
     await t.pumpAndSettle();
     expect(t.getBottomRight(find.text('Save Task')).dy,lessThan(544));expect(t.getBottomRight(find.text('Cancel')).dy,lessThan(544));
     await capture(t,key,'nov13-service-editor-keyboard');
-    await t.ensureVisible(find.text('Start Date: 2026-11-09'));await t.tap(find.text('Start Date: 2026-11-09'));await t.pumpAndSettle();expect(find.byType(DatePickerDialog),findsOneWidget);await t.tap(find.text('Cancel').last);await t.pumpAndSettle();
+    await t.scrollUntilVisible(find.byKey(const ValueKey('task-start-date')),150,scrollable:find.byType(Scrollable).first);await t.pumpAndSettle();await t.ensureVisible(find.byKey(const ValueKey('task-start-date')));await t.pumpAndSettle();await t.tap(find.byKey(const ValueKey('task-start-date')));await t.pumpAndSettle();expect(find.byType(DatePickerDialog),findsOneWidget);await t.tap(find.text('Cancel').last);await t.pumpAndSettle();
     await t.tap(find.text('Save Task'));await t.pumpAndSettle();expect(saved!.start,'2026-11-09');expect(saved!.status,'Done');expect(saved!.mechanics.single.minutes,600);expect(t.takeException(),isNull);
   });
   testWidgets('historical zero-hour Done task can change dates and historical-paid choice requires confirmation',(t)async{

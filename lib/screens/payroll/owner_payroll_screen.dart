@@ -1660,6 +1660,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             return {...customer,'vehicles':details?['vehicles']??[]};
           },
           editing: task != null,
+          onOpenJob: (id) => _openRecordedWork(id, invoice: false),
           onLinkInvoiceLabor:widget.jobId==null?null:(){Navigator.pop(context,false);unawaited(_newJobLabor());},
           invoiceLabor: source?['source_kind'] == 'invoice',
           statusLocked: allocations.any((r) => r['state'] == 'Done') || source?['status']=='done' || source?['archived_labor']==1,
