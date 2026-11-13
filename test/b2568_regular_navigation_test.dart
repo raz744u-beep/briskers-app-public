@@ -245,11 +245,14 @@ void main(){
     await click(find.text('Review Weekly Labor (2 tasks)'));
     await until(find.text('Employee Profile'));
     
-    expect(find.text('Tasks'),findsOneWidget);expect(find.text('General Tasks'),findsOneWidget);
+    expect(find.text('Tasks'),findsOneWidget);expect(find.text('General Tasks'),findsNothing);
+    expect(find.text('Work Review (Read Only)'),findsOneWidget);
     expect(find.widgetWithText(OutlinedButton,'Details'),findsOneWidget);
     await capture('bugs30-employee-unpaid-tasks');
 
-    await click(find.widgetWithText(FilledButton,'Verify Payment'));
+    await click(find.text('Payroll'));
+    await capture('nov12-employee-payroll');
+    await click(find.widgetWithText(FilledButton,'Verify Weekly Payment'));
     await until(find.text(r'Calculated labor: $200.00'));
     await click(find.widgetWithText(FilledButton,'Record payment'));
     await until(find.text('Payment Recorded'));await click(find.widgetWithText(FilledButton,'Done'));
@@ -280,10 +283,12 @@ void main(){
     expect(find.text('Review Weekly Labor (0 tasks)'),findsOneWidget);
     expect(find.text('Review Weekly Labor (1 tasks)'),findsOneWidget);
     await click(find.text('Review Weekly Labor (0 tasks)'));
-    await until(find.text('Unpaid work · 0'));
-    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Verify Payment')).onPressed,isNull);
+    await until(find.text('Work Review (Read Only)'));
+    await click(find.text('Payroll'));
+    await until(find.text('No verified unpaid labor for this week.'));
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Verify Weekly Payment')).onPressed,isNull);
     await capture('bugs30-employee-paid-tasks');
-    await click(find.text('View Paid Tasks'));await until(find.text('Payroll History'));
+    await click(find.text('Reports'));await until(find.text('Payroll History'));
     navigator.currentState!.pop();await tester.pumpAndSettle();
     navigator.currentState!.pop();await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('Tasks'),-100,scrollable:find.descendant(of:find.byType(HomeScreen),matching:find.byType(Scrollable)).first);

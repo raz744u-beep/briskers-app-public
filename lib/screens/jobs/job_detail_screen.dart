@@ -3786,7 +3786,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       label: Row(mainAxisSize: MainAxisSize.min, children: [
         Flexible(child: Text(invoice['document_number'] == null
             ? 'Open invoice' : 'Invoice #${invoice['document_number']}',
-          overflow: TextOverflow.ellipsis,
+          softWrap: true,
           style: const TextStyle(fontSize: 17,
             fontWeight: FontWeight.w900, color: Color(0xFF07594D)))),
       ]),
@@ -3879,13 +3879,13 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal:6, vertical:6),
                   child: Row(children: [
-                    Expanded(child: _canSeeFinancial && linkedInvoices.isNotEmpty
+                    Expanded(flex:3,child: _canSeeFinancial && linkedInvoices.isNotEmpty
                       ? Align(alignment: Alignment.centerLeft, child: invoiceChip(linkedInvoices.first))
                       : InkWell(onTap: _canManage && !_busy ? _changeJobTitle : null,
                           child: Text(jobTitle.isEmpty ? 'No linked invoice saved' : jobTitle))),
                     if (OwnerPayrollScreen.enabled && _owner) ...[
                       const SizedBox(width:8),
-                      Expanded(child: JobTasksAccess(business:widget.businessId,job:widget.jobId,selectorOnly:true,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);})),
+                      Expanded(flex:2,child: JobTasksAccess(business:widget.businessId,job:widget.jobId,selectorOnly:true,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);})),
                     ],
                   ]),
                 ),
@@ -6130,7 +6130,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                       'documents',
                       tr('jobDocuments'),
                       Icons.receipt_long_outlined,
-                      BriskersColors.invoices,
+                      const Color(0xFF0A8F53),
                       badge(_documents.length),
                     ),
                   ),

@@ -1,3 +1,5 @@
+import 'employee_work_review.dart';
+import '../../core/work_status_colors.dart';
 import '../../services/job_task_bulk_completion.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_invoice_task_store.dart';
@@ -24,7 +26,6 @@ import '../../services/local_owner_authorization.dart';
 import '../../services/local_payroll_repository.dart';
 import '../../services/employee_nickname_store.dart';
 import '../../services/local_task_assignment_store.dart';
-import '../../services/payroll_period_totals.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../services/payroll_lan_enrollment.dart';
 import '../../services/payroll_lan_identity.dart';
@@ -38,7 +39,6 @@ import '../settings/employee_edit_screen.dart';
 import '../jobs/job_document_screen.dart';
 import 'payroll_history_panel.dart';
 import 'historical_expense_review.dart';
-import 'payroll_dry_run_preview.dart';
 import 'historical_invoice_labor_review.dart';
 import '../../services/local_financial_cache.dart' as expenses;
 import 'payroll_lan_controls.dart';
@@ -147,8 +147,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   int? _advanceBalance;
   List<Map<String, dynamic>> _repayments = [];
   List<Map<String, dynamic>> _generalTasks = [];
-  bool _showGeneralTasks = false;
-  bool _currentJobsExpanded=false;
+
+  List<Map<String,dynamic>> _assignedJobs = [];
+  String? _carryReview;
   bool _advanceExpanded = false;
   bool _editingOpening = false;
   int? _openingAdvance;
@@ -164,8 +165,6 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   final _repaymentNote = TextEditingController();
   DateTime _repaymentDate = DateTime.now();
   String _repaymentMethod = 'Cash';
-  String _payrollPeriod = 'This Week';
-  DateTimeRange? _customPeriod;
   static final _currency = NumberFormat.simpleCurrency(locale: 'en_US');
   String _money(int cents) => _currency.format(cents / 100);
   String _moneyNullable(int? cents) => cents == null ? '—' : _money(cents);
@@ -404,10 +403,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       'archived_labor': r['source_kind']=='invoice' &&
           !LocalInvoiceTaskStore.currentPayrollDate(r['invoice_date']) ? 1 : 0,
     }).toList();
+    final hydrated=await _taskEditRepository.localCompensation(cachedRoster);
+    _carryReview=await _taskEditRepository.applyNov12OilSeparatorCarry();
     final persistedEmployees = job == null
         ? await repository.employees()
         : await repository.assignedEmployees(job);
-    final roster = cachedRoster;
+    final roster = hydrated;
     final combined = {
       for (final row in roster) row['id']: row,
       for (final row in persistedEmployees)
@@ -422,6 +423,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         widget.employeeId ?? _employee ?? (employees.firstOrNull?['id'] as String?);
     // Preserve historical allocations in read-only Tasks and Reports views.
     // Payroll payment eligibility is guarded separately in WeeklyLaborReview.
+    if(employee!=null) {
+      _assignedJobs=(await _db.customSelect("SELECT DISTINCT j.* FROM local_jobs j JOIN local_job_assignments a ON a.business_id=j.business_id AND a.job_id=j.id AND a.active=1 WHERE j.business_id=? AND a.employee_id=? AND j.status NOT IN ('completed','closed','cancelled','deleted') ORDER BY j.created_at DESC",variables:[Variable(widget.businessId),Variable(employee)]).get()).map((r)=>r.data).toList();
+    }
     final work = await repository.work(employee: _jobMode ? null : employee, job: job);
     if(!mounted||generation!=_loadGeneration)return;
     if(!_canView)return;
@@ -707,8 +711,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         FilledButton.icon(
           onPressed: _busy ? null : () => _recordTaskProgress(row, markDone: true),
           icon: const Icon(Icons.done, size: 18),
+          style: FilledButton.styleFrom(backgroundColor: WorkStatusColors.done),
           label: const Text('Mark Done'),
         ),
+      if(editable && row['source_kind']!='invoice')
+        TextButton.icon(onPressed:_busy?null:()=>_editEstimated(row),icon:const Icon(Icons.edit_outlined),label:const Text('Edit Assignment')),
       if (editable)
         TextButton.icon(
           onPressed: _busy ? null : () => _confirmHistoricalPaid(row),
@@ -802,16 +809,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     }
   }
 
-  static Color _workStatusColor(String state) {
-    switch (state) {
-      case 'Done':
-        return const Color(0xFF00897E);
-      case 'In Progress':
-        return const Color(0xFFD97706);
-      default:
-        return const Color(0xFF7C8A9D);
-    }
-  }
+  static Color _workStatusColor(String state) => switch(state) {
+    'Done'=>WorkStatusColors.done,'In Progress'=>WorkStatusColors.progress,_=>WorkStatusColors.open,
+  };
 
   // The approved Tasks TEST separates the job/task header from the mechanic's
   // progress controls. This is a view over the real immutable payroll credits.
@@ -912,6 +912,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                         OutlinedButton.icon(
                           onPressed:()=>_recordTaskProgress(row,markDone:true),
                           style:OutlinedButton.styleFrom(
+                            foregroundColor:WorkStatusColors.done,
+                            side:const BorderSide(color:WorkStatusColors.done),
                             visualDensity:VisualDensity.compact,
                             padding:const EdgeInsets.symmetric(
                               horizontal:12,vertical:6)),
@@ -933,6 +935,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                         if (canProgress && state == 'Open')
                           OutlinedButton.icon(
                             onPressed:()=>_recordTaskProgress(row,markDone:true),
+                            style:OutlinedButton.styleFrom(foregroundColor:WorkStatusColors.done,side:const BorderSide(color:WorkStatusColors.done)),
                             icon:const Icon(Icons.done,size:17),
                             label:const Text('Mark Done')),
                         if (conflict)
@@ -1167,21 +1170,6 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     ]),
   );
 
-  Widget _financeMetric(String label, String value, {Color? color}) =>
-    Expanded(child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(
-          fontSize: 10.5, color: Color(0xFF64748B))),
-        const SizedBox(height: 4),
-        FittedBox(fit: BoxFit.scaleDown, child: Text(value,
-          style: TextStyle(
-            fontSize: 15, fontWeight: FontWeight.w800,
-            color: color ?? const Color(0xFF17212B)))),
-      ],
-    ));
-
-  // ignore: unused_element
   Widget _panel(Widget child) => Card(
     margin: const EdgeInsets.symmetric(vertical: 6),
     child: Padding(
@@ -1212,60 +1200,6 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       label: const Text('Details'),
     ),
   ]);
-
-  ({DateTime from, DateTime until}) _periodBounds() {
-    final today = DateTime.now();
-    final midnight = DateTime(today.year, today.month, today.day);
-    final monday = midnight.subtract(Duration(days: today.weekday - 1));
-    final tomorrow = midnight.add(const Duration(days: 1));
-    switch (_payrollPeriod) {
-      case 'This Week':
-        return (from:monday,until:monday.add(const Duration(days: 5)));
-      case 'Last Week':
-        return (from:monday.subtract(const Duration(days: 7)),until:monday.subtract(const Duration(days: 2)));
-      case 'Last 30 Days':
-        return (from:midnight.subtract(const Duration(days: 29)),until:tomorrow);
-      case 'Last 3 Months':
-        return (from:DateTime(today.year,today.month-2),until:tomorrow);
-      case 'Last 6 Months':
-        return (from:DateTime(today.year,today.month-5),until:tomorrow);
-      case 'Year to Date':
-        return (from:DateTime(today.year),until:tomorrow);
-      case 'All Time':
-        return (from:DateTime(2000),until:DateTime(2100));
-      case 'Custom':
-        if (_customPeriod != null) {
-          return (from:DateTime(_customPeriod!.start.year,
-            _customPeriod!.start.month,_customPeriod!.start.day),
-            until:DateTime(_customPeriod!.end.year,
-              _customPeriod!.end.month,_customPeriod!.end.day)
-              .add(const Duration(days: 1)));
-        }
-        return (from:monday,until:monday.add(const Duration(days: 5)));
-      default:
-        return (from:monday,until:monday.add(const Duration(days: 5)));
-    }
-  }
-
-  Future<void> _setPayrollPeriod(String? next) async {
-    if (next == null) return;
-    if (next == 'Custom') {
-      final chosen = await showDateRangePicker(
-        context: context,
-        firstDate: DateTime(2020),
-        lastDate: DateTime(2100),
-        initialDateRange: _customPeriod,
-      );
-      if (chosen != null && mounted) {
-        setState(() { _customPeriod = chosen; _payrollPeriod = next; });
-      }
-      return;
-    }
-    setState(() => _payrollPeriod = next);
-  }
-
-  PayrollPeriodTotals _projectPeriod(DateTime from, DateTime until) =>
-      PayrollPeriodTotals.calculate(work: _currentPayrollWork, payments: _history, from: from, until: until);
 
   void _selectAmount(TextEditingController controller) {
     controller.selection = TextSelection(baseOffset: 0, extentOffset: controller.text.length);
@@ -1430,106 +1364,24 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Widget _payrollTab() {
-    final period = _periodBounds();
-    final current = _projectPeriod(period.from, period.until);
-    final overall = _projectPeriod(DateTime(2000), DateTime(2100));
-    final previous = overall.balanceCents == null || current.balanceCents == null
-      ? null : (overall.balanceCents! - current.balanceCents!)
-        .clamp(0, 1000000000).toInt();
-    final outsideLabel = _payrollPeriod == 'This Week'
-      ? 'Previous weeks' : 'Outside period';
-    const options = [
-      'This Week', 'Last Week', 'Last 30 Days', 'Last 3 Months',
-      'Last 6 Months', 'Year to Date', 'All Time', 'Custom',
-    ];
-    return ListView(
-      padding: const EdgeInsets.all(11),
-      children: [
-        _panel(Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(children: [
-              const Expanded(child: Text('Payroll summary',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800))),
-              SizedBox(width: 166, child: DropdownButtonFormField<String>(
-                key: ValueKey('employee-payroll-period-dropdown-$_payrollPeriod'),
-                initialValue: _payrollPeriod,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 8,
-                    vertical: 9),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(14)))),
-                items: options.map((label) => DropdownMenuItem(
-                  value: label, child: Text(label,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12)))).toList(),
-                onChanged: _setPayrollPeriod,
-              )),
-            ]),
-            const SizedBox(height: 12),
-            Row(children: [
-              _financeMetric('Hours',
-                current.hasRecords ? current.hours.toStringAsFixed(1) : '—'),
-              _financeMetric('Gross', _moneyNullable(current.grossCents)),
-              _financeMetric('Transferred', _money(current.paidCents)),
-              _financeMetric('Balance', _moneyNullable(current.balanceCents),
-                color: const Color(0xFFCC6222)),
-            ]),
-            const SizedBox(height: 12),
-            Builder(builder: (tabContext) => SizedBox(
-              height: 41,
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF007E78)),
-                onPressed: () {
-                  setState(() => _showGeneralTasks = false);
-                  DefaultTabController.of(tabContext).animateTo(0);
-                },
-                icon: const Icon(Icons.assignment_outlined),
-                label: const Text('Review Weekly Labor'),
-              ),
-            )),
-          ],
-        )),
-        // No large empty balance panel when nothing positive is owed.
-        if ((overall.balanceCents ?? 0) > 0)
-          _panel(Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text('Outstanding balance (all weeks)',
-              style: TextStyle(
-                fontSize: 15, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 9),
-            Row(children: [
-              _financeMetric(outsideLabel,
-                previous == null ? '—' : _money(previous),
-                color: const Color(0xFFCC6222)),
-              const SizedBox(width: 8),
-              _financeMetric('Selected period',
-                current.balanceCents == null
-                  ? '—' : _money(current.balanceCents!),
-                color: const Color(0xFFCC6222)),
-            ]),
-            const Divider(height: 20),
-            const Text('Total amount owed',
-              style: TextStyle(fontSize: 12,
-                fontWeight: FontWeight.w700)),
-            Text(overall.balanceCents == null
-                ? '—' : _money(overall.balanceCents!),
-              style: const TextStyle(
-                fontSize: 25, fontWeight: FontWeight.w800,
-                color: Color(0xFFC76023))),
-          ],
-        )),
-        if (['fixed_weekly', 'flexible_weekly'].contains(widget.employeePayType) ||
-            _currentPayrollWork.every((row) => (row['rate_cents'] as int) <= 0))
-          _flexibleWeeklyPreview(_currentPayrollWork.fold<double>(
-            0, (sum, row) => sum + (row['actual_minutes'] as int) / 60,
-          )),
-        _advancePanel(),
-      ],
+    final person=_employees.where((r)=>r['id']==_employee).firstOrNull;
+    final base=person?['base_enabled']==1;
+    if(base) return ListView(padding:const EdgeInsets.all(12),children:[
+      _flexibleWeeklyPreview(_currentPayrollWork.fold<double>(0,(n,r)=>n+(r['actual_minutes'] as int)/60)),
+      _advancePanel(),
+    ]);
+    return WeeklyLaborReview(
+      key:ValueKey('employee-payroll-${widget.employeeId}'),
+      employeeId:widget.employeeId!,employeeName:_employeeLabel(widget.employeeId),
+      tasks:_work,week:_week,embedded:true,profileLayout:true,
+      paymentHistory:_history,
+      savedRateCents:person?['rate'] as int?,reviewMessage:_carryReview,
+      advanceBalance:()=>_viewRepository.advance(widget.employeeId!),
+      recordPayment:_recordWeekly,onPaymentSaved:_load,
+      onWeekChanged:(week)=>setState(()=>_week=week),
+      saveDraft:(week,selected)=>_taskEditRepository.savePayrollDraft(widget.employeeId!,_date(week),selected),
+      loadDraft:(week)=>_viewRepository.payrollDraft(widget.employeeId!,_date(week)),
+      extra: _advancePanel(),
     );
   }
 
@@ -1741,13 +1593,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final estimated=await payrollLanInput(context,'Mechanic estimated hours','Estimated hours');
     final hours=double.tryParse(estimated??'');
     if(hours==null||!hours.isFinite||hours<0||hours>10000||!mounted)return;
-    final jobs=(await _db.customSelect("SELECT * FROM local_jobs WHERE business_id=? AND status NOT IN ('completed','closed','cancelled','deleted') ORDER BY created_at DESC",
+    final jobs=(await _db.customSelect("SELECT j.*,(SELECT d.document_number FROM local_documents d WHERE d.business_id=j.business_id AND d.job_id=j.id AND d.kind='invoice' ORDER BY d.created_at DESC LIMIT 1) AS invoice_number FROM local_jobs j WHERE j.business_id=? AND j.status NOT IN ('cancelled','deleted') ORDER BY j.created_at DESC",
       variables:[Variable<String>(widget.businessId)]).get()).map((r)=>r.data).toList();
     if(!mounted)return;
-    Future<String?> chooseJob(List<Map<String,dynamic>> rows)=>showDialog<String>(context:context,builder:(c)=>SimpleDialog(
-      title:const Text('Choose an open Job or create a new Job'),children:[
-        for(final j in rows)SimpleDialogOption(onPressed:()=>Navigator.pop(c,j['id']),child:Text('${j['job_number']??'Job'} · ${j['title']??''}')),
-        SimpleDialogOption(onPressed:()=>Navigator.pop(c,'new'),child:const Text('Choose customer / create new Job'))]));
+    Future<String?> chooseJob(List<Map<String,dynamic>> rows)=>showJobTaskSelection(context,rows);
     var job=widget.jobId??await chooseJob(jobs);
     Map<String,dynamic>? customer,vehicle;
     if(job=='new'){
@@ -1986,159 +1835,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     ));
   }
 
-  Future<void> _updateEmployeeGeneralTask(int id, String status) =>
-      _changeGeneralTaskStatus(widget.employeeId!, id, status);
-
-  // Read-only weekly work history: Tasks must not masquerade as the
-  // unpaid-only payment selection panel. This never creates payroll credits.
-  Widget _recordedServiceLabor() {
-    final monday = DateTime(_week.year,_week.month,_week.day)
-        .subtract(Duration(days:_week.weekday-1));
-    final end = monday.add(const Duration(days:5));
-    DateTime? recordedDate(Map<String,dynamic> row) {
-      for (final field in const ['completed_date','invoice_date','job_document_date']) {
-        final value = row[field]?.toString();
-        if(value==null || value.isEmpty)continue;
-        final date=DateTime.tryParse(value);
-        if(date!=null)return date;
-      }
-      final created=row['job_created_at'];
-      if(created is int && created>0) {
-        return DateTime.fromMillisecondsSinceEpoch(
-          created<100000000000 ? created*1000 : created);
-      }
-      return null;
-    }
-    final rows = _work.where((row) {
-      final date = recordedDate(row);
-      return date!=null && !date.isBefore(monday) && date.isBefore(end);
-    }).toList();
-    return ExpansionTile(
-      key:ValueKey('employee-recorded-week-${widget.employeeId}-${monday.toIso8601String()}'),
-      initiallyExpanded:false,
-      title:Text('Recorded labor this week · ${rows.length}',
-        style:const TextStyle(fontWeight:FontWeight.w700)),
-      subtitle:const Text('Assigned, completed and historical work · view only',
-        style:TextStyle(fontSize:12)),
-      children:[
-        ListTile(
-          title:const Text('Preview weekly payroll · TEST ONLY'),
-          subtitle:const Text('Read only · does not record a payment'),
-          trailing:const Icon(Icons.chevron_right),
-          onTap:()=>Navigator.of(context).push<void>(
-            MaterialPageRoute(builder:(_)=>PayrollDryRunPreview(
-              employeeName:_employeeLabel(widget.employeeId),
-              weekStart:monday,
-              rows:List<Map<String,dynamic>>.from(rows),
-            )),
-          ),
-        ),
-        if(rows.isEmpty)const ListTile(
-          dense:true,
-          title:Text('No linked mechanic allocations dated this week.'),
-          subtitle:Text('Invoice labor and prior payments remain in their original records.')),
-        for(final row in rows)
-          ListTile(
-            dense:true,
-            title:Text('${row['job_number']??'Job'} · ${row['description']??'Labor'}',
-              maxLines:2,overflow:TextOverflow.ellipsis),
-            subtitle:Text(row['archived_labor']==1
-                ? 'Historical labor · excluded from new payroll'
-                : row['state']=='Done' ? 'Completed' :
-                    row['state']=='In Progress' ? 'In progress' : 'Assigned'),
-            trailing:Text(
-              '${((row['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(2)} h',
-              style:const TextStyle(fontWeight:FontWeight.w700)),
-          ),
-      ],
-    );
-  }
-
-  Widget _tasksTab() => _PayrollViewport(minHeight:_currentJobsExpanded?680:480,child:Column(children:[
-    Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),
-      child:Row(children:[
-        for(final general in [false,true])
-          Expanded(child:InkWell(
-            onTap:()=>setState(()=>_showGeneralTasks=general),
-            child:Container(
-              padding:const EdgeInsets.symmetric(vertical:9),
-              decoration:BoxDecoration(
-                color:_showGeneralTasks==general
-                  ? const Color(0xFF007E78) : const Color(0xFFF2F6F7),
-                borderRadius:BorderRadius.circular(16)),
-              child:Text(general?'General Tasks':'Service Tasks',
-                textAlign:TextAlign.center,
-                style:TextStyle(fontWeight:FontWeight.w800,
-                  color:_showGeneralTasks==general ? Colors.white :
-                    const Color(0xFF334155)))))),
-      ]),
-    ),
-    if(!_showGeneralTasks)Row(children:[
-      const Expanded(child:Text('Service Tasks',style:TextStyle(fontWeight:FontWeight.w700))),
-      TextButton.icon(onPressed:_newServiceTask,icon:const Icon(Icons.add),label:const Text('New Task'))]),
-    if(!_showGeneralTasks && _work.any((r)=>r['archived_labor']!=1 && r['state']!='Done'))
-      ExpansionTile(key:PageStorageKey('employee-current-jobs-${widget.employeeId}'),
-        initiallyExpanded:_currentJobsExpanded,onExpansionChanged:(v)=>setState(()=>_currentJobsExpanded=v),
-        title:const Text('Current assigned Jobs'),children:[SizedBox(height:160,child:ListView(children:[
-          for(final row in _work.where((r)=>r['archived_labor']!=1 && r['state']!='Done'))Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-            Text('${row['job_number']??'Job'} · ${row['vehicle_label']??''}'),_taskCard(row)])]))]),
-    if(!_showGeneralTasks) _recordedServiceLabor(),
-    if(!_showGeneralTasks)
-      Align(alignment:Alignment.centerLeft,child:TextButton.icon(
-        onPressed:()=>HistoricalExpenseReview.open(context,
-          businessId:widget.businessId,
-          employeeName:_employeeLabel(widget.employeeId),
-          access:_historyUnlocked,
-          canView:()=>mounted && _canView,
-          cache:expenses.LocalFinancialCache(database:_db),
-          exactDate:DateTime(_week.year,_week.month,_week.day)
-              .subtract(Duration(days:_week.weekday-1))
-              .add(const Duration(days:4))),
-        icon:const Icon(Icons.receipt_long_outlined),
-        label:const Text('Review Friday expenses · read only'),
-      )),
-    Expanded(child:_showGeneralTasks
-      ? Builder(builder:(context) {
-        final rows = _generalTasks;
-        return ListView(padding:const EdgeInsets.all(12),children:[
-          Row(children:[
-            Expanded(child:Text('Assigned General Tasks · ${rows.length}',
-              style:const TextStyle(fontWeight:FontWeight.w700))),
-            TextButton.icon(onPressed:_createEmployeeGeneralTask,
-              icon:const Icon(Icons.add),label:const Text('New Task')),
-          ]),
-          if(rows.isEmpty) const ListTile(
-            title:Text('No general tasks assigned')),
-          for(final task in rows)
-            Card(child:ListTile(
-              title:Text(task['description']?.toString()??'',
-                style:const TextStyle(fontWeight:FontWeight.w700)),
-              subtitle: Text('${task['category'] ?? 'General'} · ${switch (task['status']) {
-                'done' => 'Completed',
-                'in_progress' => 'In Progress',
-                _ => 'Planned',
-              }}'),
-              trailing:PopupMenuButton<String>(
-                tooltip:'Update task progress',
-                onSelected:(status)=>_updateEmployeeGeneralTask(
-                  task['id'] as int,status),
-                itemBuilder:(_)=>const [
-                  PopupMenuItem(value:'planned',child:Text('Not Started')),
-                  PopupMenuItem(value:'in_progress',child:Text('In Progress')),
-                  PopupMenuItem(value:'done',child:Text('Done')),
-                ]))),
-        ]);
-      })
-      : WeeklyLaborReview(
-        employeeId: widget.employeeId!,
-        employeeName: _employeeLabel(widget.employeeId),
-        tasks: _work, week: _week, embedded: true,
-        advanceBalance: () => _viewRepository.advance(widget.employeeId!),
-        recordPayment: _recordWeekly,
-        onWeekChanged: (week) => setState(()=>_week = week),
-        onCancel: () => Navigator.of(context).pop(),
-      )),
-  ]));
+  Widget _tasksTab() => EmployeeWorkReview(week:_week,rows:_work,jobs:_assignedJobs,
+    onWeekChanged:(week)=>setState(()=>_week=week),onJob:(id)=>_openRecordedWork(id,invoice:false));
 
   String _employeeLabel(String? employee) {
     final row = _employees.where((row) => row['id'] == employee).firstOrNull;

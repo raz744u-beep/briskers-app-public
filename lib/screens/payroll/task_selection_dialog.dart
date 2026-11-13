@@ -158,3 +158,17 @@ Future<String?> showTaskHours(BuildContext context) async {
     Future<void>.delayed(const Duration(milliseconds: 400), input.dispose);
   }
 }
+
+Future<String?> showJobTaskSelection(BuildContext context,List<Map<String,dynamic>> jobs) async {
+  var query='';
+  return showDialog<String>(context:context,builder:(dialog)=>StatefulBuilder(builder:(context,update){
+    final rows=jobs.where((j)=>['job_number','invoice_number','customer_name','vehicle_label','requested_work','title'].map((k)=>j[k]??'').join(' ').toLowerCase().contains(query.toLowerCase())).toList();
+    return AlertDialog(title:const Text('Choose Job · active or historical'),content:SizedBox(width:520,height:MediaQuery.sizeOf(context).height*.55,child:Column(children:[
+      TextField(decoration:const InputDecoration(labelText:'Search job, invoice, customer or vehicle',prefixIcon:Icon(Icons.search)),onChanged:(v)=>update(()=>query=v)),
+      Expanded(child:ListView(children:[for(final j in rows)ListTile(
+        title:Text('${j['job_number']??'Job'} · ${j['customer_name']??''}',style:const TextStyle(fontWeight:FontWeight.w800)),
+        subtitle:Text('${j['vehicle_label']??''}\nInvoice #${j['invoice_number']??'—'} · ${j['status_name']??j['status']}\n${j['requested_work']??j['title']??''}',maxLines:4,overflow:TextOverflow.ellipsis),
+        onTap:()=>Navigator.pop(dialog,j['id'] as String))])),
+    ])),actions:[TextButton(onPressed:()=>Navigator.pop(dialog),child:const Text('Cancel')),TextButton(onPressed:()=>Navigator.pop(dialog,'new'),child:const Text('Create new Job'))]);
+  }));
+}

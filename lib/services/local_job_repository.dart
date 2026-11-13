@@ -1,3 +1,4 @@
+import 'nov12_job_completion.dart';
 import 'local_document_repository.dart';
 import 'local_document_detail_cache.dart';
 import 'invoice_labor_work_summary.dart';
@@ -31,6 +32,7 @@ class LocalJobRepository {
     : _database = database ?? localDatabase;
 
   final BriskersLocalDatabase _database;
+  Future<void> reconcileNov12OwnerCompletion(String business,{required bool isOwner})=>Nov12JobCompletion(_database).reconcile(business,isOwner:isOwner);
 
   Future<Map<String,Map<String,int>>> allocationHours(String business,List<String> jobs) =>
       JobTaskSummary(_database).hours(business,jobs);

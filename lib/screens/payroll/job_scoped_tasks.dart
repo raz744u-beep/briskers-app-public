@@ -1,3 +1,4 @@
+import '../../core/work_status_colors.dart';
 // ignore_for_file: prefer_interpolation_to_compose_strings
 import 'package:flutter/material.dart';
 
@@ -45,9 +46,9 @@ class JobScopedTasks extends StatefulWidget {
 }
 
 class _JobScopedTasksState extends State<JobScopedTasks> {
-  static const blue = Color(0xFF1479D8);
-  static const orange = Color(0xFFD97608);
-  static const green = Color(0xFF078C49);
+  static const blue = WorkStatusColors.progress;
+  static const orange = WorkStatusColors.open;
+  static const green = WorkStatusColors.done;
   final Set<String> _expanded = <String>{};
   String? _running;
 
@@ -202,18 +203,12 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
 
   Widget _details(Map<String, dynamic> row, bool general,
       List<Map<String, dynamic>> allocations, String status, String key) {
-    final description = (row['description'] ??
-        row['source_description'] ?? 'Task').toString();
     final notes = (row['notes'] ?? row['note'] ?? '').toString().trim();
     final employee = widget.employeeName(row['employee_id']?.toString());
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Divider(height: 12),
-        Text(description),
-        const SizedBox(height: 8),
-        Text('Type: ' + (general ? 'General' : 'Labor')),
-        Text('Status: ' + status),
         if (general) Text('Mechanic: ' + employee),
         if (!general)
           for (final allocation in allocations)

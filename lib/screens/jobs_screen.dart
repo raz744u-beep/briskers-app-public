@@ -406,6 +406,7 @@ class _JobsScreenState extends State<JobsScreen>
       // Job rows contain the vehicle and description together. Give their
       // SQLite read priority over counts/statuses/document search, which
       // previously queued several other queries first on the same database.
+      if(widget.roleCode=='owner')await _localJobs.reconcileNov12OwnerCompletion(businessId,isOwner:true);
       final rows = await _localJobs.listJobs(
         businessId,
         status: status,

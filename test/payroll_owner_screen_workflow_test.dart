@@ -95,7 +95,9 @@ void main() {
           businessId: 'shop', employeeId: 'a', employeeName: 'Alice', employeeRole: 'mechanic',
           database: db, unlockOwner: unlock, ownerConnection: network, initialTab: tab)));
       await tester.pumpWidget(screen());
-      await until(find.widgetWithText(FilledButton, 'Verify Payment'));
+      await until(find.text('Work Review (Read Only)'));
+      await tester.tap(find.text('Payroll'));
+      await tester.pumpAndSettle();
       expect(find.text('Tasks'), findsOneWidget);
       expect(find.text('Payroll'), findsOneWidget);
       expect(find.text('Reports'), findsOneWidget);
@@ -127,14 +129,14 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.widgetWithText(FilledButton, 'Save Repayment'));
         await until(find.text(r'Remaining balance: $0.00'));
-        await tester.tap(find.text('Tasks'));
+        await tester.tap(find.text('Payroll'));
         await tester.pumpAndSettle();
-        await until(find.widgetWithText(FilledButton, 'Verify Payment'));
+        await until(find.widgetWithText(FilledButton, 'Verify Weekly Payment'));
       }
       // The recorded-labor review above WeeklyLaborReview makes the footer
       // scrollable on short phones; bring the existing payment action into
       // view before tapping it.
-      final verify = find.widgetWithText(FilledButton, 'Verify Payment');
+      final verify = find.widgetWithText(FilledButton, 'Verify Weekly Payment');
       await tester.ensureVisible(verify);
       await tester.pumpAndSettle();
       expect(tester.widget<FilledButton>(verify).onPressed, isNotNull);

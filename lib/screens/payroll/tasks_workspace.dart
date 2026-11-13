@@ -1,3 +1,4 @@
+import '../../core/work_status_colors.dart';
 // ignore_for_file: curly_braces_in_flow_control_structures, prefer_interpolation_to_compose_strings
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -435,7 +436,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                     ),
                     child: ExpansionTile(
                       key: ValueKey(task['line_id']),
-                      leading: Icon(task['status']=='done' ? Icons.check_circle : task['status']=='in_progress' ? Icons.play_circle : Icons.schedule, color: task['status']=='done' ? const Color(0xFF087D63) : task['status']=='in_progress' ? const Color(0xFF1976D2) : const Color(0xFFF58A00)),
+                      leading: Icon(task['status']=='done' ? Icons.check_circle : task['status']=='in_progress' ? Icons.play_circle : Icons.schedule, color: task['status']=='done' ? WorkStatusColors.done : task['status']=='in_progress' ? WorkStatusColors.progress : WorkStatusColors.open),
                       title: Text((task['source_description'] ?? task['description'] ?? 'Labor task').toString()),
                       children: [Builder(builder: (_) => widget.serviceTaskCard(task))],
                     ),
@@ -468,7 +469,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
     final progressTasks=jobTasks.isEmpty?tasks:jobTasks;
     final done=progressTasks.where((t)=>t['status']=='done').length;
     final status=done==progressTasks.length?'completed':(done>0 || progressTasks.any((t)=>t['status']=='in_progress'))?'in_progress':'open';
-    final color=status=='open'?const Color(0xFFF58A00):approvedJobListStatusColor({'status':status});
+    final color=status=='open'?WorkStatusColors.open:approvedJobListStatusColor({'status':status});
     final people=<String,int>{};
     final seen=<String>{};
     for(final task in progressTasks) {

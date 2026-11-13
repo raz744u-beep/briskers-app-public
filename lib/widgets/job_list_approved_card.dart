@@ -1,3 +1,4 @@
+import '../core/work_status_colors.dart';
 import 'package:flutter/material.dart';
 import '../core/job_status_style.dart';
 import '../services/job_task_summary.dart';
@@ -5,11 +6,12 @@ import '../services/job_task_summary.dart';
 Color approvedJobListStatusColor(Map<String, dynamic> job) {
   final status = job['status']?.toString().trim().toLowerCase().replaceAll(' ', '_');
   return switch (status) {
-    'open' || 'not_started' => const Color(0xFF0066FF),
-    'in_progress' => const Color(0xFF0066FF),
+    'open' || 'not_started' => WorkStatusColors.open,
+    'in_progress' => WorkStatusColors.progress,
     'awaiting_parts' || 'waiting_parts' => const Color(0xFFF58A00),
     'awaiting_payment' => const Color(0xFF7A16EE),
-    'completed' || 'complete' || 'closed' => const Color(0xFF008F35),
+    'completed' || 'complete' => WorkStatusColors.done,
+    'closed' => WorkStatusColors.closed,
     _ => colorFromHex(job['status_color']?.toString()),
   };
 }
@@ -223,7 +225,7 @@ class JobListApprovedCard extends StatelessWidget {
                     value: fraction,
                     minHeight: 6,
                     borderRadius: BorderRadius.circular(8),
-                    color: fraction == 1 ? const Color(0xFF008F35) : color,
+                    color: fraction == 1 ? WorkStatusColors.done : color,
                     backgroundColor: const Color(0xFFDFE1EC),
                   ),
                 ],

@@ -1,3 +1,6 @@
+import '../../services/local_payroll_repository.dart';
+import '../../services/device_owner_authorization.dart';
+import '../../local/local_database_provider.dart';
 import '../payroll/owner_payroll_screen.dart';
 import '../payroll/payroll_lan_controls.dart';
 import 'package:flutter/material.dart';
@@ -46,48 +49,46 @@ class _EmployeesSettingsScreenState
   }
 
   Future<void> _load() async {
+    final cached=await _offlineEmployees.cachedEmployees(widget.businessId);
+    var rows=cached;
+    var payAuthorized=false;
+    LocalPayrollRepository? ledger;
+    if(widget.isOwner && await DeviceOwnerAuthorization.instance.canViewSavedOwnerPayroll(widget.businessId)) {
+      final grant=await DeviceOwnerAuthorization.instance.authority.authorizeSession(widget.businessId);
+      ledger=LocalPayrollRepository(localDatabase,business:widget.businessId,owner:true,
+        assertOwnerGrant:()=>grant.assertValid(widget.businessId,grant.actorId));
+      rows=await ledger.localCompensation(cached);
+      payAuthorized=true;
+    }
+    if(!mounted)return;
+    setState((){_employees=rows;_cachedEmployeesOnly=!payAuthorized;_error=null;});
+    if(BriskersConnectionModeController.instance.forceOffline)return;
     try {
-      if (BriskersConnectionModeController.instance.forceOffline) {
-        throw StateError('Force Offline is enabled.');
-      }
-      final rows = await _api.employeesSettings(widget.businessId);
-      final annotated = await _nicknameStore.decorate(widget.businessId, rows);
-      if (!mounted) return;
-      setState(() {
-        _employees = annotated;
-        _cachedEmployeesOnly = false;
-        _error = null;
-      });
-    } catch (error) {
-      // Keep known employees visible offline without fabricating pay details.
-      final cached = await _offlineEmployees.cachedEmployees(widget.businessId);
-      if (!mounted) return;
-      setState(() {
-        _employees = cached;
-        _cachedEmployeesOnly = true;
-        _error = cached.isEmpty ? error.toString()
-            : 'Showing locally saved employee names and roles. '
-              'Pay details require an authenticated refresh.';
-      });
+      final remote=await _api.employeesSettings(widget.businessId);
+      final hydrated=ledger==null?remote:await ledger.localCompensation(remote);
+      final annotated=await _nicknameStore.decorate(widget.businessId,hydrated);
+      if(mounted)setState((){_employees=annotated;_cachedEmployeesOnly=false;_error=null;});
+    }catch(error){
+      if(mounted && rows.isEmpty)setState(()=>_error='No employee records are saved on this device.');
     }
   }
 
   String _pay(Map<String, dynamic> employee) {
-    if (_cachedEmployeesOnly) return 'Pay unavailable offline';
+    if (_cachedEmployeesOnly) return 'Owner access required for pay details';
     if (employee['compensation_enabled'] == false) {
       return 'Pay not tracked';
     }
 
     final type = employee['payment_type']?.toString();
-    final raw = type == 'fixed_weekly'
+    final raw = const {'fixed_weekly','flexible_weekly'}.contains(type)
         ? employee['weekly_rate']
         : employee['hourly_rate'];
     final rate = num.tryParse(raw?.toString() ?? '');
-    if (rate == null) return 'Pay not set';
+    if (rate == null) return 'Pay not saved on this device';
 
     final money = NumberFormat.currency(symbol: '\$').format(rate);
-    return type == 'fixed_weekly'
-        ? '$money / week'
+    return const {'fixed_weekly','flexible_weekly'}.contains(type)
+        ? '$money / week${type=='flexible_weekly'?' + additional compensation':''}'
         : '$money / hr';
   }
 

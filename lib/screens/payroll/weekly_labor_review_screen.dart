@@ -21,6 +21,13 @@ class WeeklyLaborReview extends StatefulWidget {
     required this.recordPayment,
     required this.week,
     this.embedded = false,
+    this.profileLayout = false,
+    this.paymentHistory = const [],
+    this.savedRateCents,
+    this.reviewMessage,
+    this.extra,
+    this.saveDraft,
+    this.loadDraft,
     this.onCancel,
     this.onPaymentSaved,
     this.onWeekChanged,
@@ -39,6 +46,13 @@ class WeeklyLaborReview extends StatefulWidget {
   final RecordWeeklyPayroll recordPayment;
   final DateTime week;
   final bool embedded;
+  final bool profileLayout;
+  final List<Map<String,dynamic>> paymentHistory;
+  final int? savedRateCents;
+  final String? reviewMessage;
+  final Widget? extra;
+  final Future<void> Function(DateTime,Map<String,double>)? saveDraft;
+  final Future<Map<String,double>?> Function(DateTime)? loadDraft;
   final VoidCallback? onCancel;
   final Future<void> Function()? onPaymentSaved;
   final ValueChanged<DateTime>? onWeekChanged;
@@ -88,6 +102,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       if (mounted) { setState(() => _showTip = false); }
     });
     _selectUnpaid();
+    unawaited(_restoreDraft());
   }
 
   @override
@@ -101,8 +116,11 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     super.didUpdateWidget(oldWidget);
     if (widget.employeeId != oldWidget.employeeId) {
       _week = widget.week;
-      _selectUnpaid();
+      _selectUnpaid(); unawaited(_restoreDraft());
       return;
+    }
+    if(widget.week!=oldWidget.week) {
+      _week=widget.week; _selectUnpaid(); unawaited(_restoreDraft());
     }
     final available = {
       for (final task in _eligible)
@@ -126,6 +144,9 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       final date = DateTime.tryParse(task['completed_date']?.toString() ?? '');
       // Archived historical labor remains visible elsewhere, but must NEVER
       // become selectable for new payroll without explicit Owner carry-forward.
+      final carry=DateTime.tryParse(task['carry_week']?.toString()??'');
+      if(carry!=null && carry.isAfter(_start(_week)))return false;
+      if(widget.profileLayout && _rate(task)<=0)return false;
       if (task['archived_labor']==1 || task['assignment_conflict']==1 ||
           task['state'] != 'Done' || date == null || !date.isBefore(_end(_week))) {
         return false;
@@ -248,7 +269,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     final laborCents = selected.fold<int>(0, (sum, task) {
       final paid = task['paid_minutes'] as int? ?? 0;
       final minutes = task['pay_minutes'] as int;
-      final rate = widget.settlementRateCents ?? task['rate_cents'] as int? ?? 0;
+      final rate = widget.settlementRateCents ?? task['payment_rate_cents'] as int? ?? task['rate_cents'] as int? ?? 0;
       // Older widget fixtures provide a total but real records carry the rate.
       if (!task.containsKey('rate_cents')) return sum + (task['gross_cents'] as int);
       return sum + (((paid + minutes) * rate + 30) ~/ 60) - ((paid * rate + 30) ~/ 60);
@@ -436,6 +457,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
         final reason = [
           if (carryForward) 'Prior unpaid work carried forward.',
           if (widget.settlementReason.isNotEmpty) widget.settlementReason,
+          if(selected.any((t)=>t['payment_rate_cents']!=null)) 'Use saved local employee compensation for previously unrated unpaid labor.',
           if (note.text.trim().isNotEmpty) note.text.trim(),
         ].join(' ');
         await widget.recordPayment(
@@ -575,8 +597,63 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     );
   }
 
+  Future<void> _restoreDraft() async {
+    if(!widget.profileLayout || widget.loadDraft==null)return;
+    final week=_start(_week);
+    Map<String,double>? draft;
+    try { draft=await widget.loadDraft!(week); } catch(error) {
+      if(mounted)setState(()=>_error='Could not load the saved draft: $error');
+      return;
+    }
+    if(!mounted || _start(_week)!=week || draft==null)return;
+    final available={for(final r in _eligible) _id(r):_available(r)};
+    setState(() { _selected.clear(); for(final entry in draft.entries) {
+      final remaining=available[entry.key]??0;
+      if(remaining>0 && entry.value>0)_selected[entry.key]=entry.value.clamp(0,remaining).toDouble();
+    }});
+  }
+  int _rate(Map<String,dynamic> task)=>widget.settlementRateCents ?? task['payment_rate_cents'] as int? ?? task['rate_cents'] as int? ?? 0;
+  int _amount(Map<String,dynamic> task,double hours) {
+    final paid=task['paid_minutes'] as int? ?? 0, minutes=(hours*60).round(),rate=_rate(task);
+    return ((paid+minutes)*rate+30)~/60-(paid*rate+30)~/60;
+  }
+  Widget _profileBody() {
+    final tasks=_eligible.where((r)=>_available(r)>0 && _rate(r)>0).toList();
+    final start=_start(_week),end=_end(_week);
+    final dated=widget.tasks.where((r){final d=DateTime.tryParse((r['carry_week']??r['completed_date']??r['invoice_date'])?.toString()??'');return d!=null&&!d.isBefore(start)&&d.isBefore(end);}).toList();
+    final review=dated.where((r)=>r['assignment_conflict']==1 || r['archived_labor']==1 || (r['state']=='Done'&&r['paid']!=1&&_rate(r)<=0)).toList();
+    final paid=widget.paymentHistory.where((p)=>p['week']==start.toIso8601String().substring(0,10)).expand((p)=>(p['work'] as List? ?? []).whereType<Map>().map(Map<String,dynamic>.from)).toList();
+    final gross=tasks.fold<int>(widget.weeklyBaseCents+widget.weeklyAdjustmentCents,(n,r)=>n+_amount(r,_selected[_id(r)]??0));
+    final total=tasks.fold<double>(0,(n,r)=>n+_available(r));
+    String money(int n)=>NumberFormat.simpleCurrency(locale:'en_US').format(n/100);
+    Widget metric(String label,String value,Color color)=>Expanded(child:Container(padding:const EdgeInsets.all(10),margin:const EdgeInsets.all(3),decoration:BoxDecoration(color:color,borderRadius:BorderRadius.circular(14)),child:Column(children:[Text(label,textAlign:TextAlign.center),Text(value,textAlign:TextAlign.center,style:const TextStyle(fontSize:17,fontWeight:FontWeight.w800))])));
+    Widget summary(String label,String value)=>Padding(padding:const EdgeInsets.symmetric(vertical:6),child:Row(children:[Expanded(child:Text(label)),Text(value,style:const TextStyle(fontWeight:FontWeight.w800))]));
+    return ListView(key:const Key('employee-payroll-preparation'),padding:const EdgeInsets.all(12),children:[
+      Card(child:_compactWeekSelector()),
+      Row(children:[metric('Unpaid Labor','${total.toStringAsFixed(2)} hrs',const Color(0xFFEAF3FF)),metric('Saved Rate',widget.savedRateCents==null?'Not saved':'${money(widget.savedRateCents!)} / hr',const Color(0xFFEAF8EF)),metric('Selected Gross',money(gross),const Color(0xFFF2ECFF))]),
+      if(_error!=null)Text(_error!,style:const TextStyle(color:Colors.red)),
+      Card(child:Column(children:[ListTile(title:Text('Unpaid Labor (${tasks.length})',style:const TextStyle(fontWeight:FontWeight.w800)),trailing:TextButton(onPressed:tasks.isEmpty?null:_selectAll,child:const Text('Select All'))),
+        if(tasks.isEmpty)const ListTile(title:Text('No verified unpaid labor for this week.')),
+        for(final r in tasks)CheckboxListTile(key:ValueKey('payable-${_id(r)}'),value:_selected.containsKey(_id(r)),onChanged:_saving?null:(v)=>setState((){if(v==true){_selected[_id(r)]=_available(r);}else{_selected.remove(_id(r));}}),
+          title:Text('${r['job_number']??'Job'} · ${r['customer_name']??''}',style:const TextStyle(fontWeight:FontWeight.w800)),
+          subtitle:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text('${r['description']??'Labor'}'),Text(r['carry_week']!=null?'Completed · Warranty rework · Carry-forward':'Completed · Unpaid'),
+            TextButton(onPressed:_saving?null:()=>_editHours(r),child:Text('${(_selected[_id(r)]??_available(r)).toStringAsFixed(2)} h · ${money(_amount(r,_selected[_id(r)]??_available(r)))}'))]),controlAffinity:ListTileControlAffinity.leading),
+      ])),
+      if(review.isNotEmpty || widget.reviewMessage!=null)Card(child:ExpansionTile(title:Text('Needs Review (${review.length})'),children:[
+        if(widget.reviewMessage!=null)ListTile(title:Text(widget.reviewMessage!)),
+        for(final r in review)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:const Text('Pay status or compensation requires review; excluded from payment.'))])),
+      if(paid.isNotEmpty)Card(child:ExpansionTile(title:const Text('Previously Paid Work'),children:[for(final r in paid)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:Text('${((r['actual_minutes'] as int? ?? 0)/60).toStringAsFixed(2)} hrs · Paid · selected week'))])),
+      Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[summary('Total Selected Hours','${_totalHours.toStringAsFixed(2)} hrs'),summary('Gross Pay',money(gross)),summary('Adjustments (+/−)',money(widget.weeklyAdjustmentCents)),
+        const Text('Adjustments and optional advance repayments are confirmed before recording payment.',style:TextStyle(fontSize:12)),summary('Payment before repayment',money(gross))]))),
+      if(widget.extra!=null)widget.extra!,
+      Wrap(spacing:10,runSpacing:8,alignment:WrapAlignment.spaceBetween,children:[OutlinedButton(onPressed:_saving||widget.saveDraft==null?null:()async {await widget.saveDraft!(_start(_week),Map<String,double>.from(_selected));if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Payroll draft saved locally.')));},child:const Text('Save (Draft)')),
+        FilledButton.icon(style:FilledButton.styleFrom(backgroundColor:const Color(0xFF0A8F53)),onPressed:_saving||_future||gross<=0?null:_verifyPayment,icon:const Icon(Icons.check),label:const Text('Verify Weekly Payment'))]),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
+    if(widget.profileLayout)return _profileBody();
     final tasks = _eligible.where((task) => _available(task) > 0.00001).toList();
     final pending = _current
         ? widget.tasks.where((task) => task['state'] != 'Done').toList()

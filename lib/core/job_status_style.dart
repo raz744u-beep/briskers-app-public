@@ -1,3 +1,4 @@
+import 'work_status_colors.dart';
 import 'package:flutter/material.dart';
 
 Color colorFromHex(String? value, {Color fallback = const Color(0xFF546E7A)}) {
@@ -16,9 +17,10 @@ Color colorFromHex(String? value, {Color fallback = const Color(0xFF546E7A)}) {
 Color operationalJobStatusColor(String? status, String? configuredHex) {
   final code = (status ?? '').trim().toLowerCase();
   return switch (code) {
-    'open' => const Color(0xFF2864A5),
-    'in_progress' || 'in progress' => const Color(0xFFB66D13),
-    'complete' || 'completed' => const Color(0xFF26844D),
+    'open' => WorkStatusColors.open,
+    'in_progress' || 'in progress' => WorkStatusColors.progress,
+    'complete' || 'completed' => WorkStatusColors.done,
+    'closed' => WorkStatusColors.closed,
     _ => colorFromHex(configuredHex),
   };
 }

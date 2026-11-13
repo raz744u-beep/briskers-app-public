@@ -66,6 +66,8 @@ class LocalPayrollRepository {
     await LocalMechanicWorkCreditRepository(database: db).prepare();
     await LocalInvoiceTaskStore(db).prepare();
     for (final sql in [
+      '''CREATE TABLE IF NOT EXISTS regular_payroll_carry_weeks_v1 (business_id TEXT NOT NULL,allocation_id TEXT NOT NULL,week TEXT NOT NULL,reason TEXT NOT NULL,PRIMARY KEY(business_id,allocation_id))''',
+      '''CREATE TABLE IF NOT EXISTS regular_payroll_drafts_v1 (business_id TEXT NOT NULL,employee_id TEXT NOT NULL,week TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(business_id,employee_id,week))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_progress_claims (business_id TEXT NOT NULL,employee_id TEXT NOT NULL,event_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(business_id,employee_id,event_id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_payment_authority (business_id TEXT PRIMARY KEY, device_id TEXT NOT NULL)''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_weekly_defaults (business_id TEXT NOT NULL, employee_id TEXT NOT NULL, base_cents INTEGER NOT NULL, hourly_cents INTEGER NOT NULL, adjustment_cents INTEGER NOT NULL, add_labor INTEGER NOT NULL, PRIMARY KEY(business_id,employee_id))''',
@@ -263,6 +265,104 @@ class LocalPayrollRepository {
     _authorize();
   }
 
+  /// Hydrate only saved pay data, plus the Owner's explicit Nov 12 missing-rate
+  /// correction for uniquely identified Chris/Kam. Never replace a saved rate.
+  Future<List<Map<String,dynamic>>> localCompensation(List<Map<String,dynamic>> roster) async {
+    _authorize(); await prepare();
+    final saved=await employees();
+    final byId=<String,Map<String,dynamic>>{
+      for(final r in roster) if(r['id'] is String) r['id'] as String: {...r},
+      for(final r in saved) r['id'] as String: {...?roster.where((x)=>x['id']==r['id']).firstOrNull,...r},
+    };
+    await db.transaction(() async {
+      for(final entry in byId.entries) {
+        final r=entry.value;
+        final existing=saved.where((x)=>x['id']==entry.key).firstOrNull;
+        final name=(r['name']??'').toString().trim();
+        final normalized=name.toLowerCase();
+        final known=const {'chris rideaux':4000,'chris':4000,'kamerron smith':3500,'kam':3500};
+        final approved=known[normalized];
+        final unique=byId.values.where((x)=>(x['name']??'').toString().trim().toLowerCase()==normalized).length==1;
+        final raw=num.tryParse(r['hourly_rate']?.toString()??'');
+        final remoteRate=raw!=null && raw.isFinite && raw>0 ? (raw*100).round():null;
+        final type=r['payment_type']?.toString();
+        final base=existing?['base_enabled']==1 || const {'fixed_weekly','flexible_weekly'}.contains(type);
+        var rate=existing?['rate'] as int?;
+        if((rate==null || rate==0) && !base && r['compensation_enabled']!=false) {
+          final recovered=remoteRate ?? (unique?approved:null);
+          if(recovered!=null && recovered>0 && name.isNotEmpty) {
+            await saveEmployeeCompensation(employee:entry.key,name:name,rate:recovered,weeklyBase:false);
+            await db.customStatement('INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) VALUES(?,?,?,?)',
+              [business,entry.key,'local_saved_compensation_hydrated',jsonEncode({'rate':recovered,'source':remoteRate==null?'owner_2026_11_12':'saved_employee_settings'})]);
+            rate=recovered;
+          }
+        }
+        final defaults=await weeklyDefaults(entry.key);
+        r['rate']=rate;
+        r['hourly_rate']=rate==null?null:rate/100;
+        r['base_enabled']=base?1:0;
+        r['payment_type']=base ? (type=='fixed_weekly' || defaults?['add_labor']==0?'fixed_weekly':'flexible_weekly') : (rate==null?type:'hourly');
+        if(defaults!=null) r['weekly_rate']=(defaults['base_cents'] as int)/100;
+        r['pay_saved_locally']=existing!=null || rate!=null || defaults!=null;
+      }
+      _authorize();
+    });
+    return byId.values.toList();
+  }
+
+  /// Apply only the exact task the Owner identified. Match local stable IDs,
+  /// reject ambiguous/paid evidence, and retain the original task and invoice.
+  Future<String?> applyNov12OilSeparatorCarry() async {
+    _authorize(); await prepare();
+    try { return await db.transaction(() async {
+      final matches=(await work()).where((r)=>r['job_number']=='J-40' &&
+        (r['description']??'').toString().trim().toLowerCase()=='oil separator' &&
+        const {'chris','chris rideaux'}.contains((r['employee_name']??'').toString().trim().toLowerCase())).toList();
+      if(matches.isEmpty)return null;
+      if(matches.length!=1)return 'Oil Separator needs review: more than one matching allocation. No records changed.';
+      final row=matches.single, id=row['id'] as String, employee=row['employee_id'] as String;
+      final invoices=await _read("SELECT id FROM local_documents WHERE business_id=? AND job_id=? AND kind='invoice' AND document_number='6359'",[business,row['job_id'] as String]);
+      if(invoices.length!=1)return 'Oil Separator needs review: saved Gloria invoice identity is unavailable.';
+      final existing=await _read('SELECT week FROM regular_payroll_carry_weeks_v1 WHERE business_id=? AND allocation_id=?',[business,id]);
+      if(existing.isNotEmpty)return null;
+      final covered=await _read('SELECT credit_id FROM regular_payroll_work_coverage WHERE business_id=? AND credit_id=?',[business,id]);
+      final minutes=row['estimated_minutes'] as int? ?? 0;
+      final actual=row['actual_minutes'] as int? ?? 0;
+      final rate=(await employees()).where((e)=>e['id']==employee).firstOrNull?['rate'];
+      if(covered.isNotEmpty || row['owner_prior_paid']==1 || row['paid']==1 || row['paid_minutes']!=0 ||
+          row['assignment_conflict']==1 || row['recordkeeping_only']==true || minutes!=600 ||
+          (actual!=0 && actual!=600) || rate!=4000) {
+        return 'Oil Separator needs review: hours, saved rate or paid coverage differ. No records changed.';
+      }
+      await db.customStatement('INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) VALUES(?,?,?,?)',
+        [business,id,'owner_reviewed_unpaid_carry',jsonEncode({'employee':employee,'week':'2026-11-09','minutes':600,'rate':4000,'reason':'Owner instruction November 12: existing Oil Separator warranty rework, completed and unpaid. Nonbillable.'})]);
+      // Preserve a completed task's original completion date; establish one
+      // only when the saved task had not recorded its completed work yet.
+      if(row['credit_completed']!=1 || actual!=600) {
+        await _updateWork(id,'Done',600,'2026-11-12',expectedRevision:row['version'] as int,authorize:_authorize);
+      }
+      await db.customStatement('INSERT INTO regular_payroll_carry_weeks_v1 VALUES(?,?,?,?)',
+        [business,id,'2026-11-09','Warranty rework · Owner-authorized unpaid carry-forward']);
+      _authorize(); return null;
+    }); } on StateError catch(error) {
+      _authorize(); return 'Oil Separator needs review; saved records were preserved: $error';
+    }
+  }
+
+  Future<void> savePayrollDraft(String employee,String week,Map<String,double> selected) async {
+    _authorize(); await prepare(); _date(week);
+    if(selected.values.any((h)=>!h.isFinite||h<=0))throw ArgumentError('Invalid payable hours');
+    await db.customStatement('INSERT INTO regular_payroll_drafts_v1 VALUES(?,?,?,?) ON CONFLICT(business_id,employee_id,week) DO UPDATE SET payload=excluded.payload',
+      [business,employee,week,jsonEncode(selected)]);
+    _authorize();
+  }
+  Future<Map<String,double>?> payrollDraft(String employee,String week) async {
+    _authorize(); await prepare();
+    final rows=await _read('SELECT payload FROM regular_payroll_drafts_v1 WHERE business_id=? AND employee_id=? AND week=?',[business,employee,week]);
+    if(rows.isEmpty)return null;
+    return (jsonDecode(rows.single['payload'] as String) as Map).map((k,v)=>MapEntry(k as String,(v as num).toDouble()));
+  }
+
   Future<void> saveEmployeeCompensation({
     required String employee, required String name, required int rate, required bool weeklyBase,
   }) async {
@@ -364,7 +464,7 @@ class LocalPayrollRepository {
       }
       await db.customStatement(
         'INSERT INTO regular_payroll_employees VALUES(?,?,?,?,0) '
-        'ON CONFLICT(business_id,id) DO UPDATE SET name=excluded.name,rate=excluded.rate',
+        'ON CONFLICT(business_id,id) DO UPDATE SET name=excluded.name,rate=CASE WHEN regular_payroll_employees.rate=0 THEN excluded.rate ELSE regular_payroll_employees.rate END',
         [business, employee, name, rate],
       );
       await db.customStatement('INSERT OR IGNORE INTO regular_payroll_advances VALUES(?,?,0)',
@@ -829,7 +929,7 @@ class LocalPayrollRepository {
       );
       await db.customStatement(
         'INSERT INTO regular_payroll_employees VALUES(?,?,?,?,0) '
-        'ON CONFLICT(business_id,id) DO UPDATE SET name=excluded.name,rate=excluded.rate',
+        'ON CONFLICT(business_id,id) DO UPDATE SET name=excluded.name,rate=CASE WHEN regular_payroll_employees.rate=0 THEN excluded.rate ELSE regular_payroll_employees.rate END',
         [business, employeeId, employeeName, rateCents],
       );
       await db.customStatement(
@@ -1368,13 +1468,14 @@ class LocalPayrollRepository {
       "CASE WHEN s.source_kind='invoice' AND (date(d.document_date) IS NULL OR date(d.document_date)!=d.document_date OR d.document_date < '${LocalInvoiceTaskStore.payrollCutover}') AND NOT EXISTS "
       "(SELECT 1 FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id "
       "AND a.event='owner_reviewed_unpaid_carry') THEN 1 ELSE 0 END AS archived_labor,"
-      "p.state,p.completed_date,c.revision AS version,t.description,t.job_id,"
+      "cw.week AS carry_week,cw.reason AS carry_reason,e.rate AS saved_rate,e.base_enabled,p.state,p.completed_date,c.revision AS version,t.description,t.job_id,"
       "j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,"
       "(SELECT MIN(document_date) FROM local_documents jd WHERE jd.business_id=t.business_id AND jd.job_id=t.job_id) AS job_document_date,"
       "d.document_number AS invoice_number,d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,c.completed AS credit_completed,"
       "s.source_kind,CASE WHEN m.active=0 THEN 1 ELSE 0 END AS assignment_conflict,CASE WHEN m.active=0 OR d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,s.invoice_id,s.line_id AS source_line_id,"
       "COALESCE(est.minutes,0) AS estimated_minutes,"
       "c.actual_minutes,c.rate_cents,COALESCE(at.minutes,c.actual_minutes) AS recorded_actual_minutes,"
+      "(SELECT x.snapshot FROM regular_payroll_work_coverage x WHERE x.business_id=c.business_id AND x.credit_id=c.allocation_id ORDER BY x.operation_id LIMIT 1) AS coverage_snapshot,"
       "COALESCE((SELECT SUM(x.minutes) FROM regular_payroll_work_coverage x "
       "WHERE x.business_id=c.business_id AND x.credit_id=c.allocation_id),"
       "CASE WHEN c.paid_operation_id IS NOT NULL THEN c.actual_minutes ELSE 0 END) AS paid_minutes,"
@@ -1388,6 +1489,7 @@ class LocalPayrollRepository {
       "LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id "
       "LEFT JOIN regular_payroll_actual_time at ON at.business_id=p.business_id AND at.credit_id=p.id "
       "LEFT JOIN regular_payroll_owner_prior_paid_v1 h ON h.business_id=p.business_id AND h.allocation_id=p.id "
+      "LEFT JOIN regular_payroll_carry_weeks_v1 cw ON cw.business_id=p.business_id AND cw.allocation_id=p.id "
       "LEFT JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id "
       "LEFT JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id "
       "LEFT JOIN local_documents d ON d.business_id=s.business_id AND d.id=s.invoice_id "
@@ -1406,10 +1508,13 @@ class LocalPayrollRepository {
       final ownerPriorPaid = row['owner_prior_paid'] == 1;
       final paid = ownerPriorPaid ? total : row['paid_minutes'] as int;
       final rate = row['rate_cents'] as int;
+      final coverage=row['coverage_snapshot'] is String ? jsonDecode(row['coverage_snapshot'] as String) as Map : null;
+      final paymentRate=rate==0 ? (paid>0 ? (coverage?['payment_rate_cents'] as int? ?? 0) : (row['saved_rate'] as int? ?? 0)) : rate;
       if (paid < 0 || paid > total) throw StateError('Conflicting payroll coverage.');
       final remaining = total - paid;
       return {
         ...row,
+        if(rate==0 && paymentRate>0) 'payment_rate_cents':paymentRate,
         if(verifiedPaid.contains(row['id']) || row['archived_labor']==1) 'state':'Done',
         if(row['archived_labor']==1 && notes[row['id']]!=null) ...{
           'employee_id':notes[row['id']]!['employee_id'],
@@ -1421,7 +1526,7 @@ class LocalPayrollRepository {
         'paid_minutes': paid,
         'paid_cents': ownerPriorPaid ? ((total * rate + 30) ~/ 60) : row['paid_cents'],
         'remaining_minutes': remaining,
-        'remaining_cents': ((total * rate + 30) ~/ 60) - ((paid * rate + 30) ~/ 60),
+        'remaining_cents': ((total * paymentRate + 30) ~/ 60) - ((paid * paymentRate + 30) ~/ 60),
         'gross_cents': (total * rate + 30) ~/ 60,
         'paid': total > 0 && remaining == 0 ? 1 : 0,
         'pay_status': ownerPriorPaid ? 'Already Paid' :
@@ -2038,6 +2143,7 @@ class LocalPayrollRepository {
             w['actual_minutes'] != p['minutes'] ||
             w['rate_cents'] != p['rate'])
           { throw StateError('Work changed or already paid'); }
+        if(w['carry_week']!=null && week.compareTo(w['carry_week'] as String)<0) throw StateError('This carry-forward starts in its authorized payroll week.');
         final completed = DateTime.parse(w['completed_date'] as String);
         final start = DateTime.parse(week);
         if ((completed.isBefore(start) ||

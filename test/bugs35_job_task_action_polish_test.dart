@@ -7,9 +7,9 @@ void main() {
     final source = await File('lib/screens/payroll/job_scoped_tasks.dart')
         .readAsString();
 
-    expect(source, contains("static const orange = Color(0xFFD97608)"));
-    expect(source, contains("static const blue = Color(0xFF1479D8)"));
-    expect(source, contains("static const green = Color(0xFF078C49)"));
+    expect(source, contains("static const orange = WorkStatusColors.open"));
+    expect(source, contains("static const blue = WorkStatusColors.progress"));
+    expect(source, contains("static const green = WorkStatusColors.done"));
     expect(source, contains('OutlinedButton.styleFrom(foregroundColor: orange'));
     expect(source, contains('FilledButton.styleFrom(backgroundColor: blue'));
     expect(source, contains('decoration: BoxDecoration(color: green'));
