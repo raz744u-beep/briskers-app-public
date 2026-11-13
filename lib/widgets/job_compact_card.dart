@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/job_display_description.dart';
 import '../core/briskers_i18n.dart';
 import '../core/job_status_style.dart';
 import '../services/job_task_summary.dart';
@@ -49,13 +50,7 @@ class JobCompactCard extends StatelessWidget {
             ?.toString()
             .trim() ??
         '';
-    final requested = job['requested_work']?.toString().trim() ?? '';
-    final title = job['title']?.toString().trim() ?? '';
-    final description = title.isNotEmpty ? title : requested;
-    final generic = description.isEmpty || RegExp(r'^(invoice|job)(\s*#?\s*[\w-]+)?$',caseSensitive:false).hasMatch(description);
-    final summary = job['work_summary']?.toString().trim() ?? '';
-    final displayDescription = generic
-        ? (summary.isNotEmpty ? summary : requested) : description;
+    final displayDescription = jobDisplayDescription(job);
     final invoiceNumber = job['invoice_number']?.toString().trim() ?? '';
     final vehicle = job['vehicle']?.toString().trim() ?? '';
     final employee = (job['assigned_employee'] ?? job['mechanic'])

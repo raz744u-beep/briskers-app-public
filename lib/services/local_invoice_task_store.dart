@@ -6,6 +6,7 @@ import '../local/briskers_local_database.dart';
 import 'invoice_labor_work_summary.dart';
 import 'local_task_assignment_store.dart';
 import 'local_task_schedule.dart';
+import 'local_job_work_date.dart';
 
 /// Derived task identities follow saved invoice identities. This store never
 /// changes an invoice, a document number, or a mechanic's earned work.
@@ -71,6 +72,7 @@ class LocalInvoiceTaskStore {
     // Task visibility and assignment are independent of payroll eligibility.
     // Pre-cutover sources remain archived in the payroll ledger.
     await db.transaction(() async {
+      final taskDate = await LocalJobWorkDate(db).read(business, job) ?? LocalJobWorkDate.today();
       await db.customStatement(
         'INSERT INTO regular_payroll_jobs VALUES(?,?,?) '
         'ON CONFLICT(business_id,id) DO UPDATE SET label=excluded.label',
@@ -111,7 +113,7 @@ class LocalInvoiceTaskStore {
           [business, task, job, jsonEncode([document, id]), description,
             hours == null ? 0 : (hours * 100).round()],
         );
-        if(newTask) await LocalTaskSchedule(db).created(business,task,DateTime.now());
+        if(newTask) await LocalTaskSchedule(db).created(business,task,taskDate);
         await db.customStatement(
           "INSERT INTO regular_payroll_task_sources VALUES(?,?,?,?,'invoice',1) "
           'ON CONFLICT(business_id,task_id) DO UPDATE SET active=1',

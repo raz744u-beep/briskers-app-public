@@ -1,5 +1,6 @@
 import 'nov12_job_completion.dart';
 import 'local_document_repository.dart';
+import 'local_document_sql_store.dart';
 import 'local_document_detail_cache.dart';
 import 'invoice_labor_work_summary.dart';
 import 'dart:convert';
@@ -244,6 +245,19 @@ class LocalJobRepository {
          OR lower(COALESCE(j.vehicle_vin, '')) LIKE ?
          OR lower(COALESCE(j.vehicle_plate, '')) LIKE ?
          OR lower(j.title) LIKE ?
+         OR lower(COALESCE(j.requested_work, '')) LIKE ?
+         OR EXISTS (
+           SELECT 1 FROM local_documents d
+           JOIN local_document_details detail ON detail.cache_key =
+             'briskers_document_detail_' || j.business_id || '_' || d.id
+           JOIN json_each(CASE WHEN json_valid(detail.payload_json)
+             THEN COALESCE(json_extract(detail.payload_json, '\$.lines'),
+               json_extract(detail.payload_json, '\$.items'), '[]') ELSE '[]' END) line
+           WHERE d.business_id=j.business_id AND d.job_id=j.id AND d.kind='invoice'
+             AND lower(d.status) NOT IN ('void','voided','cancelled','canceled','deleted')
+             AND lower(COALESCE(json_extract(CASE WHEN line.type='object'
+               THEN line.value ELSE '{}' END, '\$.description'),
+               json_extract(CASE WHEN line.type='object' THEN line.value ELSE '{}' END, '\$.name'), '')) LIKE ?)
          OR EXISTS (
            SELECT 1 FROM local_customers c
            WHERE c.business_id = j.business_id AND c.id = j.customer_id
@@ -253,7 +267,7 @@ class LocalJobRepository {
                OR lower(COALESCE(c.list_email, '')) LIKE ?
                OR lower(COALESCE(c.list_phone, '')) LIKE ?)))
       """);
-      for (var i = 0; i < 11; i++) {
+      for (var i = 0; i < 13; i++) {
         variables.add(Variable<String>('%$query%'));
       }
     }
@@ -273,6 +287,7 @@ class LocalJobRepository {
     // Retirements are checked each time; the DDL indexes are installed once.
     await LocalJobRetirement.ensureSchema(_database);
     await _ensureListReadIndexes();
+    await LocalDocumentSqlStore.ensure(_database);
     final filters = _filters(
       businessId,
       status: status,
@@ -555,6 +570,7 @@ class LocalJobRepository {
     JobListView view = JobListView.all,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    await LocalDocumentSqlStore.ensure(_database);
     final filters = _filters(
       businessId,
       status: status,

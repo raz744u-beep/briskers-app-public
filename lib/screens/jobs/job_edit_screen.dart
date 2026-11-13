@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../services/local_job_work_date.dart';
+import '../../local/local_database_provider.dart';
+import '../../widgets/job_date_field.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_customer_repository.dart';
@@ -37,6 +40,7 @@ class _JobEditScreenState extends State<JobEditScreen> {
 
   bool _loading = true;
   bool _loadingVehicles = false;
+  DateTime _jobDate = LocalJobWorkDate.today();
   bool _saving = false;
   String? _error;
 
@@ -70,6 +74,8 @@ class _JobEditScreenState extends State<JobEditScreen> {
         BriskersConnectionModeController.instance.forceOffline;
 
     try {
+      final savedDate = await LocalJobWorkDate(localDatabase).read(widget.businessId, widget.job['id'].toString());
+      if (savedDate != null) _jobDate = savedDate;
       List<Map<String, dynamic>> customers;
       List<Map<String, dynamic>> vehicles;
 
@@ -192,10 +198,6 @@ class _JobEditScreenState extends State<JobEditScreen> {
       setState(() => _error = 'Select a customer.');
       return;
     }
-    if (title.isEmpty) {
-      setState(() => _error = 'Job title is required.');
-      return;
-    }
     if (plannedHours == null || plannedHours < 0) {
       setState(() => _error = 'Enter a valid planned time.');
       return;
@@ -214,6 +216,7 @@ class _JobEditScreenState extends State<JobEditScreen> {
         vehicleId: _vehicleId,
         replaceVehicle: true,
         title: title,
+        jobDate: _jobDate,
         requestedWork: _requestedWork.text.trim().isEmpty
             ? null
             : _requestedWork.text.trim(),
@@ -330,6 +333,8 @@ class _JobEditScreenState extends State<JobEditScreen> {
                         ? null
                         : (value) => setState(() => _vehicleId = value),
                   ),
+                const SizedBox(height: 12),
+                JobDateField(value: _jobDate, onChanged: _saving ? null : (date) => setState(() => _jobDate = date)),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _title,
