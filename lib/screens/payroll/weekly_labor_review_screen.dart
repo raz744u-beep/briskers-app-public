@@ -603,12 +603,12 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   Future<void> _restoreDraft() async {
     if(!widget.profileLayout || widget.loadDraft==null)return;
     final week=_start(_week);
-    final Map<String,dynamic>? savedDraft;
-    try { savedDraft=await widget.loadDraft!(week); } catch(error) {
+    final Map<String,dynamic> savedDraft;
+    try { savedDraft=await widget.loadDraft!(week) ?? <String,dynamic>{}; } catch(error) {
       if(mounted)setState(()=>_error='Could not load the saved draft: $error');
       return;
     }
-    if(!mounted || _start(_week)!=week || savedDraft==null)return;
+    if(!mounted || _start(_week)!=week || savedDraft.isEmpty)return;
     final available={for(final r in _eligible) _id(r):_available(r)};
     setState(() { _selected.clear(); _preparedAdjustment=savedDraft['adjustment'] as int? ?? 0;_preparedRepayment=savedDraft['repayment'] as int? ?? 0;_preparedReason=savedDraft['reason'] as String? ?? '';
       for(final entry in (savedDraft['hours'] as Map).entries) {

@@ -25,7 +25,8 @@ void main() {
     expect(action, contains('_taskEditRepository.setShopTaskStatus'));
     expect(action, isNot(contains('authorizeLocal')));
     expect(action, isNot(contains('_run(')));
-    expect(source, contains('_changeGeneralTaskStatus(widget.employeeId!, id, status)'));
+    expect(source, contains('Widget _tasksTab() => EmployeeWorkReview('));
+    expect(source, isNot(contains('_updateEmployeeGeneralTask(')));
     expect(source, contains("_changeGeneralTaskStatus(row['employee_id'] as String, id, status)"));
     expect(source, contains("if (!_canView) throw StateError('Sign in as Owner to edit tasks.')"));
   });
@@ -86,7 +87,7 @@ void main() {
 
   test('New General Task saves under Owner identity, not payment grant', () {
     final start = source.indexOf('Future<void> _createEmployeeGeneralTask()');
-    final end = source.indexOf('Future<void> _updateEmployeeGeneralTask(', start);
+    final end = source.indexOf('Future<void> _editJobGeneralTask(', start);
     expect(start, greaterThanOrEqualTo(0));
     expect(end, greaterThan(start));
     final action = source.substring(start, end);

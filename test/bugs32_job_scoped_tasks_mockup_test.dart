@@ -101,8 +101,9 @@ void main() {
 
     await tester.tap(find.text('Replace front struts'));
     await tester.pumpAndSettle();
-    expect(find.text('Type: Labor'), findsOneWidget);
-    expect(find.text('Status: In Progress'), findsOneWidget);
+    expect(find.text('Type: Labor'), findsNothing);
+    expect(find.text('Status: In Progress'), findsNothing);
+    expect(find.text('Replace front struts'), findsOneWidget);
     expect(find.textContaining('3.6 hrs'), findsWidgets);
     expect(tester.takeException(), isNull,
       reason: 'Expanded task details must fit a 390px phone.');

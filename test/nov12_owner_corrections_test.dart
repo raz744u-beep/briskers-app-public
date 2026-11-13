@@ -7,6 +7,7 @@ import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_payroll_repository.dart';
 import 'package:briskers_app/services/nov12_job_completion.dart';
+import 'package:briskers_app/services/payroll_owner_ledger.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -111,6 +112,15 @@ void main() {
       expect(work['state'], 'Done');
       expect(work['carry_week'], '2026-11-09');
       expect(work['payment_rate_cents'], 4000);
+      final replica=BriskersLocalDatabase(NativeDatabase.memory());
+      try {
+        await PayrollOwnerLedger(replica,'shop').mergeSnapshot(await PayrollOwnerLedger(db,'shop').export(),canonical:true);
+        final restored=LocalPayrollRepository(replica,business:'shop',owner:true);
+        expect((await restored.work()).singleWhere((r)=>r['id']==stableId)['carry_week'],'2026-11-09');
+        expect(await restored.applyNov12OilSeparatorCarry(),isNull);
+        expect(await replica.customSelect("SELECT * FROM regular_payroll_audit WHERE event='owner_reviewed_unpaid_carry'").get(),hasLength(1));
+      } finally {await replica.close();}
+
       final original = (await repo.work()).singleWhere(
         (r) => r['id'] == originalId,
       );
@@ -119,7 +129,7 @@ void main() {
       expect(original['carry_week'], isNull);
       await repo.savePayrollDraft('chris', '2026-11-09', {
         stableId as String: 10,
-      });
+      },adjustment:2000,repayment:5000,reason:'Owner bonus and repayment draft');
       await db.close();
       db = BriskersLocalDatabase(
         NativeDatabase(File('${folder.path}/shop.sqlite')),
@@ -127,6 +137,8 @@ void main() {
       repository();
       expect(await repo.applyNov12OilSeparatorCarry(), isNull);
       expect(await repo.payrollDraft('chris', '2026-11-09'), {stableId: 10.0});
+      final draft=await repo.payrollDraftDetails('chris','2026-11-09');
+      expect(draft!['adjustment'],2000);expect(draft['repayment'],5000);expect(draft['reason'],'Owner bonus and repayment draft');
       work = (await repo.work()).singleWhere((r) => r['id'] == stableId);
       Future<bool> pay(String operation, {String week = '2026-11-09'}) =>
           repo.verify(
