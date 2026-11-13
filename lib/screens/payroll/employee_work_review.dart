@@ -108,6 +108,7 @@ class EmployeeWorkReview extends StatelessWidget {
         ),
         Card(
           child: ExpansionTile(
+            key: const PageStorageKey('work-review-assigned-jobs'),
             initiallyExpanded: true,
             title: Text(
               'Currently Assigned Jobs (${jobs.length})',

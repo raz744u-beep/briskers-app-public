@@ -665,10 +665,10 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
           subtitle:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text('${r['description']??'Labor'}'),Text(r['carry_week']!=null?'Completed · Warranty rework · Carry-forward':'Completed · Unpaid'),
             TextButton(onPressed:_saving?null:()=>_editHours(r),child:Text('${(_selected[_id(r)]??_available(r)).toStringAsFixed(2)} h · ${money(_amount(r,_selected[_id(r)]??_available(r)))}'))]),controlAffinity:ListTileControlAffinity.leading),
       ])),
-      if(review.isNotEmpty || widget.reviewMessage!=null)Card(child:ExpansionTile(title:Text('Needs Review (${review.length})'),children:[
+      if(review.isNotEmpty || widget.reviewMessage!=null)Card(child:ExpansionTile(key:PageStorageKey('payroll-review-${widget.employeeId}-${_week.toIso8601String()}'),title:Text('Needs Review (${review.length})'),children:[
         if(widget.reviewMessage!=null)ListTile(title:Text(widget.reviewMessage!)),
         for(final r in review)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:const Text('Pay status or compensation requires review; excluded from payment.'))])),
-      if(paid.isNotEmpty)Card(child:ExpansionTile(title:const Text('Previously Paid Work'),children:[for(final r in paid)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:Text('${((r['actual_minutes'] as int? ?? 0)/60).toStringAsFixed(2)} hrs · Paid · selected week'))])),
+      if(paid.isNotEmpty)Card(child:ExpansionTile(key:PageStorageKey('payroll-paid-${widget.employeeId}-${_week.toIso8601String()}'),title:const Text('Previously Paid Work'),children:[for(final r in paid)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:Text('${((r['actual_minutes'] as int? ?? 0)/60).toStringAsFixed(2)} hrs · Paid · selected week'))])),
       Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[summary('Total Selected Hours','${_totalHours.toStringAsFixed(2)} hrs'),summary('Labor Pay',money(labor)),summary('Adjustments (+/−)',money(adjustment)),summary('Gross Pay',money(gross)),summary('Advance repayment',money(_preparedRepayment)),summary('Payment Total',money(net)),
         TextButton(onPressed:_saving?null:()=>_editPreparation(labor+widget.weeklyAdjustmentCents),child:const Text('Adjustments & repayment'))]))),
       if(widget.extra!=null)widget.extra!,
