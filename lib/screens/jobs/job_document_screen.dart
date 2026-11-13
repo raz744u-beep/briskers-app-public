@@ -482,7 +482,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         findingsProjected, queuedReceipts);
     final projected = await LocalInvoiceClosureStore(localDatabase).project(widget.businessId, OfflineInvoicePaymentLedger.projectPendingEdits(
         withLocalReceipts, queuedEdits));
-    projected['_finalization_state'] = await OfflineInvoiceFinalization().stateForDetail(widget.businessId,widget.documentId,projected);
     final jobId = projected['job_id']?.toString().trim() ?? '';
     final jobNumber = projected['job_number']?.toString().trim() ?? '';
     if (jobId.isNotEmpty &&
@@ -514,7 +513,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         // Unavailable offline history stays blank; never invent mileage.
       }
     }
-    return _projectSavedInvoiceIdentity(withMileage);
+    final result = await _projectSavedInvoiceIdentity(withMileage);
+    // Resolve the durable operation after every local overlay. It is not a
+    // cached/server payment field and must not be replaced by a stale snapshot.
+    result['_finalization_state'] = await OfflineInvoiceFinalization()
+        .stateForDetail(widget.businessId, widget.documentId, result);
+    return result;
   }
 
   /// Restore missing invoice contact/VIN/plate presentation from the exact
@@ -3352,8 +3356,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     ));
   }
 
+  bool _startingFinalization = false;
   Future<void> _finalizeEnteredPayments() async {
-    if (!widget.isOwner) return;
+    if (!widget.isOwner || _startingFinalization) return;
+    setState(() => _startingFinalization = true);
+    try {
     await _collapseWorkspaceHeader();
     if (_estimate || _busy || _number(_detail?['pending_payment']) <= 0.005) {
       return;
@@ -3396,6 +3403,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         if (mounted) await _load(fastAfterMutation: true);
       }
     }());
+    } finally { if (mounted) setState(() => _startingFinalization = false); }
   }
 
   Future<void> _enterWarrantyPayment() async {
@@ -6385,7 +6393,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                       value: _money(finalizedPaid),
                     ),
                     _AmountRow(
-                      label: 'Entered (not finalized)',
+                      label: _detail?['_finalization_state'] == null
+                          ? 'Awaiting finalization' : 'Saved for finalization',
                       value: _money(pendingPaid),
                     ),
                   ],
@@ -6632,8 +6641,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      '${_money(pendingPaid)} has been entered but is not '
-                      'yet finalized as a received payment.',
+                      _detail?['_finalization_state'] == null
+                          ? '${_money(pendingPaid)} recorded. Finalization has not been requested.'
+                          : '${_money(pendingPaid)} recorded. The saved finalization request is retained; do not enter these payments again.',
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -6642,7 +6652,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     if (widget.isOwner) ...[
                     const SizedBox(height: 10),
                     FilledButton.icon(
-                      onPressed: _busy || _detail?['_local_pending_tax'] == true || _detail?['_finalization_state'] != null
+                      onPressed: _busy || _startingFinalization || _detail?['_local_pending_tax'] == true || _detail?['_finalization_state'] != null
                           ? null : _finalizeEnteredPayments,
                       icon: const Icon(Icons.check_circle_outline),
                       label: Text(switch (_detail?['_finalization_state']) {
@@ -6681,34 +6691,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
               decoration: BoxDecoration(
-                color: pendingPaid > 0
-                    ? const Color(0xFFFFF4DE)
-                    : const Color(0xFFEAF8EE),
+                color: const Color(0xFFEAF8EE),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: pendingPaid > 0
-                      ? const Color(0xFFF1CC7A)
-                      : const Color(0xFFCBEBD3),
+                  color: const Color(0xFFCBEBD3),
                 ),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
-                    pendingPaid > 0 ? Icons.schedule : Icons.check_circle,
-                    color: pendingPaid > 0
-                        ? const Color(0xFFE58A00)
-                        : const Color(0xFF0C9A43),
+                  const Icon(
+                    Icons.check_circle,
+                    color: Color(0xFF0C9A43),
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    pendingPaid > 0
-                        ? tr('paidInFullPendingClose')
-                        : tr('paidInFull'),
-                    style: TextStyle(
-                      color: pendingPaid > 0
-                          ? const Color(0xFFA45F00)
-                          : const Color(0xFF08752F),
+                    DocumentPresentation(_detail!).isClosed ? tr('invoiceClosed') : tr('paidInFull'),
+                    style: const TextStyle(
+                      color: Color(0xFF08752F),
                       fontWeight: FontWeight.w800,
                     ),
                   ),
@@ -8175,12 +8175,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             finalizedPaid: finalizedPaid,
             pendingPaid: pendingPaid,
           );
-    final unsyncedInvoice = widget.documentId.startsWith('local-invoice-') &&
-        (_detail?['_server_document_id']?.toString().isEmpty ?? true);
-    final statusLabel = (unsyncedInvoice ||
-        _detail?['_local_pending_payment'] == true)
-        ? 'Pending sync'
-        : _statusLabel(
+    final statusLabel = _statusLabel(
             total: total,
             finalizedPaid: finalizedPaid,
             pendingPaid: pendingPaid,
@@ -8199,7 +8194,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           onLongPress: _showDocumentHeaderActions,
           statusRowHeight: MediaQuery.textScalerOf(context).scale(30) + 28,
           status: _statusPill(statusLabel,
-              code: unsyncedInvoice ? 'pending' : statusCode),
+              code: statusCode),
           actions: [
             if (!_estimate && _canManageInvoiceExpenses)
               IconButton(

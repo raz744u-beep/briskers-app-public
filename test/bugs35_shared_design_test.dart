@@ -118,7 +118,7 @@ void main() {
                     'invoice_id': 'invoice-id',
                     'line_id': 'line',
                     'source_description': 'Battery programming + oil change',
-                    'status': 'in_progress',
+                    'status': 'planned',
                   },
                   {
                     'job_id': 'job',
@@ -127,6 +127,7 @@ void main() {
                     'source_description': 'Completed inspection',
                     'status': 'done',
                   },
+                  {'job_id':'job', 'job_number':'J-49', 'line_id':'completed-line-2', 'source_description':'Completed oil change', 'status':'done'},
                 ],
                 generalTasks: const [],
                 allocationsByLine: const {
@@ -155,8 +156,15 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(JobListApprovedCard), findsOneWidget);
       expect(find.text('Chris · 2.0 hrs'), findsOneWidget);
-      expect(find.text('1 of 2 tasks completed'), findsOneWidget);
-      expect(find.text('50%'), findsOneWidget);
+      expect(find.text('2 of 3 tasks completed'), findsOneWidget);
+      expect(find.text('67%'), findsOneWidget);
+      expect(find.text('In Progress'), findsOneWidget);
+      expect(find.text('Employee'), findsNothing);
+      await tester.tap(find.byKey(const Key('toggle-task-filters')));
+      await tester.pumpAndSettle();
+      expect(find.text('Employee'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('toggle-task-filters')));
+      await tester.pumpAndSettle();
       expect(tester.widget<Card>(find.byType(Card).last).color, Colors.white);
       await capture(tester, key, 'service-tasks');
       await tester.tap(find.text('Invoice #6368'));

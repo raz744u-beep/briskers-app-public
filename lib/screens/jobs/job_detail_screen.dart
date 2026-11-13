@@ -3785,11 +3785,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         size: 17, color: Color(0xFF07594D)),
       label: Row(mainAxisSize: MainAxisSize.min, children: [
         Flexible(child: Text(invoice['document_number'] == null
-            ? 'Open invoice' : '#${invoice['document_number']}',
+            ? 'Open invoice' : 'Invoice #${invoice['document_number']}',
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 17,
             fontWeight: FontWeight.w900, color: Color(0xFF07594D)))),
-        const Icon(Icons.chevron_right, size: 18, color: Color(0xFF07594D)),
       ]),
       onPressed: _busy ? null : () => _openDocument(invoice['id'] as String),
     );
@@ -3877,48 +3876,22 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   height: 1,
                   color: statusColor.withValues(alpha: 0.20),
                 ),
-                InkWell(
-                  onTap: _canManage && !_busy ? _changeJobTitle : null,
-                  borderRadius: BorderRadius.circular(10),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(6, 8, 4, 3),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            jobTitle.isEmpty ? 'Job' : jobTitle,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              height: 1.08,
-                            ),
-                          ),
-                        ),
-                        if (_canSeeFinancial && linkedInvoices.isNotEmpty) ...[
-                          const SizedBox(width: 8),
-                          Flexible(child: Align(
-                            alignment: Alignment.centerRight,
-                            child: invoiceChip(linkedInvoices.first),
-                          )),
-                        ] else if (_canManage)
-                          const Icon(Icons.chevron_right, size: 20),
-                      ],
-                    ),
-                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal:6, vertical:6),
+                  child: Row(children: [
+                    Expanded(child: _canSeeFinancial && linkedInvoices.isNotEmpty
+                      ? Align(alignment: Alignment.centerLeft, child: invoiceChip(linkedInvoices.first))
+                      : InkWell(onTap: _canManage && !_busy ? _changeJobTitle : null,
+                          child: Text(jobTitle.isEmpty ? 'No linked invoice saved' : jobTitle))),
+                    if (OwnerPayrollScreen.enabled && _owner) ...[
+                      const SizedBox(width:8),
+                      Expanded(child: JobTasksAccess(business:widget.businessId,job:widget.jobId,selectorOnly:true,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);})),
+                    ],
+                  ]),
                 ),
-                if (_canSeeFinancial && linkedInvoices.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                    child: Text('No linked invoice saved'),
-                  ),
-                // Additional invoices remain accessible without repeating the
-                // bold Job title or a second Invoice label.
                 if (_canSeeFinancial)
                   for (final extra in linkedInvoices.skip(1))
-                    Align(alignment: Alignment.centerRight,
-                      child: invoiceChip(extra)),
+                    Align(alignment: Alignment.centerLeft, child: invoiceChip(extra)),
                 if (_owner && OwnerPayrollScreen.enabled) _progressRow(),
                 // In restored Owner Tasks/Payroll, one job can have several
                 // mechanics and independently assigned labor hours. Repeating
@@ -6038,8 +6011,6 @@ class _JobDetailScreenState extends State<JobDetailScreen>
             jobTitle: jobTitle,
             assignment: assignment,
           ),
-          if (OwnerPayrollScreen.enabled && _owner)
-            Padding(padding:const EdgeInsets.all(8),child:JobTasksAccess(business:widget.businessId,job:widget.jobId,selectorOnly:true,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);})),
           if (_canSeeFinancial) ...[
             const SizedBox(height: 8),
             _completedPaymentBanner(),

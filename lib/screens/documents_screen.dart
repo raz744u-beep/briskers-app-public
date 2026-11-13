@@ -1293,7 +1293,46 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       for (final row in eligible) row['id']?.toString() ?? '',
     }..remove('');
 
-    final confirmed = await showModalBottomSheet<bool>(
+    var closing = false;
+    String? feedback;
+    Future<void> closeSelection(BuildContext sheetContext, StateSetter setSheetState) async {
+      if (closing || selected.isEmpty) return;
+      setSheetState(() { closing = true; feedback = null; });
+      final ids = Set<String>.from(selected);
+      final ok = await showDialog<bool>(context: sheetContext,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Close selected invoices?'),
+          content: Text('This will close ${ids.length} selected invoice${ids.length == 1 ? '' : 's'}.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Close invoices')),
+          ],
+        )) ?? false;
+      if (!sheetContext.mounted) return;
+      if (!ok) { setSheetState(() => closing = false); return; }
+      try {
+        final closure = LocalInvoiceClosure(database:_localDocuments.database,api:_api);
+        await closure.close(widget.businessId, ids, isOwner:widget.isOwner);
+        unawaited(closure.flush(widget.businessId));
+        if (mounted) unawaited(_load());
+        if (!sheetContext.mounted) return;
+        setSheetState(() {
+          eligible.removeWhere((row) => ids.contains(row['id']?.toString()));
+          selected.removeAll(ids);
+          selected.retainAll(eligible.map((row) => row['id'].toString()));
+          closing = false;
+          feedback = '${ids.length} invoice${ids.length == 1 ? '' : 's'} closed.';
+        });
+      } catch (error) {
+        if (!sheetContext.mounted) return;
+        setSheetState(() {
+          closing = false;
+          feedback = error is StateError ? error.message.toString() : 'The invoices could not be closed. Saved payments are preserved.';
+        });
+      }
+    }
+
+    await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
@@ -1308,7 +1347,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                 sum +
                 (num.tryParse(row['total_amount']?.toString() ?? '') ?? 0),
           );
-          final allSelected = selected.length == eligible.length;
+          final allSelected = eligible.isNotEmpty && selected.length == eligible.length;
 
           return SafeArea(
             child: SizedBox(
@@ -1330,7 +1369,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                         ),
                         IconButton(
                           tooltip: 'Close',
-                          onPressed: () => Navigator.pop(sheetContext, false),
+                          onPressed: () => Navigator.pop(sheetContext),
                           icon: const Icon(Icons.close),
                         ),
                       ],
@@ -1349,7 +1388,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                     activeColor: BriskersColors.invoices,
                     checkColor: Colors.white,
                     value: allSelected,
-                    onChanged: (value) {
+                    onChanged: closing ? null : (value) {
                       setSheetState(() {
                         selected.clear();
                         if (value == true) {
@@ -1373,6 +1412,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                       ),
                     ),
                   ),
+                  if (feedback != null) Padding(
+                    padding: const EdgeInsets.symmetric(horizontal:16, vertical:6),
+                    child: Text(feedback!, key: const Key('close-invoices-feedback'))),
                   const Divider(height: 1),
                   Expanded(
                     child: ListView.separated(
@@ -1388,7 +1430,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                           activeColor: BriskersColors.invoices,
                           checkColor: Colors.white,
                           value: selected.contains(id),
-                          onChanged: id.isEmpty
+                          onChanged: closing || id.isEmpty
                               ? null
                               : (value) {
                                   setSheetState(() {
@@ -1432,11 +1474,11 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                           style: FilledButton.styleFrom(
                             backgroundColor: BriskersColors.invoices,
                           ),
-                          onPressed: selected.isEmpty
+                          onPressed: closing || selected.isEmpty
                               ? null
-                              : () => Navigator.pop(sheetContext, true),
+                              : () => closeSelection(sheetContext, setSheetState),
                           icon: const Icon(Icons.lock_outline),
-                          label: const Text('Close selected'),
+                          label: Text(closing ? 'Closing…' : 'Close selected'),
                         ),
                       ],
                     ),
@@ -1449,52 +1491,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       ),
     );
 
-    if (confirmed != true || selected.isEmpty || !mounted) return;
-
-    final ok =
-        await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Close selected invoices?'),
-            content: Text(
-              'This will close ${selected.length} selected invoice'
-              '${selected.length == 1 ? '' : 's'}.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: BriskersColors.invoices,
-                ),
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Close invoices'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!ok || !mounted) return;
-
-    try {
-      await LocalInvoiceClosure(database:_localDocuments.database,api:_api).close(widget.businessId, selected,
-        isOwner: widget.isOwner);
-      unawaited(LocalInvoiceClosure(database:_localDocuments.database,api:_api).flush(widget.businessId));
-      unawaited(_load());
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${selected.length} invoice${selected.length == 1 ? '' : 's'} closed.',
-          ),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _error = error is StateError ? error.message.toString() : 'The invoices could not be closed. Saved payments are preserved.');
-    }
   }
 
   Future<void> _showExpensesFromList(Map<String, dynamic> row) async {

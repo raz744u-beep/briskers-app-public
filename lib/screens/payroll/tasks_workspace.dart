@@ -53,6 +53,7 @@ class TasksWorkspace extends StatefulWidget {
 
 class _TasksWorkspaceState extends State<TasksWorkspace> {
   late bool _general;
+  bool _filtersExpanded = false;
   final _search = TextEditingController();
   String _employee = '';
   String _status = 'Active';
@@ -174,7 +175,9 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
     }
   }
 
-  List<Map<String,dynamic>> get _service {
+  List<Map<String,dynamic>> get _service => _serviceRows();
+
+  List<Map<String,dynamic>> _serviceRows({bool includeCompleted = false}) {
     final q = _search.text.toLowerCase().trim();
     final rows = widget.serviceTasks.where((task) {
       if(widget.scopedJob != null && task['job_id'] != widget.scopedJob) return false;
@@ -191,7 +194,9 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
       if (_job != 'All Jobs' &&
           task['job_id']?.toString() != _job) return false;
       return task['source_missing'] != 1 &&
-        _matchesStatus(task) && _matchesEmployee(task,general:false) &&
+        (_matchesStatus(task) || (includeCompleted && _status == 'Active' &&
+          task['status'] == 'done' && task['archived_labor'] != 1)) &&
+        _matchesEmployee(task,general:false) &&
         _matchesServicePeriod(task) &&
         (q.isEmpty || desc.contains(q) ||
           (task['job_number']?.toString().toLowerCase().contains(q) ?? false) ||
@@ -418,7 +423,8 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                 const Divider(height:1),
                 // Match the approved isolated Tasks TEST: a distinct white
                 // rounded work card sits inside each tinted Job group.
-                for(final task in entry.value)
+                for(final task in _serviceRows(includeCompleted:true).where(
+                    (task)=>(task['job_id']?.toString() ?? 'Unlinked Job')==entry.key))
                   Card(
                     color: Colors.white,
                     elevation: 0,
@@ -429,6 +435,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                     ),
                     child: ExpansionTile(
                       key: ValueKey(task['line_id']),
+                      leading: Icon(task['status']=='done' ? Icons.check_circle : task['status']=='in_progress' ? Icons.play_circle : Icons.schedule, color: task['status']=='done' ? const Color(0xFF087D63) : task['status']=='in_progress' ? const Color(0xFF1976D2) : const Color(0xFFF58A00)),
                       title: Text((task['source_description'] ?? task['description'] ?? 'Labor task').toString()),
                       children: [Builder(builder: (_) => widget.serviceTaskCard(task))],
                     ),
@@ -460,7 +467,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
     final jobTasks=widget.serviceTasks.where((t)=>(t['job_id']?.toString()??'Unlinked Job')==entry.key).toList();
     final progressTasks=jobTasks.isEmpty?tasks:jobTasks;
     final done=progressTasks.where((t)=>t['status']=='done').length;
-    final status=done==progressTasks.length?'completed':progressTasks.any((t)=>t['status']=='in_progress')?'in_progress':'open';
+    final status=done==progressTasks.length?'completed':(done>0 || progressTasks.any((t)=>t['status']=='in_progress'))?'in_progress':'open';
     final color=status=='open'?const Color(0xFFF58A00):approvedJobListStatusColor({'status':status});
     final people=<String,int>{};
     final seen=<String>{};
@@ -644,9 +651,15 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
               borderRadius:BorderRadius.circular(22))),
         ),
         const SizedBox(height:5),
+        Align(alignment: Alignment.centerLeft, child: TextButton.icon(
+          key: const Key('toggle-task-filters'),
+          onPressed: () => setState(() => _filtersExpanded = !_filtersExpanded),
+          icon: Icon(_filtersExpanded ? Icons.expand_less : Icons.tune),
+          label: const Text('Filters'),
+        )),
         // Two balanced rows on narrow Note 9 screens: no fourth filter
         // clipped off-screen or undiscoverable horizontal scroll.
-        Padding(
+        if (_filtersExpanded) Padding(
           padding:const EdgeInsets.symmetric(horizontal:12),
           child:Column(children:[
             Row(children:[

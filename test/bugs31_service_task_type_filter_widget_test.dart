@@ -47,6 +47,8 @@ void main() {
     expect(find.text('Ordinary task-first job work'), findsOneWidget);
     expect(find.text('Separate recheck after repair'), findsOneWidget);
 
+    await tester.tap(find.byKey(const Key('toggle-task-filters')));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Task Type'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Rechecks').last);

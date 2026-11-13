@@ -38,6 +38,8 @@ void main() {
       onEmployeeTap:(_){},
     ))));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('toggle-task-filters')));
+    await tester.pumpAndSettle();
   }
 
   testWidgets('visible Period filters recent service jobs without changing records',

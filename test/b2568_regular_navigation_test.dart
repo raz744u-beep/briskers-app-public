@@ -289,6 +289,7 @@ void main(){
     await tester.scrollUntilVisible(find.text('Tasks'),-100,scrollable:find.descendant(of:find.byType(HomeScreen),matching:find.byType(Scrollable)).first);
     await click(find.text('Tasks'));
     await until(find.byType(TasksWorkspace));
+    await click(find.byKey(const Key('toggle-task-filters')));
     await tester.tap(find.byTooltip('Status'));await tester.pumpAndSettle();
     await tester.tap(find.text('All').last);await tester.pumpAndSettle();
     await until(find.text('Jobs with Tasks · 1'));

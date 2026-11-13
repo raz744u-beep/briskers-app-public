@@ -352,10 +352,10 @@ class LocalJobRepository {
       final invoice=invoices.first;
       job['invoice_id']=invoice['id'];
       job['invoice_number']=invoice['document_number'];
-      final detail=await cache.loadReadOnly(businessId,invoice['id'] as String,includeLegacyPreferences:false);
+      final detail=await cache.loadReadOnly(businessId,invoice['id'] as String);
       if(detail==null || detail['job_id']!=job['id'] || detail['id']!=invoice['id']) continue;
       final lines=invoiceLaborWorkSummary(detail).split('\n').where((s)=>s.trim().isNotEmpty).toList();
-      job['work_summary']=lines.take(2).join(' · ');
+      if (lines.isNotEmpty) job['work_summary']=lines.take(2).join(' · ');
       job['additional_work_count']=lines.length>2 ? lines.length-2 : 0;
     }
     return result;

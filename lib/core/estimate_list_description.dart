@@ -7,7 +7,6 @@ String estimateListDescription(
 }) {
   final labor=detail==null ? '' : invoiceLaborWorkSummary(detail).replaceAll(RegExp(r'\s+'),' ').trim();
   if(labor.isNotEmpty) return labor;
-  final title = (index['title'] ?? index['job_title'] ?? '').toString().trim();
   final candidates = <Object?>[
     index['estimate_description'],
     index['description'],
@@ -16,10 +15,12 @@ String estimateListDescription(
     detail?['estimate_description'],
     detail?['description'],
     detail?['work_summary'],
+    index['title'],
+    index['job_title'],
   ];
   for (final raw in candidates) {
     final value = raw?.toString().replaceAll(RegExp(r'\s+'), ' ').trim() ?? '';
-    if (value.isNotEmpty && !RegExp(r'^(invoice|estimate)(\s*#?\s*[\w-]+)?$',caseSensitive:false).hasMatch(value) && value.toLowerCase() != title.toLowerCase()) {
+    if (value.isNotEmpty && !RegExp(r'^(invoice|estimate)(\s*#?\s*[\w-]+)?$',caseSensitive:false).hasMatch(value)) {
       return value;
     }
   }
@@ -31,7 +32,7 @@ String estimateListDescription(
   final ordered=[...rawLines.whereType<Map>().where((r)=>r['line_kind']=='labor'), ...rawLines.whereType<Map>().where((r)=>r['line_kind']!='labor')];
   for (final raw in ordered) {
     if (raw['line_kind']?.toString() == 'discount') continue;
-    final name = (raw['name'] ?? '').toString()
+    final name = (raw['description'] ?? raw['name'] ?? '').toString()
         .replaceAll(RegExp(r'\s+'), ' ').trim();
     if (name.isNotEmpty && !names.contains(name)) names.add(name);
     if (names.length == 2) break;

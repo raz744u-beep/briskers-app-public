@@ -884,7 +884,7 @@ void main() {
     },
   );
 
-  testWidgets('shared interface surfaces unresolved sync verification', (
+  testWidgets('shared interface keeps lifecycle visible without per-finding sync messages', (
     tester,
   ) async {
     Future<void> action(Map<String, dynamic> row) async {}
@@ -910,8 +910,10 @@ void main() {
     );
     expect(
       find.text('Needs verification • saved on this device'),
-      findsOneWidget,
+      findsNothing,
     );
+    expect(find.text('Open'), findsOneWidget);
+    expect(find.textContaining('waiting to sync'), findsNothing);
   });
 
   testWidgets(

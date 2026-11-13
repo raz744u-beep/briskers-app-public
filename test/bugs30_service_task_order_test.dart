@@ -33,6 +33,8 @@ void main(){
     expect(tester.getTopLeft(find.text('J-2')).dy,lessThan(tester.getTopLeft(find.text('MB-3335')).dy));
     await tester.tap(find.text('J-2'));await tester.pumpAndSettle();
     expect(tester.getTopLeft(find.text('First printed line')).dy,lessThan(tester.getTopLeft(find.text('Second printed line')).dy));
+    await tester.tap(find.byKey(const Key('toggle-task-filters')));
+    await tester.pumpAndSettle();
     await pick('Status','All');
     await tester.tap(find.byTooltip('Advanced task filters'));
     await tester.pumpAndSettle();

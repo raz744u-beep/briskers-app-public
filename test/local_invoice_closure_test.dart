@@ -46,7 +46,7 @@ void main() {
     await LocalDocumentDetailCache.initialize(db);
     api=CloseApi();
     await BriskersConnectionModeController.instance.setMode(BriskersConnectionMode.offline);
-    for(final e in {'6368':521.31,'6357':400.0,'6359':7882.11}.entries) {
+    for(final e in {'6368':521.31,'6357':1637.62,'6359':7882.11}.entries) {
       await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status,job_number,customer_name) VALUES(?,'shop','owner','Invoice','open',?,?)",['job-${e.key}',e.key=='6368'?'J-49':e.key=='6357'?'J-38':'J-40',e.key=='6368'?'Rick Francis':e.key=='6357'?'Reginald Willis':'Gloria Johnson']);
       await db.customStatement("INSERT INTO local_documents(id,business_id,kind,status,total,sync_state,job_id,document_number) VALUES(?,'shop','invoice','issued',?,'synced',?,?)",[e.key,e.value,'job-${e.key}',e.key]);
       await LocalDocumentDetailCache(database:db).save('shop',e.key,detail(e.key,e.value,pending:e.key!='6359'));
@@ -173,10 +173,17 @@ void main() {
     await tester.tap(find.text('Close selected')); await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton,'Close invoices').last); await tester.pumpAndSettle();
     expect(find.text('Closed'),findsOneWidget); expect(find.text('Paid'),findsNWidgets(2));
-    await tester.tap(find.text('Close invoices').first); await tester.pumpAndSettle();
     expect(find.text('Select all (2)'),findsOneWidget);
+    expect(find.text('0 selected • \$0.00'), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Close selected')).onPressed, isNull);
     expect(find.text('I-6368  Rick Francis'),findsNothing);
     expect(await tester.runAsync(paymentHistory),before);
+    await tester.tap(find.text('I-6357  Reginald Willis')); await tester.pumpAndSettle();
+    await tester.tap(find.text('Close selected')); await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton,'Close invoices').last); await tester.pumpAndSettle();
+    expect(find.text('Select all (1)'), findsOneWidget);
+    expect(find.text('I-6357  Reginald Willis'), findsNothing);
+    expect(await tester.runAsync(paymentHistory), before);
     expect(api.closes,0); expect(api.payments,0);
     await tester.pumpWidget(const SizedBox.shrink());
   },timeout:const Timeout(Duration(seconds:30)));

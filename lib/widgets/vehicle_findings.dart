@@ -103,22 +103,12 @@ class VehicleFindings extends StatelessWidget {
     final id = finding['id']?.toString() ?? '';
     final status = statusLabel(finding);
     final description = finding['body']?.toString().trim() ?? '';
-    final attachments = (finding['attachments'] as List? ?? const []);
-    final pendingPhoto = attachments.whereType<Map>()
-        .any((photo) => photo['upload_state'] == 'pending');
-    final syncWarning = finding['sync_state'] == 'conflict'
-        ? 'Sync conflict'
-        : (finding['_finding_action_error']?.toString() ?? '').isNotEmpty
-            ? 'Needs verification · saved locally'
-            : finding['sync_state'] == 'pending' || pendingPhoto
-                ? 'Saved locally · waiting to sync'
-                : '';
     return ExpansionTile(
       key: ValueKey('finding-collapsed-$id'),
       initiallyExpanded: false,
       title: Text(description.isEmpty ? 'Vehicle finding' : description,
         maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(syncWarning.isEmpty ? status : '$status • $syncWarning'),
+      subtitle: Text(status),
       leading: Icon(status == 'Resolved' ? Icons.check_circle_outline
           : status == 'In Job' ? Icons.handyman_outlined
           : Icons.warning_amber_rounded),
@@ -175,11 +165,7 @@ class VehicleFindings extends StatelessWidget {
               if (status == 'Resolved' &&
                   (finding['resolved_job_number']?.toString() ?? '').isNotEmpty)
                 Text(' • Job ${finding['resolved_job_number']}'),
-              if (status == 'Resolved' &&
-                  (finding['resolved_job_number']?.toString() ?? '').isEmpty &&
-                  (finding['resolved_job_id']?.toString() ?? '').isNotEmpty &&
-                  finding['sync_state'] == 'pending')
-                const Text(' • Job link pending sync'),
+
             ],
           ),
           const SizedBox(height: 7),
@@ -190,27 +176,6 @@ class VehicleFindings extends StatelessWidget {
           if (showVehicle &&
               (finding['_vehicle_label']?.toString() ?? '').isNotEmpty)
             Text(finding['_vehicle_label'].toString()),
-          if (conflict)
-            const Text(
-              'Sync conflict • local finding is preserved',
-              style: TextStyle(color: Colors.orange),
-            )
-          else if ((finding['_finding_action_error']?.toString() ?? '')
-              .isNotEmpty)
-            const Text(
-              'Needs verification • saved on this device',
-              key: ValueKey('finding-needs-verification'),
-              style: TextStyle(
-                color: Colors.orange,
-                fontWeight: FontWeight.w600,
-              ),
-            )
-          else if (finding['sync_state'] == 'pending' ||
-              attachments.any((a) => a['upload_state'] == 'pending'))
-            const Text(
-              'Saved locally • waiting to sync',
-              style: TextStyle(fontSize: 12),
-            ),
           if (attachments.isNotEmpty && photoBuilder != null) ...[
             const SizedBox(height: 8),
             Wrap(

@@ -118,6 +118,13 @@ class OfflineInvoiceFinalization {
             }
             continue;
           }
+          final oldReceipts=(old['receipts'] as List)
+              .map((r)=>r['operation_id'] ?? r['id']).toSet();
+          final overlaps=(current['receipts'] as List)
+              .any((r)=>oldReceipts.contains(r['operation_id'] ?? r['id']));
+          if (overlaps) {
+            throw StateError('Previously finalized receipts are still present in the saved details. Refresh their status before finalizing newer receipts. Original payments and the saved request are preserved.');
+          }
           if(previous.single.read<String>('state')!='confirmed') {
             throw StateError('The earlier saved request must finish before changed payments can be finalized. Your payments are safe. Use Retry saved finalization when connected; do not enter them again.');
           }
@@ -149,15 +156,24 @@ class OfflineInvoiceFinalization {
   /// blocks only the same receipt identities; a later payment is independent.
   Future<String?> stateForDetail(String business,String invoice,Map<String,dynamic> detail) async {
     await prepare();
-    final rows=await db.customSelect('SELECT state,payload FROM invoice_finalization_intents_v1 WHERE business_id=? AND invoice_id=?',
-      variables:[Variable(business),Variable(invoice)]).get();
+    // A screen opened before draft synchronization can retain its local route
+    // while the durable intent has moved to the exact saved server identity.
+    final server = detail['_server_document_id']?.toString().trim() ?? '';
+    final identitiesToRead = <String>{invoice,
+      if (server.isNotEmpty && (detail['id'] == invoice ||
+          (invoice.startsWith('local-') && detail['id'] == server))) server};
+    final rows=await db.customSelect(
+      'SELECT state,payload FROM invoice_finalization_intents_v1 WHERE business_id=? AND invoice_id IN (${List.filled(identitiesToRead.length, '?').join(',')})',
+      variables:[Variable(business), ...identitiesToRead.map(Variable<String>.new)]).get();
     if(rows.isEmpty) return null;
+    if (rows.length != 1) return 'review';
     final state=rows.single.read<String>('state');
     if(state!='confirmed') return state;
     final old=jsonDecode(rows.single.read<String>('payload')) as Map;
     final identities=(old['receipts'] as List).map((r)=>r['operation_id'] ?? r['id']).toSet();
     final pending=(detail['payments'] as List? ?? []).whereType<Map>().where((p)=>p['state']=='pending');
     if(pending.every((p)=>identities.contains(p['operation_id'] ?? p['id']))) return 'confirmed';
+    if(pending.any((p)=>identities.contains(p['operation_id'] ?? p['id']))) return 'review';
     return null;
   }
 
