@@ -403,7 +403,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       'archived_labor': r['source_kind']=='invoice' &&
           !LocalInvoiceTaskStore.currentPayrollDate(r['invoice_date']) ? 1 : 0,
     }).toList();
-    final hydrated=await _taskEditRepository.localCompensation(cachedRoster);
+    final hydrated=await _taskEditRepository.localCompensation(cachedRoster,grant:_grant);
     _carryReview=await _taskEditRepository.applyNov12OilSeparatorCarry();
     final persistedEmployees = job == null
         ? await repository.employees()
@@ -1366,10 +1366,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   Widget _payrollTab() {
     final person=_employees.where((r)=>r['id']==_employee).firstOrNull;
     final base=person?['base_enabled']==1;
-    if(base) return ListView(padding:const EdgeInsets.all(12),children:[
+    if(base) { return ListView(padding:const EdgeInsets.all(12),children:[
+      Row(children:[IconButton(tooltip:'Previous payroll week',onPressed:()=>setState(()=>_week=_week.subtract(const Duration(days:7))),icon:const Icon(Icons.chevron_left)),Expanded(child:Text('Week of ${DateFormat.yMMMd().format(EmployeeWorkReview.monday(_week))}',textAlign:TextAlign.center)),IconButton(tooltip:'Next payroll week',onPressed:()=>setState(()=>_week=_week.add(const Duration(days:7))),icon:const Icon(Icons.chevron_right))]),
       _flexibleWeeklyPreview(_currentPayrollWork.fold<double>(0,(n,r)=>n+(r['actual_minutes'] as int)/60)),
       _advancePanel(),
-    ]);
+    ]); }
     return WeeklyLaborReview(
       key:ValueKey('employee-payroll-${widget.employeeId}'),
       employeeId:widget.employeeId!,employeeName:_employeeLabel(widget.employeeId),
@@ -1379,8 +1380,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       advanceBalance:()=>_viewRepository.advance(widget.employeeId!),
       recordPayment:_recordWeekly,onPaymentSaved:_load,
       onWeekChanged:(week)=>setState(()=>_week=week),
-      saveDraft:(week,selected)=>_taskEditRepository.savePayrollDraft(widget.employeeId!,_date(week),selected),
-      loadDraft:(week)=>_viewRepository.payrollDraft(widget.employeeId!,_date(week)),
+      saveDraft:(week,selected,adjustment,repayment,reason)=>_taskEditRepository.savePayrollDraft(widget.employeeId!,_date(week),selected,adjustment:adjustment,repayment:repayment,reason:reason),
+      loadDraft:(week)=>_viewRepository.payrollDraftDetails(widget.employeeId!,_date(week)),
       extra: _advancePanel(),
     );
   }

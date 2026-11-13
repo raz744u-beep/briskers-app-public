@@ -163,7 +163,7 @@ Future<String?> showJobTaskSelection(BuildContext context,List<Map<String,dynami
   var query='';
   return showDialog<String>(context:context,builder:(dialog)=>StatefulBuilder(builder:(context,update){
     final rows=jobs.where((j)=>['job_number','invoice_number','customer_name','vehicle_label','requested_work','title'].map((k)=>j[k]??'').join(' ').toLowerCase().contains(query.toLowerCase())).toList();
-    return AlertDialog(title:const Text('Choose Job · active or historical'),content:SizedBox(width:520,height:MediaQuery.sizeOf(context).height*.55,child:Column(children:[
+    return AlertDialog(scrollable:true,title:const Text('Choose Job · active or historical'),content:SizedBox(width:520,height:(MediaQuery.sizeOf(context).height-MediaQuery.viewInsetsOf(context).bottom-240).clamp(120.0,480.0),child:Column(children:[
       TextField(decoration:const InputDecoration(labelText:'Search job, invoice, customer or vehicle',prefixIcon:Icon(Icons.search)),onChanged:(v)=>update(()=>query=v)),
       Expanded(child:ListView(children:[for(final j in rows)ListTile(
         title:Text('${j['job_number']??'Job'} · ${j['customer_name']??''}',style:const TextStyle(fontWeight:FontWeight.w800)),

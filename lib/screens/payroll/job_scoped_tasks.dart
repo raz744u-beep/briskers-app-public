@@ -215,7 +215,7 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 5),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
+                if(allocations.length>1)Row(children: [
                 Expanded(child: Text(
                   widget.employeeName(allocation['employee_id']?.toString()) +
                   ' · ' +
@@ -293,7 +293,7 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
                   Expanded(child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
+                      Text(title, maxLines: expanded?null:2, overflow: expanded?null:TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w800,
                           fontSize: 14.5)),
                       const SizedBox(height: 4),

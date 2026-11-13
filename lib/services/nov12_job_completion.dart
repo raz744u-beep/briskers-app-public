@@ -52,8 +52,9 @@ class Nov12JobCompletion {
         final saved = await LocalDocumentDetailCache(
           database: db,
         ).loadReadOnly(business, invoice);
-        if (saved == null || saved['id'] != invoice || saved['job_id'] != job)
+        if (saved == null || saved['id'] != invoice || saved['job_id'] != job) {
           return;
+        }
         final detail = OfflineInvoicePaymentLedger.projectPendingPayments(
           saved,
           await OfflineInvoicePaymentLedger(
@@ -64,8 +65,9 @@ class Nov12JobCompletion {
         if (!financial.paymentDetailsKnown ||
             !financial.fullyCovered ||
             financial.isVoid ||
-            financial.totalCents != target.$3)
+            financial.totalCents != target.$3) {
           return;
+        }
         await db.customStatement(
           'INSERT INTO owner_nov12_job_completion_v1 VALUES(?,?,?,?)',
           [

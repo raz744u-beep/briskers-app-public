@@ -15,11 +15,12 @@ void main() {
           '${Platform.environment['FLUTTER_ROOT']}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
     }.entries) {
       final f = File(entry.value);
-      if (await f.exists())
+      if (await f.exists()) {
         await (FontLoader(entry.key)..addFont(
               Future.value(ByteData.sublistView(await f.readAsBytes())),
             ))
             .load();
+      }
     }
   });
   Map<String, dynamic> task(String id, String status, int minutes) => {
@@ -135,9 +136,10 @@ void main() {
                     'work': [row],
                   },
                 ],
-                saveDraft: (week, selected) async {
-                  draft = selected;
-                },
+                saveDraft:
+                    (week, selected, adjustment, repayment, reason) async {
+                      draft = selected;
+                    },
                 recordPayment:
                     (
                       week,
@@ -153,8 +155,9 @@ void main() {
                       recorded++;
                       expect(selected.single['id'], 'warranty');
                       expect(selected.single['pay_minutes'], 600);
-                      expect(net, 40000);
-                      expect(repayment, 0);
+                      expect(net, 37000);
+                      expect(adjustment, 2000);
+                      expect(repayment, 5000);
                     },
               ),
             ),
@@ -171,6 +174,25 @@ void main() {
       await tester.tap(find.text('Save (Draft)'));
       await tester.pumpAndSettle();
       expect(draft, {'warranty': 10.0});
+      await tester.ensureVisible(find.text('Adjustments & repayment'));
+      await tester.tap(find.text('Adjustments & repayment'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Adjustment (+/−)'),
+        '20',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Repayment from this payment'),
+        '50',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Adjustment reason'),
+        'Owner approved bonus',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text(r'Payment Total: $370.00'), findsOneWidget);
+      await tester.tap(find.text('Apply'));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Verify Weekly Payment'));
       await tester.tap(find.text('Verify Weekly Payment'));
       await tester.pumpAndSettle();
@@ -185,4 +207,67 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+  testWidgets('Previously Paid Work contains only the selected payroll week', (
+    tester,
+  ) async {
+    final row = task('this-week', 'Done', 60);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: WeeklyLaborReview(
+            employeeId: 'chris',
+            employeeName: 'Chris',
+            tasks: const [],
+            advanceBalance: () async => 0,
+            week: DateTime(2026, 11, 9),
+            profileLayout: true,
+            savedRateCents: 4000,
+            paymentHistory: [
+              {
+                'week': '2026-11-09',
+                'work': [row],
+              },
+              {
+                'week': '2026-11-02',
+                'work': [
+                  {...row, 'description': 'Already paid last week'},
+                ],
+              },
+            ],
+            recordPayment:
+                (
+                  week,
+                  date,
+                  method,
+                  selected,
+                  adjustment,
+                  repayment,
+                  net,
+                  reason,
+                  base,
+                ) async {
+                  fail('No unpaid labor can be verified');
+                },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Previously Paid Work'));
+    await tester.tap(find.text('Previously Paid Work'));
+    await tester.pumpAndSettle();
+    expect(find.text('J-54 · Repair this-week'), findsOneWidget);
+    expect(find.textContaining('Already paid last week'), findsNothing);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Verify Weekly Payment'),
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
 }

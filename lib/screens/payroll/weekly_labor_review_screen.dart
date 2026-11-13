@@ -51,8 +51,8 @@ class WeeklyLaborReview extends StatefulWidget {
   final int? savedRateCents;
   final String? reviewMessage;
   final Widget? extra;
-  final Future<void> Function(DateTime,Map<String,double>)? saveDraft;
-  final Future<Map<String,double>?> Function(DateTime)? loadDraft;
+  final Future<void> Function(DateTime,Map<String,double>,int,int,String)? saveDraft;
+  final Future<Map<String,dynamic>?> Function(DateTime)? loadDraft;
   final VoidCallback? onCancel;
   final Future<void> Function()? onPaymentSaved;
   final ValueChanged<DateTime>? onWeekChanged;
@@ -74,6 +74,8 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   static final _date = DateFormat('MMM d');
   late DateTime _week;
   bool _saving = false;
+  int _preparedAdjustment=0,_preparedRepayment=0;
+  String _preparedReason='';
   String? _error;
 
   static DateTime _start(DateTime date) =>
@@ -131,6 +133,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   }
 
   void _selectUnpaid() {
+    _preparedAdjustment=0;_preparedRepayment=0;_preparedReason='';
     _selected.clear();
     for (final task in _eligible) {
       final remaining = _available(task);
@@ -285,14 +288,14 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     }
     final calculatedGross = laborCents + widget.weeklyBaseCents + widget.weeklyAdjustmentCents;
     final amount=TextEditingController(
-      text:(calculatedGross/100).toStringAsFixed(2));
-    final debtInput=TextEditingController();
-    final note=TextEditingController();
+      text:((calculatedGross+_preparedAdjustment)/100).toStringAsFixed(2));
+    final debtInput=TextEditingController(text:_preparedRepayment>0?(_preparedRepayment/100).toStringAsFixed(2):'');
+    final note=TextEditingController(text:_preparedReason);
     var method='Zelle';
     var paidDate = DateTime.now();
-    var deduct=false;
+    var deduct=_preparedRepayment>0;
     // Optional repayment is collapsed until explicitly expanded.
-    var showDebtOptions=false;
+    var showDebtOptions=_preparedRepayment>0;
     final confirmed=await showDialog<bool>(
       context:context,
       builder:(outer)=>StatefulBuilder(
@@ -493,7 +496,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
           );
           if(mounted) {
             if(widget.embedded) {
-              setState(_selected.clear);
+              setState((){_selected.clear();_preparedAdjustment=0;_preparedRepayment=0;_preparedReason='';});
               await widget.onPaymentSaved?.call();
             } else {
               Navigator.pop(context,true);
@@ -600,17 +603,38 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   Future<void> _restoreDraft() async {
     if(!widget.profileLayout || widget.loadDraft==null)return;
     final week=_start(_week);
-    Map<String,double>? draft;
-    try { draft=await widget.loadDraft!(week); } catch(error) {
+    final Map<String,dynamic>? savedDraft;
+    try { savedDraft=await widget.loadDraft!(week); } catch(error) {
       if(mounted)setState(()=>_error='Could not load the saved draft: $error');
       return;
     }
-    if(!mounted || _start(_week)!=week || draft==null)return;
+    if(!mounted || _start(_week)!=week || savedDraft==null)return;
     final available={for(final r in _eligible) _id(r):_available(r)};
-    setState(() { _selected.clear(); for(final entry in draft.entries) {
+    setState(() { _selected.clear(); _preparedAdjustment=savedDraft['adjustment'] as int? ?? 0;_preparedRepayment=savedDraft['repayment'] as int? ?? 0;_preparedReason=savedDraft['reason'] as String? ?? '';
+      for(final entry in (savedDraft['hours'] as Map).entries) {
       final remaining=available[entry.key]??0;
-      if(remaining>0 && entry.value>0)_selected[entry.key]=entry.value.clamp(0,remaining).toDouble();
+      if(remaining>0 && entry.value>0)_selected[entry.key]=(entry.value as num).clamp(0,remaining).toDouble();
     }});
+  }
+  Future<void> _editPreparation(int labor) async {
+    final debt=await widget.advanceBalance();
+    if(!mounted)return;
+    final adjustment=TextEditingController(text:(_preparedAdjustment/100).toStringAsFixed(2));
+    final repayment=TextEditingController(text:(_preparedRepayment/100).toStringAsFixed(2));
+    final reason=TextEditingController(text:_preparedReason);
+    final saved=await showDialog<bool>(context:context,builder:(dialog)=>StatefulBuilder(builder:(context,update){
+      final a=double.tryParse(adjustment.text),r=double.tryParse(repayment.text);
+      final valid=a!=null&&r!=null&&a.isFinite&&r.isFinite&&a.abs()<=1000000&&r>=0&&(r*100).round()<=debt&&labor+(a*100).round()>=(r*100).round()&&(a==0||reason.text.trim().isNotEmpty);
+      return AlertDialog(title:const Text('Adjustments & repayment'),content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+        Text('Outstanding advance: \$${(debt/100).toStringAsFixed(2)}'),
+        TextField(controller:adjustment,keyboardType:const TextInputType.numberWithOptions(decimal:true,signed:true),decoration:const InputDecoration(labelText:'Adjustment (+/−)'),onChanged:(_)=>update((){})),
+        TextField(controller:repayment,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:const InputDecoration(labelText:'Repayment from this payment'),onChanged:(_)=>update((){})),
+        TextField(controller:reason,decoration:const InputDecoration(labelText:'Adjustment reason'),onChanged:(_)=>update((){})),
+        if(valid)Text('Payment Total: \$${((labor+(a*100).round()-(r*100).round())/100).toStringAsFixed(2)}'),
+      ])),actions:[TextButton(onPressed:()=>Navigator.pop(dialog),child:const Text('Cancel')),FilledButton(onPressed:valid?()=>Navigator.pop(dialog,true):null,child:const Text('Apply'))]);
+    }));
+    if(saved==true&&mounted)setState((){_preparedAdjustment=(double.parse(adjustment.text)*100).round();_preparedRepayment=(double.parse(repayment.text)*100).round();_preparedReason=reason.text.trim();});
+    Future<void>.delayed(const Duration(milliseconds:400),(){adjustment.dispose();repayment.dispose();reason.dispose();});
   }
   int _rate(Map<String,dynamic> task)=>widget.settlementRateCents ?? task['payment_rate_cents'] as int? ?? task['rate_cents'] as int? ?? 0;
   int _amount(Map<String,dynamic> task,double hours) {
@@ -623,7 +647,9 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     final dated=widget.tasks.where((r){final d=DateTime.tryParse((r['carry_week']??r['completed_date']??r['invoice_date'])?.toString()??'');return d!=null&&!d.isBefore(start)&&d.isBefore(end);}).toList();
     final review=dated.where((r)=>r['assignment_conflict']==1 || r['archived_labor']==1 || (r['state']=='Done'&&r['paid']!=1&&_rate(r)<=0)).toList();
     final paid=widget.paymentHistory.where((p)=>p['week']==start.toIso8601String().substring(0,10)).expand((p)=>(p['work'] as List? ?? []).whereType<Map>().map(Map<String,dynamic>.from)).toList();
-    final gross=tasks.fold<int>(widget.weeklyBaseCents+widget.weeklyAdjustmentCents,(n,r)=>n+_amount(r,_selected[_id(r)]??0));
+    final labor=tasks.fold<int>(widget.weeklyBaseCents,(n,r)=>n+_amount(r,_selected[_id(r)]??0));
+    final adjustment=widget.weeklyAdjustmentCents+_preparedAdjustment,gross=labor+widget.weeklyAdjustmentCents+_preparedAdjustment;
+    final net=gross-_preparedRepayment;
     final total=tasks.fold<double>(0,(n,r)=>n+_available(r));
     String money(int n)=>NumberFormat.simpleCurrency(locale:'en_US').format(n/100);
     Widget metric(String label,String value,Color color)=>Expanded(child:Container(padding:const EdgeInsets.all(10),margin:const EdgeInsets.all(3),decoration:BoxDecoration(color:color,borderRadius:BorderRadius.circular(14)),child:Column(children:[Text(label,textAlign:TextAlign.center),Text(value,textAlign:TextAlign.center,style:const TextStyle(fontSize:17,fontWeight:FontWeight.w800))])));
@@ -643,11 +669,11 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
         if(widget.reviewMessage!=null)ListTile(title:Text(widget.reviewMessage!)),
         for(final r in review)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:const Text('Pay status or compensation requires review; excluded from payment.'))])),
       if(paid.isNotEmpty)Card(child:ExpansionTile(title:const Text('Previously Paid Work'),children:[for(final r in paid)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:Text('${((r['actual_minutes'] as int? ?? 0)/60).toStringAsFixed(2)} hrs · Paid · selected week'))])),
-      Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[summary('Total Selected Hours','${_totalHours.toStringAsFixed(2)} hrs'),summary('Gross Pay',money(gross)),summary('Adjustments (+/−)',money(widget.weeklyAdjustmentCents)),
-        const Text('Adjustments and optional advance repayments are confirmed before recording payment.',style:TextStyle(fontSize:12)),summary('Payment before repayment',money(gross))]))),
+      Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[summary('Total Selected Hours','${_totalHours.toStringAsFixed(2)} hrs'),summary('Labor Pay',money(labor)),summary('Adjustments (+/−)',money(adjustment)),summary('Gross Pay',money(gross)),summary('Advance repayment',money(_preparedRepayment)),summary('Payment Total',money(net)),
+        TextButton(onPressed:_saving?null:()=>_editPreparation(labor+widget.weeklyAdjustmentCents),child:const Text('Adjustments & repayment'))]))),
       if(widget.extra!=null)widget.extra!,
-      Wrap(spacing:10,runSpacing:8,alignment:WrapAlignment.spaceBetween,children:[OutlinedButton(onPressed:_saving||widget.saveDraft==null?null:()async {await widget.saveDraft!(_start(_week),Map<String,double>.from(_selected));if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Payroll draft saved locally.')));},child:const Text('Save (Draft)')),
-        FilledButton.icon(style:FilledButton.styleFrom(backgroundColor:const Color(0xFF0A8F53)),onPressed:_saving||_future||gross<=0?null:_verifyPayment,icon:const Icon(Icons.check),label:const Text('Verify Weekly Payment'))]),
+      Wrap(spacing:10,runSpacing:8,alignment:WrapAlignment.spaceBetween,children:[OutlinedButton(onPressed:_saving||widget.saveDraft==null?null:()async {await widget.saveDraft!(_start(_week),Map<String,double>.from(_selected),_preparedAdjustment,_preparedRepayment,_preparedReason);if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Payroll draft saved locally.')));},child:const Text('Save (Draft)')),
+        FilledButton.icon(style:FilledButton.styleFrom(backgroundColor:const Color(0xFF0A8F53)),onPressed:_saving||_future||gross<=0||net<0||(_totalHours<=0&&widget.weeklyBaseCents<=0)?null:_verifyPayment,icon:const Icon(Icons.check),label:const Text('Verify Weekly Payment'))]),
     ]);
   }
 

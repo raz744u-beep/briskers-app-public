@@ -53,13 +53,16 @@ class _EmployeesSettingsScreenState
     var rows=cached;
     var payAuthorized=false;
     LocalPayrollRepository? ledger;
+    try {
     if(widget.isOwner && await DeviceOwnerAuthorization.instance.canViewSavedOwnerPayroll(widget.businessId)) {
       final grant=await DeviceOwnerAuthorization.instance.authority.authorizeSession(widget.businessId);
       ledger=LocalPayrollRepository(localDatabase,business:widget.businessId,owner:true,
         assertOwnerGrant:()=>grant.assertValid(widget.businessId,grant.actorId));
-      rows=await ledger.localCompensation(cached);
+      rows=await ledger.localCompensation(cached,grant:grant);
       payAuthorized=true;
     }
+    } catch(error) { ledger=null; }
+    rows=await _nicknameStore.decorate(widget.businessId,rows);
     if(!mounted)return;
     setState((){_employees=rows;_cachedEmployeesOnly=!payAuthorized;_error=null;});
     if(BriskersConnectionModeController.instance.forceOffline)return;

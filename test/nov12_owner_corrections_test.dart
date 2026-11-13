@@ -40,7 +40,7 @@ void main() {
       "INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id,employee_name) VALUES('a','shop','gloria','chris','Chris')",
     );
     await db.customStatement(
-      "INSERT INTO local_documents(id,business_id,job_id,kind,document_number,document_date) VALUES('invoice','shop','gloria','invoice','6359','2026-11-02')",
+      "INSERT INTO local_documents(id,business_id,job_id,kind,document_number,document_date) VALUES('invoice','shop','gloria','invoice','6359','2026-11-09')",
     );
     await LocalDocumentDetailCache(database: db).save('shop', 'invoice', {
       'id': 'invoice',
@@ -70,6 +70,9 @@ void main() {
       employeeId: 'chris',
       employeeName: 'Chris',
       rateCents: 0,
+    );
+    await db.customStatement(
+      "UPDATE local_documents SET document_date='2026-11-02' WHERE id='invoice'",
     );
   });
   tearDown(() async {
@@ -160,6 +163,46 @@ void main() {
         hasLength(1),
       );
       expect(await financial(), before);
+    },
+  );
+  test(
+    'partial warranty payment retains the approved rate and cannot pay covered hours again',
+    () async {
+      await rework('partial');
+      await repo.localCompensation([]);
+      await repo.applyNov12OilSeparatorCarry();
+      var work = (await repo.work()).singleWhere(
+        (r) => r['description'] == 'Oil Separator',
+      );
+      Future<bool> pay(String operation) => repo.verify(
+        operation: operation,
+        employee: 'chris',
+        week: '2026-11-09',
+        date: '2026-11-13',
+        method: 'Cash',
+        selected: [
+          {...work, 'pay_minutes': 300},
+        ],
+        base: 0,
+        hourlyAdjustment: 0,
+        adjustmentReason: 'Saved rate for unpaid warranty labor',
+        repayment: 0,
+        confirmedNet: 20000,
+      );
+      expect(await pay('half'), isTrue);
+      work = (await repo.work()).singleWhere(
+        (r) => r['description'] == 'Oil Separator',
+      );
+      expect(work['paid_minutes'], 300);
+      expect(work['remaining_cents'], 20000);
+      expect(work['payment_rate_cents'], 4000);
+      expect(await pay('remainder'), isTrue);
+      work = (await repo.work()).singleWhere(
+        (r) => r['description'] == 'Oil Separator',
+      );
+      expect(work['paid'], 1);
+      expect(work['remaining_minutes'], 0);
+      await expectLater(pay('again'), throwsStateError);
     },
   );
   test(

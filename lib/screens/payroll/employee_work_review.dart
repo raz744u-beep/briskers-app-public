@@ -70,9 +70,9 @@ class EmployeeWorkReview extends StatelessWidget {
       key: const Key('employee-work-review'),
       padding: const EdgeInsets.all(12),
       children: [
-        Card(
-          color: const Color(0xFFEAF2FF),
-          child: const ListTile(
+        const Card(
+          color: Color(0xFFEAF2FF),
+          child: ListTile(
             leading: Icon(Icons.assignment_outlined),
             title: Text(
               'Work Review (Read Only)',

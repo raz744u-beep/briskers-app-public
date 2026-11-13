@@ -3878,16 +3878,17 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal:6, vertical:6),
-                  child: Row(children: [
-                    Expanded(flex:3,child: _canSeeFinancial && linkedInvoices.isNotEmpty
-                      ? Align(alignment: Alignment.centerLeft, child: invoiceChip(linkedInvoices.first))
-                      : InkWell(onTap: _canManage && !_busy ? _changeJobTitle : null,
-                          child: Text(jobTitle.isEmpty ? 'No linked invoice saved' : jobTitle))),
-                    if (OwnerPayrollScreen.enabled && _owner) ...[
-                      const SizedBox(width:8),
-                      Expanded(flex:2,child: JobTasksAccess(business:widget.businessId,job:widget.jobId,selectorOnly:true,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);})),
-                    ],
-                  ]),
+                  child: LayoutBuilder(builder:(context,constraints) {
+                    final invoice=_canSeeFinancial && linkedInvoices.isNotEmpty
+                      ? Align(alignment:Alignment.centerLeft,child:invoiceChip(linkedInvoices.first))
+                      : InkWell(onTap:_canManage && !_busy?_changeJobTitle:null,child:Text(jobTitle.isEmpty?'No linked invoice saved':jobTitle));
+                    if(!(OwnerPayrollScreen.enabled && _owner))return invoice;
+                    final mechanic=JobTasksAccess(business:widget.businessId,job:widget.jobId,selectorOnly:true,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);});
+                    if(constraints.maxWidth*.6<180*MediaQuery.textScalerOf(context).scale(1)) {
+                      return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[invoice,const SizedBox(height:6),mechanic]);
+                    }
+                    return Row(children:[Expanded(flex:3,child:invoice),const SizedBox(width:8),Expanded(flex:2,child:mechanic)]);
+                  }),
                 ),
                 if (_canSeeFinancial)
                   for (final extra in linkedInvoices.skip(1))

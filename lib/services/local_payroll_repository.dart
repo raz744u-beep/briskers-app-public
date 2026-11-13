@@ -13,6 +13,8 @@ import 'local_invoice_task_store.dart';
 import 'invoice_labor_work_summary.dart';
 import 'local_document_detail_cache.dart';
 import 'verified_paid_labor.dart';
+import 'secure_employee_details_cache.dart';
+import 'local_owner_authorization.dart';
 
 /// Business-scoped local payroll ledger. Payment recording never sends money
 /// or connects to the general financial sync queue.
@@ -267,7 +269,7 @@ class LocalPayrollRepository {
 
   /// Hydrate only saved pay data, plus the Owner's explicit Nov 12 missing-rate
   /// correction for uniquely identified Chris/Kam. Never replace a saved rate.
-  Future<List<Map<String,dynamic>>> localCompensation(List<Map<String,dynamic>> roster) async {
+  Future<List<Map<String,dynamic>>> localCompensation(List<Map<String,dynamic>> roster,{LocalOwnerGrant? grant}) async {
     _authorize(); await prepare();
     final saved=await employees();
     final byId=<String,Map<String,dynamic>>{
@@ -277,6 +279,15 @@ class LocalPayrollRepository {
     await db.transaction(() async {
       for(final entry in byId.entries) {
         final r=entry.value;
+        if(grant!=null) {
+          try {
+            final snapshot=await const SecureEmployeeDetailsCache().read(business,entry.key,grant);
+            final details=snapshot?['details'] as Map?;
+            if(details!=null)for(final key in ['payment_type','hourly_rate','weekly_rate','compensation_enabled']) {
+              if(details.containsKey(key))r[key]=details[key];
+            }
+          } on StateError { /* Expired private snapshots never replace saved local pay. */ }
+        }
         final existing=saved.where((x)=>x['id']==entry.key).firstOrNull;
         final name=(r['name']??'').toString().trim();
         final normalized=name.toLowerCase();
@@ -297,7 +308,19 @@ class LocalPayrollRepository {
             rate=recovered;
           }
         }
-        final defaults=await weeklyDefaults(entry.key);
+        var defaults=await weeklyDefaults(entry.key);
+        if(base && existing==null && name.isNotEmpty) {
+          final weekly=num.tryParse(r['weekly_rate']?.toString()??'');
+          if(weekly!=null && weekly.isFinite && weekly>=0) {
+            if(type=='flexible_weekly') {
+              await saveEmployeeCompensation(employee:entry.key,name:name,rate:remoteRate??0,weeklyBase:true);
+              await saveWeeklyDefaults(entry.key,(weekly*100).round(),remoteRate??0,0,true);
+            } else {
+              await saveLocalPayBasis(employee:entry.key,name:name,paymentType:'fixed_weekly',amountCents:(weekly*100).round());
+            }
+            defaults=await weeklyDefaults(entry.key);rate=type=='flexible_weekly'?remoteRate??0:0;
+          }
+        }
         r['rate']=rate;
         r['hourly_rate']=rate==null?null:rate/100;
         r['base_enabled']=base?1:0;
@@ -349,18 +372,23 @@ class LocalPayrollRepository {
     }
   }
 
-  Future<void> savePayrollDraft(String employee,String week,Map<String,double> selected) async {
+  Future<void> savePayrollDraft(String employee,String week,Map<String,double> selected,{int adjustment=0,int repayment=0,String reason=''}) async {
     _authorize(); await prepare(); _date(week);
-    if(selected.values.any((h)=>!h.isFinite||h<=0))throw ArgumentError('Invalid payable hours');
+    if(selected.values.any((h)=>!h.isFinite||h<=0) || repayment<0 || adjustment.abs()>100000000 || (adjustment!=0 && reason.trim().isEmpty))throw ArgumentError('Invalid payroll draft');
     await db.customStatement('INSERT INTO regular_payroll_drafts_v1 VALUES(?,?,?,?) ON CONFLICT(business_id,employee_id,week) DO UPDATE SET payload=excluded.payload',
-      [business,employee,week,jsonEncode(selected)]);
+      [business,employee,week,jsonEncode({'hours':selected,'adjustment':adjustment,'repayment':repayment,'reason':reason})]);
     _authorize();
   }
-  Future<Map<String,double>?> payrollDraft(String employee,String week) async {
+  Future<Map<String,dynamic>?> payrollDraftDetails(String employee,String week) async {
     _authorize(); await prepare();
     final rows=await _read('SELECT payload FROM regular_payroll_drafts_v1 WHERE business_id=? AND employee_id=? AND week=?',[business,employee,week]);
     if(rows.isEmpty)return null;
-    return (jsonDecode(rows.single['payload'] as String) as Map).map((k,v)=>MapEntry(k as String,(v as num).toDouble()));
+    final value=Map<String,dynamic>.from(jsonDecode(rows.single['payload'] as String) as Map);
+    return value['hours'] is Map ? value : {'hours':value,'adjustment':0,'repayment':0,'reason':''};
+  }
+  Future<Map<String,double>?> payrollDraft(String employee,String week) async {
+    final value=await payrollDraftDetails(employee,week);
+    return (value?['hours'] as Map?)?.map((k,v)=>MapEntry(k as String,(v as num).toDouble()));
   }
 
   Future<void> saveEmployeeCompensation({
