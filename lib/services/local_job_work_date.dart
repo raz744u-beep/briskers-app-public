@@ -21,7 +21,7 @@ class LocalJobWorkDate {
   }
 
   Future<void> prepare() => db.customStatement(
-    'CREATE TABLE IF NOT EXISTS local_job_work_dates_v1 ('
+    'CREATE TABLE IF NOT EXISTS local_job_work_dates ('
     'business_id TEXT NOT NULL,job_id TEXT NOT NULL,work_date TEXT NOT NULL,'
     'PRIMARY KEY(business_id,job_id))',
   );
@@ -30,7 +30,7 @@ class LocalJobWorkDate {
     await prepare();
     final row = await db
         .customSelect(
-          'SELECT work_date FROM local_job_work_dates_v1 WHERE business_id=? AND job_id=?',
+          'SELECT work_date FROM local_job_work_dates WHERE business_id=? AND job_id=?',
           variables: [Variable(business), Variable(job)],
         )
         .getSingleOrNull();
@@ -40,7 +40,7 @@ class LocalJobWorkDate {
   Future<void> save(String business, String job, DateTime date) async {
     await prepare();
     await db.customStatement(
-      'INSERT INTO local_job_work_dates_v1(business_id,job_id,work_date) '
+      'INSERT INTO local_job_work_dates(business_id,job_id,work_date) '
       'SELECT business_id,id,? FROM local_jobs WHERE business_id=? AND id=? '
       'ON CONFLICT(business_id,job_id) DO UPDATE SET work_date=excluded.work_date',
       [LocalTaskSchedule.day(date), business, job],

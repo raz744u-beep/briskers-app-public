@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/core/connection_mode.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
+import 'package:briskers_app/services/local_job_work_date.dart';
 import 'package:briskers_app/services/local_document_repository.dart';
 import 'package:briskers_app/services/offline_invoice_payment_ledger.dart';
 import 'package:briskers_app/services/owner_recovery_finalizer.dart';
@@ -204,11 +205,14 @@ void main() {
   test(
     'commits identities and snapshot, preserves all original operation bytes and audit',
     () async {
+      await LocalJobWorkDate(db).save(b, lj, DateTime(2026, 1, 2));
       final before =
           (await db.customSelect('SELECT * FROM sync_outbox ORDER BY id').get())
               .map((r) => r.data)
               .toList();
       expect(await run(), 'server-invoice');
+      expect(await LocalJobWorkDate(db).read(b, 'server-job'), DateTime(2026, 1, 2));
+      expect(await LocalJobWorkDate(db).read(b, lj), isNull);
       final after =
           (await db.customSelect('SELECT * FROM sync_outbox ORDER BY id').get())
               .map((r) => r.data)
