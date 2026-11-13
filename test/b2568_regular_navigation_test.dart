@@ -252,7 +252,8 @@ void main(){
 
     await click(find.text('Payroll'));
     await capture('nov12-employee-payroll');
-    await click(find.widgetWithText(FilledButton,'Verify Weekly Payment'));
+    await tester.scrollUntilVisible(find.byKey(const Key('verify-weekly-payment')),150,scrollable:find.descendant(of:find.byKey(const Key('employee-payroll-preparation')),matching:find.byType(Scrollable)).first);
+    await click(find.byKey(const Key('verify-weekly-payment')));
     await until(find.text(r'Calculated labor: $200.00'));
     await click(find.widgetWithText(FilledButton,'Record payment'));
     await until(find.text('Payment Recorded'));await click(find.widgetWithText(FilledButton,'Done'));
@@ -286,7 +287,8 @@ void main(){
     await until(find.text('Work Review (Read Only)'));
     await click(find.text('Payroll'));
     await until(find.text('No verified unpaid labor for this week.'));
-    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Verify Weekly Payment')).onPressed,isNull);
+    await tester.scrollUntilVisible(find.byKey(const Key('verify-weekly-payment')),150,scrollable:find.descendant(of:find.byKey(const Key('employee-payroll-preparation')),matching:find.byType(Scrollable)).first);
+    expect(tester.widget<FilledButton>(find.byKey(const Key('verify-weekly-payment'))).onPressed,isNull);
     await capture('bugs30-employee-paid-tasks');
     await click(find.text('Reports'));await until(find.text('Payroll History'));
     navigator.currentState!.pop();await tester.pumpAndSettle();

@@ -131,12 +131,13 @@ void main() {
         await until(find.text(r'Remaining balance: $0.00'));
         await tester.tap(find.text('Payroll'));
         await tester.pumpAndSettle();
-        await until(find.widgetWithText(FilledButton, 'Verify Weekly Payment'));
+        await until(find.byKey(const Key('verify-weekly-payment')));
       }
       // The recorded-labor review above WeeklyLaborReview makes the footer
       // scrollable on short phones; bring the existing payment action into
       // view before tapping it.
-      final verify = find.widgetWithText(FilledButton, 'Verify Weekly Payment');
+      final verify = find.byKey(const Key('verify-weekly-payment'));
+      await tester.scrollUntilVisible(find.byKey(const Key('verify-weekly-payment')),150,scrollable:find.descendant(of:find.byKey(const Key('employee-payroll-preparation')),matching:find.byType(Scrollable)).first);
       await tester.ensureVisible(verify);
       await tester.pumpAndSettle();
       expect(tester.widget<FilledButton>(verify).onPressed, isNotNull);

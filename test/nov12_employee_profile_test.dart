@@ -258,10 +258,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('J-54 · Repair this-week'), findsOneWidget);
     expect(find.textContaining('Already paid last week'), findsNothing);
+    await tester.scrollUntilVisible(find.byKey(const Key('verify-weekly-payment')),150,scrollable:find.descendant(of:find.byKey(const Key('employee-payroll-preparation')),matching:find.byType(Scrollable)).first);
     expect(
       tester
           .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Verify Weekly Payment'),
+            find.byKey(const Key('verify-weekly-payment')),
           )
           .onPressed,
       isNull,

@@ -1376,7 +1376,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       employeeId:widget.employeeId!,employeeName:_employeeLabel(widget.employeeId),
       tasks:_work,week:_week,embedded:true,profileLayout:true,
       paymentHistory:_history,
-      savedRateCents:person?['rate'] as int?,reviewMessage:_carryReview,
+      savedRateCents:person?['rate'] as int?,reviewMessage:_work.any((r)=>r['job_number']=='J-40' && r['description']?.toString().trim().toLowerCase()=='oil separator')?_carryReview:null,
       advanceBalance:()=>_viewRepository.advance(widget.employeeId!),
       recordPayment:_recordWeekly,onPaymentSaved:_load,
       onWeekChanged:(week)=>setState(()=>_week=week),

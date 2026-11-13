@@ -673,7 +673,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
         TextButton(onPressed:_saving?null:()=>_editPreparation(labor+widget.weeklyAdjustmentCents),child:const Text('Adjustments & repayment'))]))),
       if(widget.extra!=null)widget.extra!,
       Wrap(spacing:10,runSpacing:8,alignment:WrapAlignment.spaceBetween,children:[OutlinedButton(onPressed:_saving||widget.saveDraft==null?null:()async {await widget.saveDraft!(_start(_week),Map<String,double>.from(_selected),_preparedAdjustment,_preparedRepayment,_preparedReason);if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Payroll draft saved locally.')));},child:const Text('Save (Draft)')),
-        FilledButton.icon(style:FilledButton.styleFrom(backgroundColor:const Color(0xFF0A8F53)),onPressed:_saving||_future||gross<=0||net<0||(_totalHours<=0&&widget.weeklyBaseCents<=0)?null:_verifyPayment,icon:const Icon(Icons.check),label:const Text('Verify Weekly Payment'))]),
+        FilledButton.icon(key:const Key('verify-weekly-payment'),style:FilledButton.styleFrom(backgroundColor:const Color(0xFF0A8F53)),onPressed:_saving||_future||gross<=0||net<0||(_totalHours<=0&&widget.weeklyBaseCents<=0)?null:_verifyPayment,icon:const Icon(Icons.check),label:const Text('Verify Weekly Payment'))]),
     ]);
   }
 
