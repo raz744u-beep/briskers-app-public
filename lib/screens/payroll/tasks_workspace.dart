@@ -1,3 +1,4 @@
+import '../../widgets/list_interaction_hint.dart';
 import '../../core/work_status_colors.dart';
 // ignore_for_file: curly_braces_in_flow_control_structures, prefer_interpolation_to_compose_strings
 import 'package:flutter/material.dart';
@@ -454,7 +455,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                       label: const Text('Add Recheck'),
                     ),
                 ],
-                const SizedBox(height:5),
+                        const SizedBox(height:5),
             ]) : null,
           ),
         ],
@@ -651,7 +652,8 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
             border:OutlineInputBorder(
               borderRadius:BorderRadius.circular(22))),
         ),
-        const SizedBox(height:5),
+                const SizedBox(height:5),
+        const ListInteractionHint(),
         Align(alignment: Alignment.centerLeft, child: TextButton.icon(
           key: const Key('toggle-task-filters'),
           onPressed: () => setState(() => _filtersExpanded = !_filtersExpanded),
@@ -673,7 +675,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                 ['Active','Unpaid','Paid','All','Not Started','In Progress','Done'],
                 (v)=>setState(()=>_status=v))),
             ]),
-            const SizedBox(height:5),
+                    const SizedBox(height:5),
             Row(children:[
               Expanded(child:_picker(_general?'Category':'Task Type',
                 _general?_category:_kind,

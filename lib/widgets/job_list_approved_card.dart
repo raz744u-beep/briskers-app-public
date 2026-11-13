@@ -71,7 +71,7 @@ class JobListApprovedCard extends StatelessWidget {
         int.tryParse(job['additional_work_count']?.toString() ?? '') ?? 0;
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
-      color: Colors.white,
+      color: Color.alphaBlend(color.withValues(alpha:0.08),Colors.white),
       surfaceTintColor: Colors.transparent,
       elevation: 2,
       shadowColor: const Color(0x22344466),

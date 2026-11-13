@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../core/work_status_colors.dart';
+import '../../services/local_task_schedule.dart';
 
 /// Read-only projection of saved allocations. No task or payment mutations.
 class EmployeeWorkReview extends StatelessWidget {
@@ -20,7 +21,8 @@ class EmployeeWorkReview extends StatelessWidget {
       DateTime(d.year, d.month, d.day).subtract(Duration(days: d.weekday - 1));
   static DateTime? date(Map<String, dynamic> r) {
     for (final key in [
-      'carry_week',
+      'work_start_date',
+      'work_end_date',
       'completed_date',
       'invoice_date',
       'job_document_date',
@@ -57,6 +59,7 @@ class EmployeeWorkReview extends StatelessWidget {
   Widget build(BuildContext context) {
     final start = monday(week), end = monday(week).add(const Duration(days: 5));
     final visible = rows.where((r) {
+      if(LocalTaskSchedule.parse(r['work_start_date'])!=null && LocalTaskSchedule.parse(r['work_end_date'])!=null)return LocalTaskSchedule.inWeek(r,start)&&r['source_active']!=0;
       final d = date(r);
       return d != null &&
           !d.isBefore(start) &&
@@ -68,7 +71,7 @@ class EmployeeWorkReview extends StatelessWidget {
     String hrs(int n) => (n / 60).toStringAsFixed(2);
     return ListView(
       key: const Key('employee-work-review'),
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.fromLTRB(12,12,12,16+MediaQuery.paddingOf(context).bottom),
       children: [
         const Card(
           color: Color(0xFFEAF2FF),

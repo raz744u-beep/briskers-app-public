@@ -83,3 +83,10 @@ const jobStatusColorChoices = <String>[
   '#C2185B',
   '#3949AB',
 ];
+
+/// The shop Owner selector has four operational states. Stored legacy history
+/// is left intact; this only controls choices for a new explicit change.
+List<Map<String,dynamic>> ownerJobStatuses(List<Map<String,dynamic>> saved) => [
+  for(final item in const [('open','Open','#D97706'),('in_progress','In Progress','#1674DB'),('completed','Completed','#0A8F53'),('closed','Closed','#777777')])
+    {...?saved.where((s)=>s['code']==item.$1).firstOrNull,'code':item.$1,'name':item.$2,'color_hex':item.$3,'icon_key':item.$1=='completed'?'task_alt':item.$1=='in_progress'?'build_circle':'work_outline'},
+];

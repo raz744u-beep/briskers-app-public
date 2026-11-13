@@ -1,3 +1,4 @@
+import '../../widgets/task_schedule_indicator.dart';
 import '../../core/work_status_colors.dart';
 // ignore_for_file: prefer_interpolation_to_compose_strings
 import 'package:flutter/material.dart';
@@ -18,6 +19,7 @@ class JobScopedTasks extends StatefulWidget {
     required this.onLaborProgress,
     required this.onGeneralProgress,
     this.onManageLabor,
+    this.onEditLabor,
     this.onManageGeneral,
     this.laborActions,
     this.onMarkAllDone,
@@ -39,6 +41,7 @@ class JobScopedTasks extends StatefulWidget {
   final Future<void> Function(int taskId, String nextStatus)
       onGeneralProgress;
   final ValueChanged<Map<String, dynamic>>? onManageLabor;
+  final ValueChanged<Map<String,dynamic>>? onEditLabor;
   final ValueChanged<Map<String, dynamic>>? onManageGeneral;
 
   @override
@@ -126,6 +129,7 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
               _toggle(key);
             },
           ),
+          if (!general && widget.onEditLabor!=null)ListTile(leading:const Icon(Icons.edit_calendar_outlined),title:const Text('Edit Task'),onTap:(){Navigator.pop(sheet);widget.onEditLabor!(row);}),
           if (editableLabor)
             ListTile(
               leading: const Icon(Icons.edit_outlined),
@@ -209,6 +213,8 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Divider(height: 12),
+        if(!general && row['work_start_date']!=null)Text('Work dates: ${row['work_start_date']} – ${row['work_end_date']}'),
+        if(!general && allocations.isEmpty && widget.onEditLabor!=null)TextButton(onPressed:()=>widget.onEditLabor!(row),child:const Text('Edit Task')),
         if (general) Text('Mechanic: ' + employee),
         if (!general)
           for (final allocation in allocations)
@@ -304,6 +310,7 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
                           fontWeight: FontWeight.w700)),
                     ],
                   )),
+                  if(!general)TaskScheduleIndicator({...row,'status':status}),
                   const SizedBox(width: 7),
                   if (general)
                     _action(key, status, generalTask: row['id'] as int?)

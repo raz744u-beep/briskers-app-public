@@ -166,7 +166,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Unpaid Labor (1)'), findsOneWidget);
-      expect(find.text(r'$40.00 / hr'), findsOneWidget);
+      expect(find.text(r'$40.00'), findsOneWidget);
       expect(find.text('Previously Paid Work'), findsNothing);
       expect(find.textContaining('Needs Review'), findsNothing);
       await capture(tester, key, 'nov12-payroll-preparation');

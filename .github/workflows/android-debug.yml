@@ -675,7 +675,23 @@ jobs:
                   </provider>
           '''
           s = s.replace("</application>", provider + "\n    </application>", 1)
+          permissions = '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />'
+          s = s.replace('<application', permissions + '\n    <application', 1)
+          receivers = '''<receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
+              <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+                <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>
+              </receiver>'''
+          s = s.replace('</application>', receivers + '\n</application>', 1)
           p.write_text(s)
+          gradle = Path('android/app/build.gradle.kts')
+          g = gradle.read_text().replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 37')
+          g = g.replace('minSdk = flutter.minSdkVersion', 'minSdk = 24')
+          g = g.replace('compileOptions {', 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true', 1)
+          g += '\ndependencies { coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4") }\n'
+          gradle.write_text(g)
+          icon=Path('android/app/src/main/res/drawable/ic_task_reminder.xml')
+          icon.parent.mkdir(parents=True,exist_ok=True)
+          icon.write_text('<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24"><path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round" android:pathData="M12,3 A9,9 0,1 0,12 21 A9,9 0,0 0,12 3 M12,7 L12,12 L16,15" /></vector>')
           PY
 
       - name: Configure persistent Android signing
@@ -820,7 +836,7 @@ jobs:
           BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
           if [ "$GITHUB_REF_NAME" = fix/bugs33-preserve-offline-financial-history-20261108 ]; then
             BUILD_NUMBER=$((3000 + GITHUB_RUN_NUMBER))
-            test "$BUILD_NUMBER" -gt 4640
+            test "$BUILD_NUMBER" -gt 4645
           fi
           test "$BUILD_NUMBER" -gt 2545
           if [ "$PAYROLL_CANDIDATE" = true ] || [ "$GITHUB_REF_NAME" = candidate/payroll-bootstrap ]; then
@@ -874,7 +890,7 @@ jobs:
           BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
           if [ "$GITHUB_REF_NAME" = fix/bugs33-preserve-offline-financial-history-20261108 ]; then
             BUILD_NUMBER=$((3000 + GITHUB_RUN_NUMBER))
-            test "$BUILD_NUMBER" -gt 4640
+            test "$BUILD_NUMBER" -gt 4645
           fi
           test "$BUILD_NUMBER" -gt 2545
           APK="build/app/outputs/flutter-apk/Briskers-v${VERSION}-b${BUILD_NUMBER}.apk"
@@ -922,7 +938,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: briskers-android-debug
-          run-id: ${{ github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108' && '43339725211' || github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && '42414887944' || '42165351470' }}
+          run-id: ${{ github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108' && '43363311138' || github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && '42414887944' || '42165351470' }}
           github-token: ${{ github.token }}
           path: upgrade-receipt-baseline
 

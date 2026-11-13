@@ -1,3 +1,4 @@
+import '../widgets/list_interaction_hint.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
@@ -412,7 +413,7 @@ class _JobsScreenState extends State<JobsScreen>
         status: status,
         search: query,
         view: view,
-        sort: JobListSort.lastModified,
+        sort: JobListSort.creation,
         userId: userId,
         limit: limit,
       );
@@ -694,7 +695,7 @@ class _JobsScreenState extends State<JobsScreen>
     }
 
     Map<String, dynamic>? selectedStatus;
-    for (final status in _statuses) {
+    for (final status in ownerJobStatuses(_statuses)) {
       if (status['code']?.toString() == statusCode) {
         selectedStatus = status;
         break;
@@ -782,7 +783,7 @@ class _JobsScreenState extends State<JobsScreen>
   }
 
   List<Map<String, dynamic>> _availableStatusesFor(Map<String, dynamic> job) =>
-      _statuses;
+      ownerJobStatuses(_statuses);
 
   Widget _statusControl(Map<String, dynamic> job) {
     final color = approvedJobListStatusColor(job);
@@ -1048,7 +1049,7 @@ class _JobsScreenState extends State<JobsScreen>
                               ],
                             ),
                           ),
-                          ..._statuses.map((status) {
+                          ...ownerJobStatuses(_statuses).map((status) {
                             final color = colorFromHex(
                               status['color_hex']?.toString(),
                             );
@@ -1083,7 +1084,7 @@ class _JobsScreenState extends State<JobsScreen>
                           builder: (context) {
                             Map<String, dynamic>? selected;
                             if (_selectedStatus != null) {
-                              for (final status in _statuses) {
+                              for (final status in ownerJobStatuses(_statuses)) {
                                 if (status['code']?.toString() ==
                                     _selectedStatus) {
                                   selected = status;
@@ -1209,6 +1210,7 @@ class _JobsScreenState extends State<JobsScreen>
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 100),
               children: [
+                const ListInteractionHint(),
                 // No redundant offline/refresh-failure banner here. Briskers'
                 // global connection header shows actual mode, last sync and
                 // pending/error status. Cached Jobs remain fully usable in

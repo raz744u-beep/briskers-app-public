@@ -1,3 +1,4 @@
+import 'local_task_schedule.dart';
 import 'historical_general_tasks.dart';
 import 'historical_task_recordkeeping.dart';
 import 'dart:convert';
@@ -67,6 +68,7 @@ class LocalPayrollRepository {
     await LocalTaskAssignmentStore(db).prepare();
     await LocalMechanicWorkCreditRepository(database: db).prepare();
     await LocalInvoiceTaskStore(db).prepare();
+    await db.customStatement('CREATE TABLE IF NOT EXISTS general_task_editor_v1(business_id TEXT NOT NULL,task_id INTEGER NOT NULL,operation_id TEXT NOT NULL,reminder_enabled INTEGER NOT NULL DEFAULT 0,reminder_minutes INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(business_id,task_id),UNIQUE(business_id,operation_id))');
     for (final sql in [
       '''CREATE TABLE IF NOT EXISTS regular_payroll_carry_weeks_v1 (business_id TEXT NOT NULL,allocation_id TEXT NOT NULL,week TEXT NOT NULL,reason TEXT NOT NULL,PRIMARY KEY(business_id,allocation_id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_drafts_v1 (business_id TEXT NOT NULL,employee_id TEXT NOT NULL,week TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(business_id,employee_id,week))''',
@@ -517,8 +519,83 @@ class LocalPayrollRepository {
       await db.customStatement(
         "INSERT INTO regular_payroll_task_sources VALUES(?,?,NULL,NULL,?,1)", [business, task, kind],
       );
+      await LocalTaskSchedule(db).created(business,task,DateTime.now());
       await _assign(task, employee);
       await queueChange?.call();
+      _authorize();
+    });
+  }
+
+  /// Atomic editor save. Scheduling never rewrites completion or payment dates.
+  Future<void> saveServiceTask({required String operation,String? task,
+    required String job,required String description,required List<Map<String,dynamic>> mechanics,
+    required String start,required String end,required String priority,
+    required String status,required String treatment}) async {
+    _authorize();await prepare();
+    if((task==null && mechanics.isEmpty) || mechanics.map((m)=>m['employee']).toSet().length!=mechanics.length ||
+       !['Open','In Progress','Done'].contains(status) || !['unpaid','paid','review','preserve'].contains(treatment) || (task==null && treatment=='preserve')) {
+      throw ArgumentError('Invalid task details.');
+    }
+    await db.transaction(() async {
+      final existing=task!=null;
+      final id=task??jsonEncode([job,'job',operation]);
+      final before=(await work()).where((r)=>r['task_id']==id).toList();
+      if(!existing) {
+        final first=mechanics.first;
+        await LocalTaskAssignmentStore(db).linkEmployee(business,job,first['employee'] as String,first['name'] as String);
+        await createRecheck(operation:operation,job:job,description:description,employee:first['employee'] as String,name:first['name'] as String,rate:first['rate'] as int? ?? 0,estimatedMinutes:first['minutes'] as int,kind:'job');
+      } else {
+        final saved=(await tasks()).where((r)=>r['id']==id).single;
+        if(saved['job_id']!=job)throw StateError('A task cannot move to another job.');
+        if(saved['source_kind']!='invoice' && saved['description']!=description.trim()) {
+          await db.customStatement('UPDATE regular_payroll_tasks SET description=? WHERE business_id=? AND id=?',[description.trim(),business,id]);
+        }
+      }
+      for(final m in mechanics) {
+        final employee=m['employee'] as String,previous=m['previous'] as String? ?? employee;
+        final original=before.where((r)=>r['employee_id']==previous).firstOrNull;
+        final minutes=m['minutes'] as int;
+        if(original==null) {
+          await LocalTaskAssignmentStore(db).linkEmployee(business,job,employee,m['name'] as String);
+          if(existing || employee!=mechanics.first['employee'])await assignTask(id,employee,m['name'] as String,rate:m['rate'] as int? ?? 0);
+          await setEstimatedMinutes(id,employee,minutes);
+        } else if(previous!=employee || original['estimated_minutes']!=minutes) {
+          await editAllocation(task:id,previous:previous,employee:employee,name:m['name'] as String,minutes:minutes);
+        }
+        final row=(await work()).where((r)=>r['task_id']==id && r['employee_id']==employee).single;
+        // Existing completed/settled tasks keep their state and payroll coverage.
+        if(!before.any((r)=>r['state']=='Done') && row['state']!='Done' && row['state']!=status) {
+          if(status=='Open')throw StateError('Started work cannot be reset in the task editor.');
+          final completed=status=='Done';
+          if(completed && minutes<=0)throw StateError('Completed labor needs assigned hours.');
+          await recordAllocatedTime(row['id'] as String,status,completed?minutes:0,completed?minutes:0,end);
+        }
+        if(treatment=='paid' && row['owner_prior_paid']!=1 && row['paid']!=1)await confirmHistoricalAlreadyPaid(row['id'] as String);
+      }
+      await LocalTaskSchedule(db).save(business,id,start,end,priority,treatment:treatment=='preserve'?null:treatment=='review'?'review':'unpaid');
+      _authorize();
+    });
+  }
+
+  Future<void> applyOwnerNov13WorkDates() async {
+    _authorize();await prepare();
+    // Exact existing allocation already identified by the Nov 12 audit. No dates
+    // are invented for J-48/J-49, and later Owner date corrections win.
+    await db.customStatement("INSERT INTO regular_task_schedule_v1(business_id,task_id,start_date,end_date) "
+      "SELECT p.business_id,p.task_id,'2026-11-09','2026-11-10' FROM regular_payroll_portions p "
+      "JOIN regular_payroll_tasks t ON t.business_id=p.business_id AND t.id=p.task_id "
+      "JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id "
+      "WHERE p.business_id=? AND j.job_number='J-40' AND lower(trim(t.description))='oil separator' "
+      "AND EXISTS(SELECT 1 FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id "
+      "AND a.event='owner_reviewed_unpaid_carry' AND json_extract(a.payload,'\$.week')='2026-11-09' AND json_extract(a.payload,'\$.minutes')=600) ON CONFLICT(business_id,task_id) DO UPDATE SET start_date=excluded.start_date,end_date=excluded.end_date,revision=regular_task_schedule_v1.revision+1 WHERE regular_task_schedule_v1.revision=0",[business]);
+  }
+
+  Future<void> saveTaskSchedule(String task,String start,String end,String priority) async {
+    _authorize();await prepare();
+    await db.transaction(() async {
+      await LocalTaskSchedule(db).save(business,task,start,end,priority);
+      await db.customStatement('INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) VALUES(?,?,?,?)',
+        [business,task,'owner_task_schedule',jsonEncode({'start':start,'end':end,'priority':priority})]);
       _authorize();
     });
   }
@@ -958,6 +1035,7 @@ class LocalPayrollRepository {
       // mechanic estimate instead of creating a permanent zero-hour task.
       // This does not mark work done or change credited/paid hours.
       final billableHours = LocalInvoiceTaskStore.invoiceLaborHours(line);
+      final isNewTask=(await _read('SELECT id FROM regular_payroll_tasks WHERE business_id=? AND id=?',[business,task])).isEmpty;
       await db.customStatement(
         'INSERT OR IGNORE INTO regular_payroll_tasks VALUES(?,?,?,?,?,?)',
         [business, task, jobId, laborId,
@@ -973,6 +1051,7 @@ class LocalPayrollRepository {
         'INSERT OR IGNORE INTO regular_payroll_advances VALUES(?,?,0)',
         [business, employeeId],
       );
+      if(isNewTask)await LocalTaskSchedule(db).created(business,task,DateTime.now());
       await db.customStatement("INSERT OR IGNORE INTO regular_payroll_task_sources VALUES(?,?,?,?,'invoice',1)",
         [business,task,invoiceId,lineId]);
       await LocalTaskAssignmentStore(db).allocate(business,task,employeeId,inherited:false);
@@ -1484,11 +1563,12 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     return _read(
-      'SELECT t.*,j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,'
+      'SELECT t.*,sch.start_date AS work_start_date,sch.end_date AS work_end_date,sch.priority,sch.payroll_treatment,j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,'
       '(SELECT MIN(document_date) FROM local_documents jd WHERE jd.business_id=t.business_id AND jd.job_id=t.job_id) AS job_document_date,'
       "d.document_number AS invoice_number,d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,s.source_kind,CASE WHEN d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,"
       's.invoice_id,s.line_id AS source_line_id FROM regular_payroll_tasks t '
       'LEFT JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id '
+      'LEFT JOIN regular_task_schedule_v1 sch ON sch.business_id=t.business_id AND sch.task_id=t.id '
       'LEFT JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id '
       'LEFT JOIN local_documents d ON d.business_id=s.business_id AND d.id=s.invoice_id '
       'LEFT JOIN regular_payroll_task_order o ON o.business_id=t.business_id AND o.task_id=t.id '
@@ -1500,7 +1580,7 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     final rows = await _read(
-      "SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,"
+      "SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,sch.start_date AS work_start_date,sch.end_date AS work_end_date,sch.priority,sch.payroll_treatment,"
       "CASE WHEN h.allocation_id IS NULL THEN 0 ELSE 1 END AS owner_prior_paid,"
       "CASE WHEN s.source_kind='invoice' AND (date(d.document_date) IS NULL OR date(d.document_date)!=d.document_date OR d.document_date < '${LocalInvoiceTaskStore.payrollCutover}') AND NOT EXISTS "
       "(SELECT 1 FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id "
@@ -1528,6 +1608,7 @@ class LocalPayrollRepository {
       "LEFT JOIN regular_payroll_owner_prior_paid_v1 h ON h.business_id=p.business_id AND h.allocation_id=p.id "
       "LEFT JOIN regular_payroll_carry_weeks_v1 cw ON cw.business_id=p.business_id AND cw.allocation_id=p.id "
       "LEFT JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id "
+      "LEFT JOIN regular_task_schedule_v1 sch ON sch.business_id=t.business_id AND sch.task_id=t.id "
       "LEFT JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id "
       "LEFT JOIN local_documents d ON d.business_id=s.business_id AND d.id=s.invoice_id "
       "LEFT JOIN regular_payroll_task_order o ON o.business_id=t.business_id AND o.task_id=t.id "
@@ -1630,13 +1711,42 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     final rows = await _read(
-      'SELECT t.*, j.job_id FROM regular_payroll_shop_tasks t LEFT JOIN regular_payroll_shop_task_jobs j ON j.business_id=t.business_id AND j.task_id=t.id '
+      'SELECT t.*, j.job_id,COALESCE(m.reminder_enabled,0) AS reminder_enabled,COALESCE(m.reminder_minutes,0) AS reminder_minutes FROM regular_payroll_shop_tasks t LEFT JOIN regular_payroll_shop_task_jobs j ON j.business_id=t.business_id AND j.task_id=t.id LEFT JOIN general_task_editor_v1 m ON m.business_id=t.business_id AND m.task_id=t.id '
       'WHERE t.business_id=? ${employee == null ? '' : 'AND employee_id=?'} ORDER BY t.id DESC',
       [business, ?employee],
     );
     _authorize();
     final historical=await HistoricalGeneralTasks(db).completed(business);
     return rows.map((r)=><String,dynamic>{...r,if(historical.contains(r['id'])) 'status':'done'}).toList();
+  }
+
+  Future<int> saveGeneralTask({required String operation,int? id,String? previousEmployee,
+    required String employee,required String description,required String category,
+    String? job,DateTime? due,bool reminder=false,int reminderMinutes=0}) async {
+    _authorize();await prepare();
+    if(operation.isEmpty || employee.isEmpty || description.trim().isEmpty || ![0,15,60].contains(reminderMinutes) || (reminder && due==null))throw ArgumentError('Invalid General Task.');
+    return db.transaction(() async {
+      var task=id;
+      if(task==null){
+        final prior=await _read('SELECT task_id FROM general_task_editor_v1 WHERE business_id=? AND operation_id=?',[business,operation]);
+        task=prior.firstOrNull?['task_id'] as int?;
+      }
+      if(task==null){
+        await addShopTask(employee,description,category,due:due,job:job);
+        // The link table can update last_insert_rowid, so locate the inserted task
+        // inside this same write transaction using its monotonic local identity.
+        task=(await _read('SELECT MAX(id) AS id FROM regular_payroll_shop_tasks WHERE business_id=?',[business])).single['id'] as int;
+      } else {
+        final current=(await _read('SELECT employee_id FROM regular_payroll_shop_tasks WHERE business_id=? AND id=?',[business,task])).single;
+        if(previousEmployee!=null && current['employee_id']!=previousEmployee && current['employee_id']!=employee)throw StateError('Task assignment changed. Refresh.');
+        await editShopTask(id:task,previousEmployee:current['employee_id'] as String,employee:employee,description:description,category:category);
+        await db.customStatement('UPDATE regular_payroll_shop_tasks SET due_at=? WHERE business_id=? AND id=?',[due?.millisecondsSinceEpoch,business,task]);
+        await db.customStatement('DELETE FROM regular_payroll_shop_task_jobs WHERE business_id=? AND task_id=?',[business,task]);
+        if(job!=null)await db.customStatement('INSERT INTO regular_payroll_shop_task_jobs VALUES(?,?,?)',[business,task,job]);
+      }
+      await db.customStatement('INSERT INTO general_task_editor_v1 VALUES(?,?,?,?,?) ON CONFLICT(business_id,task_id) DO UPDATE SET reminder_enabled=excluded.reminder_enabled,reminder_minutes=excluded.reminder_minutes',[business,task,operation,reminder?1:0,reminderMinutes]);
+      _authorize();return task;
+    });
   }
 
   Future<void> addShopTask(
@@ -2154,7 +2264,7 @@ class LocalPayrollRepository {
       );
       if (staff.length != 1 || (base > 0 && staff.single['base_enabled'] != 1))
         { throw StateError('Base not allowed for employee'); }
-      final current = (await work(employee: employee)).where((r)=>r['archived_labor']!=1).toList();
+      final current = (await work(employee: employee)).where((r)=>r['archived_labor']!=1 && r['payroll_treatment']!='review').toList();
       if (base > 0 && selected.isEmpty) {
         final nextWeek = DateTime.parse(week).add(const Duration(days: 7));
         final unpaidWork = current.any((row) {

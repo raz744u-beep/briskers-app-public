@@ -1,3 +1,4 @@
+import '../widgets/list_interaction_hint.dart';
 import '../services/offline_invoice_payment_ledger.dart';
 import '../services/local_invoice_closure.dart';
 import 'jobs/owner_local_delete_action.dart';
@@ -2100,6 +2101,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                 ],
               ],
             ),
+            const ListInteractionHint(),
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 10),

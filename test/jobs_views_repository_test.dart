@@ -62,6 +62,16 @@ void main() {
   List<String> ids(List<Map<String, dynamic>> rows) =>
       rows.map((row) => row['id'] as String).toList();
 
+  test('Owner creation order ignores subsequent edits, payments and completion and has a stable number tie break',()async{
+    await addJob('old',number:'J-49',created:100,updated:999999,completed:999999,status:'completed');
+    await addJob('new',number:'J-54',created:200,updated:201);
+    await addJob('same-a',number:'J-52',created:200,updated:888888);
+    await addJob('same-b',number:'J-53',created:200,updated:1000);
+    expect(ids(await repository.listJobs('shop',sort:JobListSort.creation)),['new','same-b','same-a','old']);
+    await db.customStatement("UPDATE local_jobs SET server_updated_at=9999999,payment_state='paid' WHERE id='old'");
+    expect(ids(await repository.listJobs('shop',sort:JobListSort.creation)),['new','same-b','same-a','old']);
+  });
+
   test('direct Job local core first frame is readable before secondary graph',
       () async {
     await addJob('fast-local-job', number: 'J-123',
@@ -294,7 +304,7 @@ void main() {
         ids(await repository.listJobs('shop', view: JobListView.all)),
         all,
       );
-      for (final legacySort in JobListSort.values) {
+      for (final legacySort in JobListSort.values.where((s)=>s!=JobListSort.creation)) {
         expect(
           ids(
             await repository.listJobs(
@@ -739,7 +749,7 @@ void main() {
         for (final sort in JobListSort.values) {
           expect(
             ids(await repository.listJobs('shop', view: view, sort: sort)),
-            view == JobListView.all
+            view == JobListView.all || sort == JobListSort.creation
                 ? ['newer', 'pending', 'temp']
                 : ['pending', 'temp', 'newer'],
           );

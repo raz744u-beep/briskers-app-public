@@ -165,7 +165,7 @@ void main() {
   );
 
   testWidgets(
-    'Jobs uses latest activity with only the existing status filter',
+    'Jobs uses stable creation order with only the existing status filter',
     (tester) async {
       final repository = _Jobs();
       await tester.pumpWidget(
@@ -173,7 +173,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(repository.calls.last.view, JobListView.all);
-      expect(repository.calls.last.sort, JobListSort.lastModified);
+      expect(repository.calls.last.sort, JobListSort.creation);
       expect(repository.calls.last.user, 'owner');
       expect(find.byType(SegmentedButton<JobListView>), findsNothing);
       expect(find.byKey(const ValueKey('job-list-sort')), findsNothing);
@@ -210,6 +210,8 @@ void main() {
           .first,
       maxScrolls: 50,
     );
+    await tester.drag(find.byType(ListView).first,const Offset(0,-120));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('load-more-jobs')));
     await tester.pumpAndSettle();
     expect(repository.calls.last.limit, 60);
@@ -255,7 +257,7 @@ void main() {
     visible.value = true;
     await tester.pumpAndSettle();
     expect(repository.calls.last.view, JobListView.all);
-    expect(repository.calls.last.sort, JobListSort.lastModified);
+    expect(repository.calls.last.sort, JobListSort.creation);
     expect(repository.calls.last.status, 'completed');
     expect(repository.calls.last.search, 'new');
     expect(repository.calls.last.limit, 60);

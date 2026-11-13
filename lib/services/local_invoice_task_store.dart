@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import 'invoice_labor_work_summary.dart';
 import 'local_task_assignment_store.dart';
+import 'local_task_schedule.dart';
 
 /// Derived task identities follow saved invoice identities. This store never
 /// changes an invoice, a document number, or a mechanic's earned work.
@@ -22,6 +23,7 @@ class LocalInvoiceTaskStore {
   }
 
   Future<void> prepare() async {
+    await LocalTaskSchedule(db).prepare();
     await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_task_order '
       '(business_id TEXT NOT NULL,task_id TEXT NOT NULL,line_position INTEGER NOT NULL,PRIMARY KEY(business_id,task_id))');
     await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_estimates '
@@ -102,12 +104,14 @@ class LocalInvoiceTaskStore {
           : canonical.isNotEmpty ? canonical.single.read<String>('id') : jsonEncode([job, document, id]);
         final hours = isInvoiceLaborLine(line) ? invoiceLaborHours(line) : null;
         final description = (line['description'] ?? line['name'] ?? 'Invoice labor').toString();
+        final newTask = retained.isEmpty && canonical.isEmpty;
         await db.customStatement(
           'INSERT INTO regular_payroll_tasks VALUES(?,?,?,?,?,?) '
           'ON CONFLICT(business_id,id) DO UPDATE SET description=excluded.description,planned=excluded.planned',
           [business, task, job, jsonEncode([document, id]), description,
             hours == null ? 0 : (hours * 100).round()],
         );
+        if(newTask) await LocalTaskSchedule(db).created(business,task,DateTime.now());
         await db.customStatement(
           "INSERT INTO regular_payroll_task_sources VALUES(?,?,?,?,'invoice',1) "
           'ON CONFLICT(business_id,task_id) DO UPDATE SET active=1',

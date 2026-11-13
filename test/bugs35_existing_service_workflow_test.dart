@@ -60,6 +60,8 @@ void main() {
     }
     Future<void> click(Finder f)async{await until(f);await tester.ensureVisible(f);await tester.tap(f);await tester.pumpAndSettle();}
     await click(find.text('Labor Task'));
+    await until(find.text('Use saved invoice labor'));
+    await click(find.text('Use saved invoice labor'));
     await until(find.text('Choose existing service'));
     expect(find.text('Add Labor Task'),findsNothing);
     await click(find.text('Oil Change'));

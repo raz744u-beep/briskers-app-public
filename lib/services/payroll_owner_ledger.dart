@@ -14,7 +14,7 @@ class PayrollOwnerLedger {
   final String business;
   static const tables = [
     'regular_payroll_jobs', 'regular_payroll_employees', 'regular_payroll_tasks',
-    'regular_payroll_task_sources', 'regular_payroll_estimates',
+    'regular_payroll_task_sources', 'regular_task_schedule_v1', 'regular_payroll_estimates',
     'regular_payroll_portions', 'local_mechanic_work_credits_v1', 'regular_payroll_progress_claims', 'regular_payroll_assignment_outgoing',
     'regular_payroll_advances', 'regular_payroll_payments',
     'regular_payroll_paid_work', 'regular_payroll_paid_base',

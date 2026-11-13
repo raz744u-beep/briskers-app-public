@@ -3504,7 +3504,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   }
 
 
-  List<Map<String, dynamic>> _availableStatuses() => _statuses;
+  List<Map<String, dynamic>> _availableStatuses() => ownerJobStatuses(_statuses);
 
   Widget _statusControl() {
     final color = operationalJobStatusColor(

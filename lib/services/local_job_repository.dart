@@ -281,7 +281,9 @@ class LocalJobRepository {
     );
     // Completed means the work was completed, regardless of a later payment,
     // import correction or note. Missing dates fall back to meaningful activity.
-    final order = status?.toLowerCase() == 'completed'
+    final order = sort == JobListSort.creation
+        ? 'COALESCE(j.created_at,0) DESC,'
+        : status?.toLowerCase() == 'completed'
         ? 'COALESCE(NULLIF(j.completed_at, 0), j.activity_at) DESC, '
               'j.activity_at DESC,'
         : view == JobListView.active
@@ -304,7 +306,7 @@ class LocalJobRepository {
     // Only legacy callers keep the old provisional pin. The Jobs screen's All
     // list is strictly newest activity first, including pending local Jobs.
     final legacyPin =
-        view == JobListView.all || status?.toLowerCase() == 'completed'
+        sort == JobListSort.creation || view == JobListView.all || status?.toLowerCase() == 'completed'
         ? ''
         : """
           CASE WHEN (j.job_number = 'Pending sync' OR upper(j.job_number) LIKE 'TEMP-%')

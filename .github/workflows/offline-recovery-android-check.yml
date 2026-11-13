@@ -47,6 +47,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash "$GITHUB_WORKSPACE/tools/ci_gradle_distribution.sh"
 
+      - name: Configure offline task reminder Android requirements
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          p=Path('android/app/build.gradle.kts')
+          s=p.read_text().replace('compileSdk = flutter.compileSdkVersion','compileSdk = 37').replace('minSdk = flutter.minSdkVersion','minSdk = 24')
+          s=s.replace('compileOptions {','compileOptions {\n        isCoreLibraryDesugaringEnabled = true',1)
+          s+='\ndependencies { coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4") }\n'
+          p.write_text(s)
+          icon=Path('android/app/src/main/res/drawable/ic_task_reminder.xml')
+          icon.parent.mkdir(parents=True,exist_ok=True)
+          icon.write_text('<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24"><path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round" android:pathData="M12,3 A9,9 0,1 0,12 21 A9,9 0,0 0,12 3 M12,7 L12,12 L16,15" /></vector>')
+          PYTHON
       - name: Compile Android debug APK
         run: flutter build apk --debug
       - name: Verify APK exists
