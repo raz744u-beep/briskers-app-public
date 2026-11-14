@@ -157,7 +157,7 @@ void main(){
     final turboCard=await creditCard('b','Replace turbocharger and gaskets');
     final edit = find.descendant(of:turboCard,matching:find.byTooltip('Edit Assignment'));
     await click(edit);
-    var field = find.widgetWithText(TextField,'Assigned hours');
+    var field = find.descendant(of:find.byKey(const ValueKey('hours-1')),matching:find.byType(TextField));
     await click(field);
     final controller = tester.widget<TextField>(field).controller!;
     expect(controller.selection.textInside(controller.text),controller.text);
@@ -165,10 +165,10 @@ void main(){
     await tester.enterText(field,'7.5');
     await click(find.text('Cancel'));
     await click(edit);
-    field = find.widgetWithText(TextField,'Assigned hours');
+    field = find.descendant(of:find.byKey(const ValueKey('hours-1')),matching:find.byType(TextField));
     expect(tester.widget<TextField>(field).controller!.text,'0.00');
     await tester.enterText(field,'3');
-    await click(find.widgetWithText(FilledButton,'Save'));
+    await click(find.widgetWithText(FilledButton,'Save Task'));
     await until(turboCard);
     await click(find.descendant(of:turboCard,matching:
       find.widgetWithText(TextButton,'Start')));
@@ -297,9 +297,10 @@ void main(){
     await click(find.text('Tasks'));
     await until(find.byType(TasksWorkspace));
     await click(find.byKey(const Key('toggle-task-filters')));
-    await tester.tap(find.byTooltip('Status'));await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('Status:Active')));await tester.pumpAndSettle();
     await tester.tap(find.text('All').last);await tester.pumpAndSettle();
-    await until(find.text('Tasks · 1'));
+    await click(find.text('Apply Filters'));
+    await until(find.text('Tasks · 2'));
     expect(find.textContaining('2 tasks'),findsOneWidget);
     await capture('bugs30-global-completed-tasks');
     // Reuse the Job identity already verified when navigating from Invoice.

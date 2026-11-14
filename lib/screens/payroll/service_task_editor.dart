@@ -71,6 +71,7 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
   late String _job, _priority, _status, _treatment;
   late DateTime _start, _end;
   late List<TaskMechanicDraft> _mechanics;
+  late List<TextEditingController> _hours;
   Map<String, dynamic>? _customer, _vehicle;
   bool _saving = false;
   bool _datesEdited = false;
@@ -96,11 +97,13 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
           ),
         )
         .toList();
+    _hours=_mechanics.map((m)=>TextEditingController(text:(m.minutes/60).toStringAsFixed(2))).toList();
   }
 
   @override
   void dispose() {
     _description.dispose();
+    for(final controller in _hours){controller.dispose();}
     super.dispose();
   }
 
@@ -632,8 +635,10 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
                           ),
                           TextFormField(
                             key: ValueKey('hours-$i'),
-                            initialValue: (_mechanics[i].minutes / 60)
-                                .toStringAsFixed(2),
+                            selectAllOnFocus: true,
+                            controller: _hours[i],
+                            onTapAlwaysCalled:true,
+                            onTap:()=>_hours[i].selection=TextSelection(baseOffset:0,extentOffset:_hours[i].text.length),
                             readOnly: _saving || _mechanics[i].locked,
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
@@ -671,11 +676,10 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
                           child: TextButton.icon(
                             onPressed: _saving
                                 ? null
-                                : () => setState(
-                                    () => _mechanics.add(
-                                      TaskMechanicDraft('', 0),
-                                    ),
-                                  ),
+                                : () => setState(() {
+                                    _mechanics.add(TaskMechanicDraft('',0));
+                                    _hours.add(TextEditingController(text:'0.00'));
+                                  }),
                             icon: const Icon(Icons.person_add_outlined),
                             label: const Text('Add mechanic'),
                           ),

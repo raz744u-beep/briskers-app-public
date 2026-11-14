@@ -834,7 +834,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                 },
               ),
             if (task['status'] != 'done' &&
-                (general || widget.onMarkDone != null))
+                (general || (widget.onMarkDone != null && (widget.allocationsByLine[task['line_id']]??[]).any((r)=>r['state']!='Done' && r['archived_labor']!=1 && r['source_active']!=0 && r['assignment_conflict']!=1 && (r['paid_minutes'] as int? ?? 0)==0 && (r['estimated_minutes'] as int? ?? 0)>0))))
               ListTile(
                 leading: const Icon(Icons.check_circle_outline),
                 title: const Text('Mark Done'),

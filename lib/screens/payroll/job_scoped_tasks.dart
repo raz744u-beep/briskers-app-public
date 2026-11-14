@@ -146,7 +146,7 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
                 widget.onManageGeneral!(row);
               },
             ),
-          if(_status(row,general)!='Done') ListTile(leading:const Icon(Icons.check_circle_outline),title:const Text('Mark Done'),onTap:() async {
+          if(_status(row,general)!='Done' && (general || _allocations(row).any((r)=>_canChange(r) && (r['estimated_minutes'] as int? ?? 0)>0))) ListTile(leading:const Icon(Icons.check_circle_outline),title:const Text('Mark Done'),onTap:() async {
             Navigator.pop(sheet);
             await _act(key,() async {if(general){await widget.onGeneralProgress(row['id'] as int,'done');}else{for(final allocation in _allocations(row).where(_canChange)){await widget.onLaborProgress(allocation,true);}}});
           }),
