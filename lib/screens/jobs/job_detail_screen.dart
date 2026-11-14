@@ -1,3 +1,4 @@
+import '../../services/local_job_core_projection.dart';
 import '../../services/offline_invoice_payment_ledger.dart';
 import '../../services/job_task_summary.dart';
 import '../payroll/mechanic_labor_screen.dart';
@@ -777,7 +778,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     }
 
     try {
-      final job = await _api.jobDetail(widget.businessId, widget.jobId);
+      final job = await LocalJobCoreProjection.merge(localDatabase, widget.businessId,
+        await _api.jobDetail(widget.businessId, widget.jobId));
       if (!_currentLoad(epoch)) return;
       final statuses = await _api.jobStatuses(widget.businessId);
       final rawCapabilities = job['capabilities'];
@@ -4166,6 +4168,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       photoBuilder: _findingPhotoThumbnail,
       onAddToJob: _addFindingToJob,
       onRemoveFromJob: _removeFindingFromJob,
+      onNotApplicable:(finding,note)=>_changeFindingLocally(()=>_findingActions.notApplicable(widget.businessId,finding,note:note)),
       onReopen: _reopenFinding,
       onResolve: _resolveFinding,
       onInvoiceChanged: _setFindingInvoiceFlag,
@@ -5864,7 +5867,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     );
     final activeFindings = _findings.where((finding) {
       final status = finding['status']?.toString() ?? 'open';
-      if (status == 'resolved') return false;
+      if (status == 'resolved' || status=='not_applicable') return false;
 
       final repairJobId = finding['repair_job_id']?.toString() ?? '';
       if (status == 'in_job' && repairJobId == widget.jobId) {
@@ -5887,7 +5890,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       int? count,
     ) {
       return SizedBox(
-        height: 80,
+        height: 94,
         child: _JobCategoryTile(
           label: label,
           icon: icon,

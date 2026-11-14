@@ -1033,12 +1033,7 @@ class _CustomerVehicleFindingsSectionState
           builder: (context, setSheetState) {
             final vehicle = finding['_vehicle_label']?.toString().trim() ?? '';
             final date = _dateLabel(finding['created_at']);
-            final rawStatus = finding['status']?.toString() ?? 'open';
-            final status = rawStatus == 'resolved'
-                ? 'Resolved'
-                : rawStatus == 'in_job'
-                ? 'In Job'
-                : 'Open';
+            final status = VehicleFindings.statusLabel(finding);
 
             Future<void> editFinding() async {
               final controller = TextEditingController(text: localBody);
@@ -1592,7 +1587,7 @@ class _CustomerVehicleFindingsSectionState
       builder: (context, snapshot) {
         final allRows = snapshot.data ?? const <Map<String, dynamic>>[];
         final open = allRows
-            .where((finding) => finding['status']?.toString() != 'resolved')
+            .where((finding) => !const {'resolved','in_job','not_applicable'}.contains(finding['status']))
             .toList();
 
         final showVehicle = widget.vehicles.length > 1;
@@ -1673,6 +1668,7 @@ class _CustomerVehicleFindingsSectionState
                 onAddPhotos: _addFindingPhotos,
                 onAddToJob: _addFindingToJob,
                 onResolve: _resolveFinding,
+                onNotApplicable:(finding,note)=>_changeFinding(()=>_findingActions.notApplicable(widget.businessId,finding,note:note,customerId:widget.customerId)),
                 onReopen: (finding) => _changeFinding(
                   () => _findingActions.reopen(
                     widget.businessId,

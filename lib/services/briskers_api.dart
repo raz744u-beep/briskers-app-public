@@ -2877,6 +2877,13 @@ class BriskersApi {
     return result.toString();
   }
 
+  Future<void> markFindingNotApplicable(String businessId,String findingId,
+    {required String originalBody,required String body})async{
+    await networkSupabase.rpc('briskers_mark_finding_not_applicable',params:{
+      'p_business_id':businessId,'p_finding_id':findingId,
+      'p_original_body':originalBody,'p_body':body});
+  }
+
   Future<void> updateVehicleFinding(
     String businessId,
     String findingId, {

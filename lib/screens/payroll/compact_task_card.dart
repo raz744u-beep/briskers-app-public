@@ -33,7 +33,7 @@ class _CompactTaskCardState extends State<CompactTaskCard> {
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: .08),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border(left: BorderSide(color: color, width: 4)),
       ),

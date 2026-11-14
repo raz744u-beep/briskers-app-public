@@ -1,3 +1,5 @@
+import '../../services/local_job_work_date.dart';
+import '../../widgets/customer_service_visit_card.dart';
 import 'dart:async';
 
 import '../../services/local_job_retirement.dart';
@@ -12,7 +14,6 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
-import '../../core/job_status_style.dart';
 import '../../core/document_presentation.dart';
 import '../../core/vehicle_invoice_repair_search.dart';
 import '../../core/connection_mode.dart';
@@ -20,11 +21,9 @@ import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
 import '../../services/completed_task_history.dart';
 import '../../services/employee_nickname_store.dart';
-import '../../widgets/completed_work_section.dart';
 import '../../services/job_summary_visibility.dart';
 import '../../services/customer_document_summary_service.dart';
 import '../../services/historical_photo_matcher.dart';
-import '../../widgets/job_compact_card.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../jobs/job_detail_screen.dart';
 import '../jobs/job_document_screen.dart';
@@ -67,7 +66,7 @@ class _CustomerServiceHistorySectionState
   final Map<String, Future<Map<String, dynamic>>> _documentSummaries = {};
   bool _loading = true;
   final Map<String,String> _completedSearch={};
-  int _historyRevision=0;
+  final Map<String,Set<String>> _completedRepairs={};
   String? _error;
   String get _roleCode => widget.roleCode;
   String? _selectedVehicleId;
@@ -182,15 +181,22 @@ class _CustomerServiceHistorySectionState
     final data = cached is Map ? Map<String, dynamic>.from(cached)
         : <String, dynamic>{};
     final localJobs = await LocalJobRepository().forCustomer(businessId, customerId);
-    final completed=await CompletedTaskHistory(localDatabase).read(businessId,customer:customerId);
+    for(final job in localJobs){
+      final date=await LocalJobWorkDate(localDatabase).read(businessId,job['id'].toString());
+      if(date!=null)job['job_date']=DateFormat('yyyy-MM-dd').format(date);
+    }
+    final completed=await CompletedTaskHistory(localDatabase).read(businessId,customer:customerId,wholeTasksOnly:true);
     final nicknames=await EmployeeNicknameStore().all(businessId);
     _completedSearch.clear();
+    _completedRepairs.clear();
     final legacyNotes=await localDatabase.customSelect('SELECT v.job_id,v.work_summary FROM local_job_visits v JOIN local_jobs j ON j.business_id=v.business_id AND j.id=v.job_id WHERE j.business_id=? AND j.customer_id=?',
       variables:[Variable(businessId),Variable(customerId)]).get();
-    for(final row in legacyNotes){final id=row.data['job_id'] as String;_completedSearch[id]='${_completedSearch[id]??''} ${row.data['work_summary']??''}';}
+    for(final row in legacyNotes){final id=row.data['job_id'] as String;_completedSearch[id]='${_completedSearch[id]??''} ${row.data['work_summary']??''}';
+      _completedRepairs.putIfAbsent(id,()=> <String>{}).addAll((row.data['work_summary']?.toString()??'').split('\n').where((s)=>s.trim().isNotEmpty));}
 
     for(final task in completed){
       final job=task['job_id'] as String;
+      _completedRepairs.putIfAbsent(job,()=> <String>{}).add(task['description']?.toString()??'');
       _completedSearch[job]='${_completedSearch[job]??''} ${task['description']} ${task['mechanic']} ${nicknames[task['employee_id']]??''}';
     }
 
@@ -208,7 +214,7 @@ class _CustomerServiceHistorySectionState
     data['documents'] = merge(data['documents'], localDocuments);
     for(final d in (data['documents'] as List).whereType<Map>()){
       final id=d['job_id']?.toString();
-      if(id!=null)_completedSearch[id]='${_completedSearch[id]??''} ${d['document_number']??''}';
+      if(id!=null)_completedSearch[id]='${_completedSearch[id]??''} ${d['document_number']??''} ${d['document_date']??''} ${VehicleInvoiceRepairSearch.repairDescriptions(Map<String,dynamic>.from(d)).join(' ')}';
     }
     final jobs = await visibility.filter(
       List<dynamic>.from(data['jobs'] ?? const [])
@@ -221,7 +227,6 @@ class _CustomerServiceHistorySectionState
     );
     if (!mounted || !visibility.isCurrent(generation)) return true;
     setState((){
-      _historyRevision++;
       _jobs = jobs;
       _documents = documents;
       _expenses = List<dynamic>.from(data['expenses'] ?? const [])
@@ -517,7 +522,7 @@ class _CustomerServiceHistorySectionState
 
   List<Map<String, dynamic>> get _visibleJobs =>
       _jobs.where(_matchesVehicle).where((j)=>_repairQuery.trim().isEmpty ||
-        '${j['job_number']} ${j['title']} ${j['requested_work']} ${j['vehicle_label']} ${j['vehicle']} ${j['customer_name']} ${_completedSearch[j['id']]??''}'.toLowerCase().contains(_repairQuery.trim().toLowerCase())).toList();
+        '${j['job_date']??j['created_at']} ${_shortDate(j['job_date']??j['created_at'])} ${j['job_number']} ${j['title']} ${j['requested_work']} ${j['vehicle_label']} ${j['vehicle']} ${j['customer_name']} ${_completedSearch[j['id']]??''}'.toLowerCase().contains(_repairQuery.trim().toLowerCase())).toList();
 
   List<Map<String, dynamic>> get _visibleEstimates => _documents
       .where((row) => row['kind']?.toString() == 'estimate')
@@ -556,31 +561,6 @@ class _CustomerServiceHistorySectionState
       vehicle['make']?.toString().trim() ?? '',
       vehicle['model']?.toString().trim() ?? '',
     ].where((part) => part.isNotEmpty).join(' ');
-  }
-
-  Widget _statusControl(Map<String, dynamic> job) {
-    final color = colorFromHex(job['status_color']?.toString());
-    final label = job['status_name']?.toString() ?? 'Status';
-
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 150),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.94),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.65)),
-      ),
-      child: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: color,
-          fontSize: 11.5,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    );
   }
 
   Future<void> _openJob(Map<String, dynamic> job) async {
@@ -853,30 +833,33 @@ class _CustomerServiceHistorySectionState
   }
 
   Widget _jobsList() {
-    final jobs = _visibleJobs;
-    if (jobs.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(16),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: Text('No jobs for this vehicle.'),
-        ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-      child: Column(
-        children: jobs
-            .map(
-              (job) => Column(children:[JobCompactCard(
-                job: job,
-                statusControl: _statusControl(job),
-                onOpen: () => _openJob(job),
-              ),if(_canSeeFinancial)CompletedWorkSection(business:widget.businessId,job:job['id'] as String,revision:_historyRevision)]),
-            )
-            .toList(),
-      ),
-    );
+    final jobs = [..._visibleJobs,
+      for(final d in _visibleInvoices.where((d)=>(d['job_id']?.toString()??'').isEmpty))
+        {...d,'id':'invoice:${d['id']}','_invoice':d,'job_date':d['document_date'],
+          'status':DocumentPresentation(d).statusLabel.toLowerCase(),
+          'vehicle':d['vehicle_label']??widget.vehicles.whereType<Map>().where((v)=>v['id']==d['vehicle_id']).map((v)=>_vehicleLabel(Map<String,dynamic>.from(v))).firstOrNull},
+    ]..sort((a,b) =>
+      '${b['job_date'] ?? b['created_at'] ?? ''}'.compareTo('${a['job_date'] ?? a['created_at'] ?? ''}'));
+    if(jobs.isEmpty) return const Padding(padding:EdgeInsets.all(16),child:Text('No matching visits.'));
+    return Padding(padding:const EdgeInsets.all(10),child:Column(children:[
+      for(final job in jobs) Builder(builder:(context){
+        final id=job['id'].toString();
+        final invoices=job['_invoice'] is Map ? [Map<String,dynamic>.from(job['_invoice'] as Map)] : _documents.where((d)=>d['kind']=='invoice'&&d['job_id']==id).toList();
+        final descriptions=<String>{for(final d in invoices)...VehicleInvoiceRepairSearch.repairDescriptions(d)};
+        final done=<String>{...?_completedRepairs[id]}..removeWhere((s)=>s.trim().isEmpty);
+        final status=job['status']?.toString()??'open';
+        // A paid/closed invoice alone is not proof every repair was performed.
+        if(status.toLowerCase()=='completed')done.addAll(descriptions);
+        final pending=descriptions.where((text)=>!done.any((d)=>text.toLowerCase().endsWith(d.toLowerCase()))).toList();
+        return CustomerServiceVisitCard(key:ValueKey('service-visit-$id'),
+          date:_shortDate(job['job_date']??job['created_at']),
+          jobNumber:job['job_number']?.toString()??'Job',
+          vehicle:(job['vehicle']??job['vehicle_label'])?.toString()??'Vehicle not recorded',
+          status:status,completed:done.toList(),pending:pending.toList(),
+          invoices:[for(final d in invoices)(number:'#${d['document_number']??''}',open:()=>_openDocument(d))],
+          onJob:job['_invoice'] is Map ? null : ()=>_openJob(job));
+      }),
+    ]));
   }
 
   /// Show each invoice even when its line-item detail has not cached yet.
@@ -1095,7 +1078,7 @@ class _CustomerServiceHistorySectionState
   @override
   Widget build(BuildContext context) {
     final count = _view == 'invoices'
-        ? _visibleInvoices.length : _visibleJobs.length;
+        ? _visibleInvoices.length : _visibleJobs.length+_visibleInvoices.where((d)=>(d['job_id']?.toString()??'').isEmpty).length;
 
     return Card(
       child: ExpansionTile(
@@ -1108,7 +1091,7 @@ class _CustomerServiceHistorySectionState
         ),
         subtitle: _loading
             ? const Text('Loading service history...')
-            : Text(count == 1 ? '1 job' : '$count jobs'),
+            : Text(count == 1 ? '1 visit' : '$count visits'),
         children: [
           const Divider(height: 1),
           if (_loading)
@@ -1155,13 +1138,16 @@ class _CustomerServiceHistorySectionState
               const Divider(height: 1),
             ],
             _vehicleSelector(),
-            _historyTypeSelector(),
-            if (_view == 'invoices') Padding(
+            if(widget.initialVehicleId != null) _historyTypeSelector(),
+            if (_view == 'invoices' || _view == 'jobs') Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
               child: SearchBar(
+                constraints:const BoxConstraints(minHeight:48,maxHeight:48),
+                backgroundColor:const WidgetStatePropertyAll(Colors.white),
+                side:const WidgetStatePropertyAll(BorderSide(color:Color(0xFFD0D5DD))),
                 key: const ValueKey('vehicle-repair-history-search'),
                 controller: _repairSearch,
-                hintText: 'Search repairs, parts or invoice #',
+                hintText: 'Search repairs, parts, dates, jobs…',
                 leading: const Icon(Icons.search),
                 trailing: [
                   if (_repairQuery.isNotEmpty)

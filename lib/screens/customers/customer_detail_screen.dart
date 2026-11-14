@@ -669,7 +669,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           Text('${items.length}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
           const SizedBox(width: 6), const Icon(Icons.chevron_right, size: 18),
         ]),
-        onTap: () => title == 'Jobs'
+        onTap: () => title == 'Service History'
             ? _showCustomerServiceHistory()
             : title == 'Invoices' || title == 'Estimates'
               ? _showCustomerDocuments(title)
@@ -682,7 +682,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             const LinearProgressIndicator(minHeight: 2),
           if (snapshot.hasError)
             const ListTile(title: Text('Saved customer activity unavailable')),
-          link('Jobs', Icons.build_outlined, BriskersColors.jobs, jobs),
+          link('Service History', Icons.history_outlined, BriskersColors.jobs, jobs),
           CustomerFindingsOverviewRow(
             businessId: widget.businessId,
             customerId: widget.customerId,
@@ -1408,17 +1408,14 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         ),
       ),
       bottomNavigationBar: widget.sharedBottomNavigationBar,
-      // The Overview already has a full-width '+ New' action. Do not
-      // overlay Visits, Payments and the invoice summary with a duplicate FAB.
-      // Keep quick actions available in the other customer tabs.
-      floatingActionButton: _data == null ||
-              !_canManageQuickActions ||
-              _customerTab == 0
+      floatingActionButton: _data == null || !_canManageQuickActions
           ? null
-          : FloatingActionButton(
+          : FloatingActionButton.extended(
               onPressed: _showQuickActions,
-              tooltip: 'Customer actions',
-              child: const Icon(Icons.add),
+              backgroundColor: BriskersColors.customers,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New'),
             ),
       body: _data == null
           ? widget.initialCustomerSummary == null
@@ -1464,7 +1461,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(16,16,16,100),
                 children: [
                   if (_showingLocal)
                     const Padding(
@@ -1561,27 +1558,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  if (_customerTab == 0 && _canManageQuickActions)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Row(children: [
-                        Expanded(child: FilledButton.icon(
-                          onPressed: _showQuickActions,
-                          icon: const Icon(Icons.add),
-                          label: const Text('New'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: BriskersColors.customers,
-                            foregroundColor: Colors.white,
-                          ),
-                        )),
-                        const SizedBox(width: 10),
-                        Expanded(child: OutlinedButton.icon(
-                          onPressed: null,
-                          icon: const Icon(Icons.chat_bubble_outline),
-                          label: const Text('New Message • Coming Soon'),
-                        )),
-                      ]),
-                    ),
                   if (_customerTab == 0) _customerOverviewCard(),
                   const SizedBox(height: 10),
                   if (_customerTab == 1) CustomerProblemFlagCard(
@@ -1594,6 +1570,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                   const SizedBox(height: 18),
                   if (_customerTab == 2) CustomerVehiclesSection(
                     vehicles: vehicles,
+                    showAdd: false,
                     onAdd: _addVehicle,
                     onEdit: _editVehicle,
                     onRepairHistory: _showVehicleRepairHistory,

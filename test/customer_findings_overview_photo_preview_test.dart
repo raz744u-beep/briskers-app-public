@@ -36,8 +36,10 @@ void main() {
       // Same finding also appears in a past Job; never count it twice.
       {'id': 'b', 'status': 'in_job', 'vehicle_id': 'vehicle-b'},
       {'id': '', 'status': 'open'},
+      {'id':'d','status':'not_applicable'},
     ]);
-    expect(counts.total, 3);
+    expect(counts.total, 4);
+    expect(counts.notApplicable,1);
     expect(counts.open, 1);
     expect(counts.inJob, 1);
     expect(counts.resolved, 1);
@@ -64,7 +66,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.text('Vehicle Findings'), findsOneWidget);
-    expect(find.text('Open 2 • In Job 1 • Resolved 3'), findsOneWidget);
+    expect(find.text('Unresolved 2 • Resolved 4'), findsOneWidget);
     expect(find.text('6'), findsOneWidget);
     await tester.tap(find.byKey(
       const ValueKey('customer-overview-vehicle-findings'),
@@ -73,7 +75,7 @@ void main() {
     expect(opened, 1);
     expect(reader.reads, 4);
     expect(reader.localReads, 2);
-    expect(find.text('Open 1 • In Job 1 • Resolved 4'), findsOneWidget);
+    expect(find.text('Unresolved 1 • Resolved 5'), findsOneWidget);
     expect(find.text('6'), findsOneWidget);
   });
 
@@ -81,7 +83,7 @@ void main() {
     final source = File('lib/screens/customers/customer_detail_screen.dart')
         .readAsStringSync();
     expect(source, contains('CustomerFindingsOverviewRow('));
-    final overview = source.indexOf("link('Jobs', Icons.build_outlined");
+    final overview = source.indexOf("link('Service History', Icons.history_outlined");
     final findings = source.indexOf('CustomerFindingsOverviewRow(', overview);
     final invoices = source.indexOf("link('Invoices',", overview);
     expect(findings, greaterThan(overview));

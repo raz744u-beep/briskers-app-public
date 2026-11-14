@@ -1,4 +1,5 @@
 import 'package:briskers_app/services/payroll_lan_peer.dart';
+import 'package:briskers_app/services/completed_task_history.dart';
 import 'package:briskers_app/core/connection_mode.dart';
 import 'dart:convert';
 import 'dart:io';
@@ -101,6 +102,13 @@ void main(){
     await LocalInvoiceTaskStore(db).save('shop','6376',detail);
     expect((await repo.tasks()).single['description'],'Corrected task only');expect((detail['lines'] as List).single['description'],'Original invoice description');
     expect(await db.customSelect('SELECT * FROM regular_payroll_payments').get(),isEmpty);
+  });
+  test('customer history only calls a repair completed when every active assignment is Done',()async{
+    final id=await create('history');
+    expect(await CompletedTaskHistory(db).read('shop',job:'j56',wholeTasksOnly:true),hasLength(1));
+    await repo.assignTask(id,'kam','Kam');await repo.setEstimatedMinutes(id,'kam',120);
+    expect(await CompletedTaskHistory(db).read('shop',job:'j56'),hasLength(1));
+    expect(await CompletedTaskHistory(db).read('shop',job:'j56',wholeTasksOnly:true),isEmpty);
   });
   test('text edit on mixed Done/Open allocations does not complete or credit the unfinished share',()async{
     final id=await create('mixed');await repo.assignTask(id,'kam','Kam');await repo.setEstimatedMinutes(id,'kam',120);

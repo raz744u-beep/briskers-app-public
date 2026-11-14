@@ -61,6 +61,13 @@ class _Api extends BriskersApi {
       };
   final Map<String, Map<String, dynamic>> rows;
   int addCalls = 0;
+  int notApplicableCalls=0;
+  bool loseNotApplicableReply=false;
+  @override Future<void> markFindingNotApplicable(String businessId,String findingId,{required String originalBody,required String body})async{
+    notApplicableCalls++;
+    patch(findingId,{'status':'not_applicable','body':body,'repair_job_id':null,'include_on_invoice':false,'resolved_at':'2026-11-14T10:00:00Z'});
+    if(loseNotApplicableReply){loseNotApplicableReply=false;throw StateError('lost reply');}
+  }
   int resolveCalls = 0;
   bool loseResolveReply = false;
   bool resolveWrongJob = false;
@@ -214,6 +221,23 @@ void main() {
     );
   });
   tearDown(() async => db.close());
+
+  test('Not Applicable keeps identity and body, optional note once, lost reply never duplicates',()async{
+    final original=finding('fixture-f1');
+    final changed=await actions.notApplicable(business,original,note:'Repaired elsewhere');
+    await actions.notApplicable(business,original,note:'Repaired elsewhere');
+    expect(changed['status'],'not_applicable');
+    expect(changed['body'],'${original['body']}\nNot Applicable note: Repaired elsewhere');
+    expect((await db.customSelect("SELECT * FROM sync_outbox WHERE entity_type='finding_action'").get()).length,1);
+    final restored=VehicleFindingActionsService(database:db,api:api);
+    expect((await restored.project(business,[original])).single['status'],'not_applicable');
+    api.loseNotApplicableReply=true;await restored.flush(business);await restored.flush(business);
+    expect(api.notApplicableCalls,1);expect(await db.customSelect('SELECT * FROM sync_outbox').get(),isEmpty);
+    final saved=(await db.customSelect("SELECT * FROM local_findings WHERE id='fixture-f1'").getSingle()).data;
+    expect(saved['status'],'not_applicable');expect(saved['body'],changed['body']);
+    await restored.reopen(business,{...original,...saved});await restored.flush(business);
+    expect(api.rows['fixture-f1']!['status'],'open');expect(api.rows['fixture-f1']!['body'],changed['body']);
+  });
 
   test(
     'pending customer-created finding can be edited from Job before sync',
@@ -912,7 +936,7 @@ void main() {
       find.text('Needs verification • saved on this device'),
       findsNothing,
     );
-    expect(find.text('Open'), findsOneWidget);
+    expect(find.text('Unresolved'), findsOneWidget);
     expect(find.textContaining('waiting to sync'), findsNothing);
   });
 
@@ -944,7 +968,7 @@ void main() {
           ),
         ),
       );
-      expect(find.text('Open 1 • In Job 1 • Resolved 1'), findsOneWidget);
+      expect(find.text('Unresolved 1 • Resolved 2'), findsOneWidget);
       // Multiple active findings are compact by default. Expand each row
       // deliberately before expecting the photo and editing controls.
       final first = find.byKey(const ValueKey('finding-collapsed-fixture-f1'));
@@ -962,7 +986,8 @@ void main() {
       await tester.tap(second);
       await tester.pumpAndSettle();
       expect(find.text('Include in Invoice Notes'), findsNWidgets(2));
-      expect(find.text('Resolve'), findsNWidgets(2));
+      expect(find.text('Resolve'), findsNothing);
+      expect(find.text('Resolved on this job'), findsOneWidget);
     },
   );
 }

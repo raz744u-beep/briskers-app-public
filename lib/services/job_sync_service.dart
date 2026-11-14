@@ -1,3 +1,4 @@
+import 'local_job_core_projection.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -573,7 +574,8 @@ class JobSyncService {
     final rawJob = bundle['job'];
     if (rawJob is! Map) return;
 
-    final job = Map<String, dynamic>.from(rawJob);
+    final job = await LocalJobCoreProjection.merge(
+      _database, businessId, Map<String, dynamic>.from(rawJob));
     final jobId = job['id']?.toString() ?? '';
     if (jobId.isEmpty) return;
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
@@ -691,7 +693,7 @@ class JobSyncService {
         completed_at=${preserveStatus ? 'local_jobs.completed_at' : 'excluded.completed_at'},
         server_updated_at=excluded.server_updated_at,
         row_version=excluded.row_version,
-        sync_state='${preserveStatus ? 'pending' : 'synced'}'
+        sync_state=${job['_local_core_pending'] == true ? 'local_jobs.sync_state' : "'${preserveStatus ? 'pending' : 'synced'}'"}
       ''',
       [
         jobId,

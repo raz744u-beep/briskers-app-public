@@ -82,6 +82,14 @@ class VehicleFindingActionsService {
     jobId: jobId,
     customerId: customerId,
   );
+  Future<Map<String, dynamic>> notApplicable(
+    String businessId, Map<String,dynamic> finding, {String note='', String? customerId}
+  ) => _change(businessId, finding, 'not_applicable', {
+    'status':'not_applicable', 'repair_job_id':null, 'include_on_invoice':false,
+    'body':'${finding['body']??''}${note.trim().isEmpty?'':'\nNot Applicable note: ${note.trim()}'}',
+    'resolved_at':DateTime.now().toUtc().toIso8601String(),
+  }, customerId:customerId);
+
   Future<Map<String, dynamic>> reopen(
     String businessId,
     Map<String, dynamic> finding, {
@@ -177,6 +185,15 @@ class VehicleFindingActionsService {
           }
         }
       }
+      if (action == 'not_applicable' && current['status'] != 'open' && current['status'] != 'not_applicable') {
+        throw StateError('Remove this finding from its Job before marking it Not Applicable.');
+      }
+      if (action == 'not_applicable' && current['status']=='not_applicable') {
+        updated=current; return;
+      }
+      if (action == 'not_applicable' && current['body'] != finding['body']) {
+        throw StateError('Finding description changed. Reopen it before continuing.');
+      }
       final relevant = patch.keys.where((key) => key != 'resolved_at');
       if (relevant.every((key) => current[key] == patch[key])) {
         updated = current;
@@ -192,7 +209,7 @@ class VehicleFindingActionsService {
         '''
         INSERT INTO local_findings(id,business_id,vehicle_id,found_job_id,repair_job_id,body,status,include_on_invoice,created_at,resolved_at,can_edit,can_delete,row_version,sync_state)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'pending')
-        ON CONFLICT(id) DO UPDATE SET status=excluded.status, repair_job_id=excluded.repair_job_id,
+        ON CONFLICT(id) DO UPDATE SET body=excluded.body,status=excluded.status, repair_job_id=excluded.repair_job_id,
           include_on_invoice=excluded.include_on_invoice,resolved_at=excluded.resolved_at,sync_state='pending'
       ''',
         [
@@ -201,7 +218,7 @@ class VehicleFindingActionsService {
           current['vehicle_id'] ?? current['_vehicle_id'],
           current['found_job_id'],
           updated['repair_job_id'],
-          current['body'] ?? '',
+          updated['body'] ?? '',
           updated['status'] ?? 'open',
           updated['include_on_invoice'] == true ? 1 : 0,
           _unix(current['created_at']),
@@ -229,6 +246,7 @@ class VehicleFindingActionsService {
             'action': action,
             '_activity_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
             'patch': patch,
+            if(action=='not_applicable') 'original_body':current['body'],
           }),
           DateTime.now().millisecondsSinceEpoch ~/ 1000,
         ],
@@ -490,6 +508,10 @@ class VehicleFindingActionsService {
                 );
               case 'resolve':
                 await _api.resolveVehicleFinding(businessId, findingId, jobId);
+              case 'not_applicable':
+                await _api.markFindingNotApplicable(businessId,findingId,
+                  originalBody:payload['original_body']?.toString()??'',
+                  body:(payload['patch'] as Map)['body'].toString());
               case 'reopen':
                 await _api.reopenVehicleFinding(businessId, findingId);
               default:
@@ -669,6 +691,7 @@ class VehicleFindingActionsService {
           '';
       if (findingJobId.isEmpty || findingJobId != documentJobId) continue;
       final id = finding['id'].toString();
+      if(finding['status']=='not_applicable'){notes.remove(id);continue;}
       final existing = notes[id];
       final pendingFields =
           finding['_pending_finding_fields'] as List? ?? const [];

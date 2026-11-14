@@ -85,8 +85,8 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
     _start = LocalTaskSchedule.parse(v.start)!;
     _end = LocalTaskSchedule.parse(v.end)!;
     _priority = v.priority;
-    _status = v.status;
-    _treatment = v.treatment;
+    _status = widget.editing ? v.status : 'Open';
+    _treatment = widget.editing ? v.treatment : 'unpaid';
     _mechanics = v.mechanics
         .map(
           (m) => TaskMechanicDraft(
@@ -711,7 +711,7 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
                             ),
                           ],
                         ),
-                        Column(
+                        widget.editing ? Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             _heading('Work Status'),
@@ -732,11 +732,21 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
                                   : (v) => setState(() => _status = v!),
                             ),
                           ],
-                        ),
+                        ) : const SizedBox.shrink(),
                       ),
                       const SizedBox(height: 16),
                       _heading('Payroll Treatment'),
-                      if (widget.payrollLocked)
+                      if (!widget.editing) ...[
+                        const Text('Unpaid when completed'),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          controlAffinity: ListTileControlAffinity.leading,
+                          title: const Text('Already paid / historical work'),
+                          value: _treatment == 'paid',
+                          onChanged: _saving ? null : (value) => setState(() =>
+                            _treatment = value == true ? 'paid' : 'unpaid'),
+                        ),
+                      ] else if (widget.payrollLocked)
                         const InputDecorator(
                           decoration: InputDecoration(
                             fillColor: Color(0xFFF2F4F2),
