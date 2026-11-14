@@ -28,7 +28,14 @@ javac -source 11 -target 11 -classpath "$platform" -d "$work/classes" tools/andr
 (cd "$work/dex" && zip -q "$work/probe.apk" classes.dex)
 "$build_tools/zipalign" -f 4 "$work/probe.apk" "$work/aligned.apk"
 if [[ "$signing" == debug ]]; then
-  "$build_tools/apksigner" sign --ks "$HOME/.android/debug.keystore" --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android "$work/aligned.apk"
+  # AGP/SDK versions can relocate the generated debug keystore. Ask the same
+  # Gradle project that built this APK instead of assuming a home directory.
+  debug_store=$(cd android && ./gradlew :app:signingReport --console=plain -q | awk '
+    /^Variant: / { selected=($0=="Variant: debug") }
+    selected && /^Store: / { sub(/^Store: /,""); print; selected=0 }
+  ')
+  test -f "$debug_store"
+  "$build_tools/apksigner" sign --ks "$debug_store" --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android "$work/aligned.apk"
 else
   # Keystore values stay in environment/stdin; never print them or pass passwords
   # on a command line. This uses the existing permanent release identity.
@@ -40,13 +47,13 @@ else
   unset BRISKERS_PROBE_STORE_PASS BRISKERS_PROBE_KEY_PASS
 fi
 "$build_tools/aapt" dump resources "$apk" > "$evidence/resources.txt"
-rg 'drawable/ic_task_reminder' "$evidence/resources.txt"
+grep -F 'drawable/ic_task_reminder' "$evidence/resources.txt"
 adb shell svc wifi disable
 adb shell svc data disable
 adb shell pm grant "$package" android.permission.POST_NOTIFICATIONS
 adb shell am force-stop "$package"
 adb install -r "$work/aligned.apk"
 adb shell am instrument -w com.briskers.reminderprobe/com.briskers.reminderprobe.ReminderProbe | tee "$evidence/notification-probe.txt"
-rg 'REMINDER_PROBE_PASS' "$evidence/notification-probe.txt"
+grep -F 'REMINDER_PROBE_PASS' "$evidence/notification-probe.txt"
 adb logcat -d -s ScheduledNotifReceiver AndroidRuntime > "$evidence/notification-logcat.txt"
 printf 'target=%s\napk_sha256=%s\noffline_wifi_disabled=true\noffline_mobile_data_disabled=true\n' "$package" "$(sha256sum "$apk" | cut -d ' ' -f1)" > "$evidence/notification-identity.txt"
