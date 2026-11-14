@@ -47,7 +47,7 @@ void main() {
     await tester.pump();
     expect(service.localReads, 1);
     expect(service.remoteReads, 1);
-    expect(find.text('Open 2 • In Job 1 • Resolved 0'), findsOneWidget);
+    expect(find.text('Unresolved 2 • Resolved 1'), findsOneWidget);
     expect(find.byKey(const ValueKey('customer-findings-total')), findsOneWidget);
     expect(find.text('3'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing,
@@ -56,7 +56,7 @@ void main() {
     service.remote.complete(
         const CustomerFindingCounts(open: 2, inJob: 1, resolved: 1));
     await tester.pumpAndSettle();
-    expect(find.text('Open 2 • In Job 1 • Resolved 1'), findsOneWidget);
+    expect(find.text('Unresolved 2 • Resolved 2'), findsOneWidget);
     expect(find.text('4'), findsOneWidget);
   });
 
