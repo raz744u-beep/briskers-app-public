@@ -84,6 +84,8 @@ void main() {
     // J-50 equivalent: the customer paid, but Kam has not. Direct Done
     // must preserve the allocation and credit exactly one unpaid hour.
     await click(find.text('Oil Change').first);
+    await tester.longPress(find.text('Oil Change').first);
+    await tester.pumpAndSettle();
     await click(find.text('Mark Done'));
     await until(find.text('Done').first);
     var earned=(await tester.runAsync(()=>repo.work()))!.single;
