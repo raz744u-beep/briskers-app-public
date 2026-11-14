@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/app.dart';
@@ -51,9 +53,43 @@ void main(){
     for(final width in [412.0,360.0]){t.view.physicalSize=Size(width,915);await t.pumpAndSettle();expect(t.takeException(),isNull);for(final tile in t.widgetList<EmployeeListTile>(find.byType(EmployeeListTile))){expect(find.text(tile.pay),findsWidgets);}expect(t.getSize(find.byType(EmployeeListTile).first).height,lessThan(90));}
     await t.tap(find.byType(EmployeeListTile).first);await t.longPress(find.byType(EmployeeListTile).first);await t.pumpAndSettle();expect(opens,1);expect(actions,1);
   });
-  testWidgets('only active shaped profile tab is colored and selecting tabs preserves their order',(t)async{
-    size(t);await t.pumpWidget(MaterialApp(home:DefaultTabController(length:4,child:Scaffold(body:Column(children:[const ApprovedProfileTabs(),Expanded(child:TabBarView(children:[for(final n in ['Work','Payroll','Reports','Taxes & 1099'])Text('$n body')]))])))));
-    for(final selected in ['Work','Payroll','Reports','Taxes & 1099']){await t.tap(find.text(selected));await t.pumpAndSettle();for(final label in ['Work','Payroll','Reports','Taxes & 1099']){final box=t.widget<Container>(find.byKey(ValueKey('profile-tab-$label'))).decoration! as BoxDecoration;final colors=(box.gradient! as LinearGradient).colors;expect(colors.first==const Color(0xFFF3F5F9),label!=selected);}expect(find.text('$selected body').hitTestable(),findsOneWidget);}
+  testWidgets('active tab stripe exactly matches its full-width background on every tab',(t)async{
+    size(t);
+    final boundary=GlobalKey();
+    const labels=['Work','Payroll','Reports','Taxes & 1099'];
+    const colors=[taskBlue,taskGreen,Color(0xFF9500C7),Color(0xFF62666D)];
+    await t.pumpWidget(MaterialApp(home:DefaultTabController(length:4,child:Scaffold(body:Column(children:[
+      RepaintBoundary(key:boundary,child:const ApprovedProfileTabs()),
+      Expanded(child:TabBarView(children:[for(final n in labels)Text('$n body')])),
+    ])))));
+    for(final width in [412.0,360.0]){
+      t.view.physicalSize=Size(width,915);await t.pumpAndSettle();
+      for(final (index,selected) in labels.indexed){
+        await t.tap(find.text(selected));await t.pump(const Duration(milliseconds:50));
+        // No traveling indicator or stripe beneath an inactive tab during switching.
+        for(final label in labels){
+          expect(find.byKey(ValueKey('profile-tab-stripe-$label')),label==selected?findsOneWidget:findsNothing);
+        }
+        await t.pumpAndSettle();
+        final bounds=t.getRect(find.byKey(ValueKey('profile-tab-$selected')));
+        expect(bounds.height,40);expect(bounds.width,width/4);
+        final origin=t.getTopLeft(find.byKey(boundary));
+        final pixels=await t.runAsync(()async{
+          final image=await (boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary).toImage(pixelRatio:1);
+          final bytes=await image.toByteData(format:ui.ImageByteFormat.rawRgba);image.dispose();return bytes!;
+        });
+        int pixel(int x,int y){final offset=(y*width.toInt()+x)*4;return (pixels!.getUint8(offset+3)<<24)|(pixels.getUint8(offset)<<16)|(pixels.getUint8(offset+1)<<8)|pixels.getUint8(offset+2);}
+        final left=(bounds.left-origin.dx).round(),bottom=(bounds.bottom-origin.dy).round();
+        final expected=colors[index].toARGB32();
+        // Read rendered pixels, including both edges, rather than just inspecting decorations.
+        for(var x=left;x<left+bounds.width.round();x++){
+          expect(pixel(x,bottom-2),expected,reason:'$selected stripe pixel $x at width $width');
+        }
+        expect(pixel(left+6,bottom-8),expected,reason:'Tab background and stripe must be identical');
+        expect(find.text('$selected body').hitTestable(),findsOneWidget);
+        if(width==412)await capture(t,boundary,'profile-tab-stripe-$index');
+      }
+    }
     expect(t.takeException(),isNull);
   });
   testWidgets('completed General Tasks are excluded only by Active and remain in All and Done filters',(t)async{

@@ -482,11 +482,8 @@ class ApprovedProfileTabs extends StatelessWidget {
       animation: controller,
       builder: (context, _) => TabBar(
         indicatorSize: TabBarIndicatorSize.tab,
-        indicator: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: entries[controller.index].$2, width: 3),
-          ),
-        ),
+        // Paint the stripe within the selected tab, not as a sliding indicator.
+        indicator: const BoxDecoration(),
         labelPadding: EdgeInsets.zero,
         dividerHeight: 0,
         labelColor: Colors.white,
@@ -495,48 +492,64 @@ class ApprovedProfileTabs extends StatelessWidget {
           for (final (i, entry) in entries.indexed)
             Tab(
               height: 40,
-              child: ClipPath(
-                clipper: _ProfileTabClip(),
-                child: Container(
-                  key: ValueKey('profile-tab-${entry.$1}'),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: controller.index == i
-                          ? [entry.$2, Color.lerp(entry.$2, Colors.black, .35)!]
-                          : [const Color(0xFFF3F5F9), const Color(0xFFE4E8F0)],
-                    ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Row(
-                        children: [
-                          Icon(
-                            [
-                              Icons.layers_outlined,
-                              Icons.payments_outlined,
-                              Icons.bar_chart,
-                              Icons.description_outlined,
-                            ][i],
-                            size: 19,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            entry.$1,
-                            style: const TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ClipPath(
+                    clipper: _ProfileTabClip(),
+                    child: Container(
+                      key: ValueKey('profile-tab-${entry.$1}'),
+                      alignment: Alignment.center,
+                      decoration: controller.index == i
+                          ? BoxDecoration(color: entry.$2)
+                          : const BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [Color(0xFFF3F5F9), Color(0xFFE4E8F0)],
+                              ),
                             ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Row(
+                            children: [
+                              Icon(
+                                [
+                                  Icons.layers_outlined,
+                                  Icons.payments_outlined,
+                                  Icons.bar_chart,
+                                  Icons.description_outlined,
+                                ][i],
+                                size: 19,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                entry.$1,
+                                style: const TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
-                ),
+                  if (controller.index == i)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: 3,
+                      child: ColoredBox(
+                        key: ValueKey('profile-tab-stripe-${entry.$1}'),
+                        color: entry.$2,
+                      ),
+                    ),
+                ],
               ),
             ),
         ],
