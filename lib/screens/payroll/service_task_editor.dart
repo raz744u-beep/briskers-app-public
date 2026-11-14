@@ -28,11 +28,13 @@ class ServiceTaskDraft {
     required this.priority,
     required this.status,
     required this.treatment,
+    this.datesEdited = false,
     this.newCustomer,
     this.newVehicle,
   });
   final String job, description, start, end, priority, status, treatment;
   final List<TaskMechanicDraft> mechanics;
+  final bool datesEdited;
   final Map<String, dynamic>? newCustomer, newVehicle;
 }
 
@@ -71,6 +73,7 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
   late List<TaskMechanicDraft> _mechanics;
   Map<String, dynamic>? _customer, _vehicle;
   bool _saving = false;
+  bool _datesEdited = false;
   String? _error;
   @override
   void initState() {
@@ -262,6 +265,10 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
     if (selected != null && mounted) {
       setState(() {
         _job = selected;
+        if(!_datesEdited) {
+          final date=LocalTaskSchedule.parse(widget.jobs.where((j)=>j['id']==selected).firstOrNull?['work_date']);
+          if(date!=null) {_start=date;_end=date;}
+        }
         final lead = widget.jobs
             .where((j) => j['id'] == selected)
             .firstOrNull?['assigned_employee_id'];
@@ -359,6 +366,7 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
     );
     if (d != null && mounted) {
       setState(() {
+        _datesEdited = true;
         if (start) {
           _start = d;
         } else {
@@ -438,6 +446,7 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
           priority: _priority,
           status: _treatment == 'paid' ? 'Done' : _status,
           treatment: _treatment,
+          datesEdited: _datesEdited,
         ),
       );
       if (mounted) Navigator.pop(context, true);
@@ -565,7 +574,7 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
                       TextFormField(
                         key: const ValueKey('task-description'),
                         controller: _description,
-                        readOnly: widget.invoiceLabor || _saving,
+                        readOnly: _saving,
                         minLines: 2,
                         maxLines: 4,
                         autocorrect: true,
@@ -656,7 +665,7 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
                           ),
                         ),
                       ],
-                      if (!widget.editing || _mechanics.isEmpty)
+                      if (!_saving)
                         Align(
                           alignment: Alignment.centerLeft,
                           child: TextButton.icon(

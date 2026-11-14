@@ -76,6 +76,7 @@ check_records baseline-launched
 intermediate=${BRISKERS_UPGRADE_INTERMEDIATE:-}
 if [ -n "$intermediate" ]; then
   case "$(basename "$intermediate")" in
+    Briskers-v0.10.9-b4649.apk) intermediate_hash=3366b38810f0d168b74afe813d39ee494253e44add38028dc904cb20111aff8a ;;
     Briskers-v0.10.9-b4648.apk) intermediate_hash=b2b097237f2638daedcc18536b085ca191749a0abf862bb6735e200c5e1094ee ;;
     Briskers-v0.10.9-b4646.apk) intermediate_hash=229311aa1d6b8b4935c3ec60d4684e2ec683e8204f732334248d3e07502ca590 ;;
     Briskers-v0.10.9-b4645.apk) intermediate_hash=55142e76737d18ceafcfca603b18dc98e8c5fa4b358480e2d12f87dd79fd4024 ;;

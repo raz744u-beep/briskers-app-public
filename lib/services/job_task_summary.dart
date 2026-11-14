@@ -117,7 +117,7 @@ class JobTaskSummary {
       LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id
       LEFT JOIN regular_payroll_estimates v ON v.business_id=p.business_id AND v.task_id=p.task_id AND v.employee_id=p.employee_id
       WHERE t.business_id=? AND t.job_id IN (${List.filled(jobs.length, '?').join(',')})
-        AND (COALESCE(m.active,1)=1 OR p.state='Done')
+        AND (COALESCE(m.active,1)=1 OR (p.state='Done' AND COALESCE(h.minutes,v.minutes,0)>0))
       GROUP BY t.job_id,COALESCE(h.employee_id,p.employee_id),COALESCE(h.employee_name,e.name)${nicknamesReady ? ",n.nickname" : ""} ORDER BY e.name,p.employee_id
     """,
           variables: [Variable(business), ...jobs.map(Variable<String>.new)],

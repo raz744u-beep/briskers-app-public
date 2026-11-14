@@ -49,17 +49,23 @@ void main() {
 
     await tester.tap(find.byKey(const Key('toggle-task-filters')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Task Type'));
+    await tester.tap(find.byKey(const ValueKey('Task Type:All Types')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Rechecks').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Apply Filters'));
     await tester.pumpAndSettle();
     expect(find.text('Separate recheck after repair'), findsNWidgets(2)); // Header and expandable details.
     expect(find.text('Ordinary task-first job work'), findsNothing);
     expect(find.text('Invoice labor task'), findsNothing);
 
-    await tester.tap(find.text('Task Type'));
+    await tester.tap(find.byKey(const Key('toggle-task-filters')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('Task Type:Rechecks')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Invoice Labor').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Apply Filters'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('J-11'));
     await tester.pumpAndSettle();

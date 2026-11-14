@@ -2,13 +2,13 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('TEST global Tasks preserves white job task cards and unclipped list', () {
+  test('global Tasks preserves shared job cards and compact task details', () {
     final source = File('lib/screens/payroll/tasks_workspace.dart').readAsStringSync();
-    expect(source, contains('color: Colors.white'));
+    expect(source, contains('CompactTaskCard('));
     expect(source, contains('widget.serviceTaskCard(task)'));
-    expect(source, contains('Expanded(child:ClipRect(child:'));
+    expect(source, contains('child: ClipRect('));
     expect(source, contains('return JobListApprovedCard('));
-    expect(source, contains('invoiceNumber:invoice'));
+    expect(source, contains('invoiceNumber: invoice'));
     expect(source, contains('widget.onRecoverHistory!()'));
   });
 

@@ -110,8 +110,8 @@ void main() {
 
     await tester.longPress(find.text('Replace front struts').first);
     await tester.pumpAndSettle();
-    expect(find.text('Manage labor assignments'), findsOneWidget);
-    await tester.tap(find.text('Manage labor assignments'));
+    expect(find.widgetWithText(ListTile,'Edit Assignment'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ListTile,'Edit Assignment'));
     await tester.pumpAndSettle();
     expect(assignmentsOpened, isTrue);
     expect(tester.takeException(), isNull);

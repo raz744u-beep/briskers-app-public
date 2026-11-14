@@ -299,7 +299,7 @@ void main(){
     await click(find.byKey(const Key('toggle-task-filters')));
     await tester.tap(find.byTooltip('Status'));await tester.pumpAndSettle();
     await tester.tap(find.text('All').last);await tester.pumpAndSettle();
-    await until(find.text('Jobs with Tasks · 1'));
+    await until(find.text('Tasks · 1'));
     expect(find.textContaining('2 tasks'),findsOneWidget);
     await capture('bugs30-global-completed-tasks');
     // Reuse the Job identity already verified when navigating from Invoice.

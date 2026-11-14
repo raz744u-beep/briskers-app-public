@@ -17,7 +17,7 @@ void main() {
     // The Owner correction reuses the existing immutable allocation. Its
     // earned/credited minutes and estimates update atomically, without
     // recording a new payment or creating another credit.
-    expect(payroll, contains('reviseCompletedUnpaid: previous == employee'));
+    expect(payroll, contains('reviseCompletedUnpaid:true'));
     expect(payroll, contains('bool reviseCompletedUnpaid = false'));
     expect(payroll, contains('owner_corrected_completed_unpaid_hours'));
     expect(payroll, contains('LocalMechanicWorkCreditRepository(database: db).recordWork('));

@@ -39,11 +39,35 @@ class LocalJobWorkDate {
 
   Future<void> save(String business, String job, DateTime date) async {
     await prepare();
-    await db.customStatement(
-      'INSERT INTO local_job_work_dates(business_id,job_id,work_date) '
-      'SELECT business_id,id,? FROM local_jobs WHERE business_id=? AND id=? '
-      'ON CONFLICT(business_id,job_id) DO UPDATE SET work_date=excluded.work_date',
-      [LocalTaskSchedule.day(date), business, job],
-    );
+    await LocalTaskSchedule(db).prepare();
+    await db.transaction(() async {
+      await db.customStatement(
+        'INSERT INTO local_job_work_dates(business_id,job_id,work_date) '
+        'SELECT business_id,id,? FROM local_jobs WHERE business_id=? AND id=? '
+        'ON CONFLICT(business_id,job_id) DO UPDATE SET work_date=excluded.work_date',
+        [LocalTaskSchedule.day(date), business, job],
+      );
+      final exists = await db
+          .customSelect(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='regular_payroll_tasks'",
+          )
+          .get();
+      if (exists.isNotEmpty) {
+        await db.customStatement(
+          "UPDATE regular_task_schedule_v1 SET start_date=?,end_date=?,revision=revision+1 WHERE business_id=? "
+          "AND EXISTS(SELECT 1 FROM regular_task_metadata m JOIN regular_payroll_tasks t ON t.business_id=m.business_id AND t.id=m.task_id "
+          "WHERE m.business_id=regular_task_schedule_v1.business_id AND m.task_id=regular_task_schedule_v1.task_id AND m.date_mode='inherited' AND t.job_id=?) "
+          "AND (start_date<>? OR end_date<>?)",
+          [
+            LocalTaskSchedule.day(date),
+            LocalTaskSchedule.day(date),
+            business,
+            job,
+            LocalTaskSchedule.day(date),
+            LocalTaskSchedule.day(date),
+          ],
+        );
+      }
+    });
   }
 }

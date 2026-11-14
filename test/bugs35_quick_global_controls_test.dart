@@ -1,3 +1,4 @@
+import 'package:briskers_app/screens/payroll/compact_task_card.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:drift/native.dart';
@@ -171,7 +172,7 @@ void main() {
       }
 
       await click(find.textContaining('Marzel Stafford').first);
-      await click(find.descendant(of:find.byType(ExpansionTile),matching:find.text('Oil Change')).first);
+      await click(find.descendant(of:find.byType(CompactTaskCard),matching:find.text('Oil Change')).first);
       final work = (await tester.runAsync(() => repo.work()))!;
       expect(work, hasLength(1));
       expect(work.single['employee_id'], 'kam');
@@ -201,13 +202,14 @@ void main() {
       await click(find.byKey(const Key('show-all-service-task-statuses')));
       await tester.pumpAndSettle();
       if (find.text('Edit Assignment').evaluate().isEmpty) {
-        await click(find.descendant(of:find.byType(ExpansionTile),matching:find.text('Oil Change')).first);
+        await click(find.descendant(of:find.byType(CompactTaskCard),matching:find.text('Oil Change')).first);
       }
       await click(find.text('Edit Assignment'));
       await until(find.text('Manage Labor Assignments'));
       await click(find.byTooltip('Edit Assignment'));
-      await tester.enterText(find.byType(TextField), '1.5');
-      await click(find.text('Save'));
+      await until(find.text('Edit Service Task'));
+      await tester.enterText(find.byKey(const ValueKey('hours-0')), '1.5');
+      await click(find.text('Save Task'));
       for (var i = 0; i < 100; i++) {
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 20)),

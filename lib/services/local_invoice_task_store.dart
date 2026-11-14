@@ -113,7 +113,7 @@ class LocalInvoiceTaskStore {
           [business, task, job, jsonEncode([document, id]), description,
             hours == null ? 0 : (hours * 100).round()],
         );
-        if(newTask) await LocalTaskSchedule(db).created(business,task,taskDate);
+        if(newTask) await LocalTaskSchedule(db).created(business,task,taskDate,inherited:true);
         await db.customStatement(
           "INSERT INTO regular_payroll_task_sources VALUES(?,?,?,?,'invoice',1) "
           'ON CONFLICT(business_id,task_id) DO UPDATE SET active=1',

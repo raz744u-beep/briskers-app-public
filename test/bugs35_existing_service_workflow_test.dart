@@ -93,10 +93,9 @@ void main() {
     expect(earned['remaining_minutes'],60);
     expect(earned['paid_minutes'],0);
     await click(find.text('Edit Assignment'));
-    await until(find.text('Manage Labor Assignments'));
-    await click(find.byTooltip('Edit Assignment'));
-    await tester.enterText(find.byType(TextField),'1.5');
-    await click(find.text('Save'));
+    await until(find.text('Edit Service Task'));
+    await tester.enterText(find.byKey(const ValueKey('hours-0')),'1.5');
+    await click(find.text('Save Task'));
     for(var i=0;i<100;i++) {
       await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:20)));
       await tester.pump(const Duration(milliseconds:20));

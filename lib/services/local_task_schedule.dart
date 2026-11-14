@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart';
+import 'local_task_metadata.dart';
 import '../local/briskers_local_database.dart';
 
 /// Scheduling belongs to the task, never to a payment or invoice.
@@ -33,18 +34,39 @@ class LocalTaskSchedule {
         !end.isBefore(monday);
   }
 
-  Future<void> prepare() => db.customStatement(
-    'CREATE TABLE IF NOT EXISTS regular_task_schedule_v1 ('
-    'business_id TEXT NOT NULL,task_id TEXT NOT NULL,start_date TEXT NOT NULL,end_date TEXT NOT NULL,'
-    "priority TEXT NOT NULL DEFAULT 'Normal',payroll_treatment TEXT NOT NULL DEFAULT 'unpaid',revision INTEGER NOT NULL DEFAULT 0,"
-    'PRIMARY KEY(business_id,task_id))',
-  );
-  Future<void> created(String business, String task, DateTime date) async {
+  Future<void> prepare() async {
+    await LocalTaskMetadata(db).prepare();
+    await db.customStatement(
+      'CREATE TABLE IF NOT EXISTS regular_task_schedule_v1 ('
+      'business_id TEXT NOT NULL,task_id TEXT NOT NULL,start_date TEXT NOT NULL,end_date TEXT NOT NULL,'
+      "priority TEXT NOT NULL DEFAULT 'Normal',payroll_treatment TEXT NOT NULL DEFAULT 'unpaid',revision INTEGER NOT NULL DEFAULT 0,"
+      'PRIMARY KEY(business_id,task_id))',
+    );
+  }
+
+  Future<void> created(
+    String business,
+    String task,
+    DateTime date, {
+    bool inherited = false,
+  }) async {
     await prepare();
+    final prior = await db
+        .customSelect(
+          'SELECT task_id FROM regular_task_schedule_v1 WHERE business_id=? AND task_id=?',
+          variables: [Variable(business), Variable(task)],
+        )
+        .get();
     await db.customStatement(
       'INSERT OR IGNORE INTO regular_task_schedule_v1(business_id,task_id,start_date,end_date) VALUES(?,?,?,?)',
       [business, task, day(date), day(date)],
     );
+    if (prior.isEmpty && inherited) {
+      await db.customStatement(
+        "INSERT OR IGNORE INTO regular_task_metadata(business_id,task_id,date_mode) VALUES(?,?,'inherited')",
+        [business, task],
+      );
+    }
   }
 
   Future<void> save(
@@ -54,6 +76,7 @@ class LocalTaskSchedule {
     String end,
     String priority, {
     String? treatment,
+    bool datesEdited = true,
   }) async {
     if (parse(start) == null ||
         parse(end) == null ||
@@ -76,6 +99,18 @@ class LocalTaskSchedule {
       throw StateError(
         'The saved task is unavailable. Refresh before editing.',
       );
+    }
+    final prior = await db
+        .customSelect(
+          'SELECT start_date,end_date FROM regular_task_schedule_v1 WHERE business_id=? AND task_id=?',
+          variables: [Variable(business), Variable(task)],
+        )
+        .getSingleOrNull();
+    if (datesEdited ||
+        (prior != null &&
+            (prior.data['start_date'] != start ||
+                prior.data['end_date'] != end))) {
+      await LocalTaskMetadata(db).manualDates(business, task);
     }
     await db.customStatement(
       'INSERT INTO regular_task_schedule_v1(business_id,task_id,start_date,end_date,priority,payroll_treatment) VALUES(?,?,?,?,?,?) '

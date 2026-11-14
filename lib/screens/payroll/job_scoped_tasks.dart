@@ -113,8 +113,6 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
   Future<void> _longPress(String key, Map<String, dynamic> row,
       bool general) async {
     final editableLabor = !general &&
-        row['invoice_id'] is String &&
-        row['source_line_id'] is String &&
         widget.onManageLabor != null;
     await showModalBottomSheet<void>(
       context: context, showDragHandle: true, useSafeArea: true,
@@ -133,7 +131,7 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
           if (editableLabor)
             ListTile(
               leading: const Icon(Icons.edit_outlined),
-              title: const Text('Manage labor assignments'),
+              title: const Text('Edit Assignment'),
               onTap: () {
                 Navigator.pop(sheet);
                 widget.onManageLabor!(row);
@@ -142,12 +140,16 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
           if (general && widget.onManageGeneral != null)
             ListTile(
               leading: const Icon(Icons.edit_outlined),
-              title: const Text('Edit general task'),
+              title: const Text('Edit Task'),
               onTap: () {
                 Navigator.pop(sheet);
                 widget.onManageGeneral!(row);
               },
             ),
+          if(_status(row,general)!='Done') ListTile(leading:const Icon(Icons.check_circle_outline),title:const Text('Mark Done'),onTap:() async {
+            Navigator.pop(sheet);
+            await _act(key,() async {if(general){await widget.onGeneralProgress(row['id'] as int,'done');}else{for(final allocation in _allocations(row).where(_canChange)){await widget.onLaborProgress(allocation,true);}}});
+          }),
           const SizedBox(height: 8),
         ],
       )),
@@ -299,7 +301,7 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
                   Expanded(child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, maxLines: expanded?null:2, overflow: expanded?null:TextOverflow.ellipsis,
+                      Text(title, maxLines: expanded?null:1, overflow: expanded?null:TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w800,
                           fontSize: 14.5)),
                       const SizedBox(height: 4),
@@ -445,15 +447,6 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
           if (rows.isEmpty) const Text(
             'No tasks saved for this job. Add a Labor Task or General Task.'),
           for (final task in rows) _task(task.data, task.general),
-          if (rows.isNotEmpty)
-            const Padding(padding: EdgeInsets.only(top: 12),
-              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(Icons.info_outline, size: 15, color: Color(0xFF52627A)),
-                SizedBox(width: 7),
-                Flexible(child: Text('Tap to view · Long press for actions',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Color(0xFF52627A), fontSize: 12))),
-              ])),
         ],
       )),
     ]);

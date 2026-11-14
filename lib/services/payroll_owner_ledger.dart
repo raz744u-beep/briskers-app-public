@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import 'local_payroll_repository.dart';
 import 'local_document_sql_store.dart';
+import 'local_job_work_date.dart';
 import 'local_document_detail_cache.dart';
 import 'payroll_owner_lease.dart';
 
@@ -14,7 +15,7 @@ class PayrollOwnerLedger {
   final String business;
   static const tables = [
     'regular_payroll_jobs', 'regular_payroll_employees', 'regular_payroll_tasks',
-    'regular_payroll_task_sources', 'regular_task_schedule_v1', 'regular_payroll_estimates',
+    'regular_payroll_task_sources', 'regular_task_schedule_v1', 'regular_task_metadata', 'local_job_work_dates', 'regular_payroll_estimates',
     'regular_payroll_portions', 'local_mechanic_work_credits_v1', 'regular_payroll_progress_claims', 'regular_payroll_assignment_outgoing',
     'regular_payroll_advances', 'regular_payroll_payments',
     'regular_payroll_paid_work', 'regular_payroll_paid_base',
@@ -31,6 +32,7 @@ class PayrollOwnerLedger {
   Future<void> prepare() async {
     await LocalPayrollRepository(db, business: business, owner: true).prepare();
     await LocalDocumentSqlStore.ensure(db);
+    await LocalJobWorkDate(db).prepare();
     await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_assignment_outgoing '
       '(business_id TEXT NOT NULL,peer TEXT NOT NULL,credit TEXT NOT NULL,revision INTEGER NOT NULL,body TEXT NOT NULL,'
       'PRIMARY KEY(business_id,peer,credit))');

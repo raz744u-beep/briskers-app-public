@@ -81,7 +81,8 @@ class EmployeeWorkReview extends StatelessWidget {
               'Work Review (Read Only)',
               style: TextStyle(fontWeight: FontWeight.w800),
             ),
-            subtitle: Text('Assigned jobs and labor for the selected week.'),
+            dense:true,
+            subtitle: Text('Assigned jobs & weekly labor',maxLines:1,overflow:TextOverflow.ellipsis),
           ),
         ),
         Card(
@@ -191,9 +192,11 @@ class EmployeeWorkReview extends StatelessWidget {
                 left: BorderSide(color: color(r['state'] as String?), width: 5),
               ),
             ),
-            child: ListTile(
+            child: Material(color:Colors.transparent,child:ListTile(
+              onTap:()=>showModalBottomSheet<void>(context:context,useSafeArea:true,isScrollControlled:true,showDragHandle:true,builder:(sheet)=>SafeArea(top:false,child:SingleChildScrollView(padding:const EdgeInsets.all(20),child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.stretch,children:[Text('${r['job_number']??'Job'} · ${r['customer_name']??''}',style:const TextStyle(fontWeight:FontWeight.w700)),const SizedBox(height:10),Text('${r['description']??'Labor'}'),const SizedBox(height:10),Text('${hrs(minutes(r))} h · ${r['state']} · ${paymentState(r)}'),Text('${r['work_start_date']??''} – ${r['work_end_date']??''}'),TextButton(onPressed:()=>Navigator.pop(sheet),child:const Text('Close'))])))),
               title: Text(
                 '${r['job_number'] ?? 'Job'} · ${r['description'] ?? 'Labor'}',
+                maxLines:1,overflow:TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
               subtitle: Text(
@@ -207,7 +210,7 @@ class EmployeeWorkReview extends StatelessWidget {
                 '${hrs(minutes(r))} h',
                 style: const TextStyle(fontWeight: FontWeight.w800),
               ),
-            ),
+            )),
           ),
       ],
     );

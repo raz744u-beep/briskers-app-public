@@ -163,7 +163,7 @@ void main() {
       await tester.tap(find.byKey(const Key('toggle-task-filters')));
       await tester.pumpAndSettle();
       expect(find.text('Employee'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('toggle-task-filters')));
+      await tester.tap(find.text('Apply Filters'));
       await tester.pumpAndSettle();
       expect(tester.widget<Card>(find.byType(Card).last).color, Color.alphaBlend(const Color(0xFF1674DB).withValues(alpha:0.08),Colors.white));
       await capture(tester, key, 'service-tasks');

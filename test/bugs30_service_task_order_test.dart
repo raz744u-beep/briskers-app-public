@@ -26,7 +26,7 @@ void main(){
       serviceTasks:rows,generalTasks:const [],allocationsByLine:const {},employeeName:(id)=>id??'Unassigned',employeeIds:const [],
       serviceTaskCard:(row)=>Text(row['source_description'] as String),onAddGeneral:(){},onGeneralStatus:(_,_)async{},onOpenJob:(_){},onEmployeeTap:(_){}))));
     Future<void> pick(String title,String value)async{
-      await tester.tap(find.byTooltip(title));await tester.pumpAndSettle();
+      await tester.tap(find.ancestor(of:find.text(title),matching:find.byType(DropdownButtonFormField<String>)));await tester.pumpAndSettle();
       await tester.tap(find.text(value).last);await tester.pumpAndSettle();
     }
     expect(find.text('Old job'),findsNothing);
@@ -36,7 +36,8 @@ void main(){
     await tester.tap(find.byKey(const Key('toggle-task-filters')));
     await tester.pumpAndSettle();
     await pick('Status','All');
-    await tester.tap(find.byTooltip('Advanced task filters'));
+    await tester.tap(find.text('Apply Filters'));await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('toggle-task-filters')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Sort By').last);
     await tester.pumpAndSettle();
@@ -45,7 +46,7 @@ void main(){
     await tester.tap(find.text('Apply Filters'));
     await tester.pumpAndSettle();
     expect(tester.getTopLeft(find.text('MB-6220')).dy,lessThan(tester.getTopLeft(find.text('MB-3335')).dy));
-    await tester.tap(find.byTooltip('Advanced task filters'));
+    await tester.tap(find.byKey(const Key('toggle-task-filters')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Sort By').last);
     await tester.pumpAndSettle();
