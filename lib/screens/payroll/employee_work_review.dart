@@ -332,55 +332,6 @@ class EmployeeWorkReview extends StatelessWidget {
             ),
           ),
           ?payrollSummary,
-          if (visible.isEmpty)
-            const ListTile(title: Text('No recorded labor for this week.')),
-          for (final r in visible)
-            Container(
-              margin: const EdgeInsets.only(bottom: 6),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x22051D35),
-                    offset: Offset(0, 2),
-                    blurRadius: 2,
-                  ),
-                ],
-                border: Border(
-                  left: BorderSide(
-                    color: color(r['state'] as String?),
-                    width: 5,
-                  ),
-                ),
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: ListTile(
-                  onTap: onTask == null ? null : () => onTask!(r),
-                  title: Text(
-                    '${r['job_number'] ?? 'Job'} · ${r['description'] ?? 'Labor'}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 17,
-                    ),
-                  ),
-                  subtitle: Text(
-                    '${r['customer_name'] ?? ''}\n${r['state'] == 'Done'
-                        ? 'Completed'
-                        : r['state'] == 'Open'
-                        ? 'Not Started'
-                        : r['state']} · ${paymentState(r)}',
-                  ),
-                  trailing: Text(
-                    '${hrs(minutes(r))} h',
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
     );

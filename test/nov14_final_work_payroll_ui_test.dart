@@ -159,16 +159,16 @@ void main() {
         row(paid: 0),
         row(id: 'oil', state: 'Done', assigned: 60, paid: 0),
       ];
-      await t.pumpWidget(
-        app(
+      Widget profile(int selected) => app(
           DefaultTabController(
             length: 4,
+            initialIndex: selected,
             child: Scaffold(
               appBar: const ApprovedTasksHeader(title: 'Employee Profile'),
               body: Column(
                 children: [
                   Padding(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.fromLTRB(12,8,12,10),
                     child: ApprovedEmployeeIdentity(
                       name: 'Chris',
                       role: 'Mechanic',
@@ -178,7 +178,8 @@ void main() {
                   ),
                   const ApprovedProfileTabs(),
                   Expanded(
-                    child: EmployeeWorkReview(
+                    child: TabBarView(children: [
+                      SafeArea(top: false, child: Builder(builder: (context) => EmployeeWorkReview(
                       week: week,
                       rows: rows,
                       jobs: const [],
@@ -191,18 +192,26 @@ void main() {
                         rows: rows,
                         payments: const [],
                         loadDraft: (_) async => null,
-                        onReview: () {},
+                        onReview: () => DefaultTabController.of(context).animateTo(1),
                         revision: 0,
                       ),
-                    ),
+                    ))),
+                      SafeArea(top: false, child: WeeklyLaborReview(
+                        employeeId: 'chris', employeeName: 'Chris',
+                        week: week, tasks: rows, profileLayout: true,
+                        savedRateCents: 4000, advanceBalance: () async => 0,
+                        recordPayment: (a,b,c,d,e,f,g,h,i) async => fail('Read-only visual review cannot create payments'),
+                      )),
+                      const SizedBox(), const SizedBox(),
+                    ]),
                   ),
                 ],
               ),
             ),
           ),
           key: key,
-        ),
-      );
+        );
+      await t.pumpWidget(profile(0));
       await t.pumpAndSettle();
       expect(find.text('Currently Assigned Tasks (1)'), findsOneWidget);
       expect(find.text('Work Review (Read Only)'), findsNothing);
@@ -212,8 +221,44 @@ void main() {
       expect(find.text('Not calculated'), findsOneWidget);
       await t.tap(find.text('Replace engine').first);
       expect(opened, 'task-engine');
+      final list=t.widget<ListView>(find.byKey(const Key('employee-work-review')));
+      final children=(list.childrenDelegate as SliverChildListDelegate).children;
+      expect(children,hasLength(4),reason:'Calendar, assigned tasks, labor summary and payroll summary only');
+      expect(children.last,isA<WorkPayrollSummary>());
+      expect(find.text('Oil Change'),findsNothing,reason:'Completed labor must not be repeated below Work summary');
+      expect(find.text('Labor This Week · 2 tasks'),findsOneWidget);
+      expect(find.text('21.00 hrs'),findsOneWidget,reason:'Removing duplicate UI retains every allocation in weekly totals');
+      expect(find.text('Review & Pay').hitTestable(),findsOneWidget);
+      final button=find.widgetWithText(FilledButton,'Review & Pay');
+      final summary=find.byKey(const Key('work-payroll-summary'));
+      // The existing card has 12 px inside its bottom edge beneath the button.
+      expect(t.getBottomRight(find.descendant(of:summary,matching:find.byType(Material)).first).dy-t.getBottomRight(button).dy, inInclusiveRange(12,16));
+      final stripe=find.byKey(const ValueKey('profile-tabs-stripe'));
+      final fixedBounds=t.getRect(stripe);
       await shot(t, key, 'work-overview');
+      await t.tap(find.text('Review & Pay'));await t.pumpAndSettle();
+      expect(t.widget<ColoredBox>(stripe).color,taskGreen);
+      expect(find.text('Oil Change'),findsOneWidget,reason:'Payroll retains individual labor selection');
+      expect(find.byType(Checkbox),findsWidgets);
+      await t.drag(find.byKey(const Key('employee-payroll-preparation')),const Offset(0,-400));await t.pumpAndSettle();
+      expect(t.getRect(stripe),fixedBounds,reason:'Stripe stays pinned while Payroll scrolls');
+      await t.tap(find.text('Work'));await t.pumpAndSettle();
+      expect(t.widget<ColoredBox>(stripe).color,taskBlue);
+      // A smaller viewport must scroll to the same end without moving the tab row.
+      t.view.physicalSize=const Size(360,640);await t.pumpAndSettle();
+      final smallStripe=t.getRect(stripe);
+      await t.drag(find.byKey(const Key('employee-work-review')),const Offset(0,-500));await t.pumpAndSettle();
+      expect(find.text('Review & Pay').hitTestable(),findsOneWidget);
+      expect(t.getRect(stripe),smallStripe);
+      expect(find.text('Oil Change'),findsNothing);
+      expect(rows,hasLength(2));expect(rows.last['remaining_minutes'],60);
       expect(t.takeException(), isNull);
+      // Capture Payroll from a fresh route to avoid cached headless header layers.
+      await t.pumpWidget(const SizedBox.shrink());await t.pumpAndSettle();
+      t.view.physicalSize=const Size(412,915);
+      await t.pumpWidget(profile(1));await t.pumpAndSettle();
+      await shot(t,key,'payroll-full-width-stripe');
+      expect(t.takeException(),isNull);
     },
   );
   testWidgets(

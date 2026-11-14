@@ -53,7 +53,7 @@ void main(){
     for(final width in [412.0,360.0]){t.view.physicalSize=Size(width,915);await t.pumpAndSettle();expect(t.takeException(),isNull);for(final tile in t.widgetList<EmployeeListTile>(find.byType(EmployeeListTile))){expect(find.text(tile.pay),findsWidgets);}expect(t.getSize(find.byType(EmployeeListTile).first).height,lessThan(90));}
     await t.tap(find.byType(EmployeeListTile).first);await t.longPress(find.byType(EmployeeListTile).first);await t.pumpAndSettle();expect(opens,1);expect(actions,1);
   });
-  testWidgets('active tab stripe exactly matches its full-width background on every tab',(t)async{
+  testWidgets('one continuous full-row stripe exactly matches each active tab background',(t)async{
     size(t);
     final boundary=GlobalKey();
     const labels=['Work','Payroll','Reports','Taxes & 1099'];
@@ -66,9 +66,12 @@ void main(){
       t.view.physicalSize=Size(width,915);await t.pumpAndSettle();
       for(final (index,selected) in labels.indexed){
         await t.tap(find.text(selected));await t.pump(const Duration(milliseconds:50));
-        // No traveling indicator or stripe beneath an inactive tab during switching.
+        // One stripe spans every tab, including during selection transitions.
+        expect(find.byKey(const ValueKey('profile-tabs-stripe')),findsOneWidget);
         for(final label in labels){
-          expect(find.byKey(ValueKey('profile-tab-stripe-$label')),label==selected?findsOneWidget:findsNothing);
+          expect(find.byKey(ValueKey('profile-tab-stripe-$label')),findsNothing);
+          final decoration=t.widget<Container>(find.byKey(ValueKey('profile-tab-$label'))).decoration! as BoxDecoration;
+          expect(decoration.color,label==selected?colors[index]:null);
         }
         await t.pumpAndSettle();
         final bounds=t.getRect(find.byKey(ValueKey('profile-tab-$selected')));
@@ -81,9 +84,14 @@ void main(){
         int pixel(int x,int y){final offset=(y*width.toInt()+x)*4;return (pixels!.getUint8(offset+3)<<24)|(pixels.getUint8(offset)<<16)|(pixels.getUint8(offset+1)<<8)|pixels.getUint8(offset+2);}
         final left=(bounds.left-origin.dx).round(),bottom=(bounds.bottom-origin.dy).round();
         final expected=colors[index].toARGB32();
-        // Read rendered pixels, including both edges, rather than just inspecting decorations.
-        for(var x=left;x<left+bounds.width.round();x++){
-          expect(pixel(x,bottom-2),expected,reason:'$selected stripe pixel $x at width $width');
+        final stripe=t.getRect(find.byKey(const ValueKey('profile-tabs-stripe')));
+        expect(stripe.width,width);expect(stripe.height,3);
+        expect(stripe.top,bounds.bottom);
+        // Every pixel across the entire tab row must be the same selected color.
+        for(var x=0;x<width.toInt();x++){
+          for(var y=bottom;y<bottom+3;y++){
+            expect(pixel(x,y),expected,reason:'$selected stripe pixel ($x,$y) at width $width');
+          }
         }
         expect(pixel(left+6,bottom-8),expected,reason:'Tab background and stripe must be identical');
         expect(find.text('$selected body').hitTestable(),findsOneWidget);

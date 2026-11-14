@@ -480,78 +480,85 @@ class ApprovedProfileTabs extends StatelessWidget {
     ];
     return AnimatedBuilder(
       animation: controller,
-      builder: (context, _) => TabBar(
-        indicatorSize: TabBarIndicatorSize.tab,
-        // Paint the stripe within the selected tab, not as a sliding indicator.
-        indicator: const BoxDecoration(),
-        labelPadding: EdgeInsets.zero,
-        dividerHeight: 0,
-        labelColor: Colors.white,
-        unselectedLabelColor: const Color(0xFF111820),
-        tabs: [
-          for (final (i, entry) in entries.indexed)
-            Tab(
-              height: 40,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  ClipPath(
-                    clipper: _ProfileTabClip(),
-                    child: Container(
-                      key: ValueKey('profile-tab-${entry.$1}'),
-                      alignment: Alignment.center,
-                      decoration: controller.index == i
-                          ? BoxDecoration(color: entry.$2)
-                          : const BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [Color(0xFFF3F5F9), Color(0xFFE4E8F0)],
+      builder: (context, _) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TabBar(
+            indicatorSize: TabBarIndicatorSize.tab,
+            indicatorWeight: 0,
+            // The shared stripe below the tab row is the only selection indicator.
+            indicator: const BoxDecoration(),
+            labelPadding: EdgeInsets.zero,
+            dividerHeight: 0,
+            labelColor: Colors.white,
+            unselectedLabelColor: const Color(0xFF111820),
+            tabs: [
+              for (final (i, entry) in entries.indexed)
+                Tab(
+                  height: 40,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      ClipPath(
+                        clipper: _ProfileTabClip(),
+                        child: Container(
+                          key: ValueKey('profile-tab-${entry.$1}'),
+                          alignment: Alignment.center,
+                          decoration: controller.index == i
+                              ? BoxDecoration(color: entry.$2)
+                              : const BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Color(0xFFF3F5F9),
+                                      Color(0xFFE4E8F0),
+                                    ],
+                                  ),
+                                ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    [
+                                      Icons.layers_outlined,
+                                      Icons.payments_outlined,
+                                      Icons.bar_chart,
+                                      Icons.description_outlined,
+                                    ][i],
+                                    size: 19,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    entry.$1,
+                                    style: const TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Row(
-                            children: [
-                              Icon(
-                                [
-                                  Icons.layers_outlined,
-                                  Icons.payments_outlined,
-                                  Icons.bar_chart,
-                                  Icons.description_outlined,
-                                ][i],
-                                size: 19,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                entry.$1,
-                                style: const TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                  if (controller.index == i)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      height: 3,
-                      child: ColoredBox(
-                        key: ValueKey('profile-tab-stripe-${entry.$1}'),
-                        color: entry.$2,
-                      ),
-                    ),
-                ],
-              ),
+                ),
+            ],
+          ),
+          SizedBox(
+            width: double.infinity,
+            height: 3,
+            child: ColoredBox(
+              key: const ValueKey('profile-tabs-stripe'),
+              // Use the same theme value as the selected tab background.
+              color: entries[controller.index].$2,
             ),
+          ),
         ],
       ),
     );
