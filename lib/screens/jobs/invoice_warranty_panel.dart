@@ -100,6 +100,8 @@ class InvoiceWarrantyPanel extends StatefulWidget {
     this.payments = const [],
     this.readOnly = false,
     this.onLocalWarrantyChanged,
+    this.mainMechanic,
+    this.laborSummary,
   });
 
   final String businessId;
@@ -112,6 +114,7 @@ class InvoiceWarrantyPanel extends StatefulWidget {
   final String? paymentPendingLabel;
   final List<Map<String, dynamic>> payments;
   final bool readOnly;
+  final Widget? mainMechanic, laborSummary;
   final Future<void> Function(Map<String, dynamic>)? onLocalWarrantyChanged;
 
   @visibleForTesting
@@ -1095,7 +1098,14 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
 
   @override
   Widget build(BuildContext context) {
-    final header = _warrantyToggle();
+    final header = Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+      if(widget.mainMechanic==null) _warrantyToggle() else
+        Padding(padding:const EdgeInsets.fromLTRB(0,6,12,6),child:Row(children:[
+          Expanded(child:_warrantyToggle()),
+          Expanded(child:widget.mainMechanic!),
+        ])),
+      if(widget.laborSummary!=null) widget.laborSummary!,
+    ]);
     if (!_enabled) return header;
 
     final company = widget.detail['warranty_company_name']?.toString() ?? '';

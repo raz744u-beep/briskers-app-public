@@ -60,8 +60,19 @@ class LocalPayrollWorkSource {
       final lines = invoice['lines'] ?? invoice['items'];
       if (lines is! List) return null;
       final matches = lines.whereType<Map>().where((row) => row['id'] == lineId);
-      if (matches.length != 1 || !isInvoiceLaborLine(matches.single)) {
+      if (matches.length != 1) {
         return null;
+      }
+      if (!isInvoiceLaborLine(matches.single)) {
+        final ready = await _database.customSelect(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='regular_payroll_task_sources'",
+        ).get();
+        if (ready.isEmpty) return null;
+        final selected = await _database.customSelect(
+          'SELECT task_id FROM regular_payroll_task_sources WHERE business_id=? AND invoice_id=? AND line_id=? AND active=1',
+          variables:[Variable(businessId),Variable(invoiceId),Variable(lineId)],
+        ).get();
+        if (selected.length != 1) return null;
       }
       return Map<String, dynamic>.unmodifiable(
         Map<String, dynamic>.from(matches.single),

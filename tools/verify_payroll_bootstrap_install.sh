@@ -76,9 +76,25 @@ check_records baseline-launched
 intermediate=${BRISKERS_UPGRADE_INTERMEDIATE:-}
 if [ -n "$intermediate" ]; then
   case "$(basename "$intermediate")" in
+    Briskers-v0.10.9-b4655.apk) intermediate_hash=4d70ea11200a4ee8285435bf6bbdf2ea62ae3af51d74731cd0fe2d9ff965257f ;;
+    Briskers-v0.10.9-b4653.apk) intermediate_hash=b2c6a5103fe2c890a394ae07a0cb32c18895645c3d6749192cad2cb78f1ec438 ;;
+    Briskers-v0.10.9-b4651.apk) intermediate_hash=1c204f7a7cdb112674661b2a7b41f6d222adffcd967a36d7eb2fc668c8bc24d1 ;;
+    Briskers-v0.10.9-b4649.apk) intermediate_hash=3366b38810f0d168b74afe813d39ee494253e44add38028dc904cb20111aff8a ;;
+    Briskers-v0.10.9-b4648.apk) intermediate_hash=b2b097237f2638daedcc18536b085ca191749a0abf862bb6735e200c5e1094ee ;;
+    Briskers-v0.10.9-b4646.apk) intermediate_hash=229311aa1d6b8b4935c3ec60d4684e2ec683e8204f732334248d3e07502ca590 ;;
+    Briskers-v0.10.9-b4645.apk) intermediate_hash=55142e76737d18ceafcfca603b18dc98e8c5fa4b358480e2d12f87dd79fd4024 ;;
+    Briskers-v0.10.9-b4640.apk) intermediate_hash=aab06ea48b27a55b23aa5378156ef7906bfcc63c4e3a9aea8c714c6a219fc70a ;;
+    Briskers-v0.10.9-b4638.apk) intermediate_hash=8ca7c81de6fdc771e78bcf190637209f831242c00606e38c328833266bf0d830 ;;
+    Briskers-v0.10.9-b4635.apk) intermediate_hash=b51a2e6e65a6feb567675a3a1cec8402c999f170d4beed556c43a678c2a2adeb ;;
+    Briskers-v0.10.9-b4632.apk) intermediate_hash=1865ec9bd59553b5a52b396a5663b4eae20369dd0bbe04278181cd086fc6c009 ;;
+    Briskers-v0.10.9-b4629.apk) intermediate_hash=17626f8317b3851bc780781f18ad0baf8360168c430d06f666983e4480848fb2 ;;
+    Briskers-v0.10.9-b4627.apk) intermediate_hash=72b0d373ede19de9a99a6abaefcd6c4de7a5d381fbbad967ca97a32128f574b7 ;;
+    Briskers-v0.10.9-b4620.apk) intermediate_hash=029c4407114f1f9894caabf5f95bb1ba50e46fd21ef4b09c52adda09ab91ac92 ;;
     Briskers-v0.10.9-b2571.apk) intermediate_hash=820845a388b63696525ccd7b2347a7690fec00690a227dd6ceb473f426572f2b ;;
     Briskers-v0.10.9-b2581.apk) intermediate_hash=50cadbc0d6a64fd8694e6dd78b0339634c746cbd83d6e84a8ec6c14b7b6a51b9 ;;
     Briskers-v0.10.9-b2582.apk) intermediate_hash=8737f3609320588081370fcfbf694f7cc7ca1b207c7c57df52bd9d5994858284 ;;
+    Briskers-v0.10.9-b2587.apk) intermediate_hash=3dd35d27decc90174dc1432970de5459baaa78ae4def068a126d27838ac353af ;;
+    Briskers-v0.10.9-b2586.apk) intermediate_hash=3e131b8fd491714b709d31838fbb3a3009f7626c540774a4b0056d869602d59b ;;
     *) echo 'Unknown signed intermediate APK' >&2; exit 1 ;;
   esac
   printf '%s  %s\n' "$intermediate_hash" "$intermediate" | sha256sum -c

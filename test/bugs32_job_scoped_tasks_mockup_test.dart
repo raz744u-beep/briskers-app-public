@@ -3,14 +3,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/screens/payroll/job_scoped_tasks.dart';
 
 void main() {
-  testWidgets('job-scoped Tasks retains approved closed and expanded cards',
+  testWidgets('job-scoped Tasks retains approved compact navigation cards',
       (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     var laborFinished = false;
-    var generalStarted = false;
+    var generalFinished = false;
+    var opened=0;
     var assignmentsOpened = false;
     final tasks = <Map<String, dynamic>>[
       {
@@ -72,45 +73,34 @@ void main() {
       onAddGeneral: () {},
       onLaborProgress: (_, finish) async { laborFinished = finish; },
       onGeneralProgress: (id, next) async {
-        generalStarted = id == 1 && next == 'in_progress';
+        generalFinished = id == 1 && next == 'done';
       },
+      onOpenTask:(_,_)=>opened++,
       onManageLabor: (_) => assignmentsOpened = true,
     ))));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull,
       reason: 'Closed task cards must not overflow a 390px phone.');
 
-    expect(find.text('3 tasks'), findsOneWidget);
+    expect(find.text('3 tasks (1 of 3 completed)'), findsOneWidget);
     expect(find.text('Labor Task'), findsOneWidget);
     expect(find.text('General Task'), findsOneWidget);
     expect(find.text('Never show another job'), findsNothing);
     expect(find.text('Advanced task filters'), findsNothing);
     expect(find.byIcon(Icons.tune), findsNothing);
     expect(find.text('Service Tasks'), findsNothing);
-    expect(find.text('Finish'), findsOneWidget);
-    expect(find.text('Start'), findsOneWidget);
+    expect(find.text('In Progress'), findsOneWidget);
+    expect(find.text('Open'), findsOneWidget);
     expect(find.text('Done'), findsOneWidget);
-    expect(find.byIcon(Icons.more_vert), findsNothing);
-
-    await tester.tap(find.text('Finish'));
-    await tester.pump();
-    expect(laborFinished, isTrue);
-    await tester.tap(find.text('Start'));
-    await tester.pump();
-    expect(generalStarted, isTrue);
-
-    await tester.tap(find.text('Replace front struts'));
-    await tester.pumpAndSettle();
-    expect(find.text('Type: Labor'), findsOneWidget);
-    expect(find.text('Status: In Progress'), findsOneWidget);
-    expect(find.textContaining('3.6 hrs'), findsWidgets);
-    expect(tester.takeException(), isNull,
-      reason: 'Expanded task details must fit a 390px phone.');
-
+    await tester.tap(find.text('Replace front struts'));await tester.pumpAndSettle();expect(opened,1);
+    await tester.longPress(find.text('Replace front struts'));await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark Done'));await tester.pumpAndSettle();expect(laborFinished,isTrue);expect(opened,1);
+    await tester.longPress(find.text('Road test vehicle'));await tester.pumpAndSettle();await tester.tap(find.text('Mark Done'));await tester.pumpAndSettle();expect(generalFinished,isTrue);
+    expect(find.textContaining('3.6 hrs'),findsWidgets);
     await tester.longPress(find.text('Replace front struts').first);
     await tester.pumpAndSettle();
-    expect(find.text('Manage labor assignments'), findsOneWidget);
-    await tester.tap(find.text('Manage labor assignments'));
+    expect(find.widgetWithText(ListTile,'Edit Assignment'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ListTile,'Edit Assignment'));
     await tester.pumpAndSettle();
     expect(assignmentsOpened, isTrue);
     expect(tester.takeException(), isNull);

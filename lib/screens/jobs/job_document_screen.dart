@@ -1,3 +1,6 @@
+import '../../services/verified_invoice_payment_events.dart';
+import '../../services/local_invoice_closure.dart';
+import '../../services/local_payroll_repository.dart';
 import '../payroll/owner_payroll_screen.dart';
 import '../payroll/job_tasks_access.dart';
 import 'owner_local_delete_action.dart';
@@ -56,7 +59,6 @@ import '../../services/local_item_categories_cache.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_document_repository.dart';
 import '../../services/verified_invoice_close_events.dart';
-import '../../services/verified_invoice_payment_events.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
@@ -70,6 +72,7 @@ import '../../services/offline_invoice_tax_service.dart';
 import '../../services/local_tax_settings_cache.dart';
 import '../../services/offline_invoice_payment_ledger.dart';
 import '../../services/invoice_finalization_guard.dart';
+import '../../services/offline_invoice_finalization.dart';
 import '../../services/document_copy_plan.dart';
 import '../../services/pending_document_memo_projection.dart';
 import '../../services/local_payment_methods_cache.dart';
@@ -80,6 +83,7 @@ import '../customers/customer_vehicle_findings_section.dart';
 import '../customers/customer_quick_actions.dart';
 import 'customer_invoice_signature_screen.dart';
 import 'invoice_warranty_panel.dart';
+import '../../widgets/invoice_labor_summary.dart';
 import 'invoice_header_warranty_fields.dart';
 import 'invoice_note_draft_rules.dart';
 import '../../widgets/document_tab_label.dart';
@@ -476,8 +480,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         .projectInvoiceNotes(widget.businessId, memoProjected);
     final withLocalReceipts = OfflineInvoicePaymentLedger.projectPendingPayments(
         findingsProjected, queuedReceipts);
-    final projected = OfflineInvoicePaymentLedger.projectPendingEdits(
-        withLocalReceipts, queuedEdits);
+    final projected = await LocalInvoiceClosureStore(localDatabase).project(widget.businessId, OfflineInvoicePaymentLedger.projectPendingEdits(
+        withLocalReceipts, queuedEdits));
     final jobId = projected['job_id']?.toString().trim() ?? '';
     final jobNumber = projected['job_number']?.toString().trim() ?? '';
     if (jobId.isNotEmpty &&
@@ -509,7 +513,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         // Unavailable offline history stays blank; never invent mileage.
       }
     }
-    return _projectSavedInvoiceIdentity(withMileage);
+    final result = await _projectSavedInvoiceIdentity(withMileage);
+    // Resolve the durable operation after every local overlay. It is not a
+    // cached/server payment field and must not be replaced by a stale snapshot.
+    result['_finalization_state'] = await OfflineInvoiceFinalization()
+        .stateForDetail(widget.businessId, widget.documentId, result);
+    return result;
   }
 
   /// Restore missing invoice contact/VIN/plate presentation from the exact
@@ -541,6 +550,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         localDatabase, widget.businessId, widget.documentId)) {
       if (mounted && generation == _loadGeneration) _blockRetiredDocument();
       return;
+    }
+    if (OwnerPayrollScreen.enabled && widget.isOwner) {
+      await LocalPayrollRepository(localDatabase,business:widget.businessId,owner:true).prepare();
     }
     final loadWatch = Stopwatch()..start();
     final forceOffline =
@@ -957,12 +969,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     );
     reason.dispose();
     if (!mounted || confirmed == null) return;
-    await _run(() => _api.ownerForceReopenInvoice(
+    await _run(() async { await _api.ownerForceReopenInvoice(
       widget.businessId,
       widget.documentId,
       expectedVersion: _version,
       reason: confirmed,
-    ));
+    ); await LocalInvoiceClosureStore(localDatabase).serverReopened(widget.businessId,widget.documentId); });
   }
 
   Future<void> _enableImportedInvoiceEditing() async {
@@ -1081,7 +1093,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       await _load(fastAfterMutation: true);
       return true;
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) setState(() => _error = error is StateError ? error.message.toString() : error.toString());
       return false;
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -3219,13 +3231,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         ),
       );
       if (complete == true) {
-        if (offline) {
-          await _run(() => _offlineJobAdmin.queueStatus(
-            widget.businessId, jobId, code: 'completed', name: 'Completed'));
-        } else {
-          await _run(() => _api.changeJobStatus(
-            widget.businessId, jobId, 'completed'));
-        }
+        await _run(() => _offlineJobAdmin.queueStatus(
+          widget.businessId, jobId, code: 'completed', name: 'Completed'));
+        if(!offline) unawaited(_offlineJobAdmin.flush(widget.businessId));
       }
     } catch (error) {
       if (mounted) {
@@ -3275,7 +3283,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         ),
       );
       if (complete == true) {
-        await _api.changeJobStatus(widget.businessId, jobId, 'completed');
+        await _offlineJobAdmin.queueStatus(widget.businessId, jobId, code:'completed',name:'Completed');
+        unawaited(_offlineJobAdmin.flush(widget.businessId));
       }
     } catch (_) {
       // Payment is finalized independently; never undo or repeat it because
@@ -3347,22 +3356,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     ));
   }
 
+  bool _startingFinalization = false;
   Future<void> _finalizeEnteredPayments() async {
     if (!widget.isOwner) return;
+    if (_startingFinalization) return;
+    setState(() => _startingFinalization = true);
+    try {
     await _collapseWorkspaceHeader();
     if (_estimate || _busy || _number(_detail?['pending_payment']) <= 0.005) {
       return;
     }
-    if (BriskersConnectionModeController.instance.forceOffline ||
-        _queuedPaymentOperationIds.isNotEmpty ||
-        _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
-      if (mounted) {
-        setState(() => _error =
-            'Connect and sync recorded payments before finalizing a payment.');
-      }
-      return;
-    }
-
+    final existing = await OfflineInvoiceFinalization().stateForDetail(
+      widget.businessId, widget.documentId, _detail!);
+    if (existing != null) { await _load(); return; }
     final amount = _number(_detail?['pending_payment']);
     if (!mounted) return;
     final confirmed = await showDialog<bool>(
@@ -3372,69 +3378,33 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         ) ??
         false;
     if (!confirmed || !mounted) return;
-    final succeeded = await _run(() async {
-      // The confirmation can remain open while sync or connection mode changes.
-      // Re-read durable receipt evidence at the action boundary, not the dialog.
-      await InvoiceFinalizationGuard().run<void>(
-        businessId: widget.businessId,
-        invoiceIds: [widget.documentId],
-        isOwner: widget.isOwner,
-        action: () async {
-          await _api.finalizePendingInvoicePayment(
-            widget.businessId,
-            widget.documentId,
-          );
-        },
-      );
-    });
-    if (mounted && succeeded) {
-      // The finalize RPC succeeded. Verify the exact authoritative invoice
-      // before publishing an immediate paid status to retained Invoices lists.
-      // Do this BEFORE the independent Complete Job prompt: keeping the
-      // repair In Progress must never leave a fully paid invoice as Open.
-      try {
-        final verified = await _api.documentDetail(
-          widget.businessId, widget.documentId);
-        final presentation = DocumentPresentation(
-          <String, dynamic>{...verified, 'kind': 'invoice'});
-        final identity = verified['id']?.toString() ?? '';
-        if (identity == widget.documentId &&
-            presentation.paymentDetailsKnown &&
-            (presentation.totalCents ?? 0) > 0 &&
-            (presentation.pendingCents ?? -1) == 0 &&
-            (presentation.finalizedCents ?? -1) >=
-                (presentation.totalCents ?? 0)) {
-          VerifiedInvoicePaymentEvents.confirmedFullyPaid(
-            VerifiedInvoiceFullyPaid(
-              businessId: widget.businessId,
-              invoiceId: widget.documentId,
-              total: presentation.totalCents! / 100,
-              finalizedPaid: presentation.finalizedCents! / 100,
-            ),
-          );
+    final saved = await _run(() => OfflineInvoiceFinalization().save(
+      widget.businessId, [widget.documentId], isOwner:widget.isOwner,close:false));
+    if (!saved || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text(
+      'Finalization saved on this device. Posting awaits synchronization; do not enter the payment again.')));
+    unawaited(() async {
+      await OfflineInvoiceFinalization().flush(widget.businessId);
+      if(mounted) await _load(fastAfterMutation:true);
+      if(mounted && await OfflineInvoiceFinalization().state(widget.businessId,widget.documentId)=='confirmed') {
+        final verified=_detail;
+        if(verified!=null) {
+          final presentation=DocumentPresentation({...verified,'kind':'invoice'});
+          final identity=verified['id']?.toString();
+          if(identity == widget.documentId && presentation.paymentDetailsKnown &&
+              presentation.pendingCents==0 && presentation.fullyCovered) {
+            VerifiedInvoicePaymentEvents.confirmedFullyPaid(VerifiedInvoiceFullyPaid(
+              businessId:widget.businessId,invoiceId:widget.documentId,
+              total:presentation.totalCents! / 100,finalizedPaid:presentation.finalizedCents! / 100));
+          }
         }
-      } catch (_) {
-        // A failed verification read cannot invent a paid invoice. The
-        // protected close path and subsequent refresh still work normally.
-      }
-      await _offerCompletePaidJob();
-      try {
+
+        await _offerCompletePaidJob();
         await _autoCloseOwnerInvoiceIfReady();
-      } catch (error) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Payment finalized. Invoice closing needs review: $error'),
-          ));
-        }
-      } finally {
-        // The payment mutation's earlier _run refresh happens BEFORE the
-        // separate Owner-only close RPC. Re-read the authoritative invoice
-        // after that RPC so the user sees Closed in this same screen, rather
-        // than stale Paid/Pending Close until the next navigation.
-        // This is read-only and never attempts to finalize payment again.
         if (mounted) await _load(fastAfterMutation: true);
       }
-    }
+    }());
+    } finally { if (mounted) setState(() => _startingFinalization = false); }
   }
 
   Future<void> _enterWarrantyPayment() async {
@@ -5186,23 +5156,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     required num finalizedPaid,
     required num pendingPaid,
   }) {
-    final rawStatus = _detail?['status']?.toString() ?? 'draft';
-    if (rawStatus == 'void') return 'void';
-    // Legacy server rows retain status=issued after close; closed_at is the
-    // authoritative marker and must override the derived Paid status pill.
-    if (DocumentPresentation(_detail ?? const <String, dynamic>{})
-        .isClosed) {
-      return 'closed';
-    }
-    final shownPaid = finalizedPaid + pendingPaid;
-    if (pendingPaid > 0 &&
-        total > 0 &&
-        shownPaid >= total - 0.005) {
-      return 'pending_close';
-    }
-    if (total > 0 && finalizedPaid >= total - 0.005) return 'paid';
-    if (shownPaid > 0) return 'partial';
-    return 'open';
+    return DocumentPresentation({
+      ...?_detail, 'kind': 'invoice', 'total_amount': total,
+      'paid_amount': finalizedPaid, 'pending_payment': pendingPaid,
+    }).statusCode;
   }
 
   String _statusLabel({
@@ -5830,7 +5787,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         Padding(
           padding: const EdgeInsets.only(left:30,top:5),
           child: Text(
-            vin.isNotEmpty?'VIN: $vin':'VIN: Not available locally',
+            vin.isNotEmpty?'VIN: $vin':'VIN: Not entered',
             style:const TextStyle(fontSize:12.5,
               color:Color(0xFF405064),height:1.2),
             softWrap:true,
@@ -5931,7 +5888,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 ),
                 Padding(
                   padding:const EdgeInsets.only(left:30,top:5),
-                  child:Text(vin.isNotEmpty?'VIN: $vin':'VIN: Not available locally',
+                  child:Text(vin.isNotEmpty?'VIN: $vin':'VIN: Not entered',
                     maxLines:2,overflow:TextOverflow.ellipsis,
                     style:const TextStyle(fontSize:11.5,
                       color:Color(0xFF405064),height:1.15)),
@@ -6437,7 +6394,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                       value: _money(finalizedPaid),
                     ),
                     _AmountRow(
-                      label: 'Entered (not finalized)',
+                      label: _detail?['_finalization_state'] == null
+                          ? 'Awaiting finalization' : 'Saved for finalization',
                       value: _money(pendingPaid),
                     ),
                   ],
@@ -6530,6 +6488,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 ),
               ),
             ),
+          ],
+          if (_detail?['_finalization_state'] == 'pending' || _detail?['_finalization_state'] == 'inflight')
+            const Text('Finalization saved · Awaiting synchronization'),
+          if (_detail?['_finalization_state'] == 'review') ...[
+            const Text('Saved finalization needs review. Do not enter the payment again.'),
+            if(widget.isOwner)
+              TextButton(onPressed:_busy ? null : () => _run(() => OfflineInvoiceFinalization().retry(
+                widget.businessId,widget.documentId,isOwner:widget.isOwner)),
+                child:const Text('Retry saved finalization')),
           ],
           const SizedBox(height: 18),
           Row(
@@ -6675,8 +6642,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      '${_money(pendingPaid)} has been entered but is not '
-                      'yet finalized as a received payment.',
+                      _detail?['_finalization_state'] == null
+                          ? '${_money(pendingPaid)} recorded. Finalization has not been requested.'
+                          : '${_money(pendingPaid)} recorded. The saved finalization request is retained; do not enter these payments again.',
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -6685,10 +6653,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     if (widget.isOwner) ...[
                     const SizedBox(height: 10),
                     FilledButton.icon(
-                      onPressed: _busy || _detail?['_local_pending_tax'] == true
+                      onPressed: _busy || _startingFinalization || _detail?['_local_pending_tax'] == true || _detail?['_finalization_state'] != null
                           ? null : _finalizeEnteredPayments,
                       icon: const Icon(Icons.check_circle_outline),
-                      label: const Text('Finalize Received Payment'),
+                      label: Text(switch (_detail?['_finalization_state']) {
+                        'pending' || 'inflight' => 'Finalization saved · pending sync',
+                        'review' => 'Saved finalization needs reconciliation',
+                        'confirmed' => 'Finalized · refreshing payment details',
+                        _ => 'Finalize Received Payment',
+                      }),
                     ),
                     ],
                   ],
@@ -6719,34 +6692,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
               decoration: BoxDecoration(
-                color: pendingPaid > 0
-                    ? const Color(0xFFFFF4DE)
-                    : const Color(0xFFEAF8EE),
+                color: const Color(0xFFEAF8EE),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: pendingPaid > 0
-                      ? const Color(0xFFF1CC7A)
-                      : const Color(0xFFCBEBD3),
+                  color: const Color(0xFFCBEBD3),
                 ),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
-                    pendingPaid > 0 ? Icons.schedule : Icons.check_circle,
-                    color: pendingPaid > 0
-                        ? const Color(0xFFE58A00)
-                        : const Color(0xFF0C9A43),
+                  const Icon(
+                    Icons.check_circle,
+                    color: Color(0xFF0C9A43),
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    pendingPaid > 0
-                        ? tr('paidInFullPendingClose')
-                        : tr('paidInFull'),
-                    style: TextStyle(
-                      color: pendingPaid > 0
-                          ? const Color(0xFFA45F00)
-                          : const Color(0xFF08752F),
+                    DocumentPresentation(_detail!).isClosed ? tr('invoiceClosed') : tr('paidInFull'),
+                    style: const TextStyle(
+                      color: Color(0xFF08752F),
                       fontWeight: FontWeight.w800,
                     ),
                   ),
@@ -8213,12 +8176,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             finalizedPaid: finalizedPaid,
             pendingPaid: pendingPaid,
           );
-    final unsyncedInvoice = widget.documentId.startsWith('local-invoice-') &&
-        (_detail?['_server_document_id']?.toString().isEmpty ?? true);
-    final statusLabel = (unsyncedInvoice ||
-        _detail?['_local_pending_payment'] == true)
-        ? 'Pending sync'
-        : _statusLabel(
+    final statusLabel = _statusLabel(
             total: total,
             finalizedPaid: finalizedPaid,
             pendingPaid: pendingPaid,
@@ -8237,7 +8195,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           onLongPress: _showDocumentHeaderActions,
           statusRowHeight: MediaQuery.textScalerOf(context).scale(30) + 28,
           status: _statusPill(statusLabel,
-              code: unsyncedInvoice ? 'pending' : statusCode),
+              code: statusCode),
           actions: [
             if (!_estimate && _canManageInvoiceExpenses)
               IconButton(
@@ -8308,6 +8266,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     ),
                   if (!_estimate)
                     InvoiceWarrantyPanel(
+                      mainMechanic: widget.isOwner && OwnerPayrollScreen.enabled &&
+                          (_detail?['job_id']?.toString().isNotEmpty ?? false)
+                        ? JobTasksAccess(
+                            business:widget.businessId,job: _detail!['job_id'].toString(),
+                            invoice:widget.documentId,selectorOnly: true,revision:_loadGeneration,
+                            onChanged:()=>unawaited(_load())) : null,
+                      laborSummary: OwnerPayrollScreen.enabled
+                        ? InvoiceLaborSummary(business:widget.businessId,invoice:widget.documentId,revision:_loadGeneration) : null,
                       businessId: widget.businessId,
                       documentId: widget.documentId,
                       expectedVersion: _version,

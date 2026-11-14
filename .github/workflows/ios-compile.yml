@@ -31,6 +31,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.9'
           channel: stable
           cache: true
       - name: Generate iOS runner
@@ -116,5 +117,20 @@ jobs:
         run: flutter analyze
       - name: Compile iOS without code signing
         working-directory: generated
-        run: flutter build ios --no-codesign
+        run: |
+          # Apply unsigned verification to every generated Xcode target, including pods.
+          export XCODE_XCCONFIG_FILE="$RUNNER_TEMP/unsigned-device.xcconfig"
+          cat > "$XCODE_XCCONFIG_FILE" <<'CONFIG'
+          CODE_SIGNING_ALLOWED = NO
+          CODE_SIGNING_REQUIRED = NO
+          CODE_SIGN_IDENTITY =
+          CONFIG
+          if ! flutter build ios --release --no-codesign --verbose > "$RUNNER_TEMP/ios-build.log" 2>&1; then
+            echo '=== iOS compiler diagnostics ==='
+            grep -i -C 3 -E '(^|[[:space:]])(error:|fatal error:)|BUILD FAILED|Swift Compiler Error|Xcode build done' "$RUNNER_TEMP/ios-build.log" | tail -100 || true
+            echo '=== final iOS build output ==='
+            tail -160 "$RUNNER_TEMP/ios-build.log"
+            exit 1
+          fi
+          test -s build/ios/iphoneos/Runner.app/Runner
 

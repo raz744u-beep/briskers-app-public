@@ -5,16 +5,17 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import 'invoice_labor_work_summary.dart';
 import 'local_task_assignment_store.dart';
+import 'local_task_schedule.dart';
+import 'local_job_work_date.dart';
 
 /// Derived task identities follow saved invoice identities. This store never
 /// changes an invoice, a document number, or a mechanic's earned work.
 class LocalInvoiceTaskStore {
   LocalInvoiceTaskStore(this.db);
   final BriskersLocalDatabase db;
-  // The last paid Monday-Friday shop workweek ended November 6.
-  // Preserve the existing task identity cutover; weekly payroll selection
-  // handles Monday-Friday separately from this invoice source-date boundary.
-  static const payrollCutover = '2026-11-07';
+  // Owner cutoff: through Sunday November 8, shop-local calendar date.
+  // Historical completion is not evidence that a mechanic was paid.
+  static const payrollCutover = '2026-11-09';
   static bool currentPayrollDate(Object? value) {
     if (value is! String || !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) return false;
     final parsed = DateTime.tryParse(value);
@@ -23,6 +24,7 @@ class LocalInvoiceTaskStore {
   }
 
   Future<void> prepare() async {
+    await LocalTaskSchedule(db).prepare();
     await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_task_order '
       '(business_id TEXT NOT NULL,task_id TEXT NOT NULL,line_position INTEGER NOT NULL,PRIMARY KEY(business_id,task_id))');
     await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_estimates '
@@ -40,7 +42,7 @@ class LocalInvoiceTaskStore {
       'PRIMARY KEY(business_id,task_id))');
   }
 
-  Future<void> save(String business, String document, Map<String, dynamic> detail) async {
+  Future<void> save(String business, String document, Map<String, dynamic> detail, {bool ownerAssignedOpenDocument = false, String? selectedServiceLine}) async {
     if (detail['id'] != document ||
         (detail['business_id'] != null && detail['business_id'] != business)) {
       return;
@@ -67,13 +69,10 @@ class LocalInvoiceTaskStore {
       await db.customStatement("UPDATE regular_payroll_task_sources SET active=0 WHERE business_id=? AND invoice_id=? AND source_kind='invoice'",[business,document]);
       return;
     }
-    final date = source.readNullable<String>('document_date');
-    if (!currentPayrollDate(date)) {
-      // Reading an archived invoice must never reconstruct its labor as new work.
-      // Existing tasks, payments and invoice lines remain available as history.
-      return;
-    }
+    // Task visibility and assignment are independent of payroll eligibility.
+    // Pre-cutover sources remain archived in the payroll ledger.
     await db.transaction(() async {
+      final taskDate = await LocalJobWorkDate(db).read(business, job) ?? LocalJobWorkDate.today();
       await db.customStatement(
         'INSERT INTO regular_payroll_jobs VALUES(?,?,?) '
         'ON CONFLICT(business_id,id) DO UPDATE SET label=excluded.label',
@@ -84,7 +83,14 @@ class LocalInvoiceTaskStore {
         "WHERE business_id=? AND invoice_id=? AND source_kind='invoice'",
         [business, document],
       );
-      for (final line in rows.where(isInvoiceLaborLine)) {
+      final linked = await db.customSelect(
+        'SELECT line_id FROM regular_payroll_task_sources WHERE business_id=? AND invoice_id=?',
+        variables: [Variable(business), Variable(document)],
+      ).get();
+      final selected = linked.map((r) => r.data['line_id']).toSet();
+      if (selectedServiceLine != null) selected.add(selectedServiceLine);
+      final taskLines = rows.where((r) => isInvoiceLaborLine(r) || selected.contains(r['id']));
+      for (final line in taskLines) {
         final id = line['id'] as String;
         final retained = await db.customSelect(
           'SELECT task_id FROM regular_payroll_task_sources '
@@ -98,14 +104,16 @@ class LocalInvoiceTaskStore {
         if(canonical.length>1) { throw StateError('Invoice labor identity needs review.'); }
         final task = retained.isNotEmpty ? retained.single.read<String>('task_id')
           : canonical.isNotEmpty ? canonical.single.read<String>('id') : jsonEncode([job, document, id]);
-        final hours = invoiceLaborHours(line);
+        final hours = isInvoiceLaborLine(line) ? invoiceLaborHours(line) : null;
         final description = (line['description'] ?? line['name'] ?? 'Invoice labor').toString();
+        final newTask = retained.isEmpty && canonical.isEmpty;
         await db.customStatement(
           'INSERT INTO regular_payroll_tasks VALUES(?,?,?,?,?,?) '
           'ON CONFLICT(business_id,id) DO UPDATE SET description=excluded.description,planned=excluded.planned',
           [business, task, job, jsonEncode([document, id]), description,
             hours == null ? 0 : (hours * 100).round()],
         );
+        if(newTask) await LocalTaskSchedule(db).created(business,task,taskDate,inherited:true);
         await db.customStatement(
           "INSERT INTO regular_payroll_task_sources VALUES(?,?,?,?,'invoice',1) "
           'ON CONFLICT(business_id,task_id) DO UPDATE SET active=1',
@@ -114,13 +122,14 @@ class LocalInvoiceTaskStore {
       }
       for (var position=0;position<rows.length;position++) {
         final line=rows[position];
-        if(!isInvoiceLaborLine(line)) continue;
+        if(!isInvoiceLaborLine(line) && !selected.contains(line['id'])) continue;
         await db.customStatement('INSERT INTO regular_payroll_task_order(business_id,task_id,line_position) '
           'SELECT business_id,task_id,? FROM regular_payroll_task_sources WHERE business_id=? AND invoice_id=? AND line_id=? '
           'ON CONFLICT(business_id,task_id) DO UPDATE SET line_position=excluded.line_position',
           [position,business,document,line['id']]);
       }
-      await LocalTaskAssignmentStore(db).inherit(business, job);
+      await LocalTaskAssignmentStore(db).inherit(business, job,
+        ownerAssignedDocument: ownerAssignedOpenDocument ? document : null);
     });
   }
 
@@ -138,9 +147,12 @@ class LocalInvoiceTaskStore {
       'LEFT JOIN regular_payroll_task_order o ON o.business_id=s.business_id AND o.task_id=s.task_id '
       "WHERE s.business_id=? AND s.invoice_id=? AND s.source_kind='invoice' AND s.active=1",
       variables:[Variable(business),Variable(document)]).get();
-    final expected={for(var i=0;i<rows.length;i++) if(isInvoiceLaborLine(rows[i])) rows[i]['id']:i};
+    final linked=actual.map((r)=>r.data['line_id']).toSet();
+    final expected={for(var i=0;i<rows.length;i++) if(isInvoiceLaborLine(rows[i]) || linked.contains(rows[i]['id'])) rows[i]['id']:i};
     if(actual.length!=expected.length || actual.any((r)=>expected[r.data['line_id']]!=r.data['line_position'])) {
       await save(business,document,detail);
+    } else if (detail['job_id'] is String) {
+      await LocalTaskAssignmentStore(db).inherit(business, detail['job_id'] as String);
     }
   }
 

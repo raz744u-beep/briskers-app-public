@@ -36,6 +36,7 @@ jobs:
       - name: Install Flutter stable
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.9'
           channel: stable
           cache: true
 
@@ -53,7 +54,11 @@ jobs:
 
       - name: Resolve packages
         working-directory: generated
-        run: flutter pub get
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flutter pub get
+          bash "$GITHUB_WORKSPACE/tools/ci_sqlite_assets.sh"
 
       - name: Generate local database code
         working-directory: generated
@@ -73,6 +78,8 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           node run.mjs
+          node payee-reconciliation.mjs
+          node finalization.mjs
 
       - name: Analyze Dart
         working-directory: generated

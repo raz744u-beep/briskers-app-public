@@ -1,7 +1,7 @@
 import 'dart:async';
 
-/// A backend-confirmed invoice closure. Never broadcast for a locally assumed
-/// payment, Job completion, or an unacknowledged/pending close request.
+/// A durable invoice closure, committed locally or acknowledged by the backend.
+/// Task completion and payment entry alone never emit this event.
 class VerifiedInvoiceClosed {
   const VerifiedInvoiceClosed({
     required this.businessId,
@@ -19,6 +19,8 @@ class VerifiedInvoiceCloseEvents {
       StreamController<VerifiedInvoiceClosed>.broadcast(sync: true);
 
   static Stream<VerifiedInvoiceClosed> get changes => _events.stream;
+
+  static void locallyCommitted(VerifiedInvoiceClosed event) => serverConfirmed(event);
 
   static void serverConfirmed(VerifiedInvoiceClosed event) {
     if (event.businessId.isEmpty || event.invoiceId.isEmpty) {

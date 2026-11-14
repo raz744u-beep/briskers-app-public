@@ -1,4 +1,5 @@
 import 'local_task_assignment_store.dart';
+import 'local_job_work_date.dart';
 import 'dart:convert';
 import 'local_number_allocator.dart';
 import 'job_status_local_events.dart';
@@ -72,12 +73,12 @@ class OfflineJobAdminService {
     String? vehicleId,
     String? vehicleLabel,
     required String title,
+    DateTime? jobDate,
     String? requestedWork,
     num plannedHours = 0,
     String? employeeId,
     String? employeeName,
   }) async {
-    if (title.trim().isEmpty) throw StateError('Job title is required.');
     final id = _newJobId();
     final now = DateTime.now().toUtc();
     await _database.transaction(() async {
@@ -107,6 +108,7 @@ class OfflineJobAdminService {
           now.millisecondsSinceEpoch ~/ 1000,
         ],
       );
+      await LocalJobWorkDate(_database).save(businessId, id, jobDate ?? LocalJobWorkDate.today());
       await _database.customStatement(
         """INSERT INTO sync_outbox
           (business_id,entity_type,entity_id,operation,payload_json,
@@ -258,6 +260,7 @@ class OfflineJobAdminService {
     String? vehicleLabel,
     String? vehicleVin,
     String? title,
+    DateTime? jobDate,
     String? requestedWork,
     bool replaceRequestedWork = false,
     num? plannedHours,
@@ -321,6 +324,7 @@ class OfflineJobAdminService {
         ],
       );
 
+      if (jobDate != null) await LocalJobWorkDate(_database).save(businessId, jobId, jobDate);
       await _mergeOutbox(businessId, jobId, {
         'core_changed': true,
         'customer_id': nextCustomerId,

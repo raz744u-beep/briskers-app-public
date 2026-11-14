@@ -1,3 +1,6 @@
+import '../widgets/list_interaction_hint.dart';
+import '../services/offline_invoice_payment_ledger.dart';
+import '../services/local_invoice_closure.dart';
 import 'jobs/owner_local_delete_action.dart';
 import 'dart:async';
 
@@ -19,6 +22,7 @@ import '../core/document_presentation.dart';
 import '../core/estimate_list_description.dart';
 import '../services/briskers_api.dart';
 import '../services/invoice_payment_feed.dart';
+import '../services/job_task_summary.dart';
 import '../services/local_job_retirement.dart';
 import '../local/local_database_provider.dart';
 import '../services/local_financial_cache.dart';
@@ -29,8 +33,8 @@ import '../services/verified_invoice_payment_events.dart';
 import '../services/local_invoice_payment_coverage_events.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/local_invoice_status_styles_cache.dart';
-import '../services/invoice_finalization_guard.dart';
 import '../widgets/briskers_page_header.dart';
+import '../widgets/job_list_approved_card.dart';
 import '../widgets/connection_header_toggle.dart';
 import '../widgets/stale_keyboard_inset_guard.dart';
 import 'jobs/blank_invoice_setup_screen.dart';
@@ -47,8 +51,8 @@ String documentListStage(Map<String, dynamic> row, {required bool estimate}) {
   switch (presentation.statusCode) {
     case 'closed':
       return 'Closed';
-    case 'pending_close':
-      return 'Pending Close';
+    case 'paid':
+      return 'Paid';
     case 'reopened':
       return 'Reopened';
     case 'void':
@@ -72,16 +76,14 @@ String invoiceListStageWithReceipts(
   if (invoiceNeedsPayment(row, receipts: receipts)) {
     return 'Open';
   }
-  return existing == 'Open' ? 'Pending Close' : existing;
+  return existing == 'Open' ? 'Paid' : existing;
 }
 
 const invoiceListStatusFilters = [
   'Open',
-  'Pending Close',
+  'Paid',
   'Closed',
-  'Reopened',
-  'Void',
-];
+ ];
 const estimateListStatusFilters = [
   'Open',
   'Draft',
@@ -162,14 +164,12 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   late final BriskersApi _api = widget.api ?? const BriskersApi();
   late final LocalDocumentRepository _localDocuments =
       widget.localDocuments ?? LocalDocumentRepository();
-  final LocalDocumentDetailCache _localDetailCache = const LocalDocumentDetailCache();
+  late final LocalDocumentDetailCache _localDetailCache = LocalDocumentDetailCache(database:_localDocuments.database);
   late final OfflineDocumentDraftService _offlineDrafts =
       OfflineDocumentDraftService();
   final LocalInvoiceStatusStylesCache _localInvoiceStyles =
       LocalInvoiceStatusStylesCache();
   static final Map<String, List<Map<String, dynamic>>> _styleCache = {};
-  late final InvoiceFinalizationGuard _finalizationGuard =
-      InvoiceFinalizationGuard();
 
   List<Map<String, dynamic>>? _rows;
   // Keep authoritative snapshots separate from local description enrichment.
@@ -196,6 +196,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
   Map<String, num> _receiptTotals = const {};
+  Map<String, Map<String, int>> _mechanicHours = const {};
   late final InvoicePaymentFeed _paymentFeed =
       widget.paymentFeed ?? InvoicePaymentFeed();
   bool _futureDatedOnly = false;
@@ -216,7 +217,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     if ((_verifiedFullyPaidInvoiceIds.contains(row['id']?.toString()) ||
           _locallyCoveredInvoiceIds.contains(row['id']?.toString())) &&
         status != 'Closed' && status != 'Void' && status != 'Reopened') {
-      return 'Pending Close';
+      return 'Paid';
     }
     return invoiceListStageWithReceipts(
       row, receipts: _receiptTotals[row['id']?.toString()] ?? 0,
@@ -263,8 +264,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     switch (status) {
       case 'Open':
         return tr('invoiceOpen');
-      case 'Pending Close':
-        return tr('invoicePendingClose');
       case 'Paid':
         return tr('invoicePaid');
       case 'Closed':
@@ -298,7 +297,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   }
 
   Color _statusColor(String status) {
-    if (!_estimate && const {'Open', 'Pending Close', 'Closed', 'Reopened'}.contains(status)) {
+    if (!_estimate && const {'Open', 'Paid', 'Closed', 'Reopened'}.contains(status)) {
       return invoiceStatusDefaultColor(status);
     }
     if (!_estimate) {
@@ -491,6 +490,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       _indexRows = null;
       _savedRows = null;
       _receiptTotals = const {};
+      _mechanicHours = const {};
       _verifiedFullyPaidInvoiceIds.clear();
       _locallyCoveredInvoiceIds.clear();
       _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
@@ -524,9 +524,15 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   Future<void> _enrichEstimateDescriptions(
     int epoch, List<Map<String, dynamic>> snapshot,
   ) async {
-    if (!_estimate) return;
     final shown = _selectedStatus == null ? snapshot
         : snapshot.where((row) => _matchesStatus(row, _selectedStatus!)).toList();
+    if(!_estimate) {
+      final projected=await _projectSavedInvoices(shown.take(75).toList());
+      if(!mounted || epoch!=_descriptionEpoch) return;
+      final byId={for(final row in projected) row['id']:row};
+      setState(() { _rows=[for(final row in _rows ?? <Map<String,dynamic>>[]) byId[row['id']] ?? row]; _orderedSource=null; });
+      return;
+    }
     final summaries = <String, String>{};
     for (final row in shown.take(75)) {
       if (!mounted || epoch != _descriptionEpoch) return;
@@ -603,7 +609,19 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       // Receipt work participates in coalescing and cannot outlive the pass
       // that promises fresh status/payment state to the caller.
       await receipts;
+      if (!estimate) unawaited(_refreshMechanicHours(epoch, businessId));
     }
+  }
+
+  Future<void> _refreshMechanicHours(int epoch, String businessId) async {
+    final jobs = (_rows ?? const <Map<String,dynamic>>[]).map((r)=>r['job_id']?.toString()??'').where((id)=>id.isNotEmpty).toSet().toList();
+    try {
+      final result = <String,Map<String,int>>{};
+      for(var start=0; start<jobs.length; start+=300) {
+        result.addAll(await JobTaskSummary(_localDocuments.database).hours(businessId,jobs.skip(start).take(300).toList()));
+      }
+      if(mounted && epoch==_loadEpoch) setState(()=>_mechanicHours=result);
+    } catch (_) { /* Optional labels cannot block saved invoice cards. */ }
   }
 
   Future<void> _loadRows(
@@ -655,9 +673,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       if (!mounted || epoch != _loadEpoch) return;
       final blocked = await (widget.blockedDocumentIds?.call(businessId) ??
           LocalJobRetirement.blockedDocumentIds(localDatabase, businessId));
-      final rows = List<Map<String, dynamic>>.from(fetched)
+      final rows = await LocalInvoiceClosureStore(_localDocuments.database).projectRows(businessId,List<Map<String, dynamic>>.from(fetched)
           .where((row) => !blocked.contains('${row['id'] ?? ''}'))
-          .toList();
+          .toList());
       if (!mounted || epoch != _loadEpoch) return;
       final styles = _invoiceStyles;
 
@@ -676,7 +694,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           _error = null;
         });
       }
-      if (estimate && !sameRows) {
+      if (!sameRows) {
         unawaited(_enrichEstimateDescriptions(_descriptionEpoch, rows));
       }
 
@@ -731,6 +749,33 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     }
   }
 
+  Future<List<Map<String,dynamic>>> _projectSavedInvoices(List<Map<String,dynamic>> rows) async {
+    if(_estimate) return rows;
+    final result=<Map<String,dynamic>>[];
+    for(final row in rows) {
+      final id=row['id']?.toString() ?? '';
+      final cached=await _localDetailCache.loadReadOnly(widget.businessId,id);
+      var projected=Map<String,dynamic>.from(row);
+      if(cached!=null) {
+        final payment=OfflineInvoicePaymentLedger.projectPendingPayments(cached,
+          await OfflineInvoicePaymentLedger(database:_localDocuments.database).pendingForInvoice(widget.businessId,id));
+        // Index placeholders and stale payment feeds must not hide saved
+        // receipt coverage. Preserve every amount; this is presentation only.
+        if(row['_local_snapshot']==true ||
+            (num.tryParse(cached['row_version']?.toString() ?? '') ?? 0) >=
+            (num.tryParse(row['row_version']?.toString() ?? '') ?? 0)) {
+          for(final key in ['paid_amount','pending_payment','_payment_reconciliation_required']) {
+            if(payment.containsKey(key)) projected[key]=payment[key];
+          }
+        }
+        projected.remove('_local_snapshot');
+        projected['_estimate_list_description']=estimateListDescription(row,detail:cached);
+      }
+      result.add(await LocalInvoiceClosureStore(_localDocuments.database).project(widget.businessId,projected));
+    }
+    return result;
+  }
+
   Future<bool> _loadLocalRows(
     int epoch,
     String businessId,
@@ -758,7 +803,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           _error = null;
         });
       }
-      if (estimate && !sameRows) {
+      if (!sameRows) {
         unawaited(_enrichEstimateDescriptions(_descriptionEpoch, _rows!));
       }
       return true;
@@ -1223,7 +1268,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     if (_estimate || !widget.isOwner) return;
 
     final eligible = (_rows ?? const <Map<String, dynamic>>[])
-        .where((row) => _invoiceStage(row) == 'Pending Close')
+        .where((row) => _invoiceStage(row) == 'Paid')
         .toList();
 
     if (eligible.isEmpty) {
@@ -1249,7 +1294,46 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       for (final row in eligible) row['id']?.toString() ?? '',
     }..remove('');
 
-    final confirmed = await showModalBottomSheet<bool>(
+    var closing = false;
+    String? feedback;
+    Future<void> closeSelection(BuildContext sheetContext, StateSetter setSheetState) async {
+      if (closing || selected.isEmpty) return;
+      setSheetState(() { closing = true; feedback = null; });
+      final ids = Set<String>.from(selected);
+      final ok = await showDialog<bool>(context: sheetContext,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Close selected invoices?'),
+          content: Text('This will close ${ids.length} selected invoice${ids.length == 1 ? '' : 's'}.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Close invoices')),
+          ],
+        )) ?? false;
+      if (!sheetContext.mounted) return;
+      if (!ok) { setSheetState(() => closing = false); return; }
+      try {
+        final closure = LocalInvoiceClosure(database:_localDocuments.database,api:_api);
+        await closure.close(widget.businessId, ids, isOwner:widget.isOwner);
+        unawaited(closure.flush(widget.businessId));
+        if (mounted) unawaited(_load());
+        if (!sheetContext.mounted) return;
+        setSheetState(() {
+          eligible.removeWhere((row) => ids.contains(row['id']?.toString()));
+          selected.removeAll(ids);
+          selected.retainAll(eligible.map((row) => row['id'].toString()));
+          closing = false;
+          feedback = '${ids.length} invoice${ids.length == 1 ? '' : 's'} closed.';
+        });
+      } catch (error) {
+        if (!sheetContext.mounted) return;
+        setSheetState(() {
+          closing = false;
+          feedback = error is StateError ? error.message.toString() : 'The invoices could not be closed. Saved payments are preserved.';
+        });
+      }
+    }
+
+    await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
@@ -1264,7 +1348,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                 sum +
                 (num.tryParse(row['total_amount']?.toString() ?? '') ?? 0),
           );
-          final allSelected = selected.length == eligible.length;
+          final allSelected = eligible.isNotEmpty && selected.length == eligible.length;
 
           return SafeArea(
             child: SizedBox(
@@ -1286,7 +1370,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                         ),
                         IconButton(
                           tooltip: 'Close',
-                          onPressed: () => Navigator.pop(sheetContext, false),
+                          onPressed: () => Navigator.pop(sheetContext),
                           icon: const Icon(Icons.close),
                         ),
                       ],
@@ -1297,7 +1381,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        'Fully paid invoices are shown here. Pending payments are posted during closeout, then the invoice is marked Closed.',
+                        'Fully covered invoices are shown here. Closing saves Closed on this device immediately. Payment records stay unchanged; synchronization runs in the background.',
                       ),
                     ),
                   ),
@@ -1305,7 +1389,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                     activeColor: BriskersColors.invoices,
                     checkColor: Colors.white,
                     value: allSelected,
-                    onChanged: (value) {
+                    onChanged: closing ? null : (value) {
                       setSheetState(() {
                         selected.clear();
                         if (value == true) {
@@ -1329,6 +1413,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                       ),
                     ),
                   ),
+                  if (feedback != null) Padding(
+                    padding: const EdgeInsets.symmetric(horizontal:16, vertical:6),
+                    child: Text(feedback!, key: const Key('close-invoices-feedback'))),
                   const Divider(height: 1),
                   Expanded(
                     child: ListView.separated(
@@ -1344,7 +1431,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                           activeColor: BriskersColors.invoices,
                           checkColor: Colors.white,
                           value: selected.contains(id),
-                          onChanged: id.isEmpty
+                          onChanged: closing || id.isEmpty
                               ? null
                               : (value) {
                                   setSheetState(() {
@@ -1388,11 +1475,11 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                           style: FilledButton.styleFrom(
                             backgroundColor: BriskersColors.invoices,
                           ),
-                          onPressed: selected.isEmpty
+                          onPressed: closing || selected.isEmpty
                               ? null
-                              : () => Navigator.pop(sheetContext, true),
+                              : () => closeSelection(sheetContext, setSheetState),
                           icon: const Icon(Icons.lock_outline),
-                          label: const Text('Close selected'),
+                          label: Text(closing ? 'Closing…' : 'Close selected'),
                         ),
                       ],
                     ),
@@ -1405,77 +1492,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       ),
     );
 
-    if (confirmed != true || selected.isEmpty || !mounted) return;
-
-    final ok =
-        await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Close selected invoices?'),
-            content: Text(
-              'This will close ${selected.length} selected invoice'
-              '${selected.length == 1 ? '' : 's'}.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: BriskersColors.invoices,
-                ),
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Close invoices'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!ok || !mounted) return;
-
-    try {
-      // Check the entire selection before closing any invoice, then recheck
-      // each RPC so a later receipt or connection-mode change cannot bypass it.
-      await _finalizationGuard.check(
-        businessId: widget.businessId,
-        invoiceIds: selected,
-        isOwner: widget.isOwner,
-      );
-      for (final id in selected) {
-        if (!mounted) return;
-        await _finalizationGuard.run(
-          businessId: widget.businessId,
-          invoiceIds: [id],
-          isOwner: widget.isOwner,
-          action: () => _api.closeInvoice(widget.businessId, id),
-        );
-        // The backend acknowledged this exact close. Update the cached
-        // index and live list now; don't wait for the full invoice query.
-        try {
-          await _localDocuments.recordServerConfirmedClosed(
-            widget.businessId, id,
-          );
-        } catch (_) {
-          // Server confirmation remains valid; cache refresh can retry.
-        }
-        VerifiedInvoiceCloseEvents.serverConfirmed(VerifiedInvoiceClosed(
-          businessId: widget.businessId, invoiceId: id,
-        ));
-      }
-      unawaited(_load());
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${selected.length} invoice${selected.length == 1 ? '' : 's'} closed.',
-          ),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _error = error.toString());
-    }
   }
 
   Future<void> _showExpensesFromList(Map<String, dynamic> row) async {
@@ -2085,6 +2101,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                 ],
               ],
             ),
+            const ListInteractionHint(),
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
@@ -2127,8 +2144,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     final color = _statusColor(status);
     final number = row['document_number']?.toString() ?? '';
     final customer = row['customer_name']?.toString() ?? '';
-    final documentTitle =
-        (row['title'] ?? row['job_title'])?.toString().trim() ?? '';
+
+    final documentTitle = (row['title'] ?? row['job_title'])?.toString().trim() ?? '';
     final estimateDescription = _estimate
         ? (row['_estimate_list_description']?.toString().trim() ??
             estimateListDescription(row))
@@ -2145,6 +2162,23 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               : (number.toUpperCase().startsWith('I-')
                     ? number
                     : 'I-$number'));
+
+    if (!_estimate) {
+      final total=num.tryParse(row['total_amount']?.toString()??'');
+      return JobListApprovedCard(
+        job:{'status_color':'#${color.toARGB32().toRadixString(16).substring(2)}'},
+        number:jobNumber,customer:customer,invoiceNumber:number,vehicle:vehicle,
+        description:row['_estimate_list_description']?.toString() ?? estimateListDescription(row),mechanic:'',employee:'',mechanicMinutes:null,progress:null,
+        statusControl:ApprovedListStatusBadge(label:statusLabel,color:color,icon:status=='Closed'||status=='Paid'?Icons.check_circle_outline:status=='Void'?Icons.block:Icons.receipt_long_outlined),
+        financialSummary:const SizedBox.shrink(),
+        footer:Wrap(alignment:WrapAlignment.spaceBetween,spacing:8,runSpacing:2,children:[
+          Text(total==null?'Total: unavailable':'Total: ${_money(total)}',style:const TextStyle(fontWeight:FontWeight.w800,fontSize:14)),
+          Text([for(final person in (_mechanicHours[row['job_id']]??const <String,int>{}).entries) '${person.key} · ${(person.value/60).toStringAsFixed(1)} hrs',documentDate,if(_hasFutureDateTag(row))'Future-dated'].where((s)=>s.isNotEmpty).join('  |  '),style:const TextStyle(color:Color(0xFF526171),fontSize:13,fontWeight:FontWeight.w700)),
+          if(row['customer_problem_flag']==true)const Icon(Icons.flag,color:Colors.red,size:18),
+        ]),
+        onOpen:()=>_open(row),onOpenInvoice:()=>_open(row),onLongPress:()=>_showDocumentActions(row),
+      );
+    }
 
     return Card(
       margin: const EdgeInsets.only(bottom: 9),

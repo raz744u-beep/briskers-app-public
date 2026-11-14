@@ -15,6 +15,7 @@ import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
 import '../services/warranty_receipt_reporting.dart';
 import '../services/local_financial_cache.dart';
+import '../services/financial_history_recovery.dart';
 import '../services/invoice_payment_feed.dart';
 import '../services/expenses_period_totals.dart';
 import '../services/local_expense_subtotal.dart';
@@ -70,6 +71,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
 
   bool _loading = true;
   bool _loadingMore = false;
+  bool _downloadingHistory = false;
+  int _downloadedHistoryCount = 0;
+  String? _historyRecoveryMessage;
+
   bool _hasMore = true;
   bool _importing = false;
   bool _requestingPhotoSync = false;
@@ -425,6 +430,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     bool forceTotals = false,
   }) async {
     final epoch = ++_loadEpoch;
+    _loadingMore = false;
     final businessId = widget.businessId;
     if (_serverConfirmedBusinessId != businessId) {
       _serverConfirmedTransactionIds.clear();
@@ -522,7 +528,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           WarrantyReceiptReporting.unverified).toList();
         // Paint locally committed transactions before loading account/category
         // dropdown options. An options query failure must not blank Expenses.
-        if (_isCurrentLoad(epoch, businessId) && localRows.isNotEmpty) {
+        if (_isCurrentLoad(epoch, businessId) &&
+            (localRows.isNotEmpty || BriskersConnectionModeController.instance.forceOffline)) {
           setState(() {
             _transactions = localRows;
             _hasMore = hasMoreLocal;
@@ -568,7 +575,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           if (!_showingLocal && _transactions.isEmpty) {
             _transactions = const [];
           }
-          _hasMore = false;
+          // Keep _hasMore from the complete filtered local cache query.
+          // Force Offline must not hide remaining historical pages.
           _loading = false;
           _error = null;
           _transactionRefreshFailed = false;
@@ -1023,28 +1031,122 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
   Future<void> _loadMore() async {
-    if (_showingLocal || _loading || _loadingMore || !_hasMore) {
-      return;
-    }
+    if (_loading || _loadingMore || !_hasMore) return;
+    final epoch = _loadEpoch;
+    final businessId = widget.businessId;
+    final local = _showingLocal;
+    final offset = _transactions.length;
     setState(() => _loadingMore = true);
     try {
-      final rows = await _fetchTransactions(offset: _transactions.length);
-      if (!mounted) return;
+      // Offline has the same paginated browsing as online. Only page the
+      // locally saved ledger; never connect merely to reveal older records.
+      if (local) {
+        final cached = await _localFinancial.loadTransactions(
+          businessId,
+          startDate: _rangeStartDate,
+          endDate: _rangeEndDate,
+          search: _searchController.text.trim().isEmpty
+              ? null : _searchController.text.trim(),
+          direction: _filter == 'all' ? null : _filter,
+          accountId: _accountFilterId,
+          categoryId: _categoryFilterId,
+          counterpartyId: _counterpartyFilterId,
+        );
+        if (!_isCurrentLoad(epoch, businessId) || !_showingLocal) return;
+        final next = cached.skip(offset).take(_pageSize)
+            .map(WarrantyReceiptReporting.unverified).toList();
+        setState(() {
+          _transactions = [..._transactions, ...next];
+          _visibleCount += next.length;
+          _hasMore = cached.length > _transactions.length;
+          _loadingMore = false;
+        });
+        return;
+      }
+      final rows = await _fetchTransactions(offset: offset);
+      if (!_isCurrentLoad(epoch, businessId) || _showingLocal) return;
       setState(() {
         _serverConfirmedTransactionIds.addAll(
           rows.map((row) => row['id']?.toString() ?? '')
               .where((id) => id.isNotEmpty),
         );
-        _transactions = LocalFinancialCache.overlayPending([..._transactions, ...rows], _transactions);
+        _transactions = LocalFinancialCache.overlayPending(
+          [..._transactions, ...rows], _transactions);
         _hasMore = rows.length == _pageSize;
         _loadingMore = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!_isCurrentLoad(epoch, businessId)) return;
       setState(() {
         _loadingMore = false;
         _error = error.toString();
       });
+    }
+  }
+
+  Future<void> _downloadSavedHistory() async {
+    if (!_owner || _downloadingHistory) return;
+    // Recover complete historical transaction rows, not only the search
+    // result. A search or category chip must not reduce the download.
+    // Force Offline remains unchanged; only this expressly approved,
+    // read-only request is sent over HTTPS.
+    final end = _rangeEndDate ?? _dateOnly(DateTime.now());
+    final start = _rangeStartDate;
+    if (start != null && start.isAfter(end)) return;
+    final period = start == null
+        ? 'through ${DateFormat('MMM d, yyyy').format(end)}'
+        : 'for ${DateFormat('MMM d, yyyy').format(start)}–${DateFormat('MMM d, yyyy').format(end)}';
+    final allowed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Download saved history?'),
+        content: Text(
+          'Read posted Income & Expenses transactions from Briskers '
+          '$period. '
+          'Downloaded records are merged with existing local history. '
+          'Pending offline payments are not submitted or replaced. '
+          'Force Offline stays enabled. This uses internet for this '
+          'one read-only download only.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Download')),
+        ],
+      ),
+    ) ?? false;
+    if (!allowed || !mounted) return;
+    setState(() {
+      _downloadingHistory = true;
+      _downloadedHistoryCount = 0;
+      _historyRecoveryMessage = null;
+    });
+    try {
+      final count = await FinancialHistoryRecovery(
+        cache: _localFinancial,
+      ).download(
+        businessId: widget.businessId,
+        start: start,
+        end: end,
+        onPage: (count) {
+          if (mounted) setState(() => _downloadedHistoryCount = count);
+        },
+      );
+      if (!mounted) return;
+      setState(() => _historyRecoveryMessage =
+        'Downloaded $count posted records to saved local history. '
+        'Pending offline transactions are preserved.');
+      await _load(showLoading: false, forceTotals: true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _historyRecoveryMessage =
+        'Download incomplete: $error. Already saved records were retained. '
+        'No payments were submitted.');
+      // Refresh the local view only, never toggle connection mode.
+      await _load(showLoading: false);
+    } finally {
+      if (mounted) setState(() => _downloadingHistory = false);
     }
   }
 
@@ -1944,7 +2046,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                 : _searchController.text.trim().isNotEmpty
                                     ? 'Search totals include all dates.'
                                     : _lastPeriodAt == null
-                                        ? 'Complete posted totals · pending offline entries excluded'
+                                        ? 'Saved totals may be incomplete until posted history is downloaded and verified'
                                         : 'Posted totals for $_rangeLabel · verified ${DateFormat('h:mm a').format(_lastPeriodAt!)} · pending offline entries excluded'),
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
@@ -1986,10 +2088,35 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                         ),
                     ],
                   ),
+                  if (_owner) ...[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: _downloadingHistory
+                            ? null : _downloadSavedHistory,
+                        icon: _downloadingHistory
+                            ? const SizedBox.square(
+                                dimension: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.download_for_offline_outlined),
+                        label: Text(_downloadingHistory
+                            ? 'Saving history… $_downloadedHistoryCount records'
+                            : 'Download missing history to this device'),
+                      ),
+                    ),
+                    if (_historyRecoveryMessage != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 3, 4, 5),
+                        child: Text(_historyRecoveryMessage!,
+                          style: const TextStyle(fontSize: 12,
+                            color: Color(0xFF526171))),
+                      ),
+                  ],
                   if (_searchController.text.trim().isNotEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 5, left: 4),
-                      child: Text('Search checks all transaction history.',
+                      child: Text('Search checks all saved local transactions. Older history may require download.',
                         style: TextStyle(fontSize: 12,
                           color: Color(0xFF667085))),
                     ),
@@ -2238,12 +2365,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       ),
                     )
                   else if (visible.isEmpty)
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(20),
-                        child: Text('No transactions in this view.'),
-                      ),
-                    )
+                     Card(
+                       child: Padding(
+                         padding: const EdgeInsets.all(20),
+                         child: Text(_showingLocal
+                             ? 'No saved transactions match this view. Older records may not have been downloaded to this device.'
+                             : 'No transactions in this view.'),
+                       ),
+                     )
                   else
                     ...visible.map((transaction) {
                       final incomeRow =
@@ -2353,22 +2482,34 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                           fontWeight: FontWeight.w800,
                                         ),
                                       ),
-                                      if (!invoiceReceipt) Text(
-                                        remarks.isEmpty
-                                            ? <String>[
-                                                if (category.isNotEmpty)
-                                                  category,
-                                                if (date.isNotEmpty) date,
-                                              ].join(' • ')
-                                            : remarks,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onSurfaceVariant,
+                                      if (!invoiceReceipt) ...[
+                                        // Always show the actual saved date,
+                                        // even when imported remarks exist.
+                                        Text(
+                                          date.isEmpty ? 'Date unavailable' : date,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 12.5,
+                                          ),
                                         ),
-                                      ),
+                                        if (category.isNotEmpty)
+                                          Text(
+                                            category,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        if (remarks.isNotEmpty &&
+                                            !remarks.startsWith('S36 Active Screen, Snap TBL-'))
+                                          Text(
+                                            remarks,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: Theme.of(context)
+                                                  .colorScheme.onSurfaceVariant,
+                                            ),
+                                          ),
+                                      ],
                                     ],
                                   ),
                                 ),
@@ -2544,15 +2685,18 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       child: Center(child: CircularProgressIndicator()),
                     )
                   else if (!_hasMore && !moreReceiptPages && visible.isNotEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Center(
-                        child: Text(
-                          'No more transactions',
-                          style: TextStyle(color: Color(0xFF667085)),
-                        ),
-                      ),
-                    ),
+                     Padding(
+                       padding: const EdgeInsets.symmetric(vertical: 12),
+                       child: Center(
+                         child: Text(
+                           _showingLocal
+                               ? 'End of saved transactions on this device. Older records may not be downloaded.'
+                               : 'No more transactions',
+                           textAlign: TextAlign.center,
+                           style: const TextStyle(color: Color(0xFF667085)),
+                         ),
+                       ),
+                     ),
                 ],
               ),
             ),

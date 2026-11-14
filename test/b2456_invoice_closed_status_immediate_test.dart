@@ -27,7 +27,7 @@ void main() {
     }, receipts: 0), 'Closed');
     expect(invoiceListStageWithReceipts({
       ...previouslyIssued, 'display_status_code': 'reopened',
-    }, receipts: 1198.05), 'Reopened');
+    }, receipts: 1198.05), 'Paid');
     expect(invoiceListStageWithReceipts({
       ...previouslyIssued, 'status': 'void',
     }, receipts: 0), 'Void');
@@ -87,7 +87,7 @@ void main() {
     await sub.cancel();
   });
 
-  test('Every close path updates retained list after verified RPC, not before', () {
+  test('Every close path updates retained list after durable local commit or verified RPC', () {
     final docs = File('lib/screens/documents_screen.dart').readAsStringSync();
     final closeService = File(
       'lib/services/owner_invoice_auto_close_service.dart').readAsStringSync();
@@ -105,7 +105,9 @@ void main() {
     expect(closeService, contains('VerifiedInvoiceCloseEvents.serverConfirmed('));
     expect(detail, contains('await InvoiceFinalizationGuard().run<void>('));
     expect(detail, contains('VerifiedInvoiceCloseEvents.serverConfirmed('));
-    expect(docs, contains('await _finalizationGuard.run('));
-    expect(docs, contains('VerifiedInvoiceCloseEvents.serverConfirmed('));
+    expect(docs, contains('await closure.close(widget.businessId, ids, isOwner:widget.isOwner)'));
+    final localClose=File('lib/services/local_invoice_closure.dart').readAsStringSync();
+    expect(localClose.indexOf('VerifiedInvoiceCloseEvents.locallyCommitted('),greaterThan(localClose.indexOf('await db.transaction(')));
+    expect(localClose,contains("'receipts':<dynamic>[]"));
   });
 }

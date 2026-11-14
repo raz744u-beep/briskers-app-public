@@ -37,18 +37,22 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('J-24'), findsOneWidget);
+    expect(find.text('J-24 · Test Customer'), findsOneWidget);
     expect(find.text('Add Recheck'), findsNothing);
-    await tester.tap(find.text('J-24'));
+    await tester.ensureVisible(find.text('J-24 · Test Customer'));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('J-24 · Test Customer'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Add Recheck'));
     await tester.tap(find.text('Add Recheck'));
     await tester.pump();
     expect(recheckJob, 'actual-job-uuid-24');
     expect(openedJob, isNull);
-    await tester.tap(find.text('J-24'));
+    await tester.ensureVisible(find.text('J-24 · Test Customer'));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('J-24 · Test Customer'));
     await tester.pump();
-    expect(find.text('Add Recheck'), findsNothing);
+    expect(find.text('Add Recheck'), findsOneWidget);
   });
   testWidgets('unlinked task placeholder cannot open or recheck a fake job',
       (tester) async {
@@ -79,7 +83,8 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('Unlinked Job'), findsOneWidget);
+    expect(find.text('Unlinked legacy task'), findsOneWidget);
+    await tester.longPress(find.text('Unlinked legacy task'));await tester.pumpAndSettle();
     expect(find.text('Add Recheck'), findsNothing);
     expect(find.text('Open Job Details'), findsNothing);
     expect(callbacks, 0);

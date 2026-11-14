@@ -65,10 +65,10 @@ void main() {
 
   test('Job Detail includes the placeholder for authorized completed jobs before online hydration', () {
     final source = File('lib/screens/jobs/job_detail_screen.dart').readAsStringSync();
-    expect(source, contains("if (_canSeeFinancial &&\n              _job?['status']?.toString() == 'completed')"));
+    expect(source, contains("if (_canSeeFinancial)"));
     expect(source, contains("savedJobFinancialStatus("));
     expect(source, contains("_job?['payment_state'] ?? widget.initialJobSummary?['payment_state']"));
-    expect(source, contains('final status = _onlineReady ? (_completedPaymentLabel() ?? saved) : saved;'));
+    expect(source, contains('final status = saved ?? (_onlineReady ? _completedPaymentLabel() : null);'));
     expect(source, contains('return JobFinancialStatusCard('));
     expect(source, contains('offline: BriskersConnectionModeController.instance.forceOffline'));
     expect(source, contains("if (_job?['status']?.toString() != 'completed') return null;"));

@@ -1,27 +1,22 @@
+import '../../widgets/owner_confirmation_dialog.dart';
 import 'package:flutter/material.dart';
 
 Future<bool> showOfflineJobPurgeConfirmation(BuildContext context, {
   required String jobLabel, required List<Map<String, dynamic>> items,
 }) async {
-  final result = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
-      title: Text('Permanently delete $jobLabel?'),
-      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Delete the following locally stored records from this device:'),
-          const SizedBox(height: 8),
-          for (final item in items) Text(offlinePurgeItemLabel(item)),
-          const SizedBox(height: 12),
-          const Text('This removes the selected Job and its linked records from this device. Customers, vehicles and other Jobs are kept. It does not refund a bank payment.'),
-          const SizedBox(height: 8),
-          const Text('The latest freed invoice and Job numbers can be reused automatically. Older free invoice numbers can be assigned manually. Deletion stays local; no internet is needed.'),
-          const SizedBox(height: 8),
-          const Text('Record numbers can be reused only after a local conflict check. Deleting payment records does not refund or reverse bank or card transactions.'),
-        ])),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Permanently delete these records')),
-      ],
-    ));
+  final result = await showDialog<bool>(context:context,builder:(dialog)=>OwnerConfirmationDialog(
+    title:'Permanently delete $jobLabel?',confirm:'Permanently delete these records',destructive:true,sections:[
+      const Text('Records affected',style:TextStyle(fontSize:18,fontWeight:FontWeight.w800)),
+      const SizedBox(height:8),
+      Text('${items.length} locally stored records will be removed from this device:'),
+      const SizedBox(height:8),
+      for(final item in items)Padding(padding:const EdgeInsets.only(bottom:6),child:Text('• ${offlinePurgeItemLabel(item)}')),
+      const Divider(height:24),
+      const Text('Consequences',style:TextStyle(fontSize:18,fontWeight:FontWeight.w800)),
+      const SizedBox(height:8),
+      const Text('• Removes this Job and the linked records listed above.\n• Keeps customers, vehicles and other Jobs.\n• Deleting payment records does not refund or reverse bank or card transactions.\n• Freed numbers are reused only after a local conflict check.\n• This local deletion cannot be undone from this dialog.'),
+      const SizedBox(height:16),
+    ]));
   return result == true;
 }
 

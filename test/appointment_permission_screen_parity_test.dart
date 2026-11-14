@@ -195,7 +195,7 @@ void main() {
 
   test('Jobs cards prefer job title over customer requested work', () async {
     final card = await File('lib/widgets/job_compact_card.dart').readAsString();
-    expect(card, contains('final description = title.isNotEmpty ? title : requested;'));
+    expect(card, contains('final displayDescription = jobDisplayDescription(job);'));
   });
 
   test('Paid Still Open uses translated copy and returns only paid unfinished Jobs', () async {

@@ -11,10 +11,12 @@ class CustomerVehiclesSection extends StatelessWidget {
     required this.onEdit,
     this.onRepairHistory,
     this.enabled = true,
+    this.showAdd = true,
   });
 
   final List<dynamic> vehicles;
   final bool enabled;
+  final bool showAdd;
   final VoidCallback onAdd;
   final ValueChanged<Map<String, dynamic>> onEdit;
   final ValueChanged<Map<String, dynamic>>? onRepairHistory;
@@ -63,7 +65,7 @@ class CustomerVehiclesSection extends StatelessWidget {
                     ),
               ),
             ),
-            TextButton.icon(
+            if (showAdd) TextButton.icon(
               onPressed: enabled ? onAdd : null,
               icon: const Icon(Icons.add, color: BriskersColors.vehicles),
               label: const Text('Vehicle'),

@@ -209,11 +209,19 @@ class LocalFinancialCache {
       }
 
       final overlay = overlayPending(serverRows.map(preserveOccurrence).toList(), saved);
+      // A server page is a partial inventory, not proof that previously
+      // saved financial history has been deleted. Preserve every cached
+      // transaction omitted by the page, including older posted expenses,
+      // payroll and locally committed (not yet acknowledged) changes.
+      // Matching server IDs take precedence unless there is a pending local
+      // edit; recurring verified metadata is retained above.
       final seen = overlay.map((r) => r['id'].toString()).toSet();
       final merged = <Map<String, dynamic>>[
         ...overlay,
-        for (final entry in downloaded.entries)
-          if (seen.add(entry.key)) entry.value,
+        for (final previous in saved)
+          if ((previous['id']?.toString() ?? '').isNotEmpty &&
+              seen.add(previous['id'].toString()))
+            previous,
       ];
       merged.sort((a, b) =>
         (b['transaction_date']?.toString() ?? '').compareTo(
@@ -254,7 +262,9 @@ class LocalFinancialCache {
       }
       final snapshot = {
         ...detail,
-        'transaction_date': detail['date'],
+        // Some verified recurring responses already use transaction_date
+        // rather than date. Never erase the posted date on import.
+        'transaction_date': detail['transaction_date'] ?? detail['date'],
         'sync_state': 'synced',
       };
       final identity = {
@@ -270,7 +280,11 @@ class LocalFinancialCache {
       await saveTransactions(businessId, [
         if (!rows.any((row) => row['id'] == id)) {...snapshot, ...identity},
         for (final row in rows)
-          if (row['id'] == id) {...row, ...identity} else row,
+          // The old merge retained stale amount/date/description on a
+          // matching ID, so a verified downloaded occurrence could remain
+          // missing or incorrect in the visible local transaction list.
+          // Preserve local-only fields while refreshing verified posted data.
+          if (row['id'] == id) {...row, ...snapshot, ...identity} else row,
       ]);
     });
   }
@@ -414,6 +428,26 @@ class LocalFinancialCache {
     );
   }
 
+  /// Recurring list rows can be complete saved records even when the generic
+  /// manual-transaction RPC never supplied a detail cache. Never open an empty
+  /// new form for a missing edit target, or invent its financial references.
+  Future<Map<String,dynamic>?> loadTransactionForEdit(String business,String id) async {
+    final detail=await loadTransactionDetail(business,id);
+    final rows=await loadTransactions(business);
+    final summary=rows.where((r)=>r['id']==id && matchesTransaction(r,business,id)).firstOrNull;
+    if(detail==null && summary==null)return null;
+    final saved=<String,dynamic>{...?summary,
+      if(detail!=null) for(final field in detail.entries)
+        if(field.value!=null)field.key:field.value};
+    final recurring=saved['recurring_rule_id']!=null || saved['recurring_engine_owned']==true;
+    if(!recurring)return detail;
+    final amount=saved['amount'] ?? (saved['amount_minor'] is int ? (saved['amount_minor'] as int)/100 : null);
+    if(amount==null || saved['account_id']==null || saved['category_id']==null ||
+       (saved['date']??saved['transaction_date'])==null) { return null; }
+    return {...saved,'id':id,'business_id':business,'amount':amount,
+      'counterparty_id':saved['counterparty_id']??saved['vendor_id']};
+  }
+
   Future<Map<String, dynamic>?> loadTransactionDetail(
     String businessId,
     String transactionId,
@@ -437,20 +471,72 @@ class LocalFinancialCache {
     String businessId,
     Map<String, dynamic> options,
   ) async {
-    await _save(businessId, _optionsKey, jsonEncode(options));
+    await _database.transaction(() async {
+      final previous = await loadOptions(businessId);
+      final people = <String, Map<String, dynamic>>{};
+      for (final source in [previous, options]) {
+        for (final item in (source['counterparties'] as List? ?? const []).whereType<Map>()) {
+          final id = item['id'];
+          if (id is String && id.isNotEmpty && people[id]?['sync_state'] != 'pending') {
+            people[id] = {...?people[id], ...Map<String, dynamic>.from(item)};
+          }
+        }
+      }
+      await _save(businessId, _optionsKey, jsonEncode({
+        ...previous, ...options,
+        if (previous.containsKey('counterparties') || options.containsKey('counterparties'))
+          'counterparties': people.values.toList(),
+      }));
+    });
   }
 
   Future<Map<String, dynamic>> loadOptions(String businessId) async {
     final raw = await _load(businessId, _optionsKey);
     if (raw == null || raw.isEmpty) return const {};
-    try {
-      final decoded = jsonDecode(raw);
-      return decoded is Map
-          ? Map<String, dynamic>.from(decoded)
-          : const {};
-    } catch (_) {
-      return const {};
-    }
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) throw const FormatException('Unreadable transaction settings.');
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  Future<void> saveLocalCounterparty(String business, Map<String, dynamic> edit) async {
+    await _database.transaction(() async {
+      final options = await loadOptions(business);
+      final rows = [for (final raw in options['counterparties'] as List? ?? const [])
+        Map<String, dynamic>.from(raw as Map)];
+      final id = edit['id'] as String;
+      final name = (edit['name'] as String).trim();
+      if (business.isEmpty || id.isEmpty || name.isEmpty) throw ArgumentError('Missing payee identity.');
+      if (rows.any((row) => row['id'] != id &&
+          row['name'].toString().trim().toLowerCase() == name.toLowerCase())) {
+        throw StateError('This name is already saved. Edit the existing payee or payer.');
+      }
+      final index = rows.indexWhere((row) => row['id'] == id);
+      final old = index < 0 ? null : rows[index];
+      final next = {...?old, ...edit, 'name': name, 'sync_state': 'pending',
+        'base': old != null && old['sync_state'] == 'pending' ? old['base'] : old,
+      };
+      if (index < 0) { rows.add(next); } else { rows[index] = next; }
+      await _save(business, _optionsKey, jsonEncode({...options, 'counterparties': rows}));
+    });
+  }
+
+  Future<void> reconcileCounterparty(String business, Map<String, dynamic> sent,
+      Future<String> Function() submit) async {
+    if (await submit() != sent['id']) throw StateError('Payee identity changed.');
+    await _database.transaction(() async {
+      final options = await loadOptions(business);
+      final rows = [for (final raw in options['counterparties'] as List? ?? const [])
+        Map<String, dynamic>.from(raw as Map)];
+      final index = rows.indexWhere((row) => row['id'] == sent['id']);
+      if (index < 0 || rows[index]['sync_state'] != 'pending') return;
+      final clean = Map<String, dynamic>.from(sent)..remove('base')..remove('sync_state');
+      if (jsonEncode(rows[index]) == jsonEncode(sent)) {
+        rows[index] = clean;
+      } else if (jsonEncode(rows[index]['base']) == jsonEncode(sent['base'])) {
+        rows[index]['base'] = clean;
+      }
+      await _save(business, _optionsKey, jsonEncode({...options, 'counterparties': rows}));
+    });
   }
 
   Future<void> _save(

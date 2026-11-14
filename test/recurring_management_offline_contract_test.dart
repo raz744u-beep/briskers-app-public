@@ -18,7 +18,8 @@ void main() {
     expect(source, contains('rows = saved ?? <Map<String, dynamic>>[];'));
     expect(source, contains('_offlineUnavailable = saved == null;'));
     expect(source, contains('Recurring transactions unavailable offline.'));
-    expect(source, contains('networkSupabase.auth.currentUser?.id'));
+    expect(source, contains('final userId = supabase.auth.currentUser?.id'));
+    expect(source, isNot(contains('networkSupabase.auth.currentUser')));
     expect(source, contains('if (_canEdit)'));
   });
 }

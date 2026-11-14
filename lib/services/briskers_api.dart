@@ -2877,6 +2877,13 @@ class BriskersApi {
     return result.toString();
   }
 
+  Future<void> markFindingNotApplicable(String businessId,String findingId,
+    {required String originalBody,required String body})async{
+    await networkSupabase.rpc('briskers_mark_finding_not_applicable',params:{
+      'p_business_id':businessId,'p_finding_id':findingId,
+      'p_original_body':originalBody,'p_body':body});
+  }
+
   Future<void> updateVehicleFinding(
     String businessId,
     String findingId, {
@@ -4606,6 +4613,14 @@ class BriskersApi {
         'p_payment_id': paymentId,
       },
     );
+  }
+
+  Future<Map<String,dynamic>> finalizeInvoiceOnce(String businessId,
+      String invoiceId,String operationId,Map<String,dynamic> request) async {
+    final result = await networkSupabase.rpc('briskers_finalize_invoice_once_v1',
+      params:{'p_business_id':businessId,'p_invoice_id':invoiceId,
+        'p_operation_id':operationId,'p_request':request});
+    return Map<String,dynamic>.from(result as Map);
   }
 
   Future<String> finalizePendingInvoicePayment(

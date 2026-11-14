@@ -1,3 +1,4 @@
+import 'work_status_colors.dart';
 import 'package:flutter/material.dart';
 
 Color colorFromHex(String? value, {Color fallback = const Color(0xFF546E7A)}) {
@@ -16,9 +17,10 @@ Color colorFromHex(String? value, {Color fallback = const Color(0xFF546E7A)}) {
 Color operationalJobStatusColor(String? status, String? configuredHex) {
   final code = (status ?? '').trim().toLowerCase();
   return switch (code) {
-    'open' => const Color(0xFF2864A5),
-    'in_progress' || 'in progress' => const Color(0xFFB66D13),
-    'complete' || 'completed' => const Color(0xFF26844D),
+    'open' => WorkStatusColors.open,
+    'in_progress' || 'in progress' => WorkStatusColors.progress,
+    'complete' || 'completed' => WorkStatusColors.done,
+    'closed' => WorkStatusColors.closed,
     _ => colorFromHex(configuredHex),
   };
 }
@@ -80,4 +82,11 @@ const jobStatusColorChoices = <String>[
   '#757575',
   '#C2185B',
   '#3949AB',
+];
+
+/// The shop Owner selector has four operational states. Stored legacy history
+/// is left intact; this only controls choices for a new explicit change.
+List<Map<String,dynamic>> ownerJobStatuses(List<Map<String,dynamic>> saved) => [
+  for(final item in const [('open','Open','#D97706'),('in_progress','In Progress','#1674DB'),('completed','Completed','#0A8F53'),('closed','Closed','#777777')])
+    {...?saved.where((s)=>s['code']==item.$1).firstOrNull,'code':item.$1,'name':item.$2,'color_hex':item.$3,'icon_key':item.$1=='completed'?'task_alt':item.$1=='in_progress'?'build_circle':'work_outline'},
 ];

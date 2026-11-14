@@ -84,7 +84,7 @@ class LocalTaskAssignmentStore {
       "AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage x WHERE x.business_id=c.business_id AND x.credit_id=c.allocation_id))",
       [business,task,except??'']);
   }
-  Future<void> inherit(String business,String job) async {
+  Future<void> inherit(String business,String job,{String? ownerAssignedDocument}) async {
     await prepare();
     final ready=await _read("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('regular_payroll_portions','regular_payroll_employees','regular_payroll_estimates','regular_payroll_work_coverage','local_mechanic_work_credits_v1')",[]);
     if(ready.length!=5)return;
@@ -114,7 +114,6 @@ class LocalTaskAssignmentStore {
     );
     final tasks=await _read("SELECT t.id FROM regular_payroll_tasks t JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id "
       "WHERE t.business_id=? AND t.job_id=? AND s.active=1 AND s.source_kind='invoice' "
-      "AND EXISTS(SELECT 1 FROM local_documents d WHERE d.business_id=s.business_id AND d.id=s.invoice_id AND date(d.document_date)=d.document_date AND d.document_date >= '2026-11-07') "
       "AND NOT EXISTS(SELECT 1 FROM regular_payroll_task_policy o WHERE o.business_id=t.business_id AND o.task_id=t.id AND o.manual_override=1) "
       "AND NOT EXISTS(SELECT 1 FROM regular_payroll_portions p LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id "
       "WHERE p.business_id=t.business_id AND p.task_id=t.id AND m.inherited IS NULL)",[business,job]);

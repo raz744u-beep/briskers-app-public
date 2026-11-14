@@ -49,20 +49,29 @@ void main() {
     await showTasks(tester,[
       service('new',2), service('old',65),
     ]);
-    expect(find.text('Jobs with Tasks · 2'),findsOneWidget);
-    expect(find.byTooltip('Period'),findsOneWidget);
-    await tester.tap(find.byTooltip('Period'));
+    expect(find.textContaining('Tasks · 2 ('),findsOneWidget);
+    await tester.tap(find.byKey(const Key('toggle-task-filters')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Period'));
+    await tester.tap(find.ancestor(of:find.text('Period'),matching:find.byType(DropdownButtonFormField<String>)));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Last 7 days').last);
     await tester.pumpAndSettle();
-    expect(find.text('Jobs with Tasks · 1'),findsOneWidget);
-    expect(find.text('J-new'),findsOneWidget);
-    expect(find.text('J-old'),findsNothing);
-    await tester.tap(find.byTooltip('Period'));
+    await tester.tap(find.text('Apply Filters'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Tasks · 1 ('),findsOneWidget);
+    expect(find.text('Service new'),findsOneWidget);
+    expect(find.text('Service old'),findsNothing);
+    await tester.tap(find.byKey(const Key('toggle-task-filters')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Period'));
+    await tester.tap(find.ancestor(of:find.text('Period'),matching:find.byType(DropdownButtonFormField<String>)));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Any time').last);
     await tester.pumpAndSettle();
-    expect(find.text('Jobs with Tasks · 2'),findsOneWidget);
+    await tester.tap(find.text('Apply Filters'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Tasks · 2 ('),findsOneWidget);
   });
 
   testWidgets('Paid and Unpaid filters do not mingle with Active jobs',
@@ -76,19 +85,29 @@ void main() {
       service('unpaid',2,status:'done',remaining:60),
       service('paid',2,status:'done',paid:1),
     ]);
-    expect(find.text('Jobs with Tasks · 1'),findsOneWidget);
-    await tester.tap(find.byTooltip('Status'));
+    expect(find.textContaining('Tasks · 1 ('),findsOneWidget);
+    await tester.tap(find.byKey(const Key('toggle-task-filters')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Status'));
+    await tester.tap(find.ancestor(of:find.text('Status'),matching:find.byType(DropdownButtonFormField<String>)));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Unpaid').last);
     await tester.pumpAndSettle();
-    expect(find.text('Jobs with Tasks · 1'),findsOneWidget);
-    expect(find.text('J-unpaid'),findsOneWidget);
-    await tester.tap(find.byTooltip('Status'));
+    await tester.tap(find.text('Apply Filters'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Tasks · 1 ('),findsOneWidget);
+    expect(find.text('Service unpaid'),findsOneWidget);
+    await tester.tap(find.byKey(const Key('toggle-task-filters')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Status'));
+    await tester.tap(find.ancestor(of:find.text('Status'),matching:find.byType(DropdownButtonFormField<String>)));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Paid').last);
     await tester.pumpAndSettle();
-    expect(find.text('Jobs with Tasks · 1'),findsOneWidget);
-    expect(find.text('J-paid'),findsOneWidget);
+    await tester.tap(find.text('Apply Filters'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Tasks · 1 ('),findsOneWidget);
+    expect(find.text('Service paid'),findsOneWidget);
   });
 
   test('unknown service dates cannot be passed off as recently completed',(){
@@ -103,12 +122,12 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await showTasks(tester,[service('historical',10,status:'done',paid:1)]);
-    expect(find.text('Jobs with Tasks · 0'),findsOneWidget);
+    expect(find.textContaining('Tasks · 0 ('),findsOneWidget);
     expect(find.byKey(const Key('show-all-service-task-statuses')),findsOneWidget);
     await tester.tap(find.byKey(const Key('show-all-service-task-statuses')));
     await tester.pumpAndSettle();
-    expect(find.text('Jobs with Tasks · 1'),findsOneWidget);
-    expect(find.text('J-historical'),findsOneWidget);
+    expect(find.textContaining('Tasks · 1 ('),findsOneWidget);
+    expect(find.text('Service historical'),findsOneWidget);
   });
 
 
@@ -121,16 +140,21 @@ void main() {
     await showTasks(tester,[
       service('historical',10,archived:true,remaining:60),
     ]);
-    expect(find.text('Jobs with Tasks · 0'),findsOneWidget);
+    expect(find.textContaining('Tasks · 0 ('),findsOneWidget);
     await tester.tap(find.byKey(const Key('show-all-service-task-statuses')));
     await tester.pumpAndSettle();
-    expect(find.text('Jobs with Tasks · 1'),findsOneWidget);
-    expect(find.text('J-historical'),findsOneWidget);
-    await tester.tap(find.byTooltip('Status'));
+    expect(find.textContaining('Tasks · 1 ('),findsOneWidget);
+    expect(find.text('Service historical'),findsOneWidget);
+    await tester.tap(find.byKey(const Key('toggle-task-filters')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Status'));
+    await tester.tap(find.ancestor(of:find.text('Status'),matching:find.byType(DropdownButtonFormField<String>)));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Unpaid').last);
     await tester.pumpAndSettle();
-    expect(find.text('Jobs with Tasks · 0'),findsOneWidget);
+    await tester.tap(find.text('Apply Filters'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Tasks · 0 ('),findsOneWidget);
   });
 
 

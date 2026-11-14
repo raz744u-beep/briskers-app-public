@@ -24,6 +24,10 @@ CANDIDATE_BRANCHES = {CANDIDATE_BRANCH, "fix/post-b2382-ux-polish-20261021", "fi
 PAYROLL_CANDIDATE = "candidate/payroll-enabled"
 PAYROLL_VERIFICATION_BRANCH = "fix/tasks-test-parity-bugs30-20261106"
 CANDIDATE_BRANCHES.add(PAYROLL_CANDIDATE)
+# Owner-approved consolidated Bugs 33 phone test candidate. The gate still
+# validates exact source, workflow identity and required successful checks.
+BUGS33_RELEASE_BRANCH = "fix/bugs33-preserve-offline-financial-history-20261108"
+CANDIDATE_BRANCHES.add(BUGS33_RELEASE_BRANCH)
 BUILD_WORKFLOW = ".github/workflows/android-debug.yml"
 REQUIRED_WORKFLOWS = {
     "diagnostics.yml": "Briskers Diagnostics",
@@ -36,10 +40,13 @@ GLORIA_RECOVERY_WORKFLOW = ("gloria-exact-total-regression.yml",
 
 def workflows_for_branch(branch):
     workflows = dict(REQUIRED_WORKFLOWS)
-    if branch == PAYROLL_CANDIDATE:
+    if branch in {PAYROLL_CANDIDATE, BUGS33_RELEASE_BRANCH}:
         workflows["offline-recovery-android-check.yml"] = "Offline recovery Android debug verification"
         filename, name = GLORIA_RECOVERY_WORKFLOW
         workflows[filename] = name
+    if branch == BUGS33_RELEASE_BRANCH:
+        workflows["retry-storm-regression.yml"] = "Retry storm protection"
+        workflows["offline-recurring-component.yml"] = "Offline recurring component"
     if branch == GLORIA_RECOVERY_BRANCH:
         filename, name = GLORIA_RECOVERY_WORKFLOW
         workflows[filename] = name

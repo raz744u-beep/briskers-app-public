@@ -119,9 +119,9 @@ void main(){
       (widget.tooltip == 'Edit or split mechanic labor' ||
        widget.tooltip == 'Assign or split mechanic labor'));
 
-    // Approved design: the job-wide Main Mechanic selector belongs on Job
-    // Details, never inside Invoice Items. Navigate to the real Job screen
-    // to set the lead, then return to the unchanged invoice labor pencil.
+    // The same job-wide Main Mechanic selector is now mirrored on Job
+    // Details and Invoice Items. Both edit one saved job lead identity;
+    // individual invoice labor still uses the existing pencil.
     final jobId=(await tester.runAsync(()async{
       final row=await db.customSelect(
         'SELECT job_id FROM local_documents WHERE business_id=? AND id=?',
@@ -129,30 +129,35 @@ void main(){
       ).getSingle();
       return row.read<String>('job_id');
     }))!;
-    navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>
-      JobDetailScreen(businessId:'shop',jobId:jobId,roleCode:'owner')));
-    await tester.pumpAndSettle();
+    // Use the real invoice link so returning exercises its refresh callback.
+    await click(find.text('Job J-1'));
     await until(find.text('Main Mechanic'));
-    expect(find.text('Job Tasks'),findsWidgets);
-    await click(find.byType(DropdownButtonFormField<String>).first);
+    expect(find.text('Job Tasks'),findsNothing,reason:'One task navigation control remains on Job Details.');
+    expect(find.textContaining('View Tasks'),findsOneWidget);
+    await capture('job-detail-main-mechanic');
+    await click(find.byType(DropdownButton<String>).first);
     await click(find.text('Alpha').last);
     await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:150)));
     await tester.pump();
     navigator.currentState!.pop();
     await tester.pumpAndSettle();
-    expect(find.text('Main Mechanic'),findsNothing,
-      reason:'Invoice Items must not duplicate Job Details controls.');
+    await until(find.text('Main Mechanic'));
+    expect(find.text('Main Mechanic'),findsOneWidget,
+      reason:'Invoice mirrors the same saved Job Main Mechanic selector.');
     await until(laborPencils());
+    await until(find.text('Total 9.0 hrs'));
+    await capture('bugs35-invoice-details-main-mechanic');
     await click(laborPencils().first);
     
     await click(find.text('Add mechanic'));
     await click(find.text('Beta'));
+    await click(find.text('Continue'));
     // The second mechanic starts at zero allocated hours. The Owner sets
     // the approved credit once, before completing the task.
     final turboCard=await creditCard('b','Replace turbocharger and gaskets');
     final edit = find.descendant(of:turboCard,matching:find.byTooltip('Edit Assignment'));
     await click(edit);
-    var field = find.widgetWithText(TextField,'Assigned hours');
+    var field = find.descendant(of:find.byKey(const ValueKey('hours-1')),matching:find.byType(TextField));
     await click(field);
     final controller = tester.widget<TextField>(field).controller!;
     expect(controller.selection.textInside(controller.text),controller.text);
@@ -160,10 +165,10 @@ void main(){
     await tester.enterText(field,'7.5');
     await click(find.text('Cancel'));
     await click(edit);
-    field = find.widgetWithText(TextField,'Assigned hours');
+    field = find.descendant(of:find.byKey(const ValueKey('hours-1')),matching:find.byType(TextField));
     expect(tester.widget<TextField>(field).controller!.text,'0.00');
     await tester.enterText(field,'3');
-    await click(find.widgetWithText(FilledButton,'Save'));
+    await click(find.widgetWithText(FilledButton,'Save Task'));
     await until(turboCard);
     await click(find.descendant(of:turboCard,matching:
       find.widgetWithText(TextButton,'Start')));
@@ -182,7 +187,7 @@ void main(){
     
     // Keep Alpha explicitly assigned, then add Beta to the same task identity.
     for(final name in ['Alpha','Beta']){
-      await click(find.text('Add mechanic').last);await click(find.text(name).last);
+      await click(find.text('Add mechanic').last);await click(find.text(name).last);await click(find.text('Continue'));
       await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:400)));await tester.pump();
     }
     // Two independent assigned-hours choices on the shared labor line.
@@ -240,11 +245,15 @@ void main(){
     await click(find.text('Review Weekly Labor (2 tasks)'));
     await until(find.text('Employee Profile'));
     
-    expect(find.text('Tasks'),findsOneWidget);expect(find.text('General Tasks'),findsOneWidget);
+    expect(find.text('Tasks'),findsOneWidget);expect(find.text('General Tasks'),findsNothing);
+    expect(find.text('Work Review (Read Only)'),findsOneWidget);
     expect(find.widgetWithText(OutlinedButton,'Details'),findsOneWidget);
     await capture('bugs30-employee-unpaid-tasks');
 
-    await click(find.widgetWithText(FilledButton,'Verify Payment'));
+    await click(find.text('Payroll'));
+    await capture('nov12-employee-payroll');
+    await tester.scrollUntilVisible(find.byKey(const Key('verify-weekly-payment')),150,scrollable:find.descendant(of:find.byKey(const Key('employee-payroll-preparation')),matching:find.byType(Scrollable)).first);
+    await click(find.byKey(const Key('verify-weekly-payment')));
     await until(find.text(r'Calculated labor: $200.00'));
     await click(find.widgetWithText(FilledButton,'Record payment'));
     await until(find.text('Payment Recorded'));await click(find.widgetWithText(FilledButton,'Done'));
@@ -275,19 +284,24 @@ void main(){
     expect(find.text('Review Weekly Labor (0 tasks)'),findsOneWidget);
     expect(find.text('Review Weekly Labor (1 tasks)'),findsOneWidget);
     await click(find.text('Review Weekly Labor (0 tasks)'));
-    await until(find.text('Unpaid work · 0'));
-    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Verify Payment')).onPressed,isNull);
+    await until(find.text('Work Review (Read Only)'));
+    await click(find.text('Payroll'));
+    await until(find.text('No verified unpaid labor for this week.'));
+    await tester.scrollUntilVisible(find.byKey(const Key('verify-weekly-payment')),150,scrollable:find.descendant(of:find.byKey(const Key('employee-payroll-preparation')),matching:find.byType(Scrollable)).first);
+    expect(tester.widget<FilledButton>(find.byKey(const Key('verify-weekly-payment'))).onPressed,isNull);
     await capture('bugs30-employee-paid-tasks');
-    await click(find.text('View Paid Tasks'));await until(find.text('Payroll History'));
+    await click(find.text('Reports'));await until(find.text('Payroll History'));
     navigator.currentState!.pop();await tester.pumpAndSettle();
     navigator.currentState!.pop();await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('Tasks'),-100,scrollable:find.descendant(of:find.byType(HomeScreen),matching:find.byType(Scrollable)).first);
     await click(find.text('Tasks'));
     await until(find.byType(TasksWorkspace));
-    await tester.tap(find.byTooltip('Status'));await tester.pumpAndSettle();
+    await click(find.byKey(const Key('toggle-task-filters')));
+    await tester.tap(find.byKey(const ValueKey('Status:Active')));await tester.pumpAndSettle();
     await tester.tap(find.text('All').last);await tester.pumpAndSettle();
-    await until(find.text('Jobs with Tasks · 1'));
-    expect(find.textContaining('2 tasks'),findsOneWidget);
+    await click(find.text('Apply Filters'));
+    await until(find.text('Tasks · 2 (All)'));
+    expect(find.text('Shared diagnostic labor'),findsOneWidget);
     await capture('bugs30-global-completed-tasks');
     // Reuse the Job identity already verified when navigating from Invoice.
     navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>
@@ -303,7 +317,7 @@ void main(){
     await click(chip);
     expect(tester.widget<JobDocumentScreen>(find.byType(JobDocumentScreen)).documentId,invoice);
     navigator.currentState!.pop();await tester.pumpAndSettle();
-    await click(find.descendant(of:jobPage,matching:find.widgetWithText(OutlinedButton,'Job Tasks')));
+    await click(find.descendant(of:jobPage,matching:find.textContaining('View Tasks')));
     // Job-specific Tasks intentionally uses the approved compact view.
     // Global Tasks above retains its existing filterable workspace.
     await until(find.byType(JobScopedTasks));
@@ -311,7 +325,14 @@ void main(){
     expect(find.text('Labor Task'),findsOneWidget);
     expect(find.text('General Task'),findsOneWidget);
     expect(find.byTooltip('Advanced task filters'),findsNothing);
-    expect(find.byIcon(Icons.more_vert),findsNothing);
+    expect(find.byIcon(Icons.more_vert),findsOneWidget,reason:'Header retains invoice labor history; cards use long press.');
+    await capture('job-tasks-collapsed');
+    final scopedTask = find.descendant(of:find.byType(JobScopedTasks),
+      matching:find.text('Shared diagnostic labor'));
+    await click(scopedTask.first);
+    await until(find.text('Task Details'));
+    expect(find.text('Edit Task'),findsOneWidget);
+    await capture('job-task-details');
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds:500));
     expect(secondaryPrompts,0,

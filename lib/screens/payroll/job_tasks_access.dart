@@ -13,9 +13,11 @@ import 'payroll_ui_scope.dart';
 
 /// The same task identity is used by the invoice, Job and employee screens.
 class JobTasksAccess extends StatefulWidget {
-  const JobTasksAccess({super.key,required this.business,required this.job,this.invoice,this.line,this.database,this.onChanged,this.onHours,this.revision=0});
+  const JobTasksAccess({super.key,required this.business,required this.job,this.invoice,this.line,this.database,this.onChanged,this.onHours,this.revision=0,this.selectorOnly=false});
   final String business,job;
   final int revision;
+  /// Render just the same job-level Main Mechanic selector on Invoice Details.
+  final bool selectorOnly;
   final String? invoice,line;
   final BriskersLocalDatabase? database;
   final VoidCallback? onChanged;
@@ -51,6 +53,8 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
         'regular_payroll_employees'
       });
       final people=<Map<String,dynamic>>[];
+      final cached=await OfflineJobAdminService(database:db)
+          .cachedEmployees(widget.business);
       if(hasCore){
         final nick=names.contains('local_employee_nicknames');
         final meta=names.contains('regular_payroll_assignment_meta');
@@ -74,8 +78,6 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
           '${meta?"AND (COALESCE(m.active,1)=1 OR p.state='Done') ": ""}'
           'ORDER BY e.name',
           variables:[widget.business,invoice,line].map(Variable<String>.new).toList()).get();
-        final cached=await OfflineJobAdminService(database:db)
-          .cachedEmployees(widget.business);
         final known={for(final p in cached)p['id']:p}.values.toList();
         for(final row in rows){
           final data=row.data;
@@ -100,7 +102,9 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
       if(mounted && widget.invoice==invoice && widget.line==line){
         setState((){
           linePeople=people;
+          staff=cached;
           lineAssignment=people.isEmpty?'Unassigned':null;
+          warning=null;
         });
       }
     }catch(_){
@@ -108,6 +112,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
         setState((){
           linePeople=[];
           lineAssignment='Assignments unavailable · Tap to retry';
+          warning='Saved mechanic assignments could not be read. Reopen this invoice to retry.';
         });
       }
     }
@@ -175,6 +180,8 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
 
   Future<void> load()async{
     try{
+      await LocalPayrollRepository(db,business:widget.business,owner:true)
+          .recoverJobAssignments(widget.job);
       final roster=await OfflineJobAdminService(database:db).cachedEmployees(widget.business).timeout(const Duration(seconds:3));
       final row=await db.customSelect('SELECT assigned_employee_id,assigned_employee_name FROM local_jobs WHERE business_id=? AND id=?',
         variables:[Variable(widget.business),Variable(widget.job)]).getSingleOrNull();
@@ -278,32 +285,68 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
             ),
           ],
         ]),
+        if (linePeople.length > 1)
+          Align(alignment:Alignment.centerRight,child:Text(
+            'Assigned total: ${(linePeople.fold<int>(0,(sum,person)=>sum+
+              (person['estimated_minutes'] as int? ?? 0))/60).toStringAsFixed(1)} h',
+            style:const TextStyle(fontSize:11,fontWeight:FontWeight.w700,
+              color:Color(0xFF526171)))),
         if(warning!=null)Text(warning!,style:const TextStyle(fontSize:11)),
       ]);
     }
     final values={for(final p in staff) p['id']:p};
     return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-      Row(children:[
-        Expanded(child:DropdownButtonFormField<String>(key:ValueKey(main),initialValue:values.containsKey(main)?main:null,
-          decoration:InputDecoration(labelText:'Main Mechanic',filled:true,
-            fillColor:const Color(0xFFF0FBF7),
-            border:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63))),
-            enabledBorder:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63))),
-            focusedBorder:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:const BorderSide(color:Color(0xFF087D63),width:2)),
-            isDense:true,contentPadding:const EdgeInsets.symmetric(horizontal:12,vertical:9)),isExpanded:true,
-          items:[const DropdownMenuItem<String>(value:null,child:Text('Unassigned')),
-            for(final entry in values.entries) if(entry.key is String)
-              DropdownMenuItem(value:entry.key as String,child:Text(EmployeeNicknameStore.displayLabel(entry.value,staff)))],
-          onChanged:busy?null:chooseMain)),
+      Row(crossAxisAlignment:CrossAxisAlignment.center,children:[
+        Expanded(child:Container(
+          height:50,
+          padding:const EdgeInsets.symmetric(horizontal:11),
+          decoration:BoxDecoration(
+            color:const Color(0xFFF0FBF7),
+            borderRadius:BorderRadius.circular(15),
+            border:Border.all(color:const Color(0xFF087D63)),
+          ),
+          child:Column(
+            mainAxisAlignment:MainAxisAlignment.center,
+            crossAxisAlignment:CrossAxisAlignment.start,
+            children:[
+              const Text('Main Mechanic',maxLines:1,
+                style:TextStyle(fontSize:10,color:Color(0xFF526171),fontWeight:FontWeight.w700)),
+              DropdownButtonHideUnderline(child:DropdownButton<String>(
+              key:ValueKey('main-mechanic-$main'),
+              value:values.containsKey(main)?main:null,
+              isExpanded:true,isDense:true,
+              style:Theme.of(context).textTheme.bodyMedium!.copyWith(fontSize:14,color:const Color(0xFF153E38),fontWeight:FontWeight.w800),
+              icon:const Icon(Icons.arrow_drop_down,color:Color(0xFF076B56)),
+              hint:const Text('Unassigned'),
+              items:[
+                const DropdownMenuItem<String>(value:null,
+                  child:Text('Unassigned')),
+                for(final entry in values.entries)
+                  DropdownMenuItem<String>(
+                    value:entry.key as String,
+                    child:Text(EmployeeNicknameStore.displayLabel(entry.value,staff),
+                      maxLines:1,overflow:TextOverflow.ellipsis)),
+              ],
+              onChanged:busy?null:chooseMain,
+            )),
+            ],
+          ),
+        )),
+        if (!widget.selectorOnly) ...[
         const SizedBox(width:8),Expanded(child:SizedBox(height:50,child:OutlinedButton.icon(
           style:OutlinedButton.styleFrom(
+            tapTargetSize:MaterialTapTargetSize.shrinkWrap,
+            visualDensity:VisualDensity.standard,
+            padding:const EdgeInsets.symmetric(horizontal:11),
             backgroundColor:const Color(0xFFF0FBF7),
             foregroundColor:const Color(0xFF076B56),
             side:const BorderSide(color:Color(0xFF087D63)),
             shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(15))),
           onPressed:busy?null:open,icon:const Icon(Icons.checklist),
-          label:const Text('Job Tasks',maxLines:1,overflow:TextOverflow.ellipsis))))]),
-      if(widget.invoice!=null && estimated!=null)Text('Estimated labor: ${(estimated!/60).toStringAsFixed(2)} h · Actual: ${(actual!/60).toStringAsFixed(2)} h',style:const TextStyle(fontSize:12)),
+          label:const Text('Job Tasks',maxLines:1,overflow:TextOverflow.ellipsis,
+            style:TextStyle(fontWeight:FontWeight.w800,fontSize:15)))))],
+      ]),
+      if(!widget.selectorOnly && widget.invoice!=null && estimated!=null)Text('Estimated labor: ${(estimated!/60).toStringAsFixed(2)} h · Actual: ${(actual!/60).toStringAsFixed(2)} h',style:const TextStyle(fontSize:12)),
       if(warning!=null)Row(children:[Expanded(child:Text(warning!)),TextButton(onPressed:load,child:const Text('Retry'))]),
     ]);
   }

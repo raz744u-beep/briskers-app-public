@@ -42,9 +42,12 @@ void main() {
     final start = screen.indexOf('Future<void> _finalizeEnteredPayments()');
     final end = screen.indexOf('Future<void> _enterWarrantyPayment()', start);
     final finalize = screen.substring(start, end);
-    expect(finalize, contains('_queuedPaymentOperationIds.isNotEmpty'));
+    expect(finalize, contains('stateForDetail('));
+    expect(finalize, isNot(contains('finalizePendingInvoicePayment(')));
     expect(screen, contains("_detail?['_payment_reconciliation_required']"));
-    expect(finalize, contains('Connect and sync recorded payments before finalizing'));
+    expect(finalize, contains('OfflineInvoiceFinalization().save('));
+    expect(finalize, contains('Posting awaits synchronization'));
+    expect(finalize.indexOf('OfflineInvoiceFinalization().save('), lessThan(finalize.indexOf('OfflineInvoiceFinalization().flush(')));
     expect(screen, contains("payment['pending_sync'] == true ||"));
     expect(screen, contains("label: 'Pending sync'"));
     expect(screen, contains('paymentPendingLabel: _warrantyPaymentProcessed(pendingOnly: true)'));

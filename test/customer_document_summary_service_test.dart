@@ -85,7 +85,7 @@ void main() {
     };
     expect(views['TEST-INV-OPEN']!.statusCode, 'open');
     expect(views['TEST-INV-OPEN']!.balanceDueCents, 87525);
-    expect(views['TEST-INV-PENDING']!.statusCode, 'pending_close');
+    expect(views['TEST-INV-PENDING']!.statusCode, 'paid');
     expect(views['TEST-INV-PENDING']!.balanceDueCents, 0);
     expect(views['TEST-INV-PENDING']!.finalizedCents, 0);
     expect(views['estimate']!.statusCode, 'accepted');
@@ -119,7 +119,7 @@ void main() {
         final view = DocumentPresentation(row);
         expect(view.pendingCents, 10000);
         expect(view.balanceDueCents, 0);
-        expect(view.statusCode, 'pending_close');
+        expect(view.statusCode, 'paid');
       }
       // Hydrating repeatedly does not write a projected amount into the cache.
       expect((await cache.load('shop', 'queued'))!['pending_payment'], 0);
@@ -160,7 +160,7 @@ void main() {
       final view = DocumentPresentation(
         (await summaries.forCustomer('shop', 'synthetic-customer')).single,
       );
-      expect(view.statusCode, 'pending_close');
+      expect(view.statusCode, 'paid');
       expect(view.balanceDueCents, isNull);
       expect(view.paymentDetailsKnown, false);
     },

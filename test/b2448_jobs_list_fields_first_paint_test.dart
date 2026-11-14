@@ -60,7 +60,7 @@ void main() {
 
     final card = File('lib/widgets/job_compact_card.dart').readAsStringSync();
     expect(card, contains("final vehicle = job['vehicle']?.toString().trim() ?? '';"));
-    expect(card, contains('final description = title.isNotEmpty ? title : requested;'));
+    expect(card, contains('final displayDescription = jobDisplayDescription(job);'));
     final repo = File('lib/services/local_job_repository.dart').readAsStringSync();
     expect(repo, contains("'title': row.read<String>('title')"));
     expect(repo, contains("'requested_work': row.readNullable<String>('requested_work')"));

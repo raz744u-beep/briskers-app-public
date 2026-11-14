@@ -33,7 +33,7 @@ void main() {
     );
     await db.customStatement(
       "INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) "
-      "VALUES('2026-11-07','invoice','shop','job','invoice','TEST-1')",
+      "VALUES('2026-11-09','invoice','shop','job','invoice','TEST-1')",
     );
     await LocalDocumentDetailCache(database: db).save(
       'shop', 'invoice',
@@ -99,7 +99,7 @@ void main() {
     );
     await db.customStatement(
       "INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) "
-      "VALUES('2026-11-07','invoice','shop','job','invoice','TEST-1')",
+      "VALUES('2026-11-09','invoice','shop','job','invoice','TEST-1')",
     );
     await LocalDocumentDetailCache(database: db).save(
       'shop', 'invoice',

@@ -28,7 +28,7 @@ void main() {
     expect(begin, greaterThan(0));
     expect(end, greaterThan(begin));
     final flow = code.substring(begin, end);
-    final finalization = flow.indexOf('await _api.finalizePendingInvoicePayment(');
+    final finalization = flow.indexOf('OfflineInvoiceFinalization().save(');
     final close = flow.indexOf('await _autoCloseOwnerInvoiceIfReady();');
     final refresh = flow.indexOf('await _load(fastAfterMutation: true);');
     expect(finalization, greaterThan(0));
@@ -45,12 +45,8 @@ void main() {
     expect(begin, greaterThan(0));
     expect(end, greaterThan(begin));
     final code = source.substring(begin, end);
-    expect(code, contains("if (rawStatus == 'void') return 'void';"));
-    expect(code, contains(".isClosed) {"));
-    expect(code, contains("return 'closed';"));
-    expect(
-      code.indexOf(".isClosed) {"),
-      lessThan(code.indexOf("if (total > 0 && finalizedPaid >= total - 0.005)")),
-    );
+    expect(code, contains('DocumentPresentation('));
+    expect(code, contains('.statusCode'));
+
   });
 }

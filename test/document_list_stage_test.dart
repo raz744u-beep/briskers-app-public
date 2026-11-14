@@ -47,11 +47,11 @@ void main() {
     expect(stage(invoice()..['display_status_code'] = 'closed'), 'Closed');
   });
 
-  test('void remains a separate filter and never falls into Open or paid', () {
+  test('void never falls into an active financial stage', () {
     final row = invoice(paid: 100)..['status'] = 'void';
     expect(stage(row), 'Void');
-    expect(invoiceListStatusFilters, contains('Void'));
-    expect(invoiceListStatusFilters, isNot(contains('Paid')));
+    expect(invoiceListStatusFilters, ['Open','Paid','Closed']);
+
   });
 
   test(
@@ -62,7 +62,7 @@ void main() {
         invoice(pending: 100),
         invoice(paid: 25, pending: 75),
       ]) {
-        expect(stage(row), 'Pending Close');
+        expect(stage(row), 'Paid');
       }
       expect(stage(invoice()), 'Open');
     },
@@ -84,12 +84,10 @@ void main() {
       };
       expect(counts, {
         'Open': 2,
-        'Pending Close': 1,
+        'Paid': 1,
         'Closed': 1,
-        'Reopened': 0,
-        'Void': 1,
       });
-      expect(counts.values.reduce((a, b) => a + b), rows.length);
+      expect(counts.values.reduce((a, b) => a + b), rows.where((row)=>stage(row)!='Void').length);
     },
   );
 
@@ -101,7 +99,7 @@ void main() {
     expect(prepared.containsKey('paid_amount'), false);
     expect(prepared.containsKey('pending_payment'), false);
     expect(DocumentPresentation(prepared).balanceDueCents, isNull);
-    expect(stage(prepared), 'Pending Close');
+    expect(stage(prepared), 'Paid');
     expect(
       local['paid_amount'],
       0,
@@ -131,10 +129,10 @@ void main() {
   test('filter values remain stable across Spanish language changes', () async {
     SharedPreferences.setMockInitialValues({});
     await BriskersLanguageController.instance.setLanguage('es');
-    expect(stage(invoice(paid: 100)), 'Pending Close');
+    expect(stage(invoice(paid: 100)), 'Paid');
     expect(
       DocumentPresentation(invoice(paid: 100)).statusLabel,
-      'Pendiente de cierre',
+      'Pagada',
     );
     await BriskersLanguageController.instance.setLanguage('en');
   });

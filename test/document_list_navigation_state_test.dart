@@ -194,7 +194,7 @@ void main() {
       heldDocuments.gate.complete();
       await tester.pump();
       await tester.pump();
-      expect(find.text('I-2467'), findsOneWidget);
+      expect(find.text('Invoice #2467'), findsOneWidget);
       expect(heldPayments.requested, isTrue);
       expect(api.reads, 1);
       expect(find.byType(CircularProgressIndicator), findsNothing,
@@ -256,7 +256,7 @@ void main() {
       pendingDocuments.gate.complete();
       await tester.pump();
       await tester.pump();
-      expect(find.text('I-6390'), findsOneWidget,
+      expect(find.text('Invoice #6390'), findsOneWidget,
           reason: 'Saved invoice must paint ahead of the pending HTTP refresh');
       expect(find.byType(CircularProgressIndicator), findsNothing);
 
@@ -354,7 +354,7 @@ void main() {
       ];
       await tester.pumpWidget(screen(1));
       await tester.pumpAndSettle();
-      expect(find.text('Pending Close'), findsOneWidget);
+      expect(find.text('Paid'), findsOneWidget);
       expect(find.text('Open'), findsNothing);
       expect(documents.reads, 2);
       expect(payments.reads, 2);
@@ -365,7 +365,7 @@ void main() {
       await tester.pumpWidget(screen(2));
       await tester.pumpAndSettle();
       expect(find.text('Closed'), findsOneWidget);
-      expect(find.text('Pending Close'), findsNothing);
+      expect(find.text('Paid'), findsNothing);
       expect(documents.reads, 3);
       expect(payments.reads, 3);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -450,7 +450,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('I-200'), findsOneWidget);
+    expect(find.text('Invoice #200'), findsOneWidget);
     // No Supabase client is initialized: Auto exercises a failed online
     // refresh, without contacting any backend.
     await BriskersConnectionModeController.instance.setMode(
@@ -460,7 +460,7 @@ void main() {
     documents.failRead = true;
     LocalJobRetirement.notify(database, 'synthetic-shop', ['retired-job']);
     await tester.pumpAndSettle();
-    expect(find.text('I-200'), findsNothing);
+    expect(find.text('Invoice #200'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -542,13 +542,13 @@ void main() {
       await tester.pump();
       expect(api.reads, 1);
       expect(documents.reads, 0);
-      expect(find.text('I-200'), findsNothing);
+      expect(find.text('Invoice #200'), findsNothing);
       await BriskersConnectionModeController.instance.setMode(
         BriskersConnectionMode.offline,
       );
       await tester.pumpAndSettle();
       expect(api.response.isCompleted, isFalse);
-      expect(find.text('I-200'), findsOneWidget);
+      expect(find.text('Invoice #200'), findsOneWidget);
       expect(find.text('Open'), findsOneWidget);
       api.response.complete([
         {
@@ -643,7 +643,7 @@ void main() {
       expect(api.reads, 2);
       expect(payments.reads, 2);
       expect(documents.saves, 1);
-      expect(find.text('Pending Close'), findsOneWidget);
+      expect(find.text('Paid'), findsOneWidget);
       expect(find.text('Open'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -693,8 +693,8 @@ void main() {
       );
       await tester.pumpWidget(screen(0));
       await tester.pumpAndSettle();
-      expect(find.text('I-200'), findsOneWidget);
-      expect(find.text('I-999'), findsNothing);
+      expect(find.text('Invoice #200'), findsOneWidget);
+      expect(find.text('Invoice #999'), findsNothing);
       expect(find.text('Open'), findsOneWidget);
       expect(api.reads, 1);
       expect(documents.reads, 0);
@@ -718,7 +718,7 @@ void main() {
       live['pending_payment'] = 100;
       await tester.pumpWidget(screen(2));
       await tester.pumpAndSettle();
-      expect(find.text('Pending Close'), findsOneWidget);
+      expect(find.text('Paid'), findsOneWidget);
       expect(find.text('Open'), findsNothing);
       expect(documents.saves, 2);
       expect(documents.savedRows.single['pending_payment'], 100);
@@ -728,7 +728,7 @@ void main() {
       await tester.pumpWidget(screen(3));
       await tester.pumpAndSettle();
       expect(find.text('Closed'), findsOneWidget);
-      expect(find.text('Pending Close'), findsNothing);
+      expect(find.text('Paid'), findsNothing);
       expect(documents.saves, 3);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -789,7 +789,7 @@ void main() {
       );
       expect(documents.savedRows.single['pending_payment'], 0);
       expect(find.text('Open'), findsOneWidget);
-      expect(find.text('Pending Close'), findsNothing);
+      expect(find.text('Paid'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );

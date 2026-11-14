@@ -1,3 +1,4 @@
+import '../../services/receipt_scanning_notice.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -23,6 +24,7 @@ class _ReceiptAiGatewaySettingsScreenState
     extends State<ReceiptAiGatewaySettingsScreen> {
   static const _storage = FlutterSecureStorage();
   final _controller = TextEditingController();
+  bool _showNotice = true;
   bool _hasToken = false;
   bool _busy = true;
   String? _message;
@@ -46,9 +48,11 @@ class _ReceiptAiGatewaySettingsScreenState
       return;
     }
     try {
+      final notice = await ReceiptScanningNotice.shown(widget.businessId);
       final existing = await _storage.read(key: _key);
       if (!mounted) return;
       setState(() {
+        _showNotice = notice;
         _hasToken = existing != null && existing.isNotEmpty;
         _busy = false;
       });
@@ -136,6 +140,15 @@ class _ReceiptAiGatewaySettingsScreenState
               : 'No receipt gateway credential is saved on this device.'),
           const SizedBox(height: 16),
           if (widget.isOwner) ...[
+            SwitchListTile(
+              title: const Text('Show scanning notice'),
+              value: _showNotice,
+              onChanged: _busy ? null : (value) async {
+                if (await ReceiptScanningNotice.setShown(widget.businessId, value) && mounted) {
+                  setState(() => _showNotice = value);
+                }
+              },
+            ),
             TextField(
               controller: _controller,
               obscureText: true,

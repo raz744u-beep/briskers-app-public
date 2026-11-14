@@ -25,7 +25,8 @@ void main() {
     expect(action, contains('_taskEditRepository.setShopTaskStatus'));
     expect(action, isNot(contains('authorizeLocal')));
     expect(action, isNot(contains('_run(')));
-    expect(source, contains('_changeGeneralTaskStatus(widget.employeeId!, id, status)'));
+    expect(source, contains('Widget _tasksTab() => EmployeeWorkReview('));
+    expect(source, isNot(contains('_updateEmployeeGeneralTask(')));
     expect(source, contains("_changeGeneralTaskStatus(row['employee_id'] as String, id, status)"));
     expect(source, contains("if (!_canView) throw StateError('Sign in as Owner to edit tasks.')"));
   });
@@ -39,7 +40,7 @@ void main() {
     expect(guarded, contains('if (_busy || !_canView) return;'));
     expect(guarded, isNot(contains('authorizeLocal')));
     expect(source, contains("_taskEditRepository.recordAllocatedTime("));
-    expect(source, contains("await _runOwnerTaskEdit(() => _taskEditRepository.editAllocation("));
+    expect(source, contains("Future<void> _editEstimated(Map<String,dynamic> row) => _serviceEditor(row)"));
     expect(source, contains("_taskEditRepository.acceptChangedAssignment("));
     expect(source, isNot(contains('_taskStatusRepository')));
   });
@@ -50,17 +51,17 @@ void main() {
     expect(start, greaterThanOrEqualTo(0));
     expect(end, greaterThan(start));
     final assign = source.substring(start, end);
-    final picker = assign.substring(0, assign.indexOf('final employee = await showDialog'));
+    final picker = assign.substring(0, assign.indexOf('final employee = await showTaskSelection'));
     expect(picker, contains('if (!_canView) return;'));
     expect(picker, contains('_viewRepository.employees()'));
     expect(picker, isNot(contains('_run(')));
     expect(picker, isNot(contains('authorizeLocal')));
     // The original TEST's local assignment is an Owner task edit.
     // Only the paired LAN writer uses the extra OS payment grant.
-    final write = assign.substring(assign.indexOf('final employee = await showDialog'));
+    final write = assign.substring(assign.indexOf('final employee = await showTaskSelection'));
     expect(write, contains('await _runOwnerTaskEdit(() => assign(pairedDevice: false))'));
     expect(write, contains('await _run(() => assign(pairedDevice: true))'));
-    expect(write, contains('_taskEditRepository.registerAssignedLabor('));
+    expect(write, contains('_taskEditRepository.assignExistingService('));
     expect(write, contains('await _db.transaction(apply)'));
     expect(write, contains('await workflow.assign('));
     expect(write, contains('if (pairedDevice) {'));
@@ -84,36 +85,34 @@ void main() {
     expect(action, contains('operation: operation'));
   });
 
-  test('New General Task saves under Owner identity, not payment grant', () {
-    final start = source.indexOf('Future<void> _createEmployeeGeneralTask()');
-    final end = source.indexOf('Future<void> _updateEmployeeGeneralTask(', start);
-    expect(start, greaterThanOrEqualTo(0));
-    expect(end, greaterThan(start));
-    final action = source.substring(start, end);
-    expect(action, contains('if (!_canView) {'));
-    expect(action, contains('_taskEditRepository.addShopTask('));
-    expect(action, isNot(contains('_repository.addShopTask(')));
-    expect(action, isNot(contains('authorizeLocal(')));
-    expect(action, isNot(contains('await _run(')));
-    expect(source, contains('assertOwnerGrant: () {'));
-    expect(source, contains("if (!_canView) throw StateError('Sign in as Owner to edit tasks.')"));
+  test('one General Task editor saves locally under Owner identity, not payment grant', () {
+    final start=source.indexOf('Future<void> _generalEditor(');
+    final end=source.indexOf('Widget _tasksTab()',start);
+    expect(start,greaterThanOrEqualTo(0));expect(end,greaterThan(start));
+    final action=source.substring(start,end);
+    expect(action,contains('GeneralTaskEditor('));
+    expect(action,contains('_taskEditRepository.saveGeneralTask('));
+    expect(action,contains("if(!_canView)throw StateError('Owner account changed.')"));
+    expect(action,isNot(contains('authorizeLocal(')));
+    expect(action,isNot(contains('await _run(')));
+    expect(source,contains('assertOwnerGrant: () {'));
+    expect(source,contains("if (!_canView) throw StateError('Sign in as Owner to edit tasks.')"));
   });
 
-  test('TEST New Service Task reads and creates locally without payment unlock', () {
-    final start = source.indexOf('Future<void> _newServiceTask()');
-    final end = source.indexOf('Future<void> _createEmployeeGeneralTask()', start);
-    expect(start, greaterThanOrEqualTo(0));
-    expect(end, greaterThan(start));
-    final task = source.substring(start, end);
-    expect(task, contains('final known=await _viewRepository.employees()'));
-    expect(task, contains('await _runOwnerTaskEdit(() async {'));
-    expect(task, contains('_taskEditRepository.createRecheck('));
-    expect(task, contains("kind:'job'"));
-    expect(task, contains('queueJobCreate'));
-    expect(task, contains('LocalTaskAssignmentStore(_db).linkEmployee'));
-    expect(task, contains("if (!_canView) throw StateError('Owner account changed during task creation.')"));
-    expect(task, isNot(contains('await _repository.employees()')));
-    expect(task, isNot(contains('await _run(() async {')));
+  test('one Service Task editor reads and saves locally without payment unlock', () {
+    final start=source.indexOf('Future<void> _serviceEditor(');
+    final end=source.indexOf('Future<void> _createEmployeeGeneralTask()',start);
+    expect(start,greaterThanOrEqualTo(0));expect(end,greaterThan(start));
+    final task=source.substring(start,end);
+    expect(task,contains('_viewRepository.employees()'));
+    expect(task,contains('ServiceTaskEditor('));
+    expect(task,contains('_taskEditRepository.saveServiceTask('));
+    expect(task,contains("if (!_canView) throw StateError('Owner account changed.')"));
+    expect(task,isNot(contains('await _repository.employees()')));
+    expect(task,isNot(contains('await _run(')));
+    final repo=File('lib/services/local_payroll_repository.dart').readAsStringSync();
+    final editor=repo.substring(repo.indexOf('Future<void> saveServiceTask('),repo.indexOf('Future<void> applyOwnerNov13WorkDates()'));
+    expect(editor,contains('db.transaction('));expect(editor,contains('_authorize()'));expect(editor,contains('createRecheck('));
   });
 
   test('payment, repayments and opening advances still require owner proof', () {

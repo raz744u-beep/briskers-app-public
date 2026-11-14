@@ -1,3 +1,4 @@
+import '../../widgets/owner_confirmation_dialog.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
@@ -23,13 +24,9 @@ Future<bool> showOwnerJobDeleteConfirmation(
   final result = await showModuleDialog<bool>(
     context: context,
     accent: BriskersColors.jobs,
-    builder: (dialogContext) => AlertDialog(
-      title: Text('Delete Job${number.isEmpty ? '' : ' $number'}?'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+    builder: (dialogContext) => OwnerConfirmationDialog(destructive:true,canConfirm:canRetire,cancelLabel:canRetire?'Cancel':'Close',confirm:offline?'Queue deletion':'Delete Job',
+      title: 'Delete Job${number.isEmpty ? '' : ' $number'}?',
+      sections: [
             Text('${invoices.length} linked invoice(s) to remove'),
             for (final raw in invoices)
               if (raw is Map)
@@ -67,19 +64,6 @@ Future<bool> showOwnerJobDeleteConfirmation(
               ),
             ],
           ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext, false),
-          child: Text(canRetire ? 'Cancel' : 'Close'),
-        ),
-        if (canRetire)
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(offline ? 'Queue deletion' : 'Delete Job'),
-          ),
-      ],
     ),
   );
   return result == true;

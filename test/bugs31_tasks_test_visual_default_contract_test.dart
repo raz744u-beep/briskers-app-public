@@ -2,12 +2,13 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('TEST global Tasks preserves white job task cards and unclipped list', () {
+  test('global Tasks uses approved flat cards and dedicated details', () {
     final source = File('lib/screens/payroll/tasks_workspace.dart').readAsStringSync();
-    expect(source, contains('color: Colors.white'));
-    expect(source, contains('widget.serviceTaskCard(task)'));
-    expect(source, contains('Expanded(child:ClipRect(child:'));
-    expect(source, contains(r'Invoice #$invoice'));
+    expect(source, contains('ApprovedTaskListCard('));
+    expect(source, contains('widget.onOpenTask?.call(task, general)'));
+    expect(source, contains('child: ClipRect('));
+    expect(source, isNot(contains('JobListApprovedCard(')));
+    expect(source, contains('widget.onPriority!(task, general, p)'));
     expect(source, contains('widget.onRecoverHistory!()'));
   });
 
