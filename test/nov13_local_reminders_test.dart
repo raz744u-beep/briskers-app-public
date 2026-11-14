@@ -1,4 +1,6 @@
 import 'package:flutter/foundation.dart';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -21,6 +23,10 @@ void main(){
     final task=<String,dynamic>{'id':7,'description':'Order part','status':'planned','due_at':due.millisecondsSinceEpoch,'reminder_enabled':1,'reminder_minutes':15};
     await LocalTaskReminders().sync('shop',[task]);await LocalTaskReminders().sync('shop',[task]);expect(pending,hasLength(1));
     final id=LocalTaskReminders.notificationId('shop',7);expect(pending.singleValue['id'],id);
+    expect((pending.singleValue['platformSpecifics'] as Map)['icon'],'ic_task_reminder');
+    // The Android APK probe uses this exact production method-channel payload.
+    // Only its synthetic ID/due time are substituted on the isolated emulator.
+    final request=File('build/reminder-qa/request.json');await request.parent.create(recursive:true);await request.writeAsString(jsonEncode(pending.singleValue));
     await LocalTaskReminders().sync('shop',[{...task,'description':'Order revised part','due_at':due.add(const Duration(hours:1)).millisecondsSinceEpoch}]);expect(pending,hasLength(1));expect(pending[id]!['body'],'Order revised part');
     await LocalTaskReminders().sync('shop',[{...task,'status':'done'}]);expect(pending,isEmpty);
     await LocalTaskReminders().sync('shop',[{...task,'reminder_enabled':0}]);expect(pending,isEmpty);
@@ -29,6 +35,11 @@ void main(){
     await LocalTaskReminders().sync('shop',[]);
     expect(pending,hasLength(1));expect(pending.containsKey(LocalTaskReminders.notificationId('other',7)),isTrue);
     expect(LocalTaskReminders.notificationId('other',7),isNot(id));
+  });
+  test('missing Android icon is reported without exposing raw platform exception',()async{
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel,(call)async{throw PlatformException(code:'invalid_icon',message:'resource missing');});
+    await expectLater(LocalTaskReminders().prepare(),throwsA(isA<TaskReminderUnavailable>()));
+    await expectLater(LocalTaskReminders().sync('shop',[]),throwsA(predicate((e)=>e is TaskReminderUnavailable&&!e.toString().contains('PlatformException')&&!e.toString().contains('invalid_icon'))));
   });
 }
 extension _OnlyValue<K,V> on Map<K,V>{V get singleValue=>values.single;}

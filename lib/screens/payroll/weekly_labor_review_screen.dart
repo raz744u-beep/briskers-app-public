@@ -25,6 +25,7 @@ class WeeklyLaborReview extends StatefulWidget {
     this.paymentHistory = const [],
     this.savedRateCents,
     this.onOpenJob,
+    this.onOpenTask,
     this.reviewMessage,
     this.extra,
     this.saveDraft,
@@ -51,6 +52,7 @@ class WeeklyLaborReview extends StatefulWidget {
   final List<Map<String,dynamic>> paymentHistory;
   final int? savedRateCents;
   final ValueChanged<String>? onOpenJob;
+  final Future<void> Function(Map<String, dynamic>)? onOpenTask;
   final String? reviewMessage;
   final Widget? extra;
   final Future<void> Function(DateTime,Map<String,double>,int,int,String)? saveDraft;
@@ -654,6 +656,58 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     final paid=task['paid_minutes'] as int? ?? 0, minutes=(hours*60).round(),rate=_rate(task);
     return ((paid+minutes)*rate+30)~/60-(paid*rate+30)~/60;
   }
+  Widget _payableCard(Map<String,dynamic> task) {
+    final id = _id(task), expanded = _expandedTasks.contains(_id(task));
+    final hours = _selected[id] ?? _available(task);
+    final amount = NumberFormat.simpleCurrency(locale:'en_US').format(_amount(task,hours)/100);
+    final description = '${task['description'] ?? 'Labor'}';
+    return Card(
+      key: ValueKey('payable-$id'),
+      margin: const EdgeInsets.fromLTRB(0, 4, 0, 6),
+      clipBehavior: Clip.antiAlias,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Container(
+        decoration: const BoxDecoration(border: Border(left: BorderSide(color:Color(0xFF008C12),width:5))),
+        child: InkWell(
+          onTap: () => setState(() { if(expanded){_expandedTasks.remove(id);}else{_expandedTasks.add(id);} }),
+          child: Column(children:[
+            Padding(padding:const EdgeInsets.fromLTRB(0,6,6,6),child:Row(children:[
+              SizedBox(width:40,child:Checkbox(
+                semanticLabel:'Select $description for payroll',
+                value:_selected.containsKey(id),
+                onChanged:_saving?null:(v)=>setState((){if(v==true){_selected[id]=_available(task);}else{_selected.remove(id);}}),
+              )),
+              Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                Semantics(link:true,child:InkWell(
+                  onTap:widget.onOpenJob==null || task['job_id']==null?null:()=>widget.onOpenJob!(task['job_id'] as String),
+                  child:Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Text('${task['job_number']??'Job'} · ${task['customer_name']??''}',maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(color:Color(0xFF17202A),fontSize:14,fontWeight:FontWeight.w800))),
+                )),
+                Text(description,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(color:Color(0xFF17202A),fontSize:13)),
+                const SizedBox(height:3),
+                const Text('Completed · Unpaid',maxLines:1,overflow:TextOverflow.ellipsis,style:TextStyle(color:Color(0xFF17202A),fontSize:12)),
+                const SizedBox(height:5),
+              ])),
+              Container(width:80,margin:const EdgeInsets.only(left:8),padding:const EdgeInsets.only(left:7),decoration:const BoxDecoration(border:Border(left:BorderSide(color:Color(0xFFD4D9E2)))),child:Column(crossAxisAlignment:CrossAxisAlignment.end,children:[
+                FittedBox(child:Text('${hours.toStringAsFixed(2)} h',style:const TextStyle(fontSize:16,fontWeight:FontWeight.w800,color:Color(0xFF17202A)))),
+                const SizedBox(height:3),
+                FittedBox(child:Text(amount,style:const TextStyle(fontSize:17,fontWeight:FontWeight.w800,color:Color(0xFF087A17)))),
+              ])),
+              Icon(expanded?Icons.expand_less:Icons.chevron_right,size:22,color:const Color(0xFF17202A)),
+            ])),
+            if(expanded)Padding(padding:const EdgeInsets.fromLTRB(14,0,14,10),child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+              const Divider(),Text(description,style:const TextStyle(color:Color(0xFF17202A))),
+              if(task['carry_week']!=null && task['work_end_date']==null)const Text('Warranty rework · Carry-forward'),
+              Wrap(alignment:WrapAlignment.spaceBetween,children:[
+                TextButton.icon(key:ValueKey('view-payable-task-$id'),onPressed:widget.onOpenTask==null?null:()=>widget.onOpenTask!(task),icon:const Icon(Icons.open_in_new),label:const Text('View Task')),
+                TextButton(onPressed:_saving?null:()=>_editHours(task),child:const Text('Payable hours')),
+              ]),
+            ])),
+          ]),
+        ),
+      ),
+    );
+  }
   Widget _profileBody() {
     final tasks=_eligible.where((r)=>_available(r)>0 && _rate(r)>0).toList();
     final start=_start(_week),end=_end(_week);
@@ -687,51 +741,15 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
               'Unpaid Hours',total.toStringAsFixed(2),const Color(0xFFEAF3FF),),metric(
               'Rate / Hr',widget.savedRateCents==null?'Not saved':money(widget.savedRateCents!),const Color(0xFFEAF8EF),),metric('Gross Pay',money(gross),const Color(0xFFF2ECFF)),],),
       if(_error!=null)Text(_error!,style:const TextStyle(color:Colors.red)),
-      Card(child:Column(children:[ListTile(title:Text('Unpaid Labor (${tasks.length})',style:const TextStyle(fontWeight:FontWeight.w800),),trailing:TextButton(onPressed:tasks.isEmpty?null:_selectAll,child:const Text('Select All'),),),
-        if(tasks.isEmpty)const ListTile(title:Text('No verified unpaid labor for this week.'),),
-        for(final r in tasks)
-                Padding(key:ValueKey('payable-${_id(r)}'),
-                  padding: const EdgeInsets.fromLTRB(4, 4, 12, 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Checkbox(value:_selected.containsKey(_id(r)),onChanged:_saving?null:(v)=>setState((){if(v==true){_selected[_id(r)]=_available(r);}else{_selected.remove(_id(r));}}),
-                      ),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Semantics(
-                              link: true,
-                              child: InkWell(
-                                onTap:
-                                    widget.onOpenJob == null ||
-                                        r['job_id'] == null
-                                    ? null
-                                    : () => widget.onOpenJob!(
-                                        r['job_id'] as String,
-                                      ),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 10,
-                                  ),
-                                  child:Text('${r['job_number']??'Job'} · ${r['customer_name']??''}',style:const TextStyle(
-                                      color: Color(0xFF17202A),fontWeight:FontWeight.w800,
-                                      decoration: TextDecoration.underline,),
-                                  ),
-                                ),
-                              ),
-                            ),Text('${r['description']??'Labor'}',
-                              style: const TextStyle(color: Color(0xFF17202A)),),Text(r['carry_week']!=null &&
-                                      r['work_end_date'] == null?'Completed · Warranty rework · Carry-forward':'Completed · Unpaid',),
-            TextButton(onPressed:_saving?null:()=>_editHours(r),child:Text('${(_selected[_id(r)]??_available(r)).toStringAsFixed(2)} h · ${money(_amount(r,_selected[_id(r)]??_available(r)))}',),),
-      ],),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),),
+      Padding(padding:const EdgeInsets.fromLTRB(8,12,8,2),child:Row(children:[
+        Expanded(child:Text('Unpaid Labor (${tasks.length})',style:const TextStyle(fontSize:17,fontWeight:FontWeight.w800))),
+        FilledButton.icon(onPressed:_saving||tasks.isEmpty?null:_selectAll,
+          style:FilledButton.styleFrom(backgroundColor:const Color(0xFF008C12),padding:const EdgeInsets.symmetric(horizontal:12)),
+          icon:Icon(tasks.isNotEmpty&&tasks.every((r)=>_selected.containsKey(_id(r)))?Icons.deselect:Icons.done_all,size:18),
+          label:Text(tasks.isNotEmpty&&tasks.every((r)=>_selected.containsKey(_id(r)))?'Deselect All':'Select All')),
+      ])),
+      if(tasks.isEmpty)const ListTile(title:Text('No verified unpaid labor for this week.')),
+      for(final task in tasks)_payableCard(task),
       if(review.isNotEmpty || widget.reviewMessage!=null)Card(child:ExpansionTile(key:PageStorageKey('payroll-review-${widget.employeeId}-${_week.toIso8601String()}',),title:Text('Needs Review (${review.length})'),children:[
         if(widget.reviewMessage!=null)ListTile(title:Text(widget.reviewMessage!)),
         for(final r in review)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:const Text('Pay status or compensation requires review; excluded from payment.',),),],),),

@@ -470,47 +470,59 @@ class ApprovedTaskListCard extends StatelessWidget {
 class ApprovedProfileTabs extends StatelessWidget {
   const ApprovedProfileTabs({super.key});
   @override
-  Widget build(BuildContext context) => TabBar(
-    indicatorSize: TabBarIndicatorSize.tab,
-    indicator: const BoxDecoration(
-      border: Border(bottom: BorderSide(color: Color(0xFF003A95), width: 3)),
-    ),
-    labelPadding: EdgeInsets.zero,
-    dividerHeight: 0,
-    labelColor: Colors.white,
-    unselectedLabelColor: Colors.white,
-    tabs: [
-      for (final entry in [
-        ('Tasks', taskBlue),
-        ('Payroll', taskGreen),
-        ('Reports', const Color(0xFF9500C7)),
-        ('Taxes', const Color(0xFF62666D)),
-      ])
-        Tab(
-          height: 40,
-          child: ClipPath(
-            clipper: _ProfileTabClip(),
-            child: Container(
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [entry.$2, Color.lerp(entry.$2, Colors.black, .35)!],
-                ),
-              ),
-              child: Text(
-                entry.$1,
-                style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) {
+    final controller = DefaultTabController.of(context);
+    const entries = [
+      ('Tasks', taskBlue),
+      ('Payroll', taskGreen),
+      ('Reports', Color(0xFF9500C7)),
+      ('Taxes', Color(0xFF62666D)),
+    ];
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) => TabBar(
+        indicatorSize: TabBarIndicatorSize.tab,
+        indicator: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: entries[controller.index].$2, width: 3),
+          ),
+        ),
+        labelPadding: EdgeInsets.zero,
+        dividerHeight: 0,
+        labelColor: Colors.white,
+        unselectedLabelColor: const Color(0xFF111820),
+        tabs: [
+          for (final (i, entry) in entries.indexed)
+            Tab(
+              height: 40,
+              child: ClipPath(
+                clipper: _ProfileTabClip(),
+                child: Container(
+                  key: ValueKey('profile-tab-${entry.$1}'),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: controller.index == i
+                          ? [entry.$2, Color.lerp(entry.$2, Colors.black, .35)!]
+                          : [const Color(0xFFF3F5F9), const Color(0xFFE4E8F0)],
+                    ),
+                  ),
+                  child: Text(
+                    entry.$1,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
-        ),
-    ],
-  );
+        ],
+      ),
+    );
+  }
 }
 
 class _ProfileTabClip extends CustomClipper<Path> {

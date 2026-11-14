@@ -70,4 +70,17 @@ void main(){
     await db.close();open();final rows=await repo.shopTasks();expect(rows,hasLength(1));expect(rows.single['id'],id);expect(rows.single['status'],'done');expect(rows.single['reminder_enabled'],0);expect(rows.single['due_at'],due.add(const Duration(days:1)).millisecondsSinceEpoch);
     expect(await db.customSelect('SELECT * FROM regular_payroll_payments').get(),isEmpty);
   });
+  test('Finish preserves General Task, reminder, job history and all financial rows after offline restart',()async{
+    await task('prior-paid',48,'Paid labor',300,treatment:'paid');
+    final due=DateTime(2026,11,20,15);
+    final id=await repo.saveGeneralTask(operation:'finish-general',employee:'chris',description:'Call customer',category:'Office',job:'j40',due:due,reminder:true,reminderMinutes:15);
+    final before=await finances();final original=(await repo.shopTasks()).single;
+    await repo.setShopTaskStatus('chris',id,'in_progress');await repo.setShopTaskStatus('chris',id,'done');await repo.setShopTaskStatus('chris',id,'done');
+    expect(await finances(),before);
+    await db.close();open();
+    final saved=(await repo.shopTasks()).single;expect(saved['status'],'done');
+    for(final field in ['id','employee_id','description','job_id','due_at','reminder_enabled','reminder_minutes']){expect(saved[field],original[field],reason:field);}
+    expect((await repo.shopTasks('chris')).single['id'],id);expect(await finances(),before);
+    expect((await repo.work()).every((r)=>r['description']!='Call customer'),true);
+  });
 }

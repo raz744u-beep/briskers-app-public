@@ -6,6 +6,7 @@ import '../payroll/payroll_lan_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'employee_list_tile.dart';
 import '../../core/employee_role_style.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
@@ -495,63 +496,10 @@ class _EmployeesSettingsScreenState
                     )
                   else
                     ..._employees!.map((employee) {
-                      final active = employee['active'] != false;
-                      final position =
-                          (employee['position'] ?? employee['position_name'])?.toString() ?? 'No position';
-                      final ssnLast4 = employee['ssn_last4']?.toString();
-                      final roleStyle = employeeRoleStyle(position);
-
-                      return Card(
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: active
-                                ? roleStyle.color.withValues(alpha: 0.14)
-                                : Colors.grey.withValues(alpha: 0.14),
-                            child: Icon(
-                              active
-                                  ? roleStyle.icon
-                                  : Icons.person_off_outlined,
-                              color: active ? roleStyle.color : Colors.grey,
-                            ),
-                          ),
-                          title: Text(
-                            EmployeeNicknameStore.displayName(employee),
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: active ? null : Colors.grey,
-                            ),
-                          ),
-                          subtitle: Text.rich(
-                            TextSpan(
-                              children: [
-                                if (employee['nickname']?.toString().isNotEmpty == true)
-                                  TextSpan(text: '${employee['name']} • '),
-                                TextSpan(
-                                  text: position,
-                                  style: TextStyle(
-                                    color: active
-                                        ? roleStyle.color
-                                        : Colors.grey,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                TextSpan(
-                                  text: ' • ${_pay(employee)}',
-                                ),
-                                if (ssnLast4 != null && ssnLast4.isNotEmpty)
-                                  TextSpan(
-                                    text: ' • SSN ***-**-$ssnLast4',
-                                  ),
-                                if (!active)
-                                  const TextSpan(text: ' • Inactive'),
-                              ],
-                            ),
-                          ),
-                          trailing: const Icon(Icons.chevron_right,
-                            color: BriskersColors.settings),
-                          onTap: () => _open(employee),
-                          onLongPress: () => _employeeActions(employee),
-                        ),
+                      return EmployeeListTile(
+                        employee:employee,pay:_pay(employee),
+                        onOpen:()=>_open(employee),
+                        onLongPress:()=>_employeeActions(employee),
                       );
                     }),
                   const SizedBox(height: 90),

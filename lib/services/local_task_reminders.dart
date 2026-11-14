@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
@@ -18,6 +19,14 @@ class LocalTaskReminders {
   }
 
   Future<bool> prepare({bool requestPermission = false}) async {
+    try {
+      return await _prepare(requestPermission: requestPermission);
+    } on PlatformException {
+      throw const TaskReminderUnavailable();
+    }
+  }
+
+  Future<bool> _prepare({bool requestPermission = false}) async {
     if (kIsWeb ||
         ![
           TargetPlatform.android,
@@ -58,14 +67,35 @@ class LocalTaskReminders {
   }
 
   Future<void> sync(String business, List<Map<String, dynamic>> tasks) async {
-    if(kIsWeb || ![TargetPlatform.android,TargetPlatform.iOS].contains(defaultTargetPlatform))return;
-    final allowed=await prepare();
-    final activeIds=tasks.map((t)=>notificationId(business,t['id'] as int)).toSet();
-    for(final pending in await plugin.pendingNotificationRequests()) {
-      final raw=pending.payload;
-      if(raw==null || !raw.startsWith('{'))continue;
-      final data=jsonDecode(raw);
-      if(data is Map && data['kind']=='general' && data['business']==business && !activeIds.contains(pending.id))await plugin.cancel(id:pending.id);
+    try {
+      await _sync(business, tasks);
+    } on PlatformException {
+      throw const TaskReminderUnavailable();
+    }
+  }
+
+  Future<void> _sync(String business, List<Map<String, dynamic>> tasks) async {
+    if (kIsWeb ||
+        ![
+          TargetPlatform.android,
+          TargetPlatform.iOS,
+        ].contains(defaultTargetPlatform)) {
+      return;
+    }
+    final allowed = await prepare();
+    final activeIds = tasks
+        .map((t) => notificationId(business, t['id'] as int))
+        .toSet();
+    for (final pending in await plugin.pendingNotificationRequests()) {
+      final raw = pending.payload;
+      if (raw == null || !raw.startsWith('{')) continue;
+      final data = jsonDecode(raw);
+      if (data is Map &&
+          data['kind'] == 'general' &&
+          data['business'] == business &&
+          !activeIds.contains(pending.id)) {
+        await plugin.cancel(id: pending.id);
+      }
     }
     for (final task in tasks) {
       final id = notificationId(business, task['id'] as int);
@@ -82,7 +112,7 @@ class LocalTaskReminders {
         await plugin.cancel(id: id);
         continue;
       }
-      if(!allowed)continue;
+      if (!allowed) continue;
       await plugin.zonedSchedule(
         id: id,
         title: 'Briskers task reminder',
@@ -93,14 +123,26 @@ class LocalTaskReminders {
             'briskers_tasks',
             'Task reminders',
             channelDescription: 'Assigned General Task due reminders',
+            icon: 'ic_task_reminder',
             importance: Importance.high,
             priority: Priority.high,
           ),
           iOS: DarwinNotificationDetails(),
         ),
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-        payload: jsonEncode({'kind':'general','business':business,'task':task['id']}),
+        payload: jsonEncode({
+          'kind': 'general',
+          'business': business,
+          'task': task['id'],
+        }),
       );
     }
   }
+}
+
+class TaskReminderUnavailable implements Exception {
+  const TaskReminderUnavailable();
+  @override
+  String toString() =>
+      'This device could not update task reminders. Check notification settings and try again.';
 }

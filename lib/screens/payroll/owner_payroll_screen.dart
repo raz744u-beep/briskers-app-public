@@ -323,10 +323,20 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     }
   }
 
+  // The task save is authoritative. A device notification error must never
+  // suppress the reload of a successfully saved completion or invite a retry.
+  Future<void> _syncSavedGeneralReminders() async {
+    try {
+      await LocalTaskReminders().sync(widget.businessId,await _viewRepository.shopTasks());
+    } catch (_) {
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Task saved locally. This device could not update reminders; check notification settings.')));
+    }
+  }
+
   Future<void> _changeGeneralTaskStatus(String employee, int id, String status,) =>
       _runOwnerTaskEdit(() async {
       await _taskEditRepository.setShopTaskStatus(employee, id, status);
-      await LocalTaskReminders().sync(widget.businessId,await _viewRepository.shopTasks());
+      await _syncSavedGeneralReminders();
     },);
 
   Future<void> _refreshLan() async {
@@ -1352,6 +1362,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       employeeId:widget.employeeId!,employeeName:_employeeLabel(widget.employeeId),
       tasks:_work,week:_week,embedded:true,profileLayout:true,
       onOpenJob: (id) => _openRecordedWork(id, invoice: false),
+      onOpenTask: (task) => _openTaskDetails({...task,'line_id':task['task_id']},false),
       paymentHistory:_history,
       savedRateCents:person?['rate'] as int?,reviewMessage:_work.any((r)=>r['job_number']=='J-40' && r['description']?.toString().trim().toLowerCase()=='oil separator',)?_carryReview:null,
       advanceBalance:()=>_viewRepository.advance(widget.employeeId!),
@@ -1695,7 +1706,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       employee:v['employee_id'] as String, description:v['description'] as String,
       category:v['category'] as String,job:v['job_id'] as String?,due:v['due_at']==null?null:DateTime.fromMillisecondsSinceEpoch(v['due_at'] as int
     ),reminder:v['reminder_enabled']==1,reminderMinutes:v['reminder_minutes'] as int);
-      await LocalTaskReminders().sync(widget.businessId,await _viewRepository.shopTasks());
+      await _syncSavedGeneralReminders();
     })));
     if(saved==true && mounted)await _load();
   }
@@ -1786,7 +1797,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       if(row==null)throw StateError('Task no longer available. Return to Tasks and refresh.');
       final job=row['job_id']?.toString();
       final jobs=job==null?[]:await _db.customSelect('SELECT status,job_number,customer_name,vehicle_label FROM local_jobs WHERE business_id=? AND id=?',variables:[Variable(widget.businessId),Variable(job)]).get();
-      return (task:{...row,if(jobs.isNotEmpty)...{'job_status':jobs.first.data['status'],'job_number':jobs.first.data['job_number'],'customer_name':jobs.first.data['customer_name'],'vehicle_label':jobs.first.data['vehicle_label']}},allocations:general?<Map<String,dynamic>>[]:_taskAllocations[id]??[]);
+      // Payroll is employee-scoped; the existing Task Details must still show
+      // every saved mechanic allocation of this exact task.
+      final allocations=general?<Map<String,dynamic>>[]:widget.employeeId==null
+          ? _taskAllocations[id]??[]
+          : (await _viewRepository.work(job:job)).where((r)=>r['task_id']==id).toList();
+      return (task:{...row,if(allocations.isNotEmpty)'status':allocations.every((r)=>r['state']=='Done')?'done':allocations.any((r)=>r['state']!='Open')?'in_progress':'planned',if(jobs.isNotEmpty)...{'job_status':jobs.first.data['status'],'job_number':jobs.first.data['job_number'],'customer_name':jobs.first.data['customer_name'],'vehicle_label':jobs.first.data['vehicle_label']}},allocations:allocations);
     }
     final data=await snapshot();if(!mounted)return;
     await Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>ApprovedTaskDetails(

@@ -563,8 +563,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                     ? 'No general tasks match these filters.'
                     : 'No service tasks match these filters. Your saved work may be completed, paid, or historical.',
               ),
-              if (!general &&
-                  widget.serviceTasks.isNotEmpty &&
+              if ((general ? widget.generalTasks : widget.serviceTasks).isNotEmpty &&
                   _status != 'All')
                 TextButton(
                   key: const Key('show-all-service-task-statuses'),

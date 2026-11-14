@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
@@ -24,6 +25,9 @@ import 'package:briskers_app/services/payroll_owner_lan.dart';
 import 'package:briskers_app/screens/jobs/job_document_screen.dart';
 import 'package:briskers_app/screens/jobs/job_detail_screen.dart';
 import 'package:briskers_app/screens/payroll/owner_payroll_screen.dart';
+import 'package:briskers_app/screens/payroll/approved_task_details.dart';
+import 'package:briskers_app/screens/payroll/weekly_labor_review_screen.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:briskers_app/screens/payroll/payroll_overview.dart';
 import 'package:briskers_app/screens/payroll/tasks_workspace.dart';
 import 'package:briskers_app/screens/payroll/job_scoped_tasks.dart';
@@ -252,6 +256,18 @@ void main(){
 
     await click(find.text('Payroll'));
     await capture('nov12-employee-payroll');
+    final payroll=find.byType(WeeklyLaborReview);
+    final expectedTask=tester.widget<WeeklyLaborReview>(payroll).tasks.firstWhere((r)=>r['state']=='Done'&&r['paid']!=1);
+    await click(find.text(expectedTask['description'] as String).first);
+    await click(find.byKey(ValueKey('view-payable-task-${expectedTask['id']}')));
+    await until(find.byType(ApprovedTaskDetails));
+    expect(tester.widget<ApprovedTaskDetails>(find.byType(ApprovedTaskDetails)).initialTask['line_id'],expectedTask['task_id']);
+    final exactAllocations=(await tester.runAsync(()=>LocalPayrollRepository(db,business:'shop',owner:true).work()))!.where((r)=>r['task_id']==expectedTask['task_id']).toList();
+    expect(tester.widget<ApprovedTaskDetails>(find.byType(ApprovedTaskDetails)).allocations.map((r)=>r['id']).toSet(),exactAllocations.map((r)=>r['id']).toSet());
+    navigator.currentState!.pop();await tester.pumpAndSettle();
+    expect(tester.widget<WeeklyLaborReview>(find.byType(WeeklyLaborReview)).employeeId,'b');
+    expect(tester.widgetList<Checkbox>(find.byType(Checkbox)).every((c)=>c.value==true),isTrue);
+
     await tester.scrollUntilVisible(find.byKey(const Key('verify-weekly-payment')),150,scrollable:find.descendant(of:find.byKey(const Key('employee-payroll-preparation')),matching:find.byType(Scrollable)).first);
     await click(find.byKey(const Key('verify-weekly-payment')));
     await until(find.text(r'Calculated labor: $200.00'));
@@ -333,6 +349,26 @@ void main(){
     await until(find.text('Task Details'));
     expect(find.text('Edit Task'),findsOneWidget);
     await capture('job-task-details');
+    navigator.currentState!.pop();await tester.pumpAndSettle();
+    // Saved General Task completion must refresh even if Android reminders fail.
+    final generalId=(await tester.runAsync(()=>LocalPayrollRepository(db,business:'shop',owner:true).saveGeneralTask(operation:'quick-general',employee:'b',description:'Call customer after repair',category:'Office',job:jobId,due:DateTime.now().add(const Duration(days:1)),reminder:true)))!;
+    navigator.currentState!.pop();await tester.pumpAndSettle();
+    await click(find.descendant(of:jobPage,matching:find.textContaining('View Tasks')));
+    await until(find.text('Call customer after repair'));await click(find.text('Call customer after repair'));
+    const notifications=MethodChannel('dexterous.com/flutter/local_notifications');
+    debugDefaultTargetPlatformOverride=TargetPlatform.android;AndroidFlutterLocalNotificationsPlugin.registerWith();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(notifications,(call)async{throw PlatformException(code:'invalid_icon',message:'synthetic missing resource');});
+    try{
+      await click(find.text('Mark as Done'));
+      await until(find.text('Done'));
+      expect(find.textContaining('PlatformException'),findsNothing);
+      expect(find.text('Mark as Done'),findsNothing);
+      await capture('quick-general-done');
+      final saved=(await tester.runAsync(()=>LocalPayrollRepository(db,business:'shop',owner:true).shopTasks()))!.singleWhere((r)=>r['id']==generalId);
+      expect(saved['status'],'done');expect(saved['job_id'],jobId);expect(saved['reminder_enabled'],1);
+      navigator.currentState!.pop();await tester.pumpAndSettle();await until(find.text('Call customer after repair'));
+      expect(find.text('Call customer after repair'),findsOneWidget);
+    }finally{debugDefaultTargetPlatformOverride=null;TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(notifications,null);}
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds:500));
     expect(secondaryPrompts,0,
