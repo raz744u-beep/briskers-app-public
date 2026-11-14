@@ -56,7 +56,7 @@ void main(){
     var rows=<Map<String,dynamic>>[{'employee_id':'kam','estimated_minutes':60,'state':'Open','source_active':1,'paid':0}];
     await t.pumpWidget(app(key,ApprovedTaskDetails(initialTask:task,allocations:rows,general:false,employeeName:employee,reload:()async=>(task:task,allocations:rows),onEdit:()async{edits++;},onPriority:(p)async{task={...task,'priority':p};},onProgress:(done)async{starts++;task={...task,'status':done?'done':'in_progress'};rows=[{...rows.single,'state':done?'Done':'In Progress'}];},onJob:(){},onInvoice:(){},onActions:(){})));
     await t.pumpAndSettle();await shot(t,key,'approved-task-details');expect(find.text('Mark as Done').hitTestable(),findsOneWidget);await t.tap(find.text('Start Task'));await t.pumpAndSettle();expect(starts,1);expect(find.text('Finish Task'),findsOneWidget);
-    task={...task,'status':'done'};rows=[{...rows.single,'state':'Done','paid':1}];await t.tap(find.text('Edit Task'));await t.pumpAndSettle();expect(edits,1);expect(find.text('Paid'),findsOneWidget);expect(find.text('Mark as Done'),findsNothing);expect(find.text('Edit Task').hitTestable(),findsOneWidget);expect(t.takeException(),isNull);
+    task={...task,'status':'done'};rows=[{...rows.single,'state':'Done','paid':1}];await t.tap(find.text('Edit Task'));await t.pumpAndSettle();expect(edits,1);expect(find.text('Paid'),findsNWidgets(2));expect(find.text('Mark as Done'),findsNothing);expect(find.text('Edit Task').hitTestable(),findsOneWidget);expect(t.takeException(),isNull);
   });
   testWidgets('approved Work Review uses real weekly totals and readonly paid history',(t)async{
     size(t);final key=GlobalKey();var week=DateTime(2026,11,9);

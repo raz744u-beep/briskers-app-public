@@ -95,10 +95,10 @@ void main() {
           businessId: 'shop', employeeId: 'a', employeeName: 'Alice', employeeRole: 'mechanic',
           database: db, unlockOwner: unlock, ownerConnection: network, initialTab: tab)));
       await tester.pumpWidget(screen());
-      await until(find.text('Work Review (Read Only)'));
+      await until(find.textContaining('Currently Assigned Tasks'));
       await tester.tap(find.text('Payroll'));
       await tester.pumpAndSettle();
-      expect(find.text('Tasks'), findsOneWidget);
+      expect(find.text('Work'), findsOneWidget);
       expect(find.text('Payroll'), findsOneWidget);
       expect(find.text('Reports'), findsOneWidget);
       if (currentHolder) {

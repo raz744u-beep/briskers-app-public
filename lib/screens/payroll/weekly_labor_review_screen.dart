@@ -1,3 +1,5 @@
+import 'payroll_review_widgets.dart';
+import 'approved_tasks_ui.dart';
 import '../../services/payroll_owner_lease.dart';
 // ignore_for_file: prefer_interpolation_to_compose_strings
 import 'dart:async';
@@ -89,7 +91,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       _start(date).add(const Duration(days: 5));
   static String _id(Map<String, dynamic> task) => task['id'] as String;
   static double _assigned(Map<String, dynamic> task) =>
-      (task['actual_minutes'] as int) / 60;
+      (task['estimated_minutes'] as int? ?? task['actual_minutes'] as int) / 60;
   static double _paidHours(Map<String, dynamic> task) =>
       (task['paid_minutes'] as int? ?? (task['paid'] == 1 ? task['actual_minutes'] as int : 0)) / 60;
   static String _statusLabel(Map<String, dynamic> task) => switch (task['state']) {
@@ -141,21 +143,31 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     _selected.clear();
     for (final task in _eligible) {
       final remaining = _available(task);
-      if (remaining > 0) _selected[_id(task)] = remaining;
+      if (remaining > 0 &&
+          task['state'] == 'Done' &&
+          (!widget.profileLayout || (task['paid_minutes'] as int? ?? 0) == 0)) {
+        _selected[_id(task)] = remaining;
+      }
     }
   }
 
   List<Map<String, dynamic>> get _eligible {
     if (_future) return const [];
     return widget.tasks.where((task) {
-      final date = DateTime.tryParse(task['completed_date']?.toString() ?? '',);
+      final progress = widget.profileLayout && task['state'] == 'In Progress';
+      final date = DateTime.tryParse(
+        (progress
+                    ? task['work_start_date'] ?? task['invoice_date']
+                    : task['completed_date'])
+                ?.toString() ?? '',);
       // Archived historical labor remains visible elsewhere, but must NEVER
       // become selectable for new payroll without explicit Owner carry-forward.
       final carry=DateTime.tryParse(task['carry_week']?.toString()??'');
       if(carry!=null && carry.isAfter(_start(_week)))return false;
       if(widget.profileLayout && _rate(task)<=0)return false;
       if (task['payroll_treatment'] == 'review' ||task['archived_labor']==1 || task['assignment_conflict']==1 ||
-          task['state'] != 'Done' || date == null || !date.isBefore(_end(_week))) {
+          (!progress && task['state'] != 'Done') ||
+          task['source_active'] == 0 || date == null || !date.isBefore(_end(_week))) {
         return false;
       }
       return task['paid'] != 1 || !date.isBefore(_start(_week));
@@ -163,7 +175,8 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   }
 
   static double _available(Map<String, dynamic> task) =>
-      task['paid'] == 1 || task['state'] != 'Done' ? 0 :
+      task['paid'] == 1 || !['Done', 'In Progress'].contains(task['state'])
+      ? 0 :
         (task['remaining_minutes'] as int? ?? task['actual_minutes'] as int) / 60;
 
   double get _totalHours {
@@ -192,48 +205,43 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
 
   Future<void> _editHours(Map<String, dynamic> task) async {
     if (_saving || _available(task) <= 0) return;
-    final input = TextEditingController(text:
-      (_selected[_id(task)] ?? _available(task)).toStringAsFixed(2),);
-    final minutes = await showDialog<int>(
+    final hours = await showDialog<double>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Mechanic Labor'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          _detailHours('Mechanic actual', _assigned(task)),
-          _detailHours('Previously paid', _paidHours(task)),
-          _detailHours('Remaining to pay', _available(task)),
-          const SizedBox(height: 12),
-          TextField(
-            controller: input,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true,),
-            onTapAlwaysCalled: true,
-            onTap: () => input.selection = TextSelection(
-              baseOffset: 0, extentOffset: input.text.length,
-            ),
-            decoration: const InputDecoration(
-              labelText: 'Hours to pay this week', border: OutlineInputBorder(),
-            ),
-          ),
-        ],),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'),),
-          FilledButton(
-            onPressed: () {
-              final hours = double.tryParse(input.text.trim());
-              if (hours == null || !hours.isFinite || hours <= 0) return;
-              final minutes = (hours * 60).round();
-              if (minutes <= 0 || minutes > (_available(task) * 60).round()) { return;
-              }
-              Navigator.pop(context, minutes);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+      builder: (_) => PayableHoursDialog(
+        task: task,
+        selected: _selected[_id(task)] ?? _available(task),
+        total: _assigned(task),
+        paid: _paidHours(task),
+        remaining: _available(task)),
     );
-    if (minutes != null && mounted) { setState(() => _selected[_id(task)] = minutes / 60);
+    if (hours != null && mounted) { setState(() {
+        if (hours == 0) {
+          _selected.remove(_id(task));
+        } else {
+          _selected[_id(task)] = hours;
+        }
+      });
+      await _savePreparationDraft();
     }
-    Future<void>.delayed(const Duration(milliseconds: 400), input.dispose);
+  }
+    Future<void> _savePreparationDraft() async {
+    if (!widget.profileLayout || widget.saveDraft == null) return;
+    try {
+      await widget.saveDraft!(
+        _start(_week),
+        Map<String, double>.from(_selected),
+        _preparedAdjustment,
+        _preparedRepayment,
+        _preparedReason,
+      );
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _error =
+              'Could not save the payroll draft. Please retry Save (Draft).',
+        );
+      }
+    }
   }
 
   void _moveWeek(int weeks) {
@@ -273,7 +281,8 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     final selected = [
       for (final task in _eligible)
         if (_selected.containsKey(_id(task)) && _available(task) > 0)
-          {...task, 'pay_minutes': (_selected[_id(task)]! * 60).round(),
+          {...task,
+            if (task['state'] == 'In Progress') 'allow_in_progress': true, 'pay_minutes': (_selected[_id(task)]! * 60).round(),
             if (widget.settlementRateCents != null) 'payment_rate_cents': widget.settlementRateCents,},
 
     ];
@@ -466,9 +475,18 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
         final debtCents=deduct
           ? (double.parse(debtInput.text.trim())*100).round():0;
         final carryForward = selected.any((task) =>
-          DateTime.parse(task['completed_date'] as String).isBefore(week),);
+              (DateTime.tryParse(
+                (task['completed_date'] ??
+                            task['work_start_date'] ??
+                            task['invoice_date'])
+                        ?.toString() ??
+                    '',
+              )?.isBefore(week) ??
+              false),);
         final reason = [
           if (carryForward) 'Prior unpaid work carried forward.',
+          if (selected.any((t) => t['allow_in_progress'] == true))
+            'Owner selected partial In Progress labor; work status unchanged.',
           if (widget.settlementReason.isNotEmpty) widget.settlementReason,
           if(selected.any((t)=>t['payment_rate_cents']!=null)) 'Use saved local employee compensation for previously unrated unpaid labor.',
           if (note.text.trim().isNotEmpty) note.text.trim(),
@@ -639,22 +657,91 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     final saved=await showDialog<bool>(context:context,builder:(dialog)=>StatefulBuilder(builder:(context,update){
       final a=double.tryParse(adjustment.text),r=double.tryParse(repayment.text);
       final valid=a!=null&&r!=null&&a.isFinite&&r.isFinite&&a.abs()<=1000000&&r>=0&&(r*100).round()<=debt&&labor+(a*100).round()>=(r*100).round()&&(a==0||reason.text.trim().isNotEmpty);
-      return AlertDialog(title:const Text('Adjustments & repayment'),content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
-        Text('Outstanding advance: \$${(debt/100).toStringAsFixed(2)}',),
-        TextField(controller:adjustment,keyboardType:const TextInputType.numberWithOptions(decimal:true,signed:true,),decoration:const InputDecoration(labelText:'Adjustment (+/−)',),onChanged:(_)=>update((){}),),
-        TextField(controller:repayment,keyboardType:const TextInputType.numberWithOptions(decimal:true,),decoration:const InputDecoration(labelText:'Repayment from this payment',),onChanged:(_)=>update((){}),),
-        TextField(controller:reason,decoration:const InputDecoration(labelText:'Adjustment reason',),onChanged:(_)=>update((){}),),
-        if(valid)Text('Payment Total: \$${((labor+(a*100).round()-(r*100).round())/100).toStringAsFixed(2)}',),
-      ],),),actions:[TextButton(onPressed:()=>Navigator.pop(dialog),child:const Text('Cancel'),),FilledButton(onPressed:valid?()=>Navigator.pop(dialog,true):null,child:const Text('Apply'),),],);
+          InputDecoration field(String label) => InputDecoration(
+            labelText: label,
+            floatingLabelBehavior: FloatingLabelBehavior.never,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 12,
+            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(9)),
+          );
+          return AlertDialog(
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+            ),
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 20,
+            ),
+            title:const Row(
+              children: [
+                Icon(Icons.payments_outlined, color: taskGreen),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Adjustments & Repayment',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children:[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE3EEFF),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text('Outstanding advance: \$${(debt/100).toStringAsFixed(2)}',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text('Adjustment (+/−)'),
+                  const SizedBox(height: 6),
+        TextField(controller:adjustment,keyboardType:const TextInputType.numberWithOptions(decimal:true,signed:true,),decoration: field('Adjustment (+/−)',),onChanged:(_)=>update((){}),),
+                  const SizedBox(height: 12),
+                  const Text('Repayment from this payment'),
+                  const SizedBox(height: 6),
+        TextField(controller:repayment,keyboardType:const TextInputType.numberWithOptions(decimal:true,),decoration: field('Repayment from this payment',),onChanged:(_)=>update((){}),),
+                  const SizedBox(height: 12),
+                  const Text('Adjustment reason'),
+                  const SizedBox(height: 6),
+                  TextField(controller:reason,
+                    minLines: 2,
+                    maxLines: 3,
+                    decoration: field('Adjustment reason',),onChanged:(_)=>update((){}),),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE3F7DE),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(valid
+                          ? 'Payment Total: \$${((labor+(a*100).round()-(r*100).round())/100).toStringAsFixed(2)}'
+                          : 'Check amounts, advance limit and adjustment reason.',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 19,
+                        color: taskGreen,
+                      ),
+                    ),),
+      ],),),actions:[TextButton(onPressed:()=>Navigator.pop(dialog),child:const Text('Cancel'),),FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: taskGreen),
+                onPressed:valid?()=>Navigator.pop(dialog,true):null,child:const Text('Apply'),),],);
     },),);
     if(saved==true&&mounted) {setState((){_preparedAdjustment=(double.parse(adjustment.text)*100).round();_preparedRepayment=(double.parse(repayment.text)*100).round();_preparedReason=reason.text.trim();});
+      await _savePreparationDraft();
     }
     Future<void>.delayed(const Duration(milliseconds:400),(){adjustment.dispose();repayment.dispose();reason.dispose();});
   }
   int _rate(Map<String,dynamic> task)=>widget.settlementRateCents ?? task['payment_rate_cents'] as int? ?? task['rate_cents'] as int? ?? 0;
   int _amount(Map<String,dynamic> task,double hours) {
-    final paid=task['paid_minutes'] as int? ?? 0, minutes=(hours*60).round(),rate=_rate(task);
-    return ((paid+minutes)*rate+30)~/60-(paid*rate+30)~/60;
+    return selectedLaborCents(task, hours,rate: _rate(task));
   }
   Widget _payableCard(Map<String,dynamic> task) {
     final id = _id(task), expanded = _expandedTasks.contains(_id(task));
@@ -685,7 +772,8 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                 )),
                 Text(description,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(color:Color(0xFF17202A),fontSize:13)),
                 const SizedBox(height:3),
-                const Text('Completed · Unpaid',maxLines:1,overflow:TextOverflow.ellipsis,style:TextStyle(color:Color(0xFF17202A),fontSize:12)),
+                          Text(
+                            '${_statusLabel(task)} · ${_paidHours(task) > 0 ? 'Partially Paid' : 'Unpaid'}',maxLines:1,overflow:TextOverflow.ellipsis,style: const TextStyle(color:Color(0xFF17202A),fontSize:12)),
                 const SizedBox(height:5),
               ])),
               Container(width:80,margin:const EdgeInsets.only(left:8),padding:const EdgeInsets.only(left:7),decoration:const BoxDecoration(border:Border(left:BorderSide(color:Color(0xFFD4D9E2)))),child:Column(crossAxisAlignment:CrossAxisAlignment.end,children:[
@@ -696,11 +784,17 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
               Icon(expanded?Icons.expand_less:Icons.chevron_right,size:22,color:const Color(0xFF17202A)),
             ])),
             if(expanded)Padding(padding:const EdgeInsets.fromLTRB(14,0,14,10),child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-              const Divider(),Text(description,style:const TextStyle(color:Color(0xFF17202A))),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: taskCanvas,
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Text(description,style:const TextStyle(color:Color(0xFF17202A)))),
               if(task['carry_week']!=null && task['work_end_date']==null)const Text('Warranty rework · Carry-forward'),
               Wrap(alignment:WrapAlignment.spaceBetween,children:[
                 TextButton.icon(key:ValueKey('view-payable-task-$id'),onPressed:widget.onOpenTask==null?null:()=>widget.onOpenTask!(task),icon:const Icon(Icons.open_in_new),label:const Text('View Task')),
-                TextButton(onPressed:_saving?null:()=>_editHours(task),child:const Text('Payable hours')),
+                TextButton(onPressed:_saving?null:()=>_editHours(task),child:const Text('Payable Hours')),
               ]),
             ])),
           ]),

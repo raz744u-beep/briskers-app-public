@@ -1,3 +1,4 @@
+import 'payroll_review_widgets.dart';
 import 'approved_tasks_ui.dart';
 import 'approved_task_details.dart';
 import '../../services/local_job_work_date.dart';
@@ -157,7 +158,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   List<Map<String, dynamic>> _repayments = [];
   List<Map<String, dynamic>> _generalTasks = [];
 
-  List<Map<String,dynamic>> _assignedJobs = [];
+  int _draftRevision = 0;
   String? _carryReview;
   bool _advanceExpanded = false;
   bool _editingOpening = false;
@@ -329,7 +330,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     try {
       await LocalTaskReminders().sync(widget.businessId,await _viewRepository.shopTasks());
     } catch (_) {
-      if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Task saved locally. This device could not update reminders; check notification settings.')));
+      if(mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Task saved locally. This device could not update reminders; check notification settings.')));
+      }
     }
   }
 
@@ -449,9 +452,6 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         widget.employeeId ?? _employee ?? (employees.firstOrNull?['id'] as String?);
     // Preserve historical allocations in read-only Tasks and Reports views.
     // Payroll payment eligibility is guarded separately in WeeklyLaborReview.
-    if(employee!=null) {
-      _assignedJobs=(await _db.customSelect("SELECT DISTINCT j.* FROM local_jobs j JOIN local_job_assignments a ON a.business_id=j.business_id AND a.job_id=j.id AND a.active=1 WHERE j.business_id=? AND a.employee_id=? AND j.status NOT IN ('completed','closed','cancelled','deleted') ORDER BY j.created_at DESC",variables:[Variable(widget.businessId),Variable(employee),],).get()).map((r)=>r.data).toList();
-    }
     final work = await repository.work(employee: _jobMode ? null : employee, job: job,);
     if(!mounted||generation!=_loadGeneration)return;
     if(!_canView)return;
@@ -604,7 +604,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if (enterHours) {
       final value = await showTaskHours(context);
       final hours = double.tryParse(value ?? '');
-      if (hours == null || !hours.isFinite || hours < 0 || hours > 10000 || !mounted) return;
+      if (hours == null || !hours.isFinite || hours < 0 || hours > 10000 || !mounted) {
+        return;
+      }
       assignedMinutes = (hours * 60).round();
     }
 
@@ -621,7 +623,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         variables:[Variable(widget.businessId),Variable(invoiceId)],
       ).getSingleOrNull();
       // Historical recordkeeping must not enqueue a fresh work assignment.
-      if (!LocalInvoiceTaskStore.currentPayrollDate(document?.data['document_date'])) paired=false;
+      if (!LocalInvoiceTaskStore.currentPayrollDate(document?.data['document_date'])) {
+        paired=false;
+      }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
       return;
@@ -631,7 +635,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     Future<void> assign({required bool pairedDevice}) async {
       final assignments = LocalTaskAssignmentStore(_db);
       Future<void> apply() async {
-        if (!_canView) throw StateError('Owner account changed during assignment.');
+        if (!_canView) {
+          throw StateError('Owner account changed during assignment.');
+        }
         await assignments.linkEmployee(widget.businessId, job, employeeId, name);
         // Add/split MUST be additive, including when the first mechanic
         // inherited the assignment from Main Mechanic. Retiring inherited
@@ -661,7 +667,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                 r['source_line_id'] == line['id']).single;
         await assignments.allocate(widget.businessId, task['id'] as String,
             employeeId, inherited: false);
-        if (!_canView) throw StateError('Owner account changed during assignment.');
+        if (!_canView) {
+          throw StateError('Owner account changed during assignment.');
+        }
       }
       // Keep a local assignment atomic. The paired LAN workflow has its own
       // durable writer protocol and must not run inside a SQLite transaction.
@@ -714,7 +722,18 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         row['state'] == 'Open' ? 'In Progress' : 'Done';
     // Paid work is immutable. Start never turns assigned time into payable
     // time. Mark Done credits exactly the hours already assigned by the Owner.
-    if (row['state'] == 'Done' || (row['paid_minutes'] as int? ?? 0) > 0) return;
+    if (row['state'] == 'Done') return;
+    if ((row['paid_minutes'] as int? ?? 0) > 0) {
+      if (next == 'Done' && row['state'] == 'In Progress') {
+        await _runOwnerTaskEdit(
+          () => _taskEditRepository.finishPaidProgress(
+            row['id'] as String,
+            _date(DateTime.now()),
+          ),
+        );
+      }
+      return;
+    }
     final assignedMinutes = row['estimated_minutes'] as int? ?? 0;
     if (next == 'Done' && assignedMinutes <= 0) {
       setState(() => _error =
@@ -1368,7 +1387,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       advanceBalance:()=>_viewRepository.advance(widget.employeeId!),
       recordPayment:_recordWeekly,onPaymentSaved:_load,
       onWeekChanged:(week)=>setState(()=>_week=week),
-      saveDraft:(week,selected,adjustment,repayment,reason)=>_taskEditRepository.savePayrollDraft(widget.employeeId!,_date(week),selected,adjustment:adjustment,repayment:repayment,reason:reason,),
+      saveDraft:(week,selected,adjustment,repayment,reason) async {
+        await _taskEditRepository.savePayrollDraft(widget.employeeId!,_date(week),selected,adjustment:adjustment,repayment:repayment,reason:reason,);
+        if (mounted) setState(() => _draftRevision++);
+      },
       loadDraft:(week)=>_viewRepository.payrollDraftDetails(widget.employeeId!,_date(week)),
       extra: _advancePanel(),
     );
@@ -1700,8 +1722,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if (!mounted || !_canView) return;
     final saved = await Navigator.push<bool>(
       context,MaterialPageRoute(builder:(_)=>GeneralTaskEditor(employees:staff.values.toList(),jobs:jobs,initial:source??{'employee_id':widget.employeeId,'job_id':widget.jobId},save:(v)async{if(!_canView)throw StateError('Owner account changed.');
-    if (v['reminder_enabled'] ==1 && !await LocalTaskReminders().prepare(requestPermission: true))throw StateError('Enable notifications in device settings, or turn the reminder off to save.');
-    await _taskEditRepository.saveGeneralTask(operation:operation,
+    if (v['reminder_enabled'] ==1 && !await LocalTaskReminders().prepare(requestPermission: true)) {
+              throw StateError('Enable notifications in device settings, or turn the reminder off to save.');
+            }
+            await _taskEditRepository.saveGeneralTask(operation:operation,
       id:source?['id'] as int?, previousEmployee:source?['employee_id'] as String?,
       employee:v['employee_id'] as String, description:v['description'] as String,
       category:v['category'] as String,job:v['job_id'] as String?,due:v['due_at']==null?null:DateTime.fromMillisecondsSinceEpoch(v['due_at'] as int
@@ -1711,8 +1735,25 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if(saved==true && mounted)await _load();
   }
 
-  Widget _tasksTab() => EmployeeWorkReview(week:_week,rows:_work,jobs:_assignedJobs,
-    onWeekChanged:(week)=>setState(()=>_week=week),onJob:(id)=>_openRecordedWork(id,invoice:false),);
+  Widget _tasksTab() => Builder(
+    builder: (context) => EmployeeWorkReview(week:_week,rows:_work,jobs: const [],
+      employeeName: _employeeLabel(widget.employeeId),
+    onWeekChanged:(week)=>setState(()=>_week=week),onJob:(id)=>_openRecordedWork(id,invoice:false),
+      onTask: (task) => unawaited(
+        _openTaskDetails({...task, 'line_id': task['task_id']}, false),
+      ),
+      payrollSummary: WorkPayrollSummary(
+        week: EmployeeWorkReview.monday(_week),
+        rows: _work,
+        payments: _history,
+        revision: _draftRevision,
+        loadDraft: (week) => _viewRepository.payrollDraftDetails(
+          widget.employeeId!,
+          _date(week),
+        ),
+        onReview: () => DefaultTabController.of(context).animateTo(1),
+      ),
+    ),);
 
   String _employeeLabel(String? employee) {
     final row = _employees.where((row) => row['id'] == employee).firstOrNull;
@@ -1781,7 +1822,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Future<void> _runPriority(Map<String,dynamic> row,bool general,String priority) async {
-    try{await _priority(row,general,priority);}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Could not save priority: $e')));}
+    try{await _priority(row,general,priority);}catch(e){if(mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Could not save priority: $e')));
+      }
+    }
   }
   Future<void> _priority(Map<String,dynamic> row,bool general,String priority) async {
     await _taskEditRepository.setTaskPriority((general?row['id']:row['line_id']??row['task_id']??row['id']).toString(),priority,general:general);
@@ -1794,7 +1838,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       final pending=_localRead;if(pending!=null)await pending.timeout(const Duration(seconds:8));
       if(!_canView)throw StateError('Sign in as Owner to view this task.');
       final row=(general?_generalTasks:_serviceTaskRows).where((r)=>(general?r['id']:r['line_id']).toString()==id).firstOrNull;
-      if(row==null)throw StateError('Task no longer available. Return to Tasks and refresh.');
+      if(row==null) {
+        throw StateError('Task no longer available. Return to Tasks and refresh.');
+      }
       final job=row['job_id']?.toString();
       final jobs=job==null?[]:await _db.customSelect('SELECT status,job_number,customer_name,vehicle_label FROM local_jobs WHERE business_id=? AND id=?',variables:[Variable(widget.businessId),Variable(job)]).get();
       // Payroll is employee-scoped; the existing Task Details must still show
@@ -1802,7 +1848,24 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       final allocations=general?<Map<String,dynamic>>[]:widget.employeeId==null
           ? _taskAllocations[id]??[]
           : (await _viewRepository.work(job:job)).where((r)=>r['task_id']==id).toList();
-      return (task:{...row,if(allocations.isNotEmpty)'status':allocations.every((r)=>r['state']=='Done')?'done':allocations.any((r)=>r['state']!='Open')?'in_progress':'planned',if(jobs.isNotEmpty)...{'job_status':jobs.first.data['status'],'job_number':jobs.first.data['job_number'],'customer_name':jobs.first.data['customer_name'],'vehicle_label':jobs.first.data['vehicle_label']}},allocations:allocations);
+      final paymentHistory = general
+          ? <Map<String, dynamic>>[]
+          : await _viewRepository.taskPaymentHistory(id);
+      final detailed = [
+        for (final allocation in allocations)
+          {
+            ...allocation,
+            'payment_history': paymentHistory
+                .where(
+                  (p) =>
+                      p['credit_id'] == allocation['id'] &&
+                      p['employee_id'] == allocation['employee_id'],
+                )
+                .toList(),
+          },
+      ];
+      return (task:{...row,if(allocations.isNotEmpty)'status':allocations.every((r)=>r['state']=='Done')?'done':allocations.any((r)=>r['state']!='Open')?'in_progress':'planned',if(jobs.isNotEmpty)...{'job_status':jobs.first.data['status'],'job_number':jobs.first.data['job_number'],'customer_name':jobs.first.data['customer_name'],'vehicle_label':jobs.first.data['vehicle_label']}},allocations: detailed,
+      );
     }
     final data=await snapshot();if(!mounted)return;
     await Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>ApprovedTaskDetails(
@@ -1919,7 +1982,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Future<void> _markTaskDone(Map<String,dynamic> task,List<Map<String,dynamic>> allocations) async {
-    for(final row in allocations.where((r)=>r['state']!='Done' && r['archived_labor']!=1 && r['source_active']!=0 && r['assignment_conflict']!=1 && (r['paid_minutes'] as int? ?? 0)==0)) {
+    for(final row in allocations.where((r)=>r['state']!='Done' && r['archived_labor']!=1 && r['source_active']!=0 && r['assignment_conflict']!=1,
+    )) {
       await _recordTaskProgress(row,markDone:true);
     }
   }

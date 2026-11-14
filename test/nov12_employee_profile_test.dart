@@ -94,7 +94,7 @@ void main() {
       await tester.tap(find.byTooltip('Previous work week'));
       await tester.pumpAndSettle();
       expect(find.text('Labor This Week · 0 tasks'), findsOneWidget);
-      expect(find.text('Currently Assigned Jobs (1)'), findsOneWidget);
+      expect(find.text('Currently Assigned Tasks (2)'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

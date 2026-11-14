@@ -1,3 +1,4 @@
+import 'payroll_review_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'approved_tasks_ui.dart';
@@ -135,8 +136,9 @@ class _ApprovedTaskDetailsState extends State<ApprovedTaskDetails> {
               r['archived_labor'] != 1 &&
               r['source_active'] != 0 &&
               r['assignment_conflict'] != 1 &&
-              r['paid'] != 1 &&
-              (r['paid_minutes'] as int? ?? 0) == 0,
+              r['owner_prior_paid'] != 1 &&
+              ((r['paid_minutes'] as int? ?? 0) == 0 ||
+                  r['state'] == 'In Progress'),
         )
         .toList();
     final canProgress =
@@ -167,12 +169,6 @@ class _ApprovedTaskDetailsState extends State<ApprovedTaskDetails> {
         : start == end
         ? DateFormat('MMM d, yyyy').format(start)
         : '${DateFormat('MMM d').format(start)} – ${end == null ? 'Not recorded' : DateFormat('MMM d, yyyy').format(end)}';
-    final states = allocations.map(EmployeeWorkReview.paymentState).toSet();
-    final payroll = states.isEmpty
-        ? 'Needs review'
-        : states.length == 1
-        ? states.single
-        : 'Partially paid';
     return Scaffold(
       backgroundColor: taskCanvas,
       appBar: ApprovedTasksHeader(
@@ -399,7 +395,7 @@ class _ApprovedTaskDetailsState extends State<ApprovedTaskDetails> {
                                     ? null
                                     : (p) => run(() => widget.onPriority(p)),
                               ),
-                              TaskStatusPill(status, icon: false),
+                              TaskStatusPill(status),
                             ],
                           ),
                         ),
@@ -450,36 +446,122 @@ class _ApprovedTaskDetailsState extends State<ApprovedTaskDetails> {
                               ),
                             ),
                           ),
-                        if (!widget.general)
-                          info(
-                            Icons.payments_outlined,
-                            'Payroll:',
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 2,
+                        if (!widget.general) ...[
+                          const SizedBox(height: 12),
+                          for (final allocation in allocations)
+                            Container(
+                              key: ValueKey(
+                                'labor-payment-${allocation['id']}',
+                              ),
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: const Color(0xFFDCE2EA),
                                 ),
-                                decoration: BoxDecoration(
-                                  color: payroll == 'Paid'
-                                      ? const Color(0xFFE0F5DC)
-                                      : const Color(0xFFFFE2BB),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Text(
-                                  payroll,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 15,
-                                    color: payroll == 'Paid'
-                                        ? taskGreen
-                                        : taskAmber,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.payments_outlined,
+                                        color: taskGreen,
+                                      ),
+                                      const SizedBox(width: 7),
+                                      Expanded(
+                                        child: Text(
+                                          allocations.length > 1
+                                              ? 'Payroll · ${widget.employeeName(allocation['employee_id']?.toString())}'
+                                              : 'Payroll (Labor Hours)',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
+                                  const SizedBox(height: 9),
+                                  LaborBalanceTiles(
+                                    total:
+                                        (allocation['estimated_minutes']
+                                                as int? ??
+                                            allocation['actual_minutes']
+                                                as int? ??
+                                            0) /
+                                        60,
+                                    paid:
+                                        (allocation['paid_minutes'] as int? ??
+                                            0) /
+                                        60,
+                                    remaining:
+                                        allocation['owner_prior_paid'] == 1 ||
+                                            allocation['paid'] == 1
+                                        ? 0
+                                        : (((allocation['estimated_minutes']
+                                                              as int? ??
+                                                          allocation['actual_minutes']
+                                                              as int? ??
+                                                          0) -
+                                                      (allocation['paid_minutes']
+                                                              as int? ??
+                                                          0))
+                                                  .clamp(0, 100000000)) /
+                                              60,
+                                  ),
+                                  if ((allocation['payment_history'] as List? ??
+                                          [])
+                                      .isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Last Payment: ${DateFormat.yMMMd().format(DateTime.parse((allocation['payment_history'] as List).first['verified_date'] as String))} · ${(((allocation['payment_history'] as List).first['minutes'] as int) / 60).toStringAsFixed(2)} h · ${payrollMoney((allocation['payment_history'] as List).first['amount'] as int)}',
+                                      style: const TextStyle(
+                                        color: taskGreen,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    if ((allocation['payment_history'] as List)
+                                            .length >
+                                        1)
+                                      ExpansionTile(
+                                        tilePadding: EdgeInsets.zero,
+                                        title: const Text('Payment history'),
+                                        children: [
+                                          for (final payment
+                                              in (allocation['payment_history']
+                                                      as List)
+                                                  .cast<Map>())
+                                            ListTile(
+                                              dense: true,
+                                              contentPadding: EdgeInsets.zero,
+                                              title: Text(
+                                                '${payment['verified_date']} · ${payment['method']}',
+                                              ),
+                                              subtitle: Text(
+                                                '${((payment['minutes'] as int) / 60).toStringAsFixed(2)} h · ${payrollMoney(payment['amount'] as int)}',
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                  ] else
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 6),
+                                      child: Text(
+                                        EmployeeWorkReview.paymentState(
+                                          allocation,
+                                        ),
+                                        style: const TextStyle(
+                                          color: taskAmber,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
-                          ),
+                        ],
                         const Divider(height: 20),
                         const Text(
                           'Description',

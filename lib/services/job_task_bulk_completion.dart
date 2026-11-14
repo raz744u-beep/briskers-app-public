@@ -19,6 +19,8 @@ class JobTaskCompletionPlan {
         r['estimated_minutes'],
         r['state'],
         r['actual_minutes'],
+        r['paid_minutes'],
+        r['can_finish_paid_progress'],
       ],
     for (final r in general)
       ['general', r['id'], r['employee_id'], r['status'], r['due_at']],
@@ -46,8 +48,7 @@ class JobTaskCompletionPlan {
                 r['source_active'] != 0 &&
                 r['assignment_conflict'] != 1 &&
                 r['owner_prior_paid'] != 1 &&
-                r['paid'] != 1 &&
-                (r['paid_minutes'] as int? ?? 0) == 0 &&
+                ((r['paid'] != 1 && (r['paid_minutes'] as int? ?? 0) == 0) || r['can_finish_paid_progress']==true) &&
                 (r['estimated_minutes'] as int? ?? 0) > 0,
           )) {
         labor.addAll(unfinished.map(Map<String, dynamic>.of));
@@ -113,6 +114,10 @@ class JobTaskBulkCompletion {
           '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
       for (final row in current.labor) {
         final minutes = row['estimated_minutes'] as int;
+        if(row['can_finish_paid_progress']==true){
+          await repository.finishPaidProgress(row['id'] as String,date);
+          continue;
+        }
         await repository.recordAllocatedTime(
           row['id'] as String,
           'Done',

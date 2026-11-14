@@ -58,7 +58,7 @@ void main() {
       }
       expect(f,findsWidgets,reason:tester.allWidgets.whereType<Text>().map((w)=>w.data).join(' | '));
     }
-    Future<void> click(Finder f)async{await until(f);await tester.ensureVisible(f);await tester.tap(f);await tester.pumpAndSettle();}
+    Future<void> click(Finder f)async{await until(f);await tester.ensureVisible(f);await tester.pumpAndSettle();await tester.tap(f);await tester.pumpAndSettle();}
     await click(find.text('Labor Task'));
     await until(find.text('Use saved invoice labor'));
     await click(find.text('Use saved invoice labor'));

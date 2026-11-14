@@ -25,7 +25,7 @@ void main() {
     expect(action, contains('_taskEditRepository.setShopTaskStatus'));
     expect(action, isNot(contains('authorizeLocal')));
     expect(action, isNot(contains('_run(')));
-    expect(source, contains('Widget _tasksTab() => EmployeeWorkReview('));
+    expect(source, contains('Widget _tasksTab() => Builder('));
     expect(source, isNot(contains('_updateEmployeeGeneralTask(')));
     expect(source, contains("_changeGeneralTaskStatus(row['employee_id'] as String, id, status)"));
     expect(source, contains("if (!_canView) throw StateError('Sign in as Owner to edit tasks.')"));
@@ -66,7 +66,7 @@ void main() {
     expect(write, contains('await workflow.assign('));
     expect(write, contains('if (pairedDevice) {'));
     expect(write, contains('await apply();'));
-    expect(write, contains("if (!_canView) throw StateError('Owner account changed during assignment.')"));
+    expect(write, contains(RegExp(r"if \(!_canView\)\s*\{?\s*throw StateError\('Owner account changed during assignment\.'\)")));
   });
 
   test('local recheck uses signed-in Owner task edit; paired LAN stays protected', () {

@@ -19,7 +19,7 @@ Color taskStatusColor(Object? value) => switch (taskStatus(value)) {
 };
 IconData taskStatusIcon(Object? value) => switch (taskStatus(value)) {
   'Done' => Icons.check_circle,
-  'In Progress' => Icons.circle_outlined,
+  'In Progress' => Icons.sync,
   _ => Icons.hourglass_top,
 };
 Color taskPriorityColor(String priority) => switch (priority) {
@@ -473,10 +473,10 @@ class ApprovedProfileTabs extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = DefaultTabController.of(context);
     const entries = [
-      ('Tasks', taskBlue),
+      ('Work', taskBlue),
       ('Payroll', taskGreen),
       ('Reports', Color(0xFF9500C7)),
-      ('Taxes', Color(0xFF62666D)),
+      ('Taxes & 1099', Color(0xFF62666D)),
     ];
     return AnimatedBuilder(
       animation: controller,
@@ -509,11 +509,31 @@ class ApprovedProfileTabs extends StatelessWidget {
                           : [const Color(0xFFF3F5F9), const Color(0xFFE4E8F0)],
                     ),
                   ),
-                  child: Text(
-                    entry.$1,
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Row(
+                        children: [
+                          Icon(
+                            [
+                              Icons.layers_outlined,
+                              Icons.payments_outlined,
+                              Icons.bar_chart,
+                              Icons.description_outlined,
+                            ][i],
+                            size: 19,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            entry.$1,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),

@@ -69,7 +69,9 @@ class PayrollOwnerLedger {
     for (final document in documents) {
       final key = LocalDocumentDetailCache.key(business, document.read<String>('id'));
       final detail = await LocalDocumentSqlStore.read(db, key);
-      if (detail != null) details.add({'cache_key': key, 'payload_json': detail});
+      if (detail != null) {
+        details.add({'cache_key': key, 'payload_json': detail});
+      }
     }
     final assignments = await db.customSelect('SELECT a.* FROM local_job_assignments a WHERE a.business_id=? AND EXISTS '
       '(SELECT 1 FROM regular_payroll_tasks t WHERE t.business_id=a.business_id AND t.job_id=a.job_id)',
@@ -147,7 +149,9 @@ class PayrollOwnerLedger {
       if (!canonical) {
         for (final raw in incoming['regular_payroll_sync_outbox'] as List) {
           final row = raw as Map;
-          if (row['business_id'] != business) throw StateError('Invalid payroll acknowledgment scope.');
+          if (row['business_id'] != business) {
+            throw StateError('Invalid payroll acknowledgment scope.');
+          }
           if (row['state'] == 'reconciled') {
             await db.customStatement("UPDATE regular_payroll_sync_outbox SET state='reconciled' "
               'WHERE business_id=? AND operation_id=? AND payload=?',
@@ -182,16 +186,48 @@ class PayrollOwnerLedger {
           final where = primary.map((key) => '$key=?').join(' AND ');
           final existing = await db.customSelect('SELECT * FROM $table WHERE $where',
             variables: primary.map((key) => _variable(row[key])).toList()).get();
-          if(table=='regular_payroll_task_policy' && existing.isNotEmpty && existing.single.data['manual_override']==1 && row['manual_override']==0)continue;
+          if(table=='regular_payroll_task_policy' && existing.isNotEmpty && existing.single.data['manual_override']==1 && row['manual_override']==0) {
+            continue;
+          }
           if (existing.isEmpty) {
             await _insert(table, row);
           } else if (!_same(existing.single.data, row)) {
-            if (immutable.contains(table) || table == 'regular_payroll_progress_claims') throw StateError('Conflicting immutable payroll record.');
+            if (immutable.contains(table) || table == 'regular_payroll_progress_claims') {
+              throw StateError('Conflicting immutable payroll record.');
+            }
             final prior = existing.single.data;
             if(table=='regular_payroll_actual_time'){
-              final paid=await db.customSelect('SELECT credit_id FROM regular_payroll_work_coverage WHERE business_id=? AND credit_id=?',
+              final paid=await db.customSelect(
+                    'SELECT credit_id,snapshot,minutes FROM regular_payroll_work_coverage WHERE business_id=? AND credit_id=?',
                 variables:[Variable(business),Variable(row['credit_id'] as String)]).get();
-              if(paid.isNotEmpty && row['minutes']!=prior['minutes'])throw const PayrollPending('Recorded actual work differs from paid history. Existing records were preserved.');
+              final completed = await db
+                  .customSelect(
+                    'SELECT c.actual_minutes,p.state,e.minutes AS assigned FROM local_mechanic_work_credits_v1 c JOIN regular_payroll_portions p ON p.business_id=c.business_id AND p.id=c.allocation_id JOIN regular_payroll_estimates e ON e.business_id=c.business_id AND e.task_id=c.task_id AND e.employee_id=c.employee_id WHERE c.business_id=? AND c.allocation_id=?',
+                    variables: [
+                      Variable(business),
+                      Variable(row['credit_id'] as String),
+                    ],
+                  )
+                  .get();
+              final explicitFinish =
+                  canonical &&
+                  completed.length == 1 &&
+                  completed.single.data['state'] == 'Done' &&
+                  completed.single.data['actual_minutes'] == row['minutes'] &&
+                  completed.single.data['assigned'] == row['minutes'] &&
+                  (row['revision'] as int) > (prior['revision'] as int) &&
+                  paid.every(
+                    (p) =>
+                        (jsonDecode(p.read<String>('snapshot'))
+                            as Map)['in_progress_payment'] ==
+                        true,
+                  ) &&
+                  paid.fold<int>(0, (n, p) => n + p.read<int>('minutes')) <=
+                      (row['minutes'] as int);
+              if(paid.isNotEmpty && row['minutes']!=prior['minutes'] &&
+                  !explicitFinish) {
+                throw const PayrollPending('Recorded actual work differs from paid history. Existing records were preserved.');
+              }
             }
 
             if (table == 'local_mechanic_work_credits_v1' || table == 'regular_payroll_portions' || table == 'regular_payroll_assignment_outgoing' || table == 'regular_payroll_assignment_meta' || table == 'regular_payroll_actual_time' || table == 'regular_payroll_job_lead') {
@@ -245,9 +281,11 @@ class PayrollOwnerLedger {
         'WHERE w.business_id=? AND (c.allocation_id IS NULL OR p.operation_id IS NULL OR c.employee_id<>p.employee_id) '
         'UNION ALL SELECT 1 FROM local_mechanic_work_credits_v1 c WHERE c.business_id=? '
         'AND COALESCE((SELECT SUM(minutes) FROM regular_payroll_work_coverage w '
-        'WHERE w.business_id=c.business_id AND w.credit_id=c.allocation_id),0)>c.actual_minutes LIMIT 1',
+            'WHERE w.business_id=c.business_id AND w.credit_id=c.allocation_id),0)>CASE WHEN EXISTS(SELECT 1 FROM regular_payroll_portions ip WHERE ip.business_id=c.business_id AND ip.id=c.allocation_id AND ip.state=\'In Progress\') AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage ipw WHERE ipw.business_id=c.business_id AND ipw.credit_id=c.allocation_id AND COALESCE(json_extract(ipw.snapshot,\'\$.in_progress_payment\'),0)!=1) THEN COALESCE((SELECT est.minutes FROM regular_payroll_estimates est WHERE est.business_id=c.business_id AND est.task_id=c.task_id AND est.employee_id=c.employee_id),0) ELSE c.actual_minutes END LIMIT 1',
         variables: [business, business, business].map(Variable<String>.new).toList()).get();
-      if (invalid.isNotEmpty) throw StateError('Payroll integrity verification failed; existing records were preserved.');
+      if (invalid.isNotEmpty) {
+        throw StateError('Payroll integrity verification failed; existing records were preserved.');
+      }
       await db.customStatement("UPDATE payroll_owner_pending_v2 SET state='resolved',reason='' "
         'WHERE business_id=? AND operation IN (SELECT operation_id FROM regular_payroll_payments WHERE business_id=?)',
         [business, business]);
@@ -261,7 +299,10 @@ class PayrollOwnerLedger {
     final selected = [
       for (final raw in request['selected'] as List? ?? [])
         {for (final key in ['id', 'version', 'hours_hundredths', 'actual_minutes',
-            'rate_cents', 'paid_minutes', 'pay_minutes', 'payment_rate_cents'])
+            'rate_cents', 'paid_minutes', 'pay_minutes', 'payment_rate_cents',
+            'allow_in_progress',
+            'payable_minutes',
+          ])
           if ((raw as Map).containsKey(key)) key: raw[key]},
     ]..sort((a, b) => (a['id'] as String).compareTo(b['id'] as String));
     return PayrollOwnerLease.digest(jsonEncode({...request, 'selected': selected}));

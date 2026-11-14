@@ -249,8 +249,8 @@ void main(){
     await click(find.text('Review Weekly Labor (2 tasks)'));
     await until(find.text('Employee Profile'));
     
-    expect(find.text('Tasks'),findsOneWidget);expect(find.text('General Tasks'),findsNothing);
-    expect(find.text('Work Review (Read Only)'),findsOneWidget);
+    expect(find.text('Work'),findsOneWidget);expect(find.text('General Tasks'),findsNothing);
+    expect(find.textContaining('Currently Assigned Tasks'),findsOneWidget);
     expect(find.widgetWithText(OutlinedButton,'Details'),findsOneWidget);
     await capture('bugs30-employee-unpaid-tasks');
 
@@ -300,7 +300,7 @@ void main(){
     expect(find.text('Review Weekly Labor (0 tasks)'),findsOneWidget);
     expect(find.text('Review Weekly Labor (1 tasks)'),findsOneWidget);
     await click(find.text('Review Weekly Labor (0 tasks)'));
-    await until(find.text('Work Review (Read Only)'));
+    await until(find.textContaining('Currently Assigned Tasks'));
     await click(find.text('Payroll'));
     await until(find.text('No verified unpaid labor for this week.'));
     await tester.scrollUntilVisible(find.byKey(const Key('verify-weekly-payment')),150,scrollable:find.descendant(of:find.byKey(const Key('employee-payroll-preparation')),matching:find.byType(Scrollable)).first);

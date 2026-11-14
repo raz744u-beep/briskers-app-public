@@ -39,7 +39,7 @@ void main(){
     await t.scrollUntilVisible(find.text('Select All'),-250,scrollable:find.byType(Scrollable).last);await t.tap(find.text('Select All'));await t.pumpAndSettle();expect(find.text('Deselect All'),findsOneWidget);
     await t.tap(find.text('Deselect All'));await t.pumpAndSettle();expect(t.widgetList<Checkbox>(find.byType(Checkbox)).every((c)=>c.value==false),true);
     await t.tap(find.text('Select All'));await t.pumpAndSettle();
-    await t.scrollUntilVisible(find.text('Payable hours'),150,scrollable:find.byType(Scrollable).last);await t.tap(find.text('Payable hours'));await t.pumpAndSettle();await t.enterText(find.byType(TextField).last,'0.50');
+    await t.scrollUntilVisible(find.text('Payable Hours'),150,scrollable:find.byType(Scrollable).last);await t.tap(find.text('Payable Hours'));await t.pumpAndSettle();await t.enterText(find.byType(TextField).last,'0.50');
     await t.tap(find.text('Save'));await t.pumpAndSettle();
     await t.scrollUntilVisible(find.text('Save (Draft)'),350,scrollable:find.byType(Scrollable).last);await t.tap(find.text('Save (Draft)'));await t.pumpAndSettle();expect(draft!['allocation-2'],.5);expect(draft!.length,8);expect(t.takeException(),isNull);
   });
@@ -52,8 +52,8 @@ void main(){
     await t.tap(find.byType(EmployeeListTile).first);await t.longPress(find.byType(EmployeeListTile).first);await t.pumpAndSettle();expect(opens,1);expect(actions,1);
   });
   testWidgets('only active shaped profile tab is colored and selecting tabs preserves their order',(t)async{
-    size(t);await t.pumpWidget(MaterialApp(home:DefaultTabController(length:4,child:Scaffold(body:Column(children:[const ApprovedProfileTabs(),Expanded(child:TabBarView(children:[for(final n in ['Tasks','Payroll','Reports','Taxes'])Text('$n body')]))])))));
-    for(final selected in ['Tasks','Payroll','Reports','Taxes']){await t.tap(find.text(selected));await t.pumpAndSettle();for(final label in ['Tasks','Payroll','Reports','Taxes']){final box=t.widget<Container>(find.byKey(ValueKey('profile-tab-$label'))).decoration! as BoxDecoration;final colors=(box.gradient! as LinearGradient).colors;expect(colors.first==const Color(0xFFF3F5F9),label!=selected);}expect(find.text('$selected body').hitTestable(),findsOneWidget);}
+    size(t);await t.pumpWidget(MaterialApp(home:DefaultTabController(length:4,child:Scaffold(body:Column(children:[const ApprovedProfileTabs(),Expanded(child:TabBarView(children:[for(final n in ['Work','Payroll','Reports','Taxes & 1099'])Text('$n body')]))])))));
+    for(final selected in ['Work','Payroll','Reports','Taxes & 1099']){await t.tap(find.text(selected));await t.pumpAndSettle();for(final label in ['Work','Payroll','Reports','Taxes & 1099']){final box=t.widget<Container>(find.byKey(ValueKey('profile-tab-$label'))).decoration! as BoxDecoration;final colors=(box.gradient! as LinearGradient).colors;expect(colors.first==const Color(0xFFF3F5F9),label!=selected);}expect(find.text('$selected body').hitTestable(),findsOneWidget);}
     expect(t.takeException(),isNull);
   });
   testWidgets('completed General Tasks are excluded only by Active and remain in All and Done filters',(t)async{

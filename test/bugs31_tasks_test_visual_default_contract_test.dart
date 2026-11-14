@@ -63,7 +63,9 @@ void main() {
     final action = screen.substring(start, end);
     expect(action, contains("row['state'] == 'Open' ? 'In Progress' : 'Done'"));
     expect(action, contains("next == 'Done' ? assignedMinutes : previousMinutes"));
-    expect(action, contains("if (row['state'] == 'Done' || (row['paid_minutes'] as int? ?? 0) > 0) return;"));
+    expect(action, contains("if (row['state'] == 'Done') return;"));
+    expect(action,contains("if (next == 'Done' && row['state'] == 'In Progress')"));
+    expect(action,contains('_taskEditRepository.finishPaidProgress('));
   });
 
   test('direct Mark Done from Open keeps paid labor locked', () {

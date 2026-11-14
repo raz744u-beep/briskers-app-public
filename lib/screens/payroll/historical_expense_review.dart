@@ -1,14 +1,19 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'approved_tasks_ui.dart';
 
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/local_invoice_task_store.dart';
 
-typedef ArchiveSearch = Future<List<Map<String, dynamic>>> Function(
-  String search, int offset, int limit,
-);
+typedef ArchiveSearch =
+    Future<List<Map<String, dynamic>>> Function(
+      String search,
+      int offset,
+      int limit,
+    );
 
 /// Original expense entries have no verified employee foreign key. This view
 /// deliberately has no payment repository, write callback or balance calculation.
@@ -30,7 +35,8 @@ class HistoricalExpenseReview extends StatefulWidget {
   final String source;
   final DateTime? exactDate;
 
-  static Future<void> open(BuildContext context, {
+  static Future<void> open(
+    BuildContext context, {
     required String businessId,
     required String employeeName,
     required ValueListenable<bool> access,
@@ -42,29 +48,46 @@ class HistoricalExpenseReview extends StatefulWidget {
     final offline = BriskersConnectionModeController.instance.forceOffline;
     final cutoff = DateTime.parse(LocalInvoiceTaskStore.payrollCutover);
     final end = DateTime(cutoff.year, cutoff.month, cutoff.day - 1);
-    await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) =>
-      HistoricalExpenseReview(
-        initialSearch: employeeName, access: access, canView: canView,
-        exactDate: exactDate,
-        source: offline ? 'Expenses saved on this device' : 'Shop expense records',
-        search: (query, offset, limit) async {
-          if (!canView()) throw StateError('Owner access required.');
-          if (offline) {
-            final rows = await cache.loadTransactions(businessId,
-              startDate: exactDate, endDate: exactDate ?? end,
-              search: query, direction: 'expense');
-            return rows.skip(offset).take(limit).toList();
-          }
-          return const BriskersApi().transactionsPaged(businessId,
-            startDate: exactDate, endDate: exactDate ?? end,
-            search: query.isEmpty ? null : query,
-            direction: 'expense', offset: offset, limit: limit);
-        },
-      )));
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => HistoricalExpenseReview(
+          initialSearch: employeeName,
+          access: access,
+          canView: canView,
+          exactDate: exactDate,
+          source: offline
+              ? 'Expenses saved on this device'
+              : 'Shop expense records',
+          search: (query, offset, limit) async {
+            if (!canView()) throw StateError('Owner access required.');
+            if (offline) {
+              final rows = await cache.loadTransactions(
+                businessId,
+                startDate: exactDate,
+                endDate: exactDate ?? end,
+                search: query,
+                direction: 'expense',
+              );
+              return rows.skip(offset).take(limit).toList();
+            }
+            return const BriskersApi().transactionsPaged(
+              businessId,
+              startDate: exactDate,
+              endDate: exactDate ?? end,
+              search: query.isEmpty ? null : query,
+              direction: 'expense',
+              offset: offset,
+              limit: limit,
+            );
+          },
+        ),
+      ),
+    );
   }
 
   @override
-  State<HistoricalExpenseReview> createState() => _HistoricalExpenseReviewState();
+  State<HistoricalExpenseReview> createState() =>
+      _HistoricalExpenseReviewState();
 }
 
 class _HistoricalExpenseReviewState extends State<HistoricalExpenseReview> {
@@ -121,8 +144,14 @@ class _HistoricalExpenseReviewState extends State<HistoricalExpenseReview> {
       if (!mounted || generation != _generation || !widget.canView()) return;
       final ids = _rows.map((row) => row['id']).toSet();
       setState(() {
-        _rows.addAll(page.where((row) =>
-          row['id'] != null && ids.add(row['id'])));
+        _rows.addAll(
+          page.where(
+            (row) =>
+                row['id'] != null &&
+                _matches(row, _query) &&
+                ids.add(row['id']),
+          ),
+        );
         _offset += page.length;
         _more = page.length == _size;
         _loading = false;
@@ -136,36 +165,170 @@ class _HistoricalExpenseReviewState extends State<HistoricalExpenseReview> {
     }
   }
 
+  static bool _matches(Map<String, dynamic> row, String query) {
+    final needle = query.trim().toLowerCase();
+    return needle.isEmpty ||
+        ['counterparty', 'payee_text', 'category', 'remarks'].any(
+          (key) => (row[key]?.toString().toLowerCase() ?? '').contains(needle),
+        );
+  }
+
+  String _amount(Map<String, dynamic> row) {
+    final amount = num.tryParse(row['amount']?.toString() ?? '');
+    if (amount == null) return 'Amount unavailable';
+    final currency = row['currency_code']?.toString() ?? 'USD';
+    return NumberFormat.currency(
+      locale: 'en_US',
+      name: currency,
+      symbol: currency == 'USD' ? r'$' : '$currency ',
+      decimalDigits: 2,
+    ).format(amount);
+  }
+
+  String _date(Map<String, dynamic> row) {
+    final date = DateTime.tryParse(row['transaction_date']?.toString() ?? '');
+    return date == null ? 'Date unavailable' : DateFormat.yMMMd().format(date);
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Historical expense review')),
+    backgroundColor: taskCanvas,
+    appBar: AppBar(title: const Text('Historical Expense Review')),
     body: !widget.access.value || !widget.canView()
-      ? const Center(child: Text('Owner access required.'))
-      : ListView(padding: const EdgeInsets.all(16), children: [
-        Text(widget.source),
-        Text(widget.exactDate == null
-          ? 'Search original expenses before November 7, 2026. A matching payee does not verify an employee payment. These records do not affect payroll balances.'
-          : 'Original expense entries for ${widget.exactDate!.month}/${widget.exactDate!.day}/${widget.exactDate!.year}. Verify the payee, amount and original transaction ID. This read-only review does not mark payroll paid.'),
-        TextField(controller: _text, textInputAction: TextInputAction.search,
-          onSubmitted: (_) => _load(reset: true),
-          decoration: InputDecoration(labelText: 'Payee, category or remarks',
-            suffixIcon: IconButton(icon: const Icon(Icons.search),
-              tooltip: 'Search expenses', onPressed: () => _load(reset: true)))),
-        if (_loading) const LinearProgressIndicator(),
-        if (_failed) TextButton(onPressed: () => _load(reset: false),
-          child: const Text('Expense records could not be loaded. Retry')),
-        if (!_loading && !_failed && _rows.isEmpty)
-          const Text('No matching expenses in this source.'),
-        for (final row in _rows)
-          ExpansionTile(key: ValueKey(row['id']),
-            title: Text((row['counterparty'] ?? row['payee_text'] ?? 'Unspecified payee').toString()),
-            subtitle: Text([row['transaction_date'] ?? 'Date unavailable',
-              row['amount'], row['currency_code']].whereType<Object>().join(' · ')),
-            children: [ListTile(title: SelectableText('Transaction ID: ${row['id']}'),
-              subtitle: Text([row['category'], row['account'], row['status'], row['remarks']]
-                .whereType<Object>().join('\n')))]),
-        if (_more && !_loading && !_failed) TextButton(onPressed: () => _load(reset: false),
-          child: const Text('Load more')),
-      ]),
+        ? const Center(child: Text('Owner access required.'))
+        : SafeArea(
+            top: false,
+            child: ListView(
+              padding: const EdgeInsets.all(12),
+              children: [
+                TextField(
+                  controller: _text,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (_) => _load(reset: true),
+                  decoration: InputDecoration(
+                    hintText: 'Payee, category or remarks',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.search),
+                      tooltip: 'Search expenses',
+                      onPressed: () => _load(reset: true),
+                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(28),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'A matching payee does not establish a payroll payment. Historical expenses do not change payroll balances.',
+                  style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  widget.exactDate == null
+                      ? '${widget.source} · Through Nov 8, 2026'
+                      : '${widget.source} · ${DateFormat.yMMMd().format(widget.exactDate!)}',
+                  style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
+                ),
+                const SizedBox(height: 10),
+                if (_loading) const LinearProgressIndicator(),
+                if (_failed)
+                  TextButton(
+                    onPressed: () => _load(reset: false),
+                    child: const Text(
+                      'Expense records could not be loaded. Retry',
+                    ),
+                  ),
+                if (!_loading && !_failed && _rows.isEmpty)
+                  const Text('No matching expenses in this source.'),
+                for (final row in _rows)
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    color: Colors.white,
+                    child: ExpansionTile(
+                      key: ValueKey(row['id']),
+                      tilePadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 2,
+                      ),
+                      childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                      title: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              (row['counterparty'] ??
+                                      row['payee_text'] ??
+                                      'Unspecified payee')
+                                  .toString(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _amount(row),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
+                      subtitle: Text(_date(row)),
+                      children: [
+                        for (final field in [
+                          ('category', 'Category'),
+                          ('account', 'Account'),
+                          ('remarks', 'Remarks'),
+                          ('status', 'Status'),
+                        ])
+                          if (row[field.$1] != null &&
+                              row[field.$1].toString().trim().isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 3),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  SizedBox(
+                                    width: 76,
+                                    child: Text(
+                                      '${field.$2}:',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Text(row[field.$1].toString()),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        const SizedBox(height: 5),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: SelectableText(
+                            'Transaction ID: ${row['id']}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (_more && !_loading && !_failed)
+                  TextButton(
+                    onPressed: () => _load(reset: false),
+                    child: const Text('Load more'),
+                  ),
+              ],
+            ),
+          ),
   );
 }

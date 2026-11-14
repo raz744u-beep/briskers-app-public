@@ -34,7 +34,7 @@ class VerifiedPaidLabor {
       'regular_payroll_payments',
     })) {
       clauses.add(
-        '''c.actual_minutes>0 AND
+        '''c.actual_minutes>0 AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage ip WHERE ip.business_id=p.business_id AND ip.credit_id=p.id AND json_extract(ip.snapshot,'\$.in_progress_payment')=1 AND p.state!='Done') AND
         (SELECT COALESCE(SUM(w.minutes),0) FROM regular_payroll_work_coverage w
          JOIN regular_payroll_payments paid ON paid.business_id=w.business_id
            AND paid.operation_id=w.operation_id AND paid.employee_id=p.employee_id

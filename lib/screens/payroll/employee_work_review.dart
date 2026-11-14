@@ -13,11 +13,17 @@ class EmployeeWorkReview extends StatelessWidget {
     required this.jobs,
     required this.onWeekChanged,
     required this.onJob,
+    this.onTask,
+    this.payrollSummary,
+    this.employeeName,
   });
   final DateTime week;
   final List<Map<String, dynamic>> rows, jobs;
   final ValueChanged<DateTime> onWeekChanged;
   final ValueChanged<String> onJob;
+  final ValueChanged<Map<String, dynamic>>? onTask;
+  final Widget? payrollSummary;
+  final String? employeeName;
   static DateTime monday(DateTime d) =>
       DateTime(d.year, d.month, d.day).subtract(Duration(days: d.weekday - 1));
   static DateTime? date(Map<String, dynamic> r) {
@@ -96,27 +102,8 @@ class EmployeeWorkReview extends StatelessWidget {
           16 + MediaQuery.paddingOf(context).bottom,
         ),
         children: [
-          const Card(
-            color: Color(0xFFD6E9FF),
-            child: ListTile(
-              leading: Icon(
-                Icons.assignment_outlined,
-                size: 30,
-                color: taskNavy,
-              ),
-              title: Text(
-                'Work Review (Read Only)',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              dense: false,
-              subtitle: Text(
-                'Assigned jobs & weekly labor',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ),
           Card(
+            color: const Color(0xFFD6E9FF),
             child: Row(
               children: [
                 IconButton(
@@ -126,10 +113,39 @@ class EmployeeWorkReview extends StatelessWidget {
                   icon: const Icon(Icons.chevron_left),
                 ),
                 Expanded(
-                  child: Text(
-                    '${DateFormat('MMM d').format(start)} – ${DateFormat('MMM d, yyyy').format(end.subtract(const Duration(days: 1)))}',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  child: InkWell(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: week,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2100),
+                      );
+                      if (picked != null) onWeekChanged(monday(picked));
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.calendar_month_outlined,
+                            color: taskNavy,
+                            size: 23,
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              '${DateFormat('MMM d').format(start)} – ${DateFormat('MMM d, yyyy').format(end.subtract(const Duration(days: 1)))}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
                 IconButton(
@@ -143,51 +159,66 @@ class EmployeeWorkReview extends StatelessWidget {
           ),
           Card(
             child: ExpansionTile(
-              key: const PageStorageKey('work-review-assigned-jobs'),
+              shape:const Border(),collapsedShape:const Border(),
+              key: const PageStorageKey('work-review-assigned-tasks'),
               initiallyExpanded: true,
               title: Text(
-                'Currently Assigned Jobs (${jobs.length})',
+                'Currently Assigned Tasks (${rows.where((r) => r['state'] != 'Done' && r['source_active'] != 0 && r['assignment_conflict'] != 1).length})',
                 style: const TextStyle(fontWeight: FontWeight.w800),
               ),
               children: [
-                for (final j in jobs)
+                for (final r in rows.where(
+                  (r) =>
+                      r['state'] != 'Done' &&
+                      r['source_active'] != 0 &&
+                      r['assignment_conflict'] != 1,
+                ))
                   Container(
                     margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(11),
-                      border: const Border(
-                        left: BorderSide(color: taskBlue, width: 5),
-                      ),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x22051D35),
-                          offset: Offset(0, 2),
-                          blurRadius: 2,
-                        ),
-                      ],
-                    ),
-                    child: Material(
-                      color: Colors.transparent,
-                      child: ListTile(
-                        onTap: () => onJob(j['id'] as String),
-                        title: Text(
-                          '${j['job_number'] ?? 'Job'} · ${j['customer_name'] ?? ''}',
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        subtitle: Text('${j['vehicle_label'] ?? ''}'),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            TaskStatusPill(j['status'], icon: false),
-                            const Icon(Icons.chevron_right),
-                          ],
+                      border: Border(
+                        left: BorderSide(
+                          color: color(r['state'] as String?),
+                          width: 5,
                         ),
                       ),
                     ),
+                    child: Material(color:Colors.transparent,child:ListTile(
+                      isThreeLine:true,
+                      key: ValueKey('assigned-task-${r['id']}'),
+                      onTap: onTask == null ? null : () => onTask!(r),
+                      title: Text(
+                        '${r['description'] ?? 'Labor'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      subtitle: Text(
+                        '${r['job_number'] ?? 'Job'} · ${r['customer_name'] ?? ''}\n${employeeName ?? r['employee_name'] ?? 'Mechanic'} · ${hrs(r['estimated_minutes'] as int? ?? 0)} h',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: SizedBox(height:54,child:FittedBox(fit:BoxFit.scaleDown,child:Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TaskPriorityPill(
+                            priority: r['priority']?.toString() ?? 'Normal',
+                          ),
+                          const SizedBox(height: 4),
+                          TaskStatusPill(r['state']),
+                        ],
+                      ))),
+                    )),
                   ),
-                if (jobs.isEmpty)
-                  const ListTile(title: Text('No current assigned jobs.')),
+                if (!rows.any(
+                  (r) =>
+                      r['state'] != 'Done' &&
+                      r['source_active'] != 0 &&
+                      r['assignment_conflict'] != 1,
+                ))
+                  const ListTile(title: Text('No current assigned tasks.')),
               ],
             ),
           ),
@@ -200,6 +231,8 @@ class EmployeeWorkReview extends StatelessWidget {
                 children: [
                   Row(
                     children: [
+                      const Icon(Icons.assignment_outlined, color: taskGreen),
+                      const SizedBox(width: 7),
                       Expanded(
                         child: Text(
                           'Labor This Week · ${visible.length} tasks',
@@ -246,18 +279,27 @@ class EmployeeWorkReview extends StatelessWidget {
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 5,
                                   ),
-                                  child: Text(
-                                    '${state == 'Done'
-                                        ? 'Completed'
-                                        : state == 'Open'
-                                        ? 'Not Started'
-                                        : state}\n${hrs(sum(visible.where((r) => r['state'] == state)))} hrs',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 16,
-                                      color: color(state),
-                                    ),
+                                  child: Column(
+                                    children: [
+                                      Icon(
+                                        taskStatusIcon(state),
+                                        color: color(state),
+                                        size: 18,
+                                      ),
+                                      Text(
+                                        '${state == 'Done'
+                                            ? 'Completed'
+                                            : state == 'Open'
+                                            ? 'Not Started'
+                                            : state}\n${hrs(sum(visible.where((r) => r['state'] == state)))} hrs',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 16,
+                                          color: color(state),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
@@ -289,6 +331,7 @@ class EmployeeWorkReview extends StatelessWidget {
               ),
             ),
           ),
+          ?payrollSummary,
           if (visible.isEmpty)
             const ListTile(title: Text('No recorded labor for this week.')),
           for (final r in visible)
@@ -314,43 +357,7 @@ class EmployeeWorkReview extends StatelessWidget {
               child: Material(
                 color: Colors.transparent,
                 child: ListTile(
-                  onTap: () => showModalBottomSheet<void>(
-                    context: context,
-                    useSafeArea: true,
-                    isScrollControlled: true,
-                    showDragHandle: true,
-                    builder: (sheet) => SafeArea(
-                      top: false,
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(
-                              '${r['job_number'] ?? 'Job'} · ${r['customer_name'] ?? ''}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            Text('${r['description'] ?? 'Labor'}'),
-                            const SizedBox(height: 10),
-                            Text(
-                              '${hrs(minutes(r))} h · ${r['state']} · ${paymentState(r)}',
-                            ),
-                            Text(
-                              '${r['work_start_date'] ?? ''} – ${r['work_end_date'] ?? ''}',
-                            ),
-                            TextButton(
-                              onPressed: () => Navigator.pop(sheet),
-                              child: const Text('Close'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
+                  onTap: onTask == null ? null : () => onTask!(r),
                   title: Text(
                     '${r['job_number'] ?? 'Job'} · ${r['description'] ?? 'Labor'}',
                     maxLines: 1,
