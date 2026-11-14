@@ -2,6 +2,7 @@ import '../../widgets/task_schedule_indicator.dart';
 import '../../core/work_status_colors.dart';
 // ignore_for_file: prefer_interpolation_to_compose_strings
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 /// Compact, job-only Tasks presentation approved by the Owner.
 /// This reads the SAME saved allocations and general tasks as payroll.
@@ -21,12 +22,14 @@ class JobScopedTasks extends StatefulWidget {
     this.onManageLabor,
     this.onEditLabor,
     this.onManageGeneral,
-    this.laborActions,
+    this.onReconcileLabor,
+    this.onReviewLabor,
     this.onMarkAllDone,
     this.markAllDoneCount = 0,
   });
 
-  final Widget Function(Map<String, dynamic>)? laborActions;
+  final ValueChanged<Map<String, dynamic>>? onReconcileLabor;
+  final ValueChanged<Map<String, dynamic>>? onReviewLabor;
   final String jobId;
   final Future<void> Function()? onMarkAllDone;
   final int markAllDoneCount;
@@ -73,11 +76,6 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
     'Not Started' => orange,
     _ => green,
   };
-  Color _surface(String status) => switch (status) {
-    'In Progress' => const Color(0xFFEAF4FF),
-    'Not Started' => const Color(0xFFFFF6ED),
-    _ => const Color(0xFFEAF8EF),
-  };
   IconData _statusIcon(String status) => switch (status) {
     'In Progress' => Icons.play_circle_fill,
     'Not Started' => Icons.hourglass_top,
@@ -116,7 +114,7 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
         widget.onManageLabor != null;
     await showModalBottomSheet<void>(
       context: context, showDragHandle: true, useSafeArea: true,
-      builder: (sheet) => SafeArea(child: Column(
+      builder: (sheet) => SafeArea(child: SingleChildScrollView(child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           ListTile(
@@ -150,9 +148,33 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
             Navigator.pop(sheet);
             await _act(key,() async {if(general){await widget.onGeneralProgress(row['id'] as int,'done');}else{for(final allocation in _allocations(row).where(_canChange)){await widget.onLaborProgress(allocation,true);}}});
           }),
+          if (!general)
+            for (final allocation in _allocations(row)) ...[
+              if (_canReconcile(allocation) && widget.onReconcileLabor != null)
+                ListTile(
+                  leading: const Icon(Icons.verified_outlined),
+                  title: const Text('Reconcile historical wages'),
+                  subtitle: _allocations(row).length > 1
+                      ? Text(widget.employeeName(allocation['employee_id']?.toString()))
+                      : null,
+                  onTap: () {
+                    Navigator.pop(sheet);
+                    widget.onReconcileLabor!(allocation);
+                  },
+                ),
+              if (_canReconcile(allocation) && allocation['archived_labor'] == 1 && widget.onReviewLabor != null)
+                ListTile(
+                  leading: const Icon(Icons.manage_search),
+                  title: const Text('Review unpaid work'),
+                  onTap: () {
+                    Navigator.pop(sheet);
+                    widget.onReviewLabor!(allocation);
+                  },
+                ),
+            ],
           const SizedBox(height: 8),
         ],
-      )),
+      ))),
     );
   }
 
@@ -207,52 +229,73 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
     );
   }
 
+  bool _canReconcile(Map<String, dynamic> row) =>
+      row['owner_prior_paid'] != 1 && row['paid'] != 1 &&
+      (row['paid_minutes'] as int? ?? 0) == 0 &&
+      row['assignment_conflict'] != 1 && row['source_active'] != 0;
+
+  String _workDate(Object? raw) {
+    final date = DateTime.tryParse(raw?.toString() ?? '');
+    return date == null ? 'Not set' : DateFormat.yMMMd().format(date);
+  }
+
   Widget _details(Map<String, dynamic> row, bool general,
       List<Map<String, dynamic>> allocations, String status, String key) {
     final notes = (row['notes'] ?? row['note'] ?? '').toString().trim();
-    final employee = widget.employeeName(row['employee_id']?.toString());
+    final edit = general ? widget.onManageGeneral : widget.onEditLabor;
+    final assignment = general ? null : widget.onManageLabor;
+    final editStyle = OutlinedButton.styleFrom(
+      foregroundColor: const Color(0xFF244B42),
+      minimumSize: const Size(0, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(fontSize: 13, fontWeight: FontWeight.w600),
+    );
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Divider(height: 12),
-        if(!general && row['work_start_date']!=null)Text('Work dates: ${row['work_start_date']} – ${row['work_end_date']}'),
-        if(!general && allocations.isEmpty && widget.onEditLabor!=null)TextButton(onPressed:()=>widget.onEditLabor!(row),child:const Text('Edit Task')),
-        if (general) Text('Mechanic: ' + employee),
-        if (!general)
+        if (!general && row['work_start_date'] != null)
+          Row(children: [
+            const Icon(Icons.calendar_month_outlined, size: 18),
+            const SizedBox(width: 6),
+            Expanded(child: Text(
+              'Work dates: ${_workDate(row['work_start_date'])} – ${_workDate(row['work_end_date'])}',
+              style: const TextStyle(fontSize: 12),
+            )),
+          ]),
+        // Only split assignments need individual progress controls here.
+        if (!general && allocations.length > 1)
           for (final allocation in allocations)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 5),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                if(allocations.length>1)Row(children: [
-                Expanded(child: Text(
-                  widget.employeeName(allocation['employee_id']?.toString()) +
-                  ' · ' +
-                  ((allocation['estimated_minutes'] as int? ?? 0) / 60)
-                    .toStringAsFixed(1) + ' hrs',
-                  maxLines: 2)),
-                // Single mechanic already has the action on the closed
-                // card. Inline details stay read-only, without duplicates.
-                // Split tasks retain independent per-mechanic actions.
-                if (allocations.length > 1)
-                  _action(key + '-' + allocation['id'].toString(),
-                    allocation['state']?.toString() == 'Done' ? 'Done' :
-                      allocation['state']?.toString() == 'In Progress'
-                        ? 'In Progress' : 'Not Started',
-                    allocation: allocation),
-                ]),
-                if (widget.laborActions != null) widget.laborActions!(allocation),
-              ]),
-            ),
-        if (!general && widget.onManageLabor != null &&
-            row['invoice_id'] is String && row['source_line_id'] is String)
-          TextButton.icon(
-            onPressed: _running != null ? null : () => widget.onManageLabor!(row),
-            icon: const Icon(Icons.edit_outlined),
-            label: const Text('Edit Assignment'),
-          ),
+            Row(children: [
+              Expanded(child: Text(
+                '${widget.employeeName(allocation['employee_id']?.toString())} · ${((allocation['estimated_minutes'] as int? ?? 0) / 60).toStringAsFixed(1)} hrs',
+              )),
+              _action('$key-${allocation['id']}',
+                allocation['state'] == 'Done' ? 'Done' :
+                  allocation['state'] == 'In Progress' ? 'In Progress' : 'Not Started',
+                allocation: allocation),
+            ]),
+        if (edit != null || assignment != null) ...[
+          const SizedBox(height: 10),
+          Row(children: [
+            if (edit != null) Expanded(child: OutlinedButton.icon(
+              onPressed: _running != null ? null : () => edit(row),
+              style: editStyle,
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              label: const Text('Edit Task'),
+            )),
+            if (edit != null && assignment != null) const SizedBox(width: 8),
+            if (assignment != null) Expanded(child: OutlinedButton.icon(
+              onPressed: _running != null ? null : () => assignment(row),
+              style: editStyle,
+              icon: const Icon(Icons.people_outline, size: 18),
+              label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Edit Assignment')),
+            )),
+          ]),
+        ],
         if (notes.isNotEmpty) ...[
-          const SizedBox(height: 5),
-          Text('Notes: ' + notes),
+          const SizedBox(height: 6),
+          Text('Notes: $notes'),
         ],
       ]),
     );
@@ -280,7 +323,7 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
       key: ValueKey('job-task-' + key),
       padding: const EdgeInsets.only(bottom: 10),
       child: Material(
-        color: _surface(status),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
@@ -288,15 +331,13 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
           onLongPress: () => _longPress(key, row, general),
           child: Container(
             decoration: BoxDecoration(
-              // Flutter requires a uniform border when using rounded corners.
-              // The status-colored outline, icon and tint remain visible.
-              border: Border.all(color: color, width: 2),
+              border: Border(left: BorderSide(color: color, width: 4)),
               borderRadius: BorderRadius.circular(14)),
             child: Column(children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(9, 12, 9, 12),
+                padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
                 child: Row(children: [
-                  Icon(_statusIcon(status), color: color, size: 29),
+                  Icon(_statusIcon(status), color: color, size: 22),
                   const SizedBox(width: 9),
                   Expanded(child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -307,13 +348,13 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
                       const SizedBox(height: 4),
                       Text((general ? 'General' : 'Labor') +
                         (name.isEmpty ? '' : ' · ' + name) + hrs,
-                        maxLines: 2, overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: color, fontSize: 12.5,
-                          fontWeight: FontWeight.w700)),
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Color(0xFF52616A), fontSize: 12.5,
+                          fontWeight: FontWeight.w500)),
                     ],
                   )),
-                  if(!general)TaskScheduleIndicator({...row,'status':status}),
                   const SizedBox(width: 7),
+                  Column(mainAxisSize: MainAxisSize.min, children: [
                   if (general)
                     _action(key, status, generalTask: row['id'] as int?)
                   else if (allocations.length == 1)
@@ -341,6 +382,8 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
                     )
                   else if (status == 'Done')
                     _action(key, status),
+                    if (!general) TaskScheduleIndicator({...row,'status':status}),
+                  ]),
                 ]),
               ),
               if (expanded)
@@ -379,6 +422,8 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
               child: OutlinedButton(
                 onPressed: widget.onAddLabor,
                 style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF244B42),
+                  side: const BorderSide(color: Color(0xFF6B8279)),
                   padding: const EdgeInsets.symmetric(horizontal: 5),
                   minimumSize: Size.zero,
                 ),
@@ -394,6 +439,8 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
               child: OutlinedButton(
                 onPressed: widget.onAddGeneral,
                 style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF244B42),
+                  side: const BorderSide(color: Color(0xFF6B8279)),
                   padding: const EdgeInsets.symmetric(horizontal: 5),
                   minimumSize: Size.zero,
                 ),
@@ -413,37 +460,39 @@ class _JobScopedTasksState extends State<JobScopedTasks> {
               decoration: BoxDecoration(color: const Color(0xFFF7FAFF),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: const Color(0xFFD0D7E2))),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              child: Row(children: [
+                const Icon(Icons.directions_car_outlined, color: Color(0xFF244B42), size: 25),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text((number.isEmpty ? 'Job' : number) +
                   (customer.isEmpty ? '' : ' · ' + customer),
                   style: const TextStyle(fontWeight: FontWeight.w800)),
                 if (vehicle.isNotEmpty)
-                  Text(vehicle, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  Text(vehicle, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ])),
               ]),
             ),
           ],
-          if(widget.markAllDoneCount>0 && widget.onMarkAllDone!=null)
-            Align(alignment:Alignment.centerLeft,child:Padding(
-              padding:const EdgeInsets.only(top:6),
-              child:FilledButton.icon(
-                key:const Key('job-mark-all-done'),
-                onPressed:_running!=null?null:()=>_act('bulk-done',widget.onMarkAllDone!),
-                style:FilledButton.styleFrom(backgroundColor:green,
-                  foregroundColor:Colors.white,visualDensity:VisualDensity.compact,
-                  padding:const EdgeInsets.symmetric(horizontal:12,vertical:8)),
-                icon:const Icon(Icons.done_all,size:18),
-                label:const Text('Mark All Done'),
-              ),
-            )),
         ]),
       ),
       Expanded(child: ListView(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 28),
         children: [
-          Text(rows.length.toString() + ' tasks',
-            style: const TextStyle(fontWeight: FontWeight.w800,
-              fontSize: 17)),
-          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: Text('${rows.length} tasks',
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17))),
+            if (widget.markAllDoneCount > 0 && widget.onMarkAllDone != null)
+              TextButton.icon(
+                key: const Key('job-mark-all-done'),
+                onPressed: _running != null ? null : () => _act('bulk-done', widget.onMarkAllDone!),
+                style: TextButton.styleFrom(foregroundColor: green,
+                  minimumSize: const Size(0,44),
+                  padding: const EdgeInsets.symmetric(horizontal: 8)),
+                icon: const Icon(Icons.done_all, size: 18),
+                label: const Text('Mark All Done'),
+              ),
+          ]),
+          const SizedBox(height: 6),
           if (rows.isEmpty) const Text(
             'No tasks saved for this job. Add a Labor Task or General Task.'),
           for (final task in rows) _task(task.data, task.general),

@@ -1829,7 +1829,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                       task['employee_id'] as String, id, status,);
                   }
                 },
-                laborActions: (row) => _quickLaborActions(row),
+                onReconcileLabor: (row) => unawaited(_confirmHistoricalPaid(row)),
+                onReviewLabor: (row) => unawaited(_reviewCarry(row)),
                         onEditLabor: (row) => _serviceEditor(row),
                 onManageLabor: (row) => unawaited(_serviceEditor(row)),
                 onManageGeneral: (row) =>
