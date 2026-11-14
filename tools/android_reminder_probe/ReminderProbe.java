@@ -31,9 +31,12 @@ public class ReminderProbe extends Instrumentation {
   Object call(String name, Object args) throws Exception {
     Object[] result={null};boolean[] completed={false};
     Object callback=Proxy.newProxyInstance(resultType.getClassLoader(),new Class<?>[]{resultType},(p,m,a)->{
-      if(m.getName().equals("success")){completed[0]=true;result[0]=a[0];}
-      else if(m.getName().equals("error")){throw new AssertionError("Plugin error "+Arrays.toString(a));}
-      else if(m.getName().equals("notImplemented")){throw new AssertionError("Plugin method unavailable: "+name);}
+      // R8 renames Flutter's Result interface in the signed release. Its three
+      // void signatures remain distinct; never rely on debug-only names.
+      if(m.getDeclaringClass()==Object.class)return null;
+      if(m.getParameterCount()==1){completed[0]=true;result[0]=a[0];}
+      else if(m.getParameterCount()==3){throw new AssertionError("Plugin error "+Arrays.toString(a));}
+      else if(m.getParameterCount()==0){throw new AssertionError("Plugin method unavailable: "+name);}
       return null;
     });
     invoke.invoke(plugin,callType.getConstructor(String.class,Object.class).newInstance(name,args),callback);
