@@ -1,3 +1,4 @@
+import 'package:briskers_app/screens/payroll/approved_tasks_ui.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -94,7 +95,7 @@ void main() {
     },
   );
   testWidgets(
-    'Service Tasks uses shared card and retains expansion and exact invoice navigation',
+    'Service Tasks uses approved flat cards and retains exact task navigation',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
@@ -148,33 +149,20 @@ void main() {
                 onOpenJob: (_) {},
                 onEmployeeTap: (_) {},
                 onOpenInvoice: (id) => opened = id,
+                onOpenTask:(row,_)=>opened=row['invoice_id']?.toString(),
               ),
             ),
           ),
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.byType(JobListApprovedCard), findsOneWidget);
-      expect(find.text('Chris · 2.0 hrs'), findsOneWidget);
-      expect(find.text('2 of 3 tasks completed'), findsOneWidget);
-      expect(find.text('67%'), findsOneWidget);
-      expect(find.text('In Progress'), findsOneWidget);
+      expect(find.byType(ApprovedTaskListCard), findsOneWidget);
+      expect(find.text('Chris · 2.0 h'), findsOneWidget);
+      expect(find.text('Open'), findsOneWidget);
       expect(find.text('Employee'), findsNothing);
-      await tester.tap(find.byKey(const Key('toggle-task-filters')));
-      await tester.pumpAndSettle();
-      expect(find.text('Employee'), findsOneWidget);
-      await tester.tap(find.text('Apply Filters'));
-      await tester.pumpAndSettle();
-      expect(tester.widget<Card>(find.byType(Card).last).color, Colors.white);
-      await capture(tester, key, 'service-tasks');
-      await tester.tap(find.text('Invoice #6368'));
-      expect(opened, 'invoice-id');
-      await tester.tap(find.text('J-49  Rick Francis'));
-      await tester.pumpAndSettle();
-      expect(find.text('Existing Start/Finish controls'), findsNothing);
-      await tester.tap(find.text('Battery programming + oil change').last);
-      await tester.pumpAndSettle();
-      expect(find.text('Existing Start/Finish controls'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('toggle-task-filters')));await tester.pumpAndSettle();expect(find.text('Employee'), findsOneWidget);await tester.tap(find.text('Apply Filters'));await tester.pumpAndSettle();
+      await capture(tester,key,'service-tasks');
+      await tester.tap(find.text('Battery programming + oil change'));await tester.pumpAndSettle();expect(opened,'invoice-id');
       expect(tester.takeException(), isNull);
     },
   );

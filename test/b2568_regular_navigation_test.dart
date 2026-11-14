@@ -300,8 +300,8 @@ void main(){
     await tester.tap(find.byKey(const ValueKey('Status:Active')));await tester.pumpAndSettle();
     await tester.tap(find.text('All').last);await tester.pumpAndSettle();
     await click(find.text('Apply Filters'));
-    await until(find.text('Tasks · 2'));
-    expect(find.textContaining('2 tasks'),findsOneWidget);
+    await until(find.text('Tasks · 2 (All)'));
+    expect(find.text('Shared diagnostic labor'),findsOneWidget);
     await capture('bugs30-global-completed-tasks');
     // Reuse the Job identity already verified when navigating from Invoice.
     navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>
@@ -325,12 +325,14 @@ void main(){
     expect(find.text('Labor Task'),findsOneWidget);
     expect(find.text('General Task'),findsOneWidget);
     expect(find.byTooltip('Advanced task filters'),findsNothing);
-    expect(find.byIcon(Icons.more_vert),findsNothing);
+    expect(find.byIcon(Icons.more_vert),findsOneWidget,reason:'Header retains invoice labor history; cards use long press.');
     await capture('job-tasks-collapsed');
     final scopedTask = find.descendant(of:find.byType(JobScopedTasks),
       matching:find.text('Shared diagnostic labor'));
     await click(scopedTask.first);
-    await capture('job-tasks-expanded');
+    await until(find.text('Task Details'));
+    expect(find.text('Edit Task'),findsOneWidget);
+    await capture('job-task-details');
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds:500));
     expect(secondaryPrompts,0,

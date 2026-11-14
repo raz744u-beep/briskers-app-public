@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/screens/payroll/tasks_workspace.dart';
-import 'package:briskers_app/screens/payroll/compact_task_card.dart';
+import 'package:briskers_app/screens/payroll/approved_tasks_ui.dart';
 import 'package:briskers_app/screens/payroll/service_task_editor.dart';
 import 'bugs35_shared_design_test.dart' show capture;
 
@@ -15,23 +15,22 @@ void main(){
     tester.view.physicalSize=const Size(412,915);tester.view.devicePixelRatio=1;
     tester.view.padding=const FakeViewPadding(bottom:32);tester.view.viewPadding=const FakeViewPadding(bottom:32);
     addTearDown(tester.view.reset);
-    int edits=0,generalEdits=0,done=0;final key=GlobalKey();
+    int edits=0,generalEdits=0,done=0,opened=0;final key=GlobalKey();
     const title='Remove oil pan. Replace oil control valve and complete the final inspection.';
     await tester.pumpWidget(RepaintBoundary(key:key,child:MaterialApp(debugShowCheckedModeBanner:false,theme:ThemeData(fontFamily:'Roboto'),home:Scaffold(appBar:AppBar(title:const Text('Tasks')),body:SafeArea(top:false,child:TasksWorkspace(
       serviceTasks:const [{'job_id':'j56','job_number':'J-56','customer_name':'Terrance Sanders','vehicle_label':'2016 Mercedes','line_id':'task','source_description':title,'status':'in_progress'}],
       generalTasks:const [{'id':1,'description':'Order replacement part and confirm delivery with the supplier','employee_id':'owner','status':'planned','category':'Office'}],
       allocationsByLine:const {'task':[{'id':'allocation','employee_id':'kam','estimated_minutes':300}]},
       employeeIds:const ['kam','owner'],employeeName:(id)=>id=='kam'?'Kam':'Owner',serviceTaskCard:(_)=>const Text('Full task details'),
-      onAddGeneral:(){},onAddService:(){},onGeneralStatus:(_,_)async{done++;},onOpenJob:(_){},onEmployeeTap:(_){},onEditService:(_){edits++;},onEditGeneral:(_){generalEdits++;},onMarkDone:(_){done++;},
+      onOpenTask:(_,_)=>opened++,onAddGeneral:(){},onAddService:(){},onGeneralStatus:(_,_)async{done++;},onOpenJob:(_){},onEmployeeTap:(_){},onEditService:(_){edits++;},onEditGeneral:(_){generalEdits++;},onMarkDone:(_){done++;},
     ))))));await tester.pumpAndSettle();
-    expect(tester.getTopLeft(find.text('J-56  Terrance Sanders')).dy,lessThan(260));
+    expect(tester.getTopLeft(find.byType(ApprovedTaskListCard).first).dy,lessThan(260));
     expect(find.text('Tap to open · Long press for options'),findsNothing);
-    await tester.tap(find.text('J-56  Terrance Sanders'));await tester.pumpAndSettle();
-    final card=find.byType(CompactTaskCard).first;
+    final card=find.byType(ApprovedTaskListCard).first;
     final label=find.descendant(of:card,matching:find.text(title));expect(tester.widget<Text>(label).maxLines,1);
     await tester.longPress(label);await tester.pumpAndSettle();expect(find.text('Edit Assignment'),findsOneWidget);expect(find.text('Full task details'),findsNothing);
     await tester.tap(find.text('Edit Assignment'));await tester.pumpAndSettle();expect(edits,1);
-    await tester.tap(label);await tester.pumpAndSettle();expect(find.text('Full task details'),findsOneWidget);expect(find.text('Kam · 5.0 h'),findsOneWidget);expect(tester.takeException(),isNull);
+    await tester.tap(label);await tester.pumpAndSettle();expect(opened,1);expect(find.text('Kam · 5.0 h'),findsOneWidget);expect(tester.takeException(),isNull);
     await capture(tester,key,'bugs36-service-tasks');
     await tester.tap(find.byKey(const Key('toggle-task-filters')));await tester.pumpAndSettle();
     for(final text in ['Employee','Job','Task Type','Period','Status','Sort By']){expect(find.text(text),findsOneWidget);}

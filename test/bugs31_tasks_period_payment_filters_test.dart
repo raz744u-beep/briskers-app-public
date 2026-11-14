@@ -49,7 +49,7 @@ void main() {
     await showTasks(tester,[
       service('new',2), service('old',65),
     ]);
-    expect(find.text('Tasks · 2'),findsOneWidget);
+    expect(find.textContaining('Tasks · 2 ('),findsOneWidget);
     await tester.tap(find.byKey(const Key('toggle-task-filters')));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Period'));
@@ -59,9 +59,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Apply Filters'));
     await tester.pumpAndSettle();
-    expect(find.text('Tasks · 1'),findsOneWidget);
-    expect(find.text('J-new'),findsOneWidget);
-    expect(find.text('J-old'),findsNothing);
+    expect(find.textContaining('Tasks · 1 ('),findsOneWidget);
+    expect(find.text('Service new'),findsOneWidget);
+    expect(find.text('Service old'),findsNothing);
     await tester.tap(find.byKey(const Key('toggle-task-filters')));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Period'));
@@ -71,7 +71,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Apply Filters'));
     await tester.pumpAndSettle();
-    expect(find.text('Tasks · 2'),findsOneWidget);
+    expect(find.textContaining('Tasks · 2 ('),findsOneWidget);
   });
 
   testWidgets('Paid and Unpaid filters do not mingle with Active jobs',
@@ -85,7 +85,7 @@ void main() {
       service('unpaid',2,status:'done',remaining:60),
       service('paid',2,status:'done',paid:1),
     ]);
-    expect(find.text('Tasks · 1'),findsOneWidget);
+    expect(find.textContaining('Tasks · 1 ('),findsOneWidget);
     await tester.tap(find.byKey(const Key('toggle-task-filters')));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Status'));
@@ -95,8 +95,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Apply Filters'));
     await tester.pumpAndSettle();
-    expect(find.text('Tasks · 1'),findsOneWidget);
-    expect(find.text('J-unpaid'),findsOneWidget);
+    expect(find.textContaining('Tasks · 1 ('),findsOneWidget);
+    expect(find.text('Service unpaid'),findsOneWidget);
     await tester.tap(find.byKey(const Key('toggle-task-filters')));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Status'));
@@ -106,8 +106,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Apply Filters'));
     await tester.pumpAndSettle();
-    expect(find.text('Tasks · 1'),findsOneWidget);
-    expect(find.text('J-paid'),findsOneWidget);
+    expect(find.textContaining('Tasks · 1 ('),findsOneWidget);
+    expect(find.text('Service paid'),findsOneWidget);
   });
 
   test('unknown service dates cannot be passed off as recently completed',(){
@@ -122,12 +122,12 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await showTasks(tester,[service('historical',10,status:'done',paid:1)]);
-    expect(find.text('Tasks · 0'),findsOneWidget);
+    expect(find.textContaining('Tasks · 0 ('),findsOneWidget);
     expect(find.byKey(const Key('show-all-service-task-statuses')),findsOneWidget);
     await tester.tap(find.byKey(const Key('show-all-service-task-statuses')));
     await tester.pumpAndSettle();
-    expect(find.text('Tasks · 1'),findsOneWidget);
-    expect(find.text('J-historical'),findsOneWidget);
+    expect(find.textContaining('Tasks · 1 ('),findsOneWidget);
+    expect(find.text('Service historical'),findsOneWidget);
   });
 
 
@@ -140,11 +140,11 @@ void main() {
     await showTasks(tester,[
       service('historical',10,archived:true,remaining:60),
     ]);
-    expect(find.text('Tasks · 0'),findsOneWidget);
+    expect(find.textContaining('Tasks · 0 ('),findsOneWidget);
     await tester.tap(find.byKey(const Key('show-all-service-task-statuses')));
     await tester.pumpAndSettle();
-    expect(find.text('Tasks · 1'),findsOneWidget);
-    expect(find.text('J-historical'),findsOneWidget);
+    expect(find.textContaining('Tasks · 1 ('),findsOneWidget);
+    expect(find.text('Service historical'),findsOneWidget);
     await tester.tap(find.byKey(const Key('toggle-task-filters')));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Status'));
@@ -154,7 +154,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Apply Filters'));
     await tester.pumpAndSettle();
-    expect(find.text('Tasks · 0'),findsOneWidget);
+    expect(find.textContaining('Tasks · 0 ('),findsOneWidget);
   });
 
 

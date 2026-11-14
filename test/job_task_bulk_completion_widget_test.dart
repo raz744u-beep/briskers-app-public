@@ -170,7 +170,7 @@ void main() {
       await until(button);
       expect(
         tester.getTopLeft(button).dy,
-        greaterThan(tester.getBottomLeft(find.text('J-53 · Damien Hester')).dy),
+        greaterThan(tester.getBottomLeft(find.text('Damien Hester')).dy),
       );
       await click(button);
       await until(find.textContaining('Complete 6 tasks for this job?'));

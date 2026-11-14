@@ -30,9 +30,10 @@ void main() {
       ),
     )));
     expect(find.text('Replace and program battery in the DME'), findsOneWidget);
-    expect(find.text('Assign mechanic'), findsOneWidget);
+    await tester.longPress(find.text('Replace and program battery in the DME'));await tester.pumpAndSettle();
+    expect(find.text('Edit Assignment'), findsOneWidget);
     expect(find.text('Start'), findsNothing);
-    await tester.tap(find.text('Assign mechanic'));
+    await tester.tap(find.text('Edit Assignment'));
     expect(managed, same(task));
   });
 
@@ -60,7 +61,8 @@ void main() {
             fail('Historical labor must not become assignable'),
       ),
     )));
-    expect(find.text('Historical · read only'), findsOneWidget);
+    await tester.longPress(find.text('Historical invoice labor'));await tester.pumpAndSettle();
+    expect(find.text('Mark Done'),findsNothing);
     expect(find.text('Assign mechanic'), findsNothing);
     expect(find.text('Start'), findsNothing);
   });
@@ -92,6 +94,7 @@ void main() {
     )));
     expect(find.textContaining('Chris'), findsWidgets);
     expect(find.textContaining('1.5 hrs'), findsWidgets);
-    expect(find.text('Start'), findsOneWidget);
+    expect(find.text('Open'), findsOneWidget);
+    expect(find.text('Start'),findsNothing);
   });
 }

@@ -33,6 +33,20 @@ void main(){
     final copy=BriskersLocalDatabase(NativeDatabase.memory());
     try{await PayrollOwnerLedger(copy,'shop').mergeSnapshot(await PayrollOwnerLedger(db,'shop').export(),canonical:true);await check(LocalPayrollRepository(copy,business:'shop',owner:true),copy);}finally{await copy.close();}
   }
+  test('priority-only edits preserve inherited dates, paid coverage and general reminders through restart',()async{
+    final paid=await create('priority-paid',treatment:'paid');final automatic=await create('priority-auto');
+    final general=await repo.saveGeneralTask(operation:'priority-general',employee:'kam',description:'Call customer',category:'Office',job:'j56',due:DateTime(2026,11,20,15),reminder:true);
+    final before=await financial();final oldWork=await repo.work();final oldGeneral=(await repo.shopTasks()).single;
+    for(final id in [paid,automatic]){await repo.setTaskPriority(id,'High');await repo.setTaskPriority(id,'High');}
+    await repo.setTaskPriority('$general','Low',general:true);
+    expect(await financial(),before);
+    for(final old in oldWork){final row=(await repo.work()).singleWhere((r)=>r['id']==old['id']);for(final k in ['id','task_id','state','estimated_minutes','actual_minutes','paid','paid_minutes','completed_date','work_start_date','work_end_date']){expect(row[k],old[k],reason:k);}expect(row['priority'],'High');}
+    expect((await db.customSelect('SELECT date_mode FROM regular_task_metadata').get()).every((r)=>r.data['date_mode']=='inherited'),isTrue);
+    await db.close();open();expect((await repo.work()).every((r)=>r['priority']=='High'),isTrue);
+    final restored=(await repo.shopTasks()).single;expect(restored['priority'],'Low');for(final k in ['id','employee_id','description','due_at','reminder_enabled','reminder_minutes','status']){expect(restored[k],oldGeneral[k],reason:k);}
+    await LocalJobWorkDate(db).save('shop','j56',DateTime(2026,11,16));expect((await repo.work()).every((r)=>r['work_start_date']=='2026-11-16'),isTrue);expect(await financial(),before);
+    await replicaCheck((r,d)async{expect((await r.work()).every((w)=>w['priority']=='High'&&w['work_start_date']=='2026-11-16'),isTrue);});
+  });
   test('Done unpaid 5h transfers Chris to Kam offline, retries/restart/sync do not duplicate',()async{
     final id=await create('five');final other=await create('other',status:'Open');await repo.setEstimatedMinutes(other,'chris',1080);
     final original=(await repo.work()).singleWhere((r)=>r['task_id']==id);

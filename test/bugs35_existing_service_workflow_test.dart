@@ -84,17 +84,15 @@ void main() {
     // J-50 equivalent: the customer paid, but Kam has not. Direct Done
     // must preserve the allocation and credit exactly one unpaid hour.
     await click(find.text('Oil Change').first);
-    await tester.longPress(find.text('Oil Change').first);
-    await tester.pumpAndSettle();
-    await click(find.text('Mark Done'));
-    await until(find.text('Done').first);
+    await click(find.text('Mark as Done'));
+    await until(find.text('Done'));
     var earned=(await tester.runAsync(()=>repo.work()))!.single;
     expect(earned['id'],work.single['id']);
     expect(earned['estimated_minutes'],60);
     expect(earned['actual_minutes'],60);
     expect(earned['remaining_minutes'],60);
     expect(earned['paid_minutes'],0);
-    await click(find.text('Edit Assignment'));
+    await click(find.text('Edit Task'));
     await until(find.text('Edit Service Task'));
     await tester.enterText(find.byKey(const ValueKey('hours-0')),'1.5');
     await click(find.text('Save Task'));

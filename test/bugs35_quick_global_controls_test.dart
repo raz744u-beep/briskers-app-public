@@ -1,4 +1,5 @@
-import 'package:briskers_app/screens/payroll/compact_task_card.dart';
+import 'package:briskers_app/screens/payroll/approved_tasks_ui.dart';
+import 'package:briskers_app/screens/payroll/approved_task_details.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:drift/native.dart';
@@ -171,8 +172,9 @@ void main() {
         await tester.pumpAndSettle();
       }
 
-      await click(find.textContaining('Marzel Stafford').first);
-      await click(find.descendant(of:find.byType(CompactTaskCard),matching:find.text('Oil Change')).first);
+      await until(find.byType(ApprovedTaskListCard));
+      await click(find.descendant(of:find.byType(ApprovedTaskListCard),matching:find.text('Oil Change')).first);
+      await until(find.byType(ApprovedTaskDetails));
       final work = (await tester.runAsync(() => repo.work()))!;
       expect(work, hasLength(1));
       expect(work.single['employee_id'], 'kam');
@@ -186,7 +188,7 @@ void main() {
       expect(find.textContaining('Oil Change'), findsWidgets);
       // J-50 equivalent: the customer paid, but Kam has not. Direct Done
       // must preserve the allocation and credit exactly one unpaid hour.
-      await click(find.text('Mark Done'));
+      await click(find.text('Mark as Done'));
       for (var i = 0; i < 50; i++) {
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 20)),
@@ -199,14 +201,7 @@ void main() {
       expect(earned['actual_minutes'], 60);
       expect(earned['remaining_minutes'], 60);
       expect(earned['paid_minutes'], 0);
-      await click(find.byKey(const Key('show-all-service-task-statuses')));
-      await tester.pumpAndSettle();
-      if (find.text('Edit Assignment').evaluate().isEmpty) {
-        await click(find.descendant(of:find.byType(CompactTaskCard),matching:find.text('Oil Change')).first);
-      }
-      await click(find.text('Edit Assignment'));
-      await until(find.text('Manage Labor Assignments'));
-      await click(find.byTooltip('Edit Assignment'));
+      await click(find.text('Edit Task'));
       await until(find.text('Edit Service Task'));
       await tester.enterText(find.byKey(const ValueKey('hours-0')), '1.5');
       await click(find.text('Save Task'));

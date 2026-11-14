@@ -1,3 +1,5 @@
+import 'approved_tasks_ui.dart';
+import 'approved_task_details.dart';
 import '../../services/local_job_work_date.dart';
 import 'dart:convert';
 import '../../services/local_customer_repository.dart';
@@ -22,7 +24,6 @@ import '../../services/local_document_repository.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
-import '../../core/employee_role_style.dart';
 
 import '../../local/local_database_provider.dart';
 import '../../local/briskers_local_database.dart';
@@ -135,6 +136,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   List<Map<String,dynamic>> get _currentPayrollWork =>
       _work.where((row)=>row['archived_labor']!=1).toList();
   List<Map<String, dynamic>> _taskSources = [];
+  Map<String,dynamic>? _workspaceJob;
   List<Map<String, dynamic>> _history = [];
   List<Map<String, dynamic>> _overviewPayments = [];
   List<Map<String, dynamic>> _pendingPayments = [];
@@ -408,7 +410,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final pendingPayments = await PayrollOwnerLedger(_db, widget.businessId,).pending();
     _loadStage = 'tasks'; // Invoice saves maintain task identities incrementally.
     final job = widget.jobId;
-    if (job != null) await repository.recoverJobAssignments(job);
+    if (job != null) {await repository.recoverJobAssignments(job);_workspaceJob=(await _db.customSelect('SELECT * FROM local_jobs WHERE business_id=? AND id=?',variables:[Variable(widget.businessId),Variable(job)]).get()).firstOrNull?.data;}
     // Keep historical invoice task sources visible in the Tasks UI.
     // A pre-cutover source is read-only history, never a new payable credit.
     final sources = (await repository.tasks()).map((r) => <String,dynamic>{
@@ -1173,28 +1175,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     ),
   );
 
-  Widget _header() => Row(children: [
-    CircleAvatar(
-      radius: 25,
-      backgroundColor: const Color(0xFFDDECFD),
-      child: Icon(employeeRoleStyle(widget.employeeRole).icon, size: 25, color: BriskersColors.jobs,),
-    ),
-    const SizedBox(width: 10),
-    Expanded(child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(_employeeLabel(widget.employeeId), maxLines: 1, overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),),
-        Text('${widget.employeeRole ?? 'Employee'} · ${widget.employeeActive ? 'Active' : 'Inactive'}',
-          style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),),
-      ],
-    ),),
-    OutlinedButton.icon(
-      onPressed: widget.openEmployeeDetails,
-      icon: const Icon(Icons.person_outline, size: 17),
-      label: const Text('Details'),
-    ),
-  ],);
+  Widget _header() => ApprovedEmployeeIdentity(name:_employeeLabel(widget.employeeId),role:widget.employeeRole??'Employee',active:widget.employeeActive,onDetails:widget.openEmployeeDetails);
 
   void _selectAmount(TextEditingController controller) {
     controller.selection = TextSelection(baseOffset: 0, extentOffset: controller.text.length,);
@@ -1745,11 +1726,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       ],),);
   }
 
-  Widget _workspace() {
-    final byTask = <String, List<Map<String, dynamic>>>{};
-    for (final row in _work) {
-      (byTask[row['task_id'] as String] ??= []).add(row);
-    }
+  Map<String,List<Map<String,dynamic>>> get _taskAllocations {
+    final result=<String,List<Map<String,dynamic>>>{};
+    for(final row in _work){(result[row['task_id'] as String]??=[]).add(row);}
+    return result;
+  }
+  List<Map<String,dynamic>> get _serviceTaskRows {
+    final byTask=_taskAllocations;
     final service = [
       for (final entry in byTask.entries)
         {...entry.value.first,
@@ -1783,8 +1766,55 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         'source_description': task['description'], 'status': task['source_kind']=='invoice' && !LocalInvoiceTaskStore.currentPayrollDate(task['invoice_date']) ? 'done' : 'planned',
       });
     }
+    return service;
+  }
+
+  Future<void> _runPriority(Map<String,dynamic> row,bool general,String priority) async {
+    try{await _priority(row,general,priority);}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Could not save priority: $e')));}
+  }
+  Future<void> _priority(Map<String,dynamic> row,bool general,String priority) async {
+    await _taskEditRepository.setTaskPriority((general?row['id']:row['line_id']??row['task_id']??row['id']).toString(),priority,general:general);
+    await _load();
+  }
+
+  Future<void> _openTaskDetails(Map<String,dynamic> initial,bool general) async {
+    final id=(general?initial['id']:initial['line_id']).toString();
+    Future<({Map<String,dynamic> task,List<Map<String,dynamic>> allocations})> snapshot() async {
+      final pending=_localRead;if(pending!=null)await pending.timeout(const Duration(seconds:8));
+      if(!_canView)throw StateError('Sign in as Owner to view this task.');
+      final row=(general?_generalTasks:_serviceTaskRows).where((r)=>(general?r['id']:r['line_id']).toString()==id).firstOrNull;
+      if(row==null)throw StateError('Task no longer available. Return to Tasks and refresh.');
+      final job=row['job_id']?.toString();
+      final jobs=job==null?[]:await _db.customSelect('SELECT status,job_number,customer_name,vehicle_label FROM local_jobs WHERE business_id=? AND id=?',variables:[Variable(widget.businessId),Variable(job)]).get();
+      return (task:{...row,if(jobs.isNotEmpty)...{'job_status':jobs.first.data['status'],'job_number':jobs.first.data['job_number'],'customer_name':jobs.first.data['customer_name'],'vehicle_label':jobs.first.data['vehicle_label']}},allocations:general?<Map<String,dynamic>>[]:_taskAllocations[id]??[]);
+    }
+    final data=await snapshot();if(!mounted)return;
+    await Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>ApprovedTaskDetails(
+      initialTask:data.task,allocations:data.allocations,general:general,employeeName:_employeeLabel,reload:snapshot,
+      onEdit:()async{final current=await snapshot();if(general){await _generalEditor(current.task);}else{await _serviceEditor(current.task);}},
+      onPriority:(p)async{final current=await snapshot();await _priority(current.task,general,p);},
+      onProgress:(finish)async{
+        final current=await snapshot();
+        if(general){await _changeGeneralTaskStatus(current.task['employee_id'] as String,current.task['id'] as int,finish?'done':'in_progress');}
+        else if(finish){await _markTaskDone(current.task,current.allocations);}
+        else {for(final allocation in current.allocations.where((r)=>r['state']=='Open')){await _recordTaskProgress(allocation);}}
+        if(_error!=null)throw StateError(_error!);
+      },
+      onJob:data.task['job_id']==null?null:()=>_openRecordedWork(data.task['job_id'] as String,invoice:false),
+      onInvoice:data.task['invoice_id']==null?null:()=>_openRecordedWork(data.task['invoice_id'] as String,invoice:true),
+    )));
+  }
+
+  void _openInvoiceHistory()=>Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>HistoricalInvoiceLaborReview(
+    businessId:widget.businessId,database:_db,weekStart:DateTime(_week.year,_week.month,_week.day).subtract(Duration(days:_week.weekday-1)),canView:()=>mounted&&_canView)));
+
+  Widget _workspace() {
+    final byTask=_taskAllocations;
+    final service=_serviceTaskRows;
+    final jobRow=_workspaceJob??service.where((r)=>r['job_id']==widget.jobId).firstOrNull??_generalTasks.where((r)=>r['job_id']==widget.jobId).firstOrNull;
     return Scaffold(
-      appBar: AppBar(title: const Text('Tasks')),
+      backgroundColor:taskCanvas,
+      appBar: ApprovedTasksHeader(title:_jobMode?'Job ${jobRow?['job_number']??''}':'Tasks',subtitle:_jobMode ? (jobRow?['customer_name']?.toString()) : null,actions:[PopupMenuButton<String>(icon:const Icon(Icons.more_vert,color:Colors.white),onSelected:(_)=>_openInvoiceHistory(),itemBuilder:(_)=>[const PopupMenuItem(value:'history',child:Text('Invoice labor history'))])]),
       body: SafeArea(
         top: false,
         child: Column(children: [
@@ -1792,24 +1822,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         if (_busy) const LinearProgressIndicator(),
         if (_error != null) Text(_error!),
         if (_backfillActive) _recoveryStatus(),
-        if (_canView && widget.globalTasks)
-          Align(alignment:Alignment.centerLeft,child:TextButton.icon(
-            icon:const Icon(Icons.receipt_long_outlined),
-            style:TextButton.styleFrom(minimumSize:const Size(0,36),padding:const EdgeInsets.symmetric(horizontal:12),visualDensity:VisualDensity.compact),
-            label:const Text('Invoice labor history',style:TextStyle(fontSize:12)),
-            onPressed:()=>Navigator.of(context).push<void>(
-              MaterialPageRoute(builder:(_)=>HistoricalInvoiceLaborReview(
-                businessId:widget.businessId,
-                database:_db,
-                weekStart:DateTime(_week.year,_week.month,_week.day,)
-                    .subtract(Duration(days:_week.weekday-1)),
-                canView:()=>mounted && _canView,
-              ),),
-            ),
-          ),),
         if (_canView)
           Expanded(child: _jobMode && widget.invoiceId == null
             ? JobScopedTasks(
+                onOpenTask:(r,g)=>unawaited(_openTaskDetails(r,g)),
+                onPriority:(r,g,p)=>unawaited(_runPriority(r,g,p)),
                 jobId: widget.jobId!,
                 onMarkAllDone: _markAllJobTasksDone,
                 markAllDoneCount: JobTaskCompletionPlan.fromRows(widget.jobId!,
@@ -1837,6 +1854,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                     unawaited(_editJobGeneralTask(row)),
               )
             : TasksWorkspace(
+            onOpenTask:(r,g)=>unawaited(_openTaskDetails(r,g)),
+            onPriority:(r,g,p)=>unawaited(_runPriority(r,g,p)),
             scopedJob: widget.jobId,
             serviceTasks: service,
             generalTasks: _generalTasks,
@@ -1893,23 +1912,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     length: 4,
     initialIndex: widget.initialTab,
     child: Scaffold(
-      appBar: AppBar(title: const Text('Employee Profile')),
+      backgroundColor:taskCanvas,
+      appBar: ApprovedTasksHeader(title:'Employee Profile',actions:[PopupMenuButton<String>(icon:const Icon(Icons.more_vert,color:Colors.white),onSelected:(v){if(v=='details'){widget.openEmployeeDetails?.call();}else{unawaited(_load());}},itemBuilder:(_)=>[if(widget.openEmployeeDetails!=null)const PopupMenuItem(value:'details',child:Text('Details')),const PopupMenuItem(value:'refresh',child:Text('Refresh'))])]),
       body: Column(children: [
         Padding(padding: const EdgeInsets.fromLTRB(12, 8, 12, 10), child: _header(),),
-        const Material(
-          color: Colors.white,
-          child: TabBar(
-            isScrollable: false,
-            labelPadding: EdgeInsets.symmetric(horizontal: 2),
-            labelStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-            tabs: [
-              Tab(child:FittedBox(fit:BoxFit.scaleDown,child:Text('Tasks')),),
-              Tab(child:FittedBox(fit:BoxFit.scaleDown,child:Text('Payroll'),),),
-              Tab(child:FittedBox(fit:BoxFit.scaleDown,child:Text('Reports'),),),
-              Tab(child:FittedBox(fit:BoxFit.scaleDown,child:Text('Taxes')),),
-            ],
-          ),
-        ),
+        const ApprovedProfileTabs(),
         if(!_canView)const Text('Sign in as Owner to view profile.'),
         if (_authorizing || _loadingLocal || _backfillActive) const LinearProgressIndicator(),
         if (_backfillActive) _recoveryStatus(),

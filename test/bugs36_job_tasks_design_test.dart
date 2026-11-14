@@ -12,7 +12,7 @@ void main() {
     tester.view.padding = const FakeViewPadding(bottom: 32);
     addTearDown(tester.view.reset);
     final key = GlobalKey();
-    var edits = 0, assignments = 0, done = 0, reconciliation = 0, bulk = 0;
+    var edits = 0, assignments = 0, done = 0, reconciliation = 0, bulk = 0, opened=0;
     const description = 'Remove oil pan. Replace pip control valve.';
     final tasks = [
       {'job_id':'j56','job_number':'J-56','customer_name':'Terrance Sanders','vehicle_label':'2016 Mercedes C300','line_id':'engine','invoice_id':'invoice','source_line_id':'engine','description':'Replace engine','status':'planned','work_start_date':'2026-11-13','work_end_date':'2026-11-13'},
@@ -27,6 +27,7 @@ void main() {
           'oil':[{'id':'kam-oil','employee_id':'kam','estimated_minutes':300,'state':'Done','source_active':1,'paid_minutes':300}],
         },employeeName:(id)=>id=='chris'?'Chris':'Kam',
         onAddLabor:(){},onAddGeneral:(){},onLaborProgress:(_,_)async{done++;},onGeneralProgress:(_,_)async{},
+        onOpenTask:(_,_)=>opened++,
         onEditLabor:(_){edits++;},onManageLabor:(_){assignments++;},
         onReconcileLabor:(_){reconciliation++;},onReviewLabor:(_){},
         markAllDoneCount:1,onMarkAllDone:()async{bulk++;},
@@ -43,23 +44,18 @@ void main() {
     await capture(tester,key,'bugs36-job-tasks-collapsed');
     await tester.tap(find.text('Replace engine'));
     await tester.pumpAndSettle();
-    expect(tester.getSize(engine).height,lessThan(220));
-    expect(find.text('Work dates: Nov 13, 2026 – Nov 13, 2026'),findsOneWidget);
-    expect(tester.getTopLeft(find.widgetWithText(OutlinedButton, 'Edit Task')).dy,
-        tester.getTopLeft(find.widgetWithText(OutlinedButton, 'Edit Assignment')).dy);
-    expect(find.text('Mark Done'),findsNothing);
-    expect(find.text('Reconcile historical wages'),findsNothing);
-    await capture(tester,key,'bugs36-job-tasks-expanded');
-    await tester.tap(find.text('Edit Task'));await tester.pumpAndSettle();
-    await tester.tap(find.text('Edit Assignment'));await tester.pumpAndSettle();
-    expect(edits,1);expect(assignments,1);expect(done,0);expect(reconciliation,0);
+    expect(opened,1);expect(tester.getSize(engine).height,lessThan(100));
+    expect(find.text('Edit Task'),findsNothing);
+    await tester.longPress(find.text('Replace engine'));await tester.pumpAndSettle();await tester.tap(find.text('Edit Task'));await tester.pumpAndSettle();
+    await tester.longPress(find.text('Replace engine'));await tester.pumpAndSettle();await tester.tap(find.text('Edit Assignment'));await tester.pumpAndSettle();
+    expect(edits,1);expect(assignments,1);expect(done,0);expect(reconciliation,0);expect(opened,1);
     // Long press must not toggle the already-expanded card or complete labor.
     await tester.longPress(find.text('Replace engine'));await tester.pumpAndSettle();
     expect(find.widgetWithText(ListTile,'Mark Done'),findsOneWidget);
     expect(find.widgetWithText(ListTile,'Reconcile historical wages'),findsOneWidget);
     await tester.tap(find.widgetWithText(ListTile,'Reconcile historical wages'));await tester.pumpAndSettle();
     expect(reconciliation,1);expect(done,0);
-    expect(find.text('Work dates: Nov 13, 2026 – Nov 13, 2026'),findsOneWidget);
+    expect(opened,1);
     await tester.longPress(find.text(description));await tester.pumpAndSettle();
     expect(find.widgetWithText(ListTile,'Mark Done'),findsNothing);
     expect(find.widgetWithText(ListTile,'Reconcile historical wages'),findsNothing);

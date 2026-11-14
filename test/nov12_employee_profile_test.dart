@@ -85,7 +85,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Labor This Week · 5 tasks'), findsOneWidget);
-      expect(find.text('Assigned hours: 11.00 hrs'), findsOneWidget);
+      expect(find.text('11.00 hrs'), findsOneWidget);
       expect(find.text('Completed\n8.50 hrs'), findsOneWidget);
       expect(find.text('In Progress\n1.00 hrs'), findsOneWidget);
       expect(find.text('New Task'), findsNothing);

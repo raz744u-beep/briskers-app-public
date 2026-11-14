@@ -1,13 +1,9 @@
-import 'compact_task_card.dart';
-import '../../core/work_status_colors.dart';
+import 'approved_tasks_ui.dart';
 // ignore_for_file: curly_braces_in_flow_control_structures, prefer_interpolation_to_compose_strings
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../services/service_task_order.dart';
-import '../../services/job_task_summary.dart';
-import '../../widgets/job_list_approved_card.dart';
 
 /// Tasks workspace. Only customer/job-linked records appear
 /// under Service Tasks. General Tasks can reference a job without billing it.
@@ -33,8 +29,12 @@ class TasksWorkspace extends StatefulWidget {
     this.onEditService,
     this.onEditGeneral,
     this.onMarkDone,
+    this.onOpenTask,
+    this.onPriority,
   });
 
+  final void Function(Map<String, dynamic>, bool)? onOpenTask;
+  final void Function(Map<String, dynamic>, bool, String)? onPriority;
   final List<Map<String, dynamic>> serviceTasks;
   final List<Map<String, dynamic>> generalTasks;
   final Map<String, List<Map<String, dynamic>>> allocationsByLine;
@@ -70,7 +70,6 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
   String _date = 'Any';
   String _servicePeriod = 'Any time';
   String _sort = 'Newest First';
-  final Set<String> _expandedJobs = <String>{};
 
   @override
   void initState() {
@@ -224,6 +223,15 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
           _matchesServicePeriod(task) &&
           (q.isEmpty ||
               desc.contains(q) ||
+              ['customer_name', 'vehicle_label', 'description'].any(
+                (k) => task[k]?.toString().toLowerCase().contains(q) ?? false,
+              ) ||
+              (widget.allocationsByLine[task['line_id']] ?? []).any(
+                (r) => widget
+                    .employeeName(r['employee_id']?.toString())
+                    .toLowerCase()
+                    .contains(q),
+              ) ||
               (task['job_number']?.toString().toLowerCase().contains(q) ??
                   false) ||
               widget
@@ -232,8 +240,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                   .contains(q));
     }).toList();
     rows.sort(
-      (a, b) =>
-          ServiceTaskOrder.compareLines(a, b, newest: _sort != 'Oldest First'),
+      (a,b){final jobOrder=ServiceTaskOrder.compareJobs(a,b,newest:_sort!='Oldest First');return jobOrder!=0?jobOrder:ServiceTaskOrder.compareLines(a,b,newest:_sort!='Oldest First');},
     );
     return rows;
   }
@@ -252,6 +259,9 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
           _matchesDate(task) &&
           (q.isEmpty ||
               description.contains(q) ||
+              ['job_number', 'customer_name', 'vehicle_label'].any(
+                (k) => task[k]?.toString().toLowerCase().contains(q) ?? false,
+              ) ||
               widget
                   .employeeName(task['employee_id']?.toString())
                   .toLowerCase()
@@ -299,7 +309,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
-      backgroundColor:Colors.white,
+      backgroundColor: Colors.white,
       builder: (sheet) => StatefulBuilder(
         builder: (context, refresh) {
           Widget dropdown(
@@ -512,288 +522,81 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
     );
   }
 
-  Widget _serviceView() {
-    final rows = _service;
-    final byJob = <String, List<Map<String, dynamic>>>{};
-    for (final task in rows) {
-      final id = task['job_id']?.toString() ?? 'Unlinked Job';
-      byJob.putIfAbsent(id, () => []).add(task);
-    }
-    final entries = byJob.entries.toList()
-      ..sort(
-        (a, b) => ServiceTaskOrder.compareJobs(
-          a.value.first,
-          b.value.first,
-          newest: _sort != 'Oldest First',
-        ),
-      );
-    return ListView(
-      key: const Key('service-tasks-list'),
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Tasks · ' + rows.length.toString(),
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 15,
-                ),
-              ),
-            ),
-            if (widget.scopedJob == null && widget.onAddService != null)
-              TextButton.icon(
-                onPressed: widget.onAddService,
-                icon: const Icon(Icons.add),
-                label: const Text('New Task'),
-              ),
-          ],
-        ),
+  Widget _serviceView() => _flatList(_service, false);
+  Widget _generalView() => _flatList(_internal, true);
 
-        if (entries.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(15),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.serviceTasks.isEmpty
-                      ? 'No service tasks are available in this view. This does not mean invoice labor or payment history was deleted.'
-                      : 'No service tasks match these filters. Your saved work may be completed, paid, or historical.',
-                ),
-                if (_status != 'All' && widget.serviceTasks.isNotEmpty)
-                  TextButton.icon(
-                    key: const Key('show-all-service-task-statuses'),
-                    onPressed: () => setState(() => _status = 'All'),
-                    icon: const Icon(Icons.history),
-                    label: const Text('Show all task statuses'),
-                  ),
-              ],
+  Widget _flatList(List<Map<String, dynamic>> rows, bool general) => ListView(
+    key: Key(general ? 'general-tasks-list' : 'service-tasks-list'),
+    padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+    children: [
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Tasks · ${rows.length} ($_status)',
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
             ),
           ),
-        for (final entry in entries) ...[
-          _serviceJobCard(
-            entry,
-            expandedDetails: _expandedJobs.contains(entry.key)
-                ? Column(
-                    children: [
-                      const Divider(height: 1),
-                      // Match the approved isolated Tasks TEST: a distinct white
-                      // rounded work card sits inside each tinted Job group.
-                      for (final task
-                          in _serviceRows(includeCompleted: true).where(
-                            (task) =>
-                                (task['job_id']?.toString() ??
-                                    'Unlinked Job') ==
-                                entry.key,
-                          ))
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
-                          child: CompactTaskCard(
-                            key: ValueKey(task['line_id']),
-                      task:task,
-                            title:
-                                (task['source_description'] ??
-                                        task['description'] ??
-                                        'Labor task')
-                                    .toString(),
-                            subtitle:
-                                (widget.allocationsByLine[task['line_id']] ??
-                                        [])
-                                    .map(
-                                      (r) =>
-                                          '${widget.employeeName(r['employee_id'] as String?)} · ${((r['estimated_minutes'] as int? ?? 0) / 60).toStringAsFixed(1)} h',
-                                    )
-                                    .join(' · '),
-                            status: _statusName(task['status']),
-                            onLongPress: () => _taskActions(task, false),
-                            details: widget.serviceTaskCard(task),
-                          ),
-                        ),
-                      // A missing Job link is display-only. Never dispatch a
-                      // fabricated label as a canonical Job ID for a recheck.
-                      if (entry.key != 'Unlinked Job') ...[
-                        TextButton.icon(
-                          onPressed: () => widget.onOpenJob(entry.key),
-                          icon: const Icon(Icons.open_in_new, size: 17),
-                          label: const Text('Open Job Details'),
-                        ),
-                        if (widget.onAddRecheck != null)
-                          TextButton.icon(
-                            onPressed: () => widget.onAddRecheck!(entry.key),
-                            icon: const Icon(Icons.add_task_outlined, size: 17),
-                            label: const Text('Add Recheck'),
-                          ),
-                      ],
-                      const SizedBox(height: 5),
-                    ],
-                  )
-                : null,
-          ),
+          if (widget.scopedJob == null)
+            TextButton.icon(
+              onPressed: general ? widget.onAddGeneral : widget.onAddService,
+              icon: const Icon(Icons.add, size: 26),
+              label: const Text(
+                'New Task',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+              ),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF00277F),
+              ),
+            ),
         ],
-      ],
-    );
-  }
-
-  Widget _serviceJobCard(
-    MapEntry<String, List<Map<String, dynamic>>> entry, {
-    Widget? expandedDetails,
-  }) {
-    final tasks = entry.value;
-    final first = tasks.first;
-    final jobTasks = widget.serviceTasks
-        .where((t) => (t['job_id']?.toString() ?? 'Unlinked Job') == entry.key)
-        .toList();
-    final progressTasks = jobTasks.isEmpty ? tasks : jobTasks;
-    final done = progressTasks.where((t) => t['status'] == 'done').length;
-    final status = done == progressTasks.length
-        ? 'completed'
-        : (done > 0 || progressTasks.any((t) => t['status'] == 'in_progress'))
-        ? 'in_progress'
-        : 'open';
-    final color = status == 'open'
-        ? WorkStatusColors.open
-        : approvedJobListStatusColor({'status': status});
-    final people = <String, int>{};
-    final seen = <String>{};
-    for (final task in progressTasks) {
-      for (final person
-          in widget.allocationsByLine[task['line_id']] ??
-              const <Map<String, dynamic>>[]) {
-        if (!seen.add(
-          person['id']?.toString() ??
-              '${task['line_id']}:${person['employee_id']}',
-        ))
-          continue;
-        final label = widget.employeeName(person['employee_id']?.toString());
-        people[label] =
-            (people[label] ?? 0) + (person['estimated_minutes'] as int? ?? 0);
-      }
-    }
-    final invoice =
-        tasks
-            .map((t) => t['invoice_number']?.toString() ?? '')
-            .where((s) => s.isNotEmpty)
-            .firstOrNull ??
-        '';
-    final invoiceId = tasks
-        .map(
-          (t) =>
-              t['invoice_id']?.toString() ?? t['document_id']?.toString() ?? '',
-        )
-        .where((s) => s.isNotEmpty)
-        .firstOrNull;
-    final descriptions = tasks
-        .map(
-          (t) => (t['source_description'] ?? t['description'] ?? '').toString(),
-        )
-        .where((s) => s.isNotEmpty)
-        .toList();
-    return JobListApprovedCard(
-      job: {
-        'status': status,
-        'status_color': '#F58A00',
-        'additional_work_count': descriptions.length > 2
-            ? descriptions.length - 2
-            : 0,
-      },
-      number: first['job_number']?.toString() ?? '',
-      customer: first['customer_name']?.toString() ?? '',
-      invoiceNumber: invoice,
-      vehicle: first['vehicle_label']?.toString() ?? '',
-      description: descriptions.take(2).join(' · '),
-      mechanic: 'Unassigned',
-      employee: '',
-      mechanicMinutes: people,
-      progress: JobTaskProgress(done, progressTasks.length),
-      statusControl: ApprovedListStatusBadge(
-        label: done == progressTasks.length
-            ? 'Done'
-            : status == 'in_progress'
-            ? 'In Progress'
-            : 'Not Started',
-        color: color,
-        icon: done == progressTasks.length
-            ? Icons.check
-            : status == 'in_progress'
-            ? Icons.circle_outlined
-            : Icons.schedule,
       ),
-      onOpen: () => setState(() {
-        if (!_expandedJobs.add(entry.key)) _expandedJobs.remove(entry.key);
-      }),
-      onOpenInvoice: invoiceId == null || widget.onOpenInvoice == null
-          ? null
-          : () => widget.onOpenInvoice!(invoiceId),
-      expandedDetails: expandedDetails,
-    );
-  }
-
-  Widget _generalView() {
-    final tasks = _internal;
-    return ListView(
-      key: const Key('general-tasks-list'),
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'General Tasks · ' + tasks.length.toString(),
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
+      const SizedBox(height: 8),
+      if (rows.isEmpty)
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                general
+                    ? 'No general tasks match these filters.'
+                    : 'No service tasks match these filters. Your saved work may be completed, paid, or historical.',
+              ),
+              if (!general &&
+                  widget.serviceTasks.isNotEmpty &&
+                  _status != 'All')
+                TextButton(
+                  key: const Key('show-all-service-task-statuses'),
+                  onPressed: () => setState(() => _status = 'All'),
+                  child: const Text('Show all task statuses'),
                 ),
-              ),
-            ),
-            if (widget.scopedJob == null)
-              TextButton.icon(
-                onPressed: widget.onAddGeneral,
-                icon: const Icon(Icons.add),
-                label: const Text('New Task'),
-              ),
-          ],
+            ],
+          ),
         ),
-        if (tasks.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(15),
-            child: Text('No general tasks match these filters.'),
+      for (final task in rows)
+        ApprovedTaskListCard(
+          key: ValueKey(
+            general ? 'general-task-${task['id']}' : task['line_id'],
           ),
-        for (final task in tasks)
-          CompactTaskCard(
-            key: ValueKey('general-task-${task['id']}'),
-            title: task['description']?.toString() ?? '',
-            subtitle: widget.employeeName(task['employee_id'] as String?),
-            status: _statusName(task['status']),
-            onLongPress: () => _taskActions(task, true),
-            details: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (task['due_at'] is int)
-                  Text(
-                    'Due ${DateFormat('MMM d, yyyy · h:mm a').format(DateTime.fromMillisecondsSinceEpoch(task['due_at'] as int))}',
-                  ),
-                Text(task['category']?.toString() ?? 'General'),
-                if (task['status'] != 'done')
-                  TextButton.icon(
-                    onPressed: () =>
-                        widget.onGeneralStatus(task['id'] as int, 'done'),
-                    icon: const Icon(Icons.check),
-                    label: const Text('Mark Done'),
-                  ),
-                if (widget.onEditGeneral != null)
-                  TextButton.icon(
-                    onPressed: () => widget.onEditGeneral!(task),
-                    icon: const Icon(Icons.edit_outlined),
-                    label: const Text('Edit Task'),
-                  ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
+          task: task,
+          general: general,
+          assignment: general
+              ? widget.employeeName(task['employee_id']?.toString())
+              : (widget.allocationsByLine[task['line_id']] ?? [])
+                    .map(
+                      (r) =>
+                          '${widget.employeeName(r['employee_id']?.toString())} · ${((r['estimated_minutes'] as int? ?? 0) / 60).toStringAsFixed(1)} h',
+                    )
+                    .join(' · '),
+          onTap: () => widget.onOpenTask?.call(task, general),
+          onLongPress: () => _taskActions(task, general),
+          onPriority: widget.onPriority == null
+              ? null
+              : (p) => widget.onPriority!(task, general, p),
+        ),
+    ],
+  );
 
   String _jobLabel(String id) {
     final row = widget.serviceTasks.where((t) => t['job_id'] == id).firstOrNull;
@@ -813,6 +616,32 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ListTile(
+              leading: const Icon(Icons.open_in_new),
+              title: const Text('View task details'),
+              onTap: () {
+                Navigator.pop(sheet);
+                widget.onOpenTask?.call(task, general);
+              },
+            ),
+            if (task['job_id'] is String)
+              ListTile(
+                title: const Text('View Job'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  widget.onOpenJob(task['job_id'] as String);
+                },
+              ),
+            if (!general &&
+                task['job_id'] is String &&
+                widget.onAddRecheck != null)
+              ListTile(
+                title: const Text('Add Recheck'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  widget.onAddRecheck!(task['job_id'] as String);
+                },
+              ),
             if ((general ? widget.onEditGeneral : widget.onEditService) != null)
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
@@ -834,7 +663,17 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                 },
               ),
             if (task['status'] != 'done' &&
-                (general || (widget.onMarkDone != null && (widget.allocationsByLine[task['line_id']]??[]).any((r)=>r['state']!='Done' && r['archived_labor']!=1 && r['source_active']!=0 && r['assignment_conflict']!=1 && (r['paid_minutes'] as int? ?? 0)==0 && (r['estimated_minutes'] as int? ?? 0)>0))))
+                (general ||
+                    (widget.onMarkDone != null &&
+                        (widget.allocationsByLine[task['line_id']] ?? []).any(
+                          (r) =>
+                              r['state'] != 'Done' &&
+                              r['archived_labor'] != 1 &&
+                              r['source_active'] != 0 &&
+                              r['assignment_conflict'] != 1 &&
+                              (r['paid_minutes'] as int? ?? 0) == 0 &&
+                              (r['estimated_minutes'] as int? ?? 0) > 0,
+                        ))))
               ListTile(
                 leading: const Icon(Icons.check_circle_outline),
                 title: const Text('Mark Done'),
@@ -857,7 +696,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
   Widget build(BuildContext context) => Column(
     children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
         child: Column(
           children: [
             if (widget.scopedJob != null)
@@ -881,7 +720,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
               ),
             Container(
               decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F7),
+                color: const Color(0xFFE3E7EF),
                 borderRadius: BorderRadius.circular(22),
               ),
               child: Row(
@@ -908,7 +747,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                           padding: const EdgeInsets.symmetric(vertical: 11),
                           decoration: BoxDecoration(
                             color: _general == option
-                                ? BriskersColors.jobs
+                                ? const Color(0xFF007E77)
                                 : null,
                             borderRadius: BorderRadius.circular(22),
                           ),
@@ -928,7 +767,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                 ],
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 14),
             Row(
               children: [
                 Expanded(
@@ -937,14 +776,16 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                     onTapOutside: (_) =>
                         FocusManager.instance.primaryFocus?.unfocus(),
                     decoration: InputDecoration(
+                      filled: true,
+                      fillColor: Colors.white,
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 12,
                         vertical: 10,
                       ),
                       hintText: _general
-                          ? 'Search general tasks · $_status'
-                          : 'Search job tasks · $_status',
+                          ? 'Search general tasks, jobs, customers...'
+                          : 'Search service tasks, jobs, customers...',
                       prefixIcon: const Icon(Icons.search, size: 21),
                       suffixIcon: _search.text.isEmpty
                           ? null
@@ -958,12 +799,28 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                     ),
                   ),
                 ),
-                IconButton(
-                  key: const Key('toggle-task-filters'),
-                  onPressed: _filters,
-                  tooltip: 'Task filters · $_status',
-                  icon: const Icon(Icons.tune),
-                  color: BriskersColors.jobs,
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Material(
+                    color: Colors.white,
+                    elevation: 2,
+                    shadowColor: const Color(0x33051D35),
+                    borderRadius: BorderRadius.circular(12),
+                    child: IconButton(
+                      key: const Key('toggle-task-filters'),
+                      onPressed: _filters,
+                      tooltip: 'Task filters · $_status',
+                      icon: Badge(
+                        isLabelVisible:
+                            _status != 'All' ||
+                            _employee.isNotEmpty ||
+                            _job != 'All Jobs',
+                        backgroundColor: taskBlue,
+                        child: const Icon(Icons.tune),
+                      ),
+                      color: taskNavy,
+                    ),
+                  ),
                 ),
               ],
             ),

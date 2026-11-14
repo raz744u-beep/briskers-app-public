@@ -71,6 +71,7 @@ class LocalPayrollRepository {
     await LocalMechanicWorkCreditRepository(database: db).prepare();
     await LocalInvoiceTaskStore(db).prepare();
     await LocalJobWorkDate(db).prepare();
+    await db.customStatement("CREATE TABLE IF NOT EXISTS task_priority_overrides_v1(business_id TEXT NOT NULL,task_kind TEXT NOT NULL,task_id TEXT NOT NULL,priority TEXT NOT NULL CHECK(priority IN ('High','Normal','Low')),PRIMARY KEY(business_id,task_kind,task_id))");
     await db.customStatement('CREATE TABLE IF NOT EXISTS general_task_editor_v1(business_id TEXT NOT NULL,task_id INTEGER NOT NULL,operation_id TEXT NOT NULL,reminder_enabled INTEGER NOT NULL DEFAULT 0,reminder_minutes INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(business_id,task_id),UNIQUE(business_id,operation_id))');
     for (final sql in [
       '''CREATE TABLE IF NOT EXISTS regular_payroll_carry_weeks_v1 (business_id TEXT NOT NULL,allocation_id TEXT NOT NULL,week TEXT NOT NULL,reason TEXT NOT NULL,PRIMARY KEY(business_id,allocation_id))''',
@@ -588,6 +589,7 @@ class LocalPayrollRepository {
         if(treatment=='paid' && row['owner_prior_paid']!=1 && row['paid']!=1)await confirmHistoricalAlreadyPaid(row['id'] as String);
       }
       await LocalTaskSchedule(db).save(business,id,start,end,priority,treatment:treatment=='preserve'?null:treatment=='review'?'review':'unpaid',datesEdited:datesEdited);
+      await db.customStatement("DELETE FROM task_priority_overrides_v1 WHERE business_id=? AND task_kind='labor' AND task_id=?",[business,id]);
       await db.customStatement("INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) VALUES(?,?,'service_editor_saved',?)",[business,operation,request]);
       _authorize();
     });
@@ -604,6 +606,23 @@ class LocalPayrollRepository {
       "WHERE p.business_id=? AND j.job_number='J-40' AND lower(trim(t.description))='oil separator' "
       "AND EXISTS(SELECT 1 FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id "
       "AND a.event='owner_reviewed_unpaid_carry' AND json_extract(a.payload,'\$.week')='2026-11-09' AND json_extract(a.payload,'\$.minutes')=600) ON CONFLICT(business_id,task_id) DO UPDATE SET start_date=excluded.start_date,end_date=excluded.end_date,revision=regular_task_schedule_v1.revision+1 WHERE regular_task_schedule_v1.revision=0",[business]);
+  }
+
+  /// Priority is independent of dates, completion, assignment and payment.
+  Future<void> setTaskPriority(String task,String priority,{bool general=false}) async {
+    _authorize();await prepare();
+    if(!['High','Normal','Low'].contains(priority))throw ArgumentError('Invalid priority');
+    await db.transaction(() async {
+      final table=general?'regular_payroll_shop_tasks':'regular_payroll_tasks';
+      if((await _read('SELECT id FROM $table WHERE business_id=? AND id=?',[business,task])).isEmpty)throw StateError('Task no longer exists');
+      final schedule=general?<Map<String,dynamic>>[]:await _read('SELECT priority FROM regular_task_schedule_v1 WHERE business_id=? AND task_id=?',[business,task]);
+      if(schedule.isNotEmpty){
+        await db.customStatement('UPDATE regular_task_schedule_v1 SET priority=?,revision=revision+1 WHERE business_id=? AND task_id=? AND priority!=?',[priority,business,task,priority]);
+      }else{
+        await db.customStatement('INSERT INTO task_priority_overrides_v1 VALUES(?,?,?,?) ON CONFLICT(business_id,task_kind,task_id) DO UPDATE SET priority=excluded.priority',[business,general?'general':'labor',task,priority]);
+      }
+      _authorize();
+    });
   }
 
   Future<void> saveTaskSchedule(String task,String start,String end,String priority) async {
@@ -1124,7 +1143,7 @@ class LocalPayrollRepository {
       'c.actual_minutes AS total_credit_minutes,c.revision AS credit_revision,p.state,p.completed_date,'
       'COALESCE(at.minutes,c.actual_minutes) AS recorded_actual_minutes,'
       'COALESCE(tm.description,t.description) AS description,t.planned,s.invoice_id AS invoice,s.line_id AS line,'
-      'sch.start_date AS work_start_date,sch.end_date AS work_end_date,sch.priority,sch.payroll_treatment,sch.revision AS schedule_revision,tm.date_mode,'
+      'sch.start_date AS work_start_date,sch.end_date AS work_end_date,COALESCE((SELECT po.priority FROM task_priority_overrides_v1 po WHERE po.business_id=t.business_id AND po.task_kind=\'labor\' AND po.task_id=t.id),sch.priority) AS priority,sch.payroll_treatment,sch.revision AS schedule_revision,tm.date_mode,'
       's.source_kind AS kind,CASE WHEN m.active=0 THEN 0 ELSE s.active END AS active,e.minutes AS estimated_minutes '
       'FROM local_mechanic_work_credits_v1 c '
       'JOIN regular_payroll_tasks t ON t.business_id=c.business_id AND t.id=c.task_id '
@@ -1597,7 +1616,7 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     return _read(
-      'SELECT t.business_id,t.id,t.job_id,t.labor_id,t.planned,COALESCE(tm.description,t.description) AS description,sch.start_date AS work_start_date,sch.end_date AS work_end_date,sch.priority,sch.payroll_treatment,j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,'
+      'SELECT t.business_id,t.id,t.job_id,t.labor_id,t.planned,COALESCE(tm.description,t.description) AS description,sch.start_date AS work_start_date,sch.end_date AS work_end_date,COALESCE((SELECT po.priority FROM task_priority_overrides_v1 po WHERE po.business_id=t.business_id AND po.task_kind=\'labor\' AND po.task_id=t.id),sch.priority) AS priority,sch.payroll_treatment,j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,'
       '(SELECT MIN(document_date) FROM local_documents jd WHERE jd.business_id=t.business_id AND jd.job_id=t.job_id) AS job_document_date,'
       "d.document_number AS invoice_number,d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,s.source_kind,CASE WHEN d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,"
       's.invoice_id,s.line_id AS source_line_id FROM regular_payroll_tasks t '
@@ -1615,7 +1634,7 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     final rows = await _read(
-      "SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,sch.start_date AS work_start_date,sch.end_date AS work_end_date,sch.priority,sch.payroll_treatment,"
+      "SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,sch.start_date AS work_start_date,sch.end_date AS work_end_date,COALESCE((SELECT po.priority FROM task_priority_overrides_v1 po WHERE po.business_id=t.business_id AND po.task_kind='labor' AND po.task_id=t.id),sch.priority) AS priority,sch.payroll_treatment,"
       "CASE WHEN h.allocation_id IS NULL THEN 0 ELSE 1 END AS owner_prior_paid,"
       "CASE WHEN s.source_kind='invoice' AND (date(d.document_date) IS NULL OR date(d.document_date)!=d.document_date OR d.document_date < '${LocalInvoiceTaskStore.payrollCutover}') AND NOT EXISTS "
       "(SELECT 1 FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id "
@@ -1747,8 +1766,8 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     final rows = await _read(
-      'SELECT t.*, j.job_id,COALESCE(m.reminder_enabled,0) AS reminder_enabled,COALESCE(m.reminder_minutes,0) AS reminder_minutes FROM regular_payroll_shop_tasks t LEFT JOIN regular_payroll_shop_task_jobs j ON j.business_id=t.business_id AND j.task_id=t.id LEFT JOIN general_task_editor_v1 m ON m.business_id=t.business_id AND m.task_id=t.id '
-      'WHERE t.business_id=? ${employee == null ? '' : 'AND employee_id=?'} ORDER BY t.id DESC',
+      'SELECT t.*, j.job_id,lj.job_number,lj.customer_name,lj.vehicle_label,COALESCE(po.priority,\'Normal\') AS priority,COALESCE(m.reminder_enabled,0) AS reminder_enabled,COALESCE(m.reminder_minutes,0) AS reminder_minutes FROM regular_payroll_shop_tasks t LEFT JOIN regular_payroll_shop_task_jobs j ON j.business_id=t.business_id AND j.task_id=t.id LEFT JOIN general_task_editor_v1 m ON m.business_id=t.business_id AND m.task_id=t.id LEFT JOIN local_jobs lj ON lj.business_id=t.business_id AND lj.id=j.job_id LEFT JOIN task_priority_overrides_v1 po ON po.business_id=t.business_id AND po.task_kind=\'general\' AND po.task_id=CAST(t.id AS TEXT) '
+      'WHERE t.business_id=? ${employee == null ? '' : 'AND t.employee_id=?'} ORDER BY t.id DESC',
       [business, ?employee],
     );
     _authorize();

@@ -19,7 +19,7 @@ void main(){
     expect(lines.map((r)=>r['line_id']).toList(),['x','a']);
     expect(ServiceTaskOrder.timestamp(1793836800),ServiceTaskOrder.timestamp(1793836800000));
   });
-  testWidgets('Newest/Oldest and Active/All render the right grouped tasks stably',(tester)async{
+  testWidgets('Newest/Oldest and Active/All render the right flat tasks stably',(tester)async{
     tester.view.physicalSize=const Size(430,1400);tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(MaterialApp(home:Scaffold(body:TasksWorkspace(
@@ -30,8 +30,7 @@ void main(){
       await tester.tap(find.text(value).last);await tester.pumpAndSettle();
     }
     expect(find.text('Old job'),findsNothing);
-    expect(tester.getTopLeft(find.text('J-2')).dy,lessThan(tester.getTopLeft(find.text('MB-3335')).dy));
-    await tester.tap(find.text('J-2'));await tester.pumpAndSettle();
+    expect(tester.getTopLeft(find.text('First printed line')).dy,lessThan(tester.getTopLeft(find.text('Middle job')).dy));
     expect(tester.getTopLeft(find.text('First printed line')).dy,lessThan(tester.getTopLeft(find.text('Second printed line')).dy));
     await tester.tap(find.byKey(const Key('toggle-task-filters')));
     await tester.pumpAndSettle();
@@ -39,22 +38,22 @@ void main(){
     await tester.tap(find.text('Apply Filters'));await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('toggle-task-filters')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Sort By').last);
+    await tester.tap(find.ancestor(of: find.text('Sort By'), matching: find.byType(DropdownButtonFormField<String>)));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Oldest First').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Apply Filters'));
     await tester.pumpAndSettle();
-    expect(tester.getTopLeft(find.text('MB-6220')).dy,lessThan(tester.getTopLeft(find.text('MB-3335')).dy));
+    expect(tester.getTopLeft(find.text('Old job')).dy,lessThan(tester.getTopLeft(find.text('Middle job')).dy));
     await tester.tap(find.byKey(const Key('toggle-task-filters')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Sort By').last);
+    await tester.tap(find.ancestor(of: find.text('Sort By'), matching: find.byType(DropdownButtonFormField<String>)));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Newest First').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Apply Filters'));
     await tester.pumpAndSettle();
-    expect(tester.getTopLeft(find.text('J-2')).dy,lessThan(tester.getTopLeft(find.text('MB-3335')).dy));
+    expect(tester.getTopLeft(find.text('First printed line')).dy,lessThan(tester.getTopLeft(find.text('Middle job')).dy));
     expect(tester.takeException(),isNull);
   });
 }

@@ -2,13 +2,13 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('global Tasks preserves shared job cards and compact task details', () {
+  test('global Tasks uses approved flat cards and dedicated details', () {
     final source = File('lib/screens/payroll/tasks_workspace.dart').readAsStringSync();
-    expect(source, contains('CompactTaskCard('));
-    expect(source, contains('widget.serviceTaskCard(task)'));
+    expect(source, contains('ApprovedTaskListCard('));
+    expect(source, contains('widget.onOpenTask?.call(task, general)'));
     expect(source, contains('child: ClipRect('));
-    expect(source, contains('return JobListApprovedCard('));
-    expect(source, contains('invoiceNumber: invoice'));
+    expect(source, isNot(contains('JobListApprovedCard(')));
+    expect(source, contains('widget.onPriority!(task, general, p)'));
     expect(source, contains('widget.onRecoverHistory!()'));
   });
 

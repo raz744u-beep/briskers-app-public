@@ -41,9 +41,6 @@ void main() {
       )),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('Ordinary task-first job work'), findsNothing);
-    await tester.tap(find.text('J-10'));
-    await tester.pumpAndSettle();
     expect(find.text('Ordinary task-first job work'), findsOneWidget);
     expect(find.text('Separate recheck after repair'), findsOneWidget);
 
@@ -55,7 +52,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Apply Filters'));
     await tester.pumpAndSettle();
-    expect(find.text('Separate recheck after repair'), findsNWidgets(2)); // Header and expandable details.
+    expect(find.text('Separate recheck after repair'), findsOneWidget); // Header and expandable details.
     expect(find.text('Ordinary task-first job work'), findsNothing);
     expect(find.text('Invoice labor task'), findsNothing);
 
@@ -67,9 +64,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Apply Filters'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('J-11'));
-    await tester.pumpAndSettle();
-    expect(find.text('Invoice labor task'), findsNWidgets(2));
+    expect(find.text('Invoice labor task'), findsOneWidget);
     expect(find.text('Separate recheck after repair'), findsNothing);
   });
 }
