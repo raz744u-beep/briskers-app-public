@@ -47,7 +47,7 @@ class LocalEmployeeDetails {
 
   Future<Map<String, dynamic>> _patch(
     String shop, String employee, Map<String, dynamic> base,
-    Map<String, dynamic> patch, {required bool metadata},
+    Map<String, dynamic> patch, {required bool metadata,}
   ) async {
     final injected = metadata ? patchMetadata : patchProfile;
     if (injected != null) return injected(shop, employee, base, patch);
