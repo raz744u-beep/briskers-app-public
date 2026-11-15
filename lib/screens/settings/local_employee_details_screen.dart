@@ -24,14 +24,12 @@ class LocalEmployeeDetailsScreen extends StatefulWidget {
     this.nicknameStore,
     this.unlockOwner,
     this.currentOwner,
-    this.revealSsn,
   });
   final String businessId, employeeId;
   final String? rosterName, rosterPosition;
   final EmployeeNicknameStore? nicknameStore;
   final Future<LocalOwnerGrant> Function(String)? unlockOwner;
   final OwnerSessionIdentity? Function()? currentOwner;
-  final Future<String?> Function(String, String)? revealSsn;
   @override
   State<LocalEmployeeDetailsScreen> createState() =>
       _LocalEmployeeDetailsScreenState();
@@ -270,8 +268,9 @@ class _LocalEmployeeDetailsScreenState
     try {
       grant!.assertValid(widget.businessId, grant!.actorId);
       BriskersConnectionModeController.instance.ensureNetworkAllowed();
-      final ssn = await (widget.revealSsn?.call(widget.businessId, widget.employeeId) ??
-          const BriskersApi().revealEmployeeSsn(widget.businessId, widget.employeeId));
+      final ssn = await const BriskersApi().revealEmployeeSsn(
+        widget.businessId, widget.employeeId,
+      );
       grant!.assertValid(widget.businessId, grant!.actorId);
       if (!mounted) return;
       final digits = digitsOnly(ssn ?? '');

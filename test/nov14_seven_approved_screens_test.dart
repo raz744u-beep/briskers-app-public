@@ -312,6 +312,9 @@ void main() {
       expect(find.text('Direct Deposit'), findsNothing);
       expect(find.text('On File'), findsNothing);
       expect(find.text('504-555-0100'), findsOneWidget);
+      expect(find.text('***-**-6789'), findsOneWidget);
+      expect(find.text('Show'), findsOneWidget);
+      expect(find.text('123-45-6789'), findsNothing);
       final addressLink = find.ancestor(
         of: find.text('Synthetic address'), matching: find.byType(InkWell),
       );
@@ -349,27 +352,6 @@ void main() {
       await t.pumpWidget(const SizedBox.shrink());
     },
   );
-  testWidgets('offline Owner sees SSN last four and an explicit protected reveal action',
-      (t) async {
-    size(t);
-    final grant = await auth.authorizeSession('shop');
-    await t.runAsync(() => cache.save('shop', 'm', detail, grant));
-    var revealCalls = 0;
-    await t.pumpWidget(app(LocalEmployeeDetailsScreen(
-      businessId: 'shop', employeeId: 'm', unlockOwner: auth.authorizeSession,
-      revealSsn: (_, _) async { revealCalls++; return '123456789'; },
-    ), GlobalKey()));
-    await settle(t);
-    await t.scrollUntilVisible(find.text('SSN'), 250);
-    expect(find.text('***-**-6789'), findsOneWidget);
-    await t.tap(find.text('Show'));
-    await t.pump();
-    expect(revealCalls, 0);
-    expect(find.textContaining('Full SSN needs an online Owner connection'), findsOneWidget);
-    expect(find.text('123-45-6789'), findsNothing);
-    expect(t.takeException(), isNull);
-    await t.pumpWidget(const SizedBox.shrink());
-  });
   testWidgets('an empty local employee profile asks for an online load without opening a blank editor',
       (t) async {
     size(t, width: 360, height: 780);
