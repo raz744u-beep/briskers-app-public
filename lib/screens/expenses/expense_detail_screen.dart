@@ -1031,17 +1031,10 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
 
   Future<void> _edit() async {
     final detail = _detail;
-    if (detail == null || _busy ||
-        (detail['editable'] != true && !widget.canDeleteTransaction)) {
-      return;
-    }
+    if (detail == null || detail['editable'] != true || _busy) return;
     var generation = _loadGeneration;
 
-    // The Owner may correct historical expenses even when the server's
-    // generic editable flag is false. The existing editor verifies the exact
-    // transaction and refuses to save if original details are unavailable.
-    if (BriskersConnectionModeController.instance.forceOffline ||
-        widget.canDeleteTransaction && detail['editable'] != true) {
+    if (BriskersConnectionModeController.instance.forceOffline) {
       final changed = await Navigator.push<bool>(
         context,
         MaterialPageRoute(
@@ -1657,9 +1650,6 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     final recordGeneration = _recordGeneration;
     final income = detail['direction']?.toString() == 'income';
     final editable = detail['editable'] == true;
-    // A list-only preview cannot safely open an edit form. Owner access is
-    // unrestricted by transaction age once a real local/server detail loads.
-    final ownerCanEdit = widget.canDeleteTransaction && _detailSource != 'preview';
     final deletable =
         widget.canDeleteTransaction &&
         _canDeleteRecords &&
@@ -1709,7 +1699,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         backgroundColor: color.withValues(alpha: 0.10),
         title: Text(income ? 'Income' : 'Expense'),
         actions: [
-          if (editable || ownerCanEdit)
+          if (editable)
             PopupMenuButton<String>(
               onSelected: (value) {
                 if (mounted && recordGeneration == _recordGeneration) {
@@ -1725,8 +1715,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                     title: Text('Edit transaction'),
                   ),
                 ),
-                if (editable)
-                  const PopupMenuItem(
+                const PopupMenuItem(
                   value: 'copy',
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
