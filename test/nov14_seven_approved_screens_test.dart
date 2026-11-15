@@ -347,11 +347,13 @@ void main() {
     expect(find.textContaining('Turn off Force Offline first'), findsOneWidget);
     expect(t.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Edit Details')).onPressed,
         isNull);
+    await capture(t, key, 'empty-employee-first-load');
     await t.scrollUntilVisible(find.text('Nickname'), 250);
     await t.tap(find.text('Nickname'));
     await t.pumpAndSettle();
     expect(find.text('Edit Nickname'), findsOneWidget);
     expect(find.textContaining('Connect once'), findsNothing);
+    await capture(t, key, 'edit-nickname-dialog');
     expect(t.takeException(), isNull);
     await t.pumpWidget(const SizedBox.shrink());
   });
