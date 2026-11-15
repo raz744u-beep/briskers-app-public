@@ -329,7 +329,11 @@ void main(){
     await capture('bugs32-owner-job-details');
     final list = find.descendant(of:jobPage,matching:find.byType(RefreshIndicator)).first;
     final add = find.descendant(of:jobPage,matching:find.widgetWithText(FloatingActionButton,'New'));
-    expect(tester.getRect(list).bottom, lessThanOrEqualTo(tester.getRect(add).top));
+    // A floating New action intentionally overlays the scrollable viewport;
+    // it must be visible inside the Job page, not reserve an opaque bottom row.
+    expect(tester.getRect(add).top, greaterThanOrEqualTo(tester.getRect(jobPage).top));
+    expect(tester.getRect(add).bottom, lessThanOrEqualTo(tester.getRect(jobPage).bottom));
+    expect(tester.getRect(list).bottom, greaterThan(tester.getRect(add).top));
     await click(chip);
     expect(tester.widget<JobDocumentScreen>(find.byType(JobDocumentScreen)).documentId,invoice);
     navigator.currentState!.pop();await tester.pumpAndSettle();

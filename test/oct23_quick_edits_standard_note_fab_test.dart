@@ -33,10 +33,10 @@ void main() {
           reason: path);
     }
     final documents=File('lib/screens/documents_screen.dart').readAsStringSync();
-    expect(documents, contains("ValueKey('documents-inline-new')"));
+    expect(documents, contains("floatingActionButtonLocation: FloatingActionButtonLocation.endFloat"));
     expect(documents, contains('shape: RoundedRectangleBorder('));
     expect(documents, contains("label: const Text('New'"));
-    expect(documents, isNot(contains('FloatingActionButton.extended(')));
+    expect(documents, contains('FloatingActionButton.extended('));
 
     // Owner-approved Nov 6 Expenses change: dedicated full-width Search
     // and the main New action floating at the lower right.
