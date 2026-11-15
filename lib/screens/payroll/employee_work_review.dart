@@ -16,6 +16,7 @@ class EmployeeWorkReview extends StatelessWidget {
     this.onTask,
     this.payrollSummary,
     this.employeeName,
+    this.employeeId,
   });
   final DateTime week;
   final List<Map<String, dynamic>> rows, jobs;
@@ -23,7 +24,7 @@ class EmployeeWorkReview extends StatelessWidget {
   final ValueChanged<String> onJob;
   final ValueChanged<Map<String, dynamic>>? onTask;
   final Widget? payrollSummary;
-  final String? employeeName;
+  final String? employeeName, employeeId;
   static DateTime monday(DateTime d) =>
       DateTime(d.year, d.month, d.day).subtract(Duration(days: d.weekday - 1));
   static DateTime? date(Map<String, dynamic> r) {
@@ -160,8 +161,8 @@ class EmployeeWorkReview extends StatelessWidget {
           Card(
             child: ExpansionTile(
               shape:const Border(),collapsedShape:const Border(),
-              key: const PageStorageKey('work-review-assigned-tasks'),
-              initiallyExpanded: true,
+              key: ValueKey('work-review-assigned-tasks-${employeeId ?? employeeName}-${start.toIso8601String()}'),
+              initiallyExpanded: rows.any((r) => r['state'] != 'Done' && r['source_active'] != 0 && r['assignment_conflict'] != 1),
               title: Text(
                 'Currently Assigned Tasks (${rows.where((r) => r['state'] != 'Done' && r['source_active'] != 0 && r['assignment_conflict'] != 1).length})',
                 style: const TextStyle(fontWeight: FontWeight.w800),

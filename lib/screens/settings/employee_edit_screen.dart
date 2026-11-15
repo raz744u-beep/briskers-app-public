@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'local_employee_details_screen.dart';
 import 'package:flutter/material.dart';
 import '../../services/secure_employee_details_cache.dart';
 import '../../services/device_owner_authorization.dart';
@@ -123,6 +124,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   @override
   void initState() {
     super.initState();
+    if (_editing && widget.isOwner) return;
     _loadedIdentity=_currentOwner();
     _name.text=widget.rosterName??'';
     _loading=!_editing;
@@ -748,6 +750,11 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_editing && widget.isOwner) {
+      return LocalEmployeeDetailsScreen(
+      businessId:widget.businessId,employeeId:widget.employeeId!,rosterName:widget.rosterName,rosterPosition:widget.rosterPosition,
+      nicknameStore:widget.nicknameStore,unlockOwner:widget.unlockOwner,currentOwner:widget.currentOwner);
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text(_editing ? 'Employee Details' : 'Add employee'),

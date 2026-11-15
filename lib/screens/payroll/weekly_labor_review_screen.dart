@@ -318,13 +318,53 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       context:context,
       builder:(outer)=>StatefulBuilder(
         builder:(dialog,update)=>AlertDialog(
-          title:const Text('Verify Payment'),
+          backgroundColor: Colors.white,
+          titlePadding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          clipBehavior: Clip.antiAlias,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 20,
+          ),
+          contentPadding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+          title: Container(
+            color: taskNavy,
+            padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
+            child: Row(
+              children: [
+                const Icon(Icons.payments_outlined, color: Colors.white),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('Verify Payment',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(dialog, false),
+                  icon: const Icon(Icons.close, color: Colors.white),
+                ),
+              ],
+            ),
+          ),
           content:SingleChildScrollView(child:Column(
             mainAxisSize:MainAxisSize.min,
             crossAxisAlignment:CrossAxisAlignment.start,
             children:[
-              Text(widget.employeeName+' · Week of '+
-                DateFormat('MMM d, yyyy').format(week),),
+              Text(widget.employeeName,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  'Week of ${DateFormat('MMM d').format(week)} – ${DateFormat('MMM d, yyyy').format(week.add(const Duration(days: 4)))}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),),
               Text(selected.length.toString()+' tasks · '+
                 hours.toStringAsFixed(2)+' hours',),
               const SizedBox(height:10),
@@ -335,11 +375,19 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                 Text('Weekly adjustment: ${(widget.weeklyAdjustmentCents / 100).toStringAsFixed(2)}',),
               const SizedBox(height:9),
               TextField(
-                controller:amount,
-                keyboardType:const TextInputType.numberWithOptions(
+                  key: const Key('verify-final-gross'),
+                  controller:amount,
+                  style: const TextStyle(
+                    fontSize: 25,
+                    fontWeight: FontWeight.w800,
+                    color: taskGreen,
+                  ),
+                  keyboardType:const TextInputType.numberWithOptions(
                   decimal:true,),
                 decoration:const InputDecoration(
                   labelText:'Final gross payment',
+                    filled: true,
+                    fillColor: Color(0xFFECF8E9),
                   prefixText:r'$ ',border:OutlineInputBorder(),),
                 onChanged:(value)=>update((){}),
                 onTap:()=>amount.selection=TextSelection(
@@ -839,15 +887,26 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     final total=tasks.fold<double>(0,(n,r)=>n+_available(r));
     String money(int n)=>NumberFormat.simpleCurrency(locale:'en_US').format(n/100);
     Widget metric(String label,String value,Color color)=>Expanded(child:Container(
-        height: (MediaQuery.textScalerOf(context).scale(35)+40).clamp(88.0,160.0),padding:const EdgeInsets.symmetric(horizontal: 8, vertical: 12),margin:const EdgeInsets.all(3),decoration:BoxDecoration(color:color,borderRadius:BorderRadius.circular(14),),child:Column(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,children:[
+        height: (MediaQuery.textScalerOf(context).scale(35)+ 24).clamp(
+          62.0,
+          120.0,
+        ),padding:const EdgeInsets.symmetric(horizontal: 6, vertical: 6),margin:const EdgeInsets.all(3),decoration:BoxDecoration(color:color,borderRadius:BorderRadius.circular(14),),child:Column(
+          mainAxisAlignment: MainAxisAlignment.center,children:[
             FittedBox(
               fit: BoxFit.scaleDown,
-              child:Text(label,textAlign:TextAlign.center),
+              child:Text(label,textAlign:TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
             ),
             FittedBox(
               fit: BoxFit.scaleDown,
-              child:Text(value,textAlign:TextAlign.center,style:const TextStyle(fontSize: 21,fontWeight:FontWeight.w800,fontFeatures:[FontFeature.tabularFigures()],),),
+              child:Text(value,textAlign:TextAlign.center,style: TextStyle(fontSize: 21,fontWeight:FontWeight.w800,
+                  color: label == 'Unpaid Hours'
+                      ? taskBlue
+                      : label == 'Gross Pay'
+                      ? const Color(0xFF7134B4)
+                      : taskGreen,
+                  fontFeatures: const [FontFeature.tabularFigures()],),),
             ),],),),);
     Widget summary(String label,String value)=>Padding(padding:const EdgeInsets.symmetric(vertical:6),child:Row(children:[Expanded(child:Text(label)),Text(value,style:const TextStyle(fontWeight:FontWeight.w800)),],),);
     return ListView(key:const Key('employee-payroll-preparation'),padding: EdgeInsets.fromLTRB(12,
@@ -872,8 +931,50 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
         if(widget.reviewMessage!=null)ListTile(title:Text(widget.reviewMessage!)),
         for(final r in review)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:const Text('Pay status or compensation requires review; excluded from payment.',),),],),),
       if(paid.isNotEmpty)Card(child:ExpansionTile(key:PageStorageKey('payroll-paid-${widget.employeeId}-${_week.toIso8601String()}',),title:const Text('Previously Paid Work'),children:[for(final r in paid)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:Text('${((r['actual_minutes'] as int? ?? 0)/60).toStringAsFixed(2)} hrs · Paid · selected week',),),],),),
-      Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[summary('Total Selected Hours','${_totalHours.toStringAsFixed(2)} hrs',),summary('Labor Pay',money(labor)),summary('Adjustments (+/−)',money(adjustment)),summary('Gross Pay',money(gross)),summary('Advance repayment',money(_preparedRepayment)),summary('Payment Total',money(net)),
-        TextButton(onPressed:_saving?null:()=>_editPreparation(labor+widget.weeklyAdjustmentCents,),child:const Text('Adjustments & repayment'),),],),),),
+      Card(
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                color: taskNavy,
+                child: const Row(
+                  children: [
+                    Icon(Icons.calculate_outlined, color: Colors.white),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Weekly Payment Summary',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(padding:const EdgeInsets.all(12),child:Column(children:[summary('Total Selected Hours','${_totalHours.toStringAsFixed(2)} hrs',),summary('Labor Pay',money(labor)),summary('Adjustments (+/−)',money(adjustment)),summary('Gross Pay',money(gross)),summary('Advance repayment',money(_preparedRepayment)),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFBCEFB4),
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: summary('Payment Total',money(net)),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(onPressed:_saving?null:()=>_editPreparation(labor+widget.weeklyAdjustmentCents,),
+                      icon: const Icon(Icons.tune, size: 18),
+                      label:const Text('Adjustments & repayment'),),],),
+              ),
+            ],
+          ),),
       if(widget.extra!=null)widget.extra!,
       Wrap(spacing:10,runSpacing:8,alignment:WrapAlignment.spaceBetween,children:[OutlinedButton(onPressed:_saving||widget.saveDraft==null?null:()async {await widget.saveDraft!(_start(_week),Map<String,double>.from(_selected),_preparedAdjustment,_preparedRepayment,_preparedReason,);if(mounted) {ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Payroll draft saved locally.'),),);
                       }},child:const Text('Save (Draft)'),),

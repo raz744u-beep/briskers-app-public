@@ -80,6 +80,7 @@ jobs:
           node run.mjs
           node payee-reconciliation.mjs
           node finalization.mjs
+          node employee-details.mjs
 
       - name: Analyze Dart
         working-directory: generated

@@ -56,7 +56,7 @@ void main(){
   testWidgets('one continuous full-row stripe exactly matches each active tab background',(t)async{
     size(t);
     final boundary=GlobalKey();
-    const labels=['Work','Payroll','Reports','Taxes & 1099'];
+    const labels=['Work','Payroll','Reports','Taxes'];
     const colors=[taskBlue,taskGreen,Color(0xFF9500C7),Color(0xFF62666D)];
     await t.pumpWidget(MaterialApp(home:DefaultTabController(length:4,child:Scaffold(body:Column(children:[
       RepaintBoundary(key:boundary,child:const ApprovedProfileTabs()),

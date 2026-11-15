@@ -1,0 +1,35 @@
+import { PGlite } from '@electric-sql/pglite';
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const db=new PGlite();
+const shop='00000000-0000-4000-a000-000000000001',employee='00000000-0000-4000-a000-000000000002',owner='00000000-0000-4000-a000-000000000003',position='00000000-0000-4000-a000-000000000004';
+try {
+ await db.exec(`create schema briskers;create schema auth;create role anon;create role authenticated;
+ create function auth.uid() returns uuid language sql as $$select nullif(current_setting('test.actor',true),'')::uuid$$;
+ create table briskers.memberships(business_id uuid,user_id uuid,active boolean,role_code text);
+ create function briskers.require_permission(uuid,text) returns void language plpgsql as $$begin if auth.uid() is null then raise exception 'denied';end if;end$$;
+ create table briskers.employees(id uuid,business_id uuid,display_name text,phone text,email text,address text,position_id uuid,active boolean,updated_at timestamptz,row_version bigint default 1);
+ create table briskers.employee_positions(business_id uuid,id uuid);
+ create table briskers.employee_compensation_calls(id serial);
+ create function public.briskers_employee_settings_detail(uuid,uuid) returns jsonb language sql as $$select jsonb_build_object('id',id,'name',display_name,'phone',coalesce(phone,''),'email',coalesce(email,''),'address',coalesce(address,''),'position_id',position_id,'active',active,'compensation_enabled',true,'payment_type','hourly','hourly_rate',35,'weekly_rate',null) from briskers.employees where business_id=$1 and id=$2$$;
+ create function public.briskers_save_employee_settings(uuid,uuid,text,text,text,text,uuid,boolean,text,numeric,numeric,boolean,text) returns uuid language plpgsql as $$begin insert into briskers.employee_compensation_calls default values;return $2;end$$;
+ insert into briskers.memberships values('${shop}','${owner}',true,'owner');
+ insert into briskers.employee_positions values('${shop}','${position}');
+ insert into briskers.employees(id,business_id,display_name,phone,email,address,position_id,active) values('${employee}','${shop}','Synthetic Employee','5045550100','fixture@example.invalid','Synthetic address','${position}',true);`);
+ await db.exec(readFileSync(new URL('../../review/employee_details_sync_v1.sql',import.meta.url),'utf8'));
+ const patch=async(base,change)=> (await db.query('select public.briskers_patch_employee_details_v1($1,$2,$3,$4) result',[shop,employee,base,change])).rows[0].result;
+ await assert.rejects(patch({phone:'5045550100'},{phone:'5045550101'}),/Owner access/);
+ await db.exec(`select set_config('test.actor','${owner}',false)`);
+ assert.equal((await patch({phone:'5045550100'},{phone:'5045550101'})).conflict,false);
+ await patch({phone:'5045550100'},{phone:'5045550101'});
+ assert.equal((await db.query('select row_version from briskers.employees')).rows[0].row_version,2);
+ assert.equal((await db.query('select count(*)::int n from briskers.employee_compensation_calls')).rows[0].n,0);
+ assert.equal((await patch({phone:'5045550100'},{phone:'5045550102'})).conflict,true);
+ assert.equal((await patch({},{phone:''})).conflict,true);
+ await assert.rejects(patch({ssn:null},{ssn:'123456789'}),/protected/);
+ await db.exec("update briskers.memberships set role_code='office'");
+ await assert.rejects(patch({phone:'5045550101'},{phone:'5045550102'}),/Owner access/);
+ assert.equal((await db.query('select email from briskers.employees')).rows[0].email,'fixture@example.invalid');
+ assert.equal((await db.query("select has_function_privilege('anon','public.briskers_patch_employee_details_v1(uuid,uuid,jsonb,jsonb)','execute') allowed")).rows[0].allowed,false);
+ console.log('Passed: Owner access, explicit baseline, conflict preservation, retry deduplication, protected-field rejection, contact edits preserve compensation and other fields.');
+}finally{await db.close();}

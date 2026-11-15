@@ -24,7 +24,6 @@ import 'package:drift/drift.dart' show Variable;
 import '../../services/local_document_repository.dart';
 import 'package:intl/intl.dart';
 
-import '../../core/briskers_colors.dart';
 
 import '../../local/local_database_provider.dart';
 import '../../local/briskers_local_database.dart';
@@ -160,7 +159,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
   int _draftRevision = 0;
   String? _carryReview;
-  bool _advanceExpanded = false;
+  bool? _advanceExpanded;
+  final _repaymentHistoryKey = GlobalKey();
   bool _editingOpening = false;
   int? _openingAdvance;
   final _opening = TextEditingController();
@@ -492,6 +492,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       _overviewPayments = allPayments;
       _pendingPayments = employee == null ? pendingPayments :
           pendingPayments.where((row) => row['employee_id'] == employee).toList();
+      if (_employee != employee) _advanceExpanded = null;
       _employee = employee;
       _work = work;
       _taskSources = sources;
@@ -1402,7 +1403,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       _panel(const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Taxes & 1099', style: TextStyle(
+          Text('Taxes', style: TextStyle(
             fontSize: 18, fontWeight: FontWeight.w800),),
           SizedBox(height: 10),
           Text('Your own earnings, federal / self-employment / '
@@ -1418,25 +1419,25 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   );
 
   Widget _advancePanel() {
-
-    return _panel(Column(
+    final expanded = _advanceExpanded ?? ((_advanceBalance ?? 0) > 0 || (_repaymentCents ?? 0) > 0);
+    return Card(clipBehavior:Clip.antiAlias,child:Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        ListTile(
-          contentPadding: EdgeInsets.zero,
+        Material(color:taskNavy,child:ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal:12),
           leading: const Icon(Icons.handshake_outlined,
-            color: BriskersColors.jobs,),
+            color: Colors.white,),
           title: const Text('Advances & Repayments',
-            style: TextStyle(fontWeight: FontWeight.w700),),
+            style: TextStyle(fontWeight: FontWeight.w700,color:Colors.white),),
           subtitle: Text('Balance: '
-            '${_moneyNullable(_advanceBalance)}',),
-          trailing: Icon(_advanceExpanded
-            ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,),
+            '${_moneyNullable(_advanceBalance)}',style:const TextStyle(color:Colors.white),),
+          trailing: Icon(expanded
+            ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,color:Colors.white,),
           onTap: () => setState(() =>
-            _advanceExpanded = !_advanceExpanded),
-        ),
-        if (_advanceExpanded) ...[
-          const Divider(),
+            _advanceExpanded = !expanded),
+        )),
+        if (expanded) Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+          Row(children:[const Expanded(child:Text("Add Repayment",style:TextStyle(fontWeight:FontWeight.w700))),TextButton.icon(onPressed:(){final c=_repaymentHistoryKey.currentContext;if(c!=null)Scrollable.ensureVisible(c);},icon:const Icon(Icons.history,size:18),label:const Text("Repayment History"))]),
           Row(children: [
             Expanded(child: TextField(
               controller: _opening,
@@ -1470,9 +1471,6 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             style: const TextStyle(
               fontWeight: FontWeight.w800, fontSize: 18),),
           const SizedBox(height: 14),
-          const Text('Add Repayment', style: TextStyle(
-            fontWeight: FontWeight.w700),),
-          const SizedBox(height: 9),
           TextField(
             controller: _repayment,
             onTapAlwaysCalled: true,
@@ -1527,8 +1525,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             'Record separate cash, Zelle, check or ACH repayments here.',
             style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),),
           const Divider(height: 25),
-          const Text('Repayment History',
-            style: TextStyle(fontWeight: FontWeight.w700),),
+          Text('Repayment History',key:_repaymentHistoryKey,
+            style: const TextStyle(fontWeight: FontWeight.w700),),
           if (_repayments.isEmpty)
             const Padding(padding: EdgeInsets.all(8),
               child: Text('No repayments recorded'),),
@@ -1541,7 +1539,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               subtitle: Text(item['date'] as String),
               trailing: Text(_money(item['remaining_after_cents'] as int)),
             ),
-        ],
+        ])),
       ],
     ),);
   }
@@ -2043,6 +2041,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           child: const Text("Connect"),),],),
     Expanded(child: PayrollHistoryPanel(
               payments: _history,
+              employeeName: _employeeLabel(widget.employeeId ?? _employee),
+              onOpenTask: (row) => unawaited(_openTaskDetails({...row, 'line_id': row['task_id']}, false)),
               unlocked: _historyUnlocked,
               onOpenJob: (id) => _openRecordedWork(id, invoice: false),
               onOpenInvoice: (id) => _openRecordedWork(id, invoice: true),

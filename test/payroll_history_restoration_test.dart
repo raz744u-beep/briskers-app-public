@@ -34,20 +34,22 @@ void main() {
     )));
     await tester.tap(find.text('Week of Oct 26, 2026'));
     await tester.pumpAndSettle();
-    expect(find.text('Gross pay'), findsOneWidget);
-    expect(find.text('Debt repaid'), findsOneWidget);
+    expect(find.text('Gross Pay'), findsOneWidget);
+    expect(find.text('Debt Repaid'), findsOneWidget);
     expect(find.text('Transferred'), findsOneWidget);
     expect(find.text(r'$85.00'), findsOneWidget);
     expect(find.text(r'$20.00'), findsOneWidget);
     expect(find.text(r'$65.00'), findsOneWidget);
-    expect(find.text(r'Paid · $100.00'), findsOneWidget);
-    await tester.tap(find.text('Job J-24'));
-    await tester.tap(find.text('Invoice #6342'));
+    expect(find.text(r'$100.00'), findsOneWidget);
+    await tester.tap(find.textContaining('Job J-24'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open Job'));
+    await tester.tap(find.text('Open Invoice'));
     expect(openedJob, 'job-id');
     expect(openedInvoice, 'invoice-id');
     unlocked.value = false;
     await tester.pumpAndSettle();
     expect(find.text('Owner payroll locked.'), findsOneWidget);
-    expect(find.text(r'Paid · $100.00'), findsNothing);
+    expect(find.text(r'$100.00'), findsNothing);
   });
 }

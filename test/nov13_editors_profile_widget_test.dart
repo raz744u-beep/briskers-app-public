@@ -46,7 +46,7 @@ void main(){
     await t.tap(find.text('J-40 · Gloria Johnson'));await t.pumpAndSettle();expect(opened,'j40');expect(t.widget<Checkbox>(find.byType(Checkbox).first).value,isTrue);
     await capture(t,key,'nov13-payroll-480');
     await t.tap(find.byType(Checkbox).first);await t.pumpAndSettle();expect(t.widget<Checkbox>(find.byType(Checkbox).first).value,isFalse);expect(opened,'j40');
-    await t.scrollUntilVisible(find.text('Save (Draft)'),200,scrollable:find.byType(Scrollable).first);await t.tap(find.text('Save (Draft)'));await t.pumpAndSettle();expect(draft!.keys.toSet(),{'change','brake'});await t.ensureVisible(find.text('Verify Weekly Payment'));expect(find.text('Adjustments & repayment'),findsOneWidget);expect(t.takeException(),isNull);await t.pumpWidget(const SizedBox.shrink());await t.pumpAndSettle();
+    await t.scrollUntilVisible(find.text('Save (Draft)'),200,scrollable:find.byType(Scrollable).first);await t.ensureVisible(find.text('Save (Draft)'));await t.pumpAndSettle();await t.tap(find.text('Save (Draft)'));await t.pumpAndSettle();expect(draft!.keys.toSet(),{'change','brake'});await t.ensureVisible(find.text('Verify Weekly Payment'));expect(find.text('Adjustments & repayment'),findsOneWidget);expect(t.takeException(),isNull);await t.pumpWidget(const SizedBox.shrink());await t.pumpAndSettle();
   });
   testWidgets('actual work dates determine readonly weekly review, not prior completion/payroll dates',(t)async{
     size(t);var week=DateTime(2026,11,9);final rows=[labor('paid48','Water pump',450,paid:true,start:'2026-11-02',end:'2026-11-06'),labor('oil','Oil Separator',600)];

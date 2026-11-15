@@ -46,10 +46,10 @@ void main(){
         child:OwnerPayrollScreen(businessId:'shop',employeeId:'a',
           employeeName:'Known Employee',employeeRole:'Mechanic',
           database:db,unlockOwner:auth.authorizeSession,ownerConnection:network))));
-      for(final name in ['Work','Payroll','Reports','Taxes & 1099']){expect(find.text(name),findsOneWidget);}
-      final x=[for(final name in ['Work','Payroll','Reports','Taxes & 1099'])tester.getCenter(find.byKey(ValueKey('profile-tab-$name'))).dx];
+      for(final name in ['Work','Payroll','Reports','Taxes']){expect(find.text(name),findsOneWidget);}
+      final x=[for(final name in ['Work','Payroll','Reports','Taxes'])tester.getCenter(find.byKey(ValueKey('profile-tab-$name'))).dx];
       expect(x[1]-x[0],closeTo(x[2]-x[1],1));expect(x[2]-x[1],closeTo(x[3]-x[2],1));
-      await tester.tap(find.text('Taxes & 1099'));await tester.pumpAndSettle();
+      await tester.tap(find.text('Taxes'));await tester.pumpAndSettle();
       expect(find.textContaining('1099'),findsWidgets);
       // View-only navigation never challenges the OS or expires after 2 min.
       expect(find.text('Unlock Owner payroll'),findsNothing);
@@ -69,7 +69,7 @@ void main(){
       await tester.pump(const Duration(seconds:6));
       expect(find.text('Unlock Owner payroll'),findsNothing);
       expect(devicePrompts, 0, reason: 'Switching Owner profile tabs must never challenge the device');
-      await tester.tap(find.text('Taxes & 1099'));await tester.pumpAndSettle();
+      await tester.tap(find.text('Taxes'));await tester.pumpAndSettle();
       expect(find.textContaining('1099'),findsWidgets);
       expect(devicePrompts, 0, reason: 'Payment grant expiry must not challenge while reading Taxes');
       await tester.pumpWidget(const SizedBox.shrink());await tester.pump();

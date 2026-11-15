@@ -2241,7 +2241,7 @@ class LocalPayrollRepository {
           )).firstOrNull : null;
           final jobId = source?['job_id'] ?? snapshot['job_id'];
           final job = jobId is String ? (await _read(
-            'SELECT id, job_number, vehicle_label FROM local_jobs '
+            'SELECT id, job_number, customer_name, vehicle_label FROM local_jobs '
             'WHERE business_id=? AND id=?', [business, jobId],
           )).firstOrNull : null;
           final invoiceIdentity = source?['invoice_id'] ??
@@ -2258,7 +2258,8 @@ class LocalPayrollRepository {
           work.add({
             ...snapshot,
             'job_id': job?['id'],
-            'job_number': job?['job_number'],
+            'job_number': job?['job_number'] ?? snapshot['job_number'],
+            'customer_name': job?['customer_name'] ?? snapshot['customer_name'],
             'vehicle_label': job?['vehicle_label'],
             ...?invoice,
             'credit_id': row['credit_id'],

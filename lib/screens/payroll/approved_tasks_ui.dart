@@ -188,7 +188,12 @@ class _HeaderWave extends CustomPainter {
 }
 
 class TaskStatusPill extends StatelessWidget {
-  const TaskStatusPill(this.status, {super.key, this.icon = true, this.filled = false});
+  const TaskStatusPill(
+    this.status, {
+    super.key,
+    this.icon = true,
+    this.filled = false,
+  });
   final Object? status;
   final bool icon, filled;
   @override
@@ -197,7 +202,9 @@ class TaskStatusPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
-        color: filled ? color : label == 'Done'
+        color: filled
+            ? color
+            : label == 'Done'
             ? taskGreen
             : label == 'Open'
             ? const Color(0xFFFFE9CA)
@@ -329,20 +336,7 @@ class ApprovedTaskListCard extends StatelessWidget {
                 task['description'] ??
                 'Task')
             .toString();
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFDCE1E9)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x22051D35),
-            offset: Offset(0, 2),
-            blurRadius: 2,
-          ),
-        ],
-      ),
+    return ApprovedTaskCardSurface(
       child: Material(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
@@ -476,7 +470,7 @@ class ApprovedProfileTabs extends StatelessWidget {
       ('Work', taskBlue),
       ('Payroll', taskGreen),
       ('Reports', Color(0xFF9500C7)),
-      ('Taxes & 1099', Color(0xFF62666D)),
+      ('Taxes', Color(0xFF62666D)),
     ];
     return AnimatedBuilder(
       animation: controller,
@@ -651,5 +645,43 @@ class ApprovedEmployeeIdentity extends StatelessWidget {
         ),
       ),
     ],
+  );
+}
+
+/// Shared approved white compact task-card surface, also used for paid history.
+class ApprovedTaskCardSurface extends StatelessWidget {
+  const ApprovedTaskCardSurface({
+    super.key,
+    required this.child,
+    this.borderColor,
+  });
+  final Widget child;
+  final Color? borderColor;
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: 10),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: const Color(0xFFDCE1E9)),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x22051D35),
+          offset: Offset(0, 2),
+          blurRadius: 2,
+        ),
+      ],
+    ),
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        decoration: BoxDecoration(
+          border: borderColor == null
+              ? null
+              : Border(left: BorderSide(width: 5, color: borderColor!)),
+        ),
+        child: child,
+      ),
+    ),
   );
 }
