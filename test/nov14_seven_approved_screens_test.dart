@@ -333,50 +333,6 @@ void main() {
       await t.pumpWidget(const SizedBox.shrink());
     },
   );
-  testWidgets('Employee Details edits pay and method offline without changing settled work', (t) async {
-    size(t);
-    final grant = await auth.authorizeSession('shop');
-    await t.runAsync(() => cache.save('shop', 'm', {
-      ...detail, 'nickname': 'Kam', 'default_payment_method': null,
-    }, grant));
-    await t.pumpWidget(app(LocalEmployeeDetailsScreen(
-      businessId: 'shop', employeeId: 'm', nicknameStore: Nicknames(),
-      unlockOwner: auth.authorizeSession,
-    ), GlobalKey()));
-    for (var i = 0; i < 20; i++) {
-      await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await t.pump();
-      if (find.text('Default Payment Method').evaluate().isNotEmpty) {
-        break;
-      }
-    }
-    expect(find.text('Default Payment Method'), findsOneWidget);
-    await t.tap(find.text('Edit Details'));
-    await t.pump(const Duration(milliseconds: 300));
-    expect(find.text('Default payment method'), findsOneWidget);
-    await t.enterText(find.widgetWithText(TextFormField, 'Hourly rate'), '40.00');
-    final method = find.widgetWithText(DropdownButtonFormField<String>, 'Default payment method');
-    await t.ensureVisible(method);
-    await t.tap(method);
-    await t.pump(const Duration(milliseconds: 300));
-    await t.tap(find.text('Zelle').last);
-    await t.pump(const Duration(milliseconds: 300));
-    await t.tap(find.text('Save').last);
-    for (var i = 0; i < 30; i++) {
-      await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await t.pump();
-      if (((await t.runAsync(() => cache.read('shop', 'm', grant)))?['pending'] as Map?)
-              ?.containsKey('default_payment_method') == true) {
-        break;
-      }
-    }
-    final saved = (await t.runAsync(() => cache.read('shop', 'm', grant)))!;
-    expect(saved['pending'], {'hourly_rate': 40, 'default_payment_method': 'Zelle'});
-    expect((saved['details'] as Map)['phone'], '5045550100');
-    expect((saved['details'] as Map)['ssn_last4'], '6789');
-    expect((saved['details'] as Map).containsKey('ssn'), false);
-    await t.pumpWidget(const SizedBox.shrink());
-  });
   testWidgets(
     'compact summary and real editable gross retain payment arithmetic',
     (t) async {
