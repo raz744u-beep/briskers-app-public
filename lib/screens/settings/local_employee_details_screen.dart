@@ -319,7 +319,24 @@ class _LocalEmployeeDetailsScreenState
       context: context,
       builder: (dialog) => StatefulBuilder(
         builder: (dialog, update) => AlertDialog(
-          title: Text(nicknameOnly ? 'Edit Nickname' : 'Edit Details'),
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          clipBehavior: Clip.antiAlias,
+          titlePadding: EdgeInsets.zero,
+          contentPadding: EdgeInsets.fromLTRB(16, nicknameOnly ? 12 : 16, 16, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+          title: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(colors: [Color(0xFF2787B9), Color(0xFF123B78)]),
+            ),
+            child: Row(children: [
+              const Icon(Icons.edit_outlined, color: Colors.white, size: 20),
+              const SizedBox(width: 9),
+              Expanded(child: Text(nicknameOnly ? 'Edit Nickname' : 'Edit Details',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 19))),
+            ]),
+          ),
           content: SingleChildScrollView(
             child: Form(
               key: form,
