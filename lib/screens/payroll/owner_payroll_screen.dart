@@ -1436,7 +1436,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,color:Colors.white,),
           onTap: () => setState(() =>
             _advanceExpanded = !expanded),
-        )),
+        ))),
         if (expanded) Padding(padding:const EdgeInsets.all(10),child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
           Row(children:[
             Expanded(child:OutlinedButton.icon(
