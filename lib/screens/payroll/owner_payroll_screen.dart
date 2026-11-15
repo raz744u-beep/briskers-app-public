@@ -2028,7 +2028,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           ConstrainedBox(constraints:const BoxConstraints(maxHeight:96),child:SingleChildScrollView(child:ListTile(dense: true, title: Text(_error!), trailing: TextButton(
             onPressed: _loadingLocal ? null : () => unawaited(_load()), child: const Text('Retry'),),),),),
         Expanded(child: TabBarView(children: [
-          _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Tasks'),child:_safeTab(_tasksTab, 'Tasks'),),
+          _PayrollTabAlive(key:ValueKey('${widget.employeeId}-Tasks'),keepAlive:false,child:_safeTab(_tasksTab, 'Tasks'),),
           _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Payroll'),child:_safeTab(_payrollTab, 'Payroll'),),
           _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Reports'),child:_safeTab(_reportsPanel, 'Reports'),),
           _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Taxes'),child:_taxesTab(),),
@@ -2285,12 +2285,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
 // Tab navigation never discards the approved screens' scroll/selection state.
 class _PayrollTabAlive extends StatefulWidget {
-  const _PayrollTabAlive({super.key,required this.child});
+  const _PayrollTabAlive({super.key,required this.child,this.keepAlive=true});
   final Widget child;
+  final bool keepAlive;
   @override State<_PayrollTabAlive> createState()=>_PayrollTabAliveState();
 }
 class _PayrollTabAliveState extends State<_PayrollTabAlive> with AutomaticKeepAliveClientMixin {
-  @override bool get wantKeepAlive=>true;
+  @override bool get wantKeepAlive=>widget.keepAlive;
   @override Widget build(BuildContext context){super.build(context);return widget.child;}
 }
 
