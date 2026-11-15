@@ -1091,7 +1091,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     String? categoryId = detail['category_id']?.toString();
     String? counterpartyId = detail['counterparty_id']?.toString();
     var date =
-        DateTime.tryParse(detail['date']?.toString() ?? '') ?? DateTime.now();
+        DateTime.tryParse((detail['date'] ?? detail['transaction_date'])?.toString() ?? '') ?? DateTime.now();
 
     final saved = await showModalBottomSheet<bool>(
       context: context,
