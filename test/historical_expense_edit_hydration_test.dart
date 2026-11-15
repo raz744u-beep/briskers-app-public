@@ -1,6 +1,6 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/local/briskers_local_database.dart' hide LocalFinancialCache;
 import 'package:briskers_app/services/local_financial_cache.dart';
 
 void main() {
