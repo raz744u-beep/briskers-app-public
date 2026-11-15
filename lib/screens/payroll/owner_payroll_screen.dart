@@ -160,6 +160,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   int _draftRevision = 0;
   String? _carryReview;
   bool? _advanceExpanded;
+  bool _advanceHistoryTab = false;
   final _repaymentHistoryKey = GlobalKey();
   bool _editingOpening = false;
   int? _openingAdvance;
@@ -1423,7 +1424,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     return Card(clipBehavior:Clip.antiAlias,child:Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Material(color:taskNavy,child:ListTile(
+        Material(color:Colors.transparent,child:Container(decoration:const BoxDecoration(gradient:LinearGradient(colors:[Color(0xFF2787B9),Color(0xFF123B78)])),child:ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal:12),
           leading: const Icon(Icons.handshake_outlined,
             color: Colors.white,),
@@ -1436,8 +1437,24 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           onTap: () => setState(() =>
             _advanceExpanded = !expanded),
         )),
-        if (expanded) Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-          Row(children:[const Expanded(child:Text("Add Repayment",style:TextStyle(fontWeight:FontWeight.w700))),TextButton.icon(onPressed:(){final c=_repaymentHistoryKey.currentContext;if(c!=null)Scrollable.ensureVisible(c);},icon:const Icon(Icons.history,size:18),label:const Text("Repayment History"))]),
+        if (expanded) Padding(padding:const EdgeInsets.all(10),child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+          Row(children:[
+            Expanded(child:OutlinedButton.icon(
+              style:OutlinedButton.styleFrom(backgroundColor:_advanceHistoryTab?const Color(0xFFF0F4FA):const Color(0xFFDFF5DE),foregroundColor:_advanceHistoryTab?const Color(0xFF465D7B):const Color(0xFF087A17),padding:const EdgeInsets.symmetric(horizontal:5,vertical:8),visualDensity:VisualDensity.compact),
+              onPressed:()=>setState(()=>_advanceHistoryTab=false),
+              icon:const Icon(Icons.add_circle_outline,size:17),
+              label:const FittedBox(fit:BoxFit.scaleDown,child:Text('Add Repayment')),
+            )),
+            const SizedBox(width:6),
+            Expanded(child:OutlinedButton.icon(
+              style:OutlinedButton.styleFrom(backgroundColor:_advanceHistoryTab?const Color(0xFFDFF5DE):const Color(0xFFF0F4FA),foregroundColor:_advanceHistoryTab?const Color(0xFF087A17):const Color(0xFF465D7B),padding:const EdgeInsets.symmetric(horizontal:5,vertical:8),visualDensity:VisualDensity.compact),
+              onPressed:()=>setState(()=>_advanceHistoryTab=true),
+              icon:const Icon(Icons.history,size:17),
+              label:const FittedBox(fit:BoxFit.scaleDown,child:Text('Repayment History')),
+            )),
+          ]),
+          const SizedBox(height:8),
+          if (!_advanceHistoryTab) ...[
           Row(children: [
             Expanded(child: TextField(
               controller: _opening,
@@ -1448,7 +1465,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               keyboardType: const TextInputType.numberWithOptions(decimal: true,),
               readOnly: !_editingOpening,
               decoration: const InputDecoration(
-                labelText: 'Original amount owed',
+                labelText: 'Original amount owed', isDense:true,
+                contentPadding:EdgeInsets.symmetric(horizontal:12,vertical:12),
                 prefixText: r'$ ', border: OutlineInputBorder(),),
             ),),
             const SizedBox(width: 8),
@@ -1470,7 +1488,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             '${_moneyNullable(_advanceBalance)}',
             style: const TextStyle(
               fontWeight: FontWeight.w800, fontSize: 18),),
-          const SizedBox(height: 14),
+          const SizedBox(height: 9),
           TextField(
             controller: _repayment,
             onTapAlwaysCalled: true,
@@ -1480,7 +1498,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             onChanged: (_) => setState(() {}),
             keyboardType: const TextInputType.numberWithOptions(decimal: true,),
             decoration: const InputDecoration(
-              labelText: 'Amount', prefixText: r'$ ',
+              labelText: 'Amount', prefixText: r'$ ', isDense:true,
+              contentPadding:EdgeInsets.symmetric(horizontal:12,vertical:12),
               border: OutlineInputBorder(),),
           ),
           const SizedBox(height: 9),
@@ -1501,7 +1520,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             initialValue: _repaymentMethod,
             isExpanded: true,
             decoration: const InputDecoration(
-              labelText: 'Repayment method', border: OutlineInputBorder(),),
+              labelText: 'Repayment method', isDense:true,contentPadding:EdgeInsets.symmetric(horizontal:12,vertical:12),border: OutlineInputBorder(),),
             items: const [
               DropdownMenuItem(value: 'Cash', child: Text('Cash')),
               DropdownMenuItem(value: 'Zelle', child: Text('Zelle')),
@@ -1513,7 +1532,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           ),
           const SizedBox(height: 9),
           TextField(controller: _repaymentNote, decoration:
-            const InputDecoration(labelText: 'Notes (optional)',
+            const InputDecoration(labelText: 'Notes (optional)',isDense:true,contentPadding:EdgeInsets.symmetric(horizontal:12,vertical:12),
               border: OutlineInputBorder(),),),
           const SizedBox(height: 10),
           FilledButton(
@@ -1524,7 +1543,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           const Text('Payroll deductions are optional during Verify Payment. '
             'Record separate cash, Zelle, check or ACH repayments here.',
             style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),),
-          const Divider(height: 25),
+          ],
+          if (_advanceHistoryTab) ...[
+          const Divider(height: 16),
           Text('Repayment History',key:_repaymentHistoryKey,
             style: const TextStyle(fontWeight: FontWeight.w700),),
           if (_repayments.isEmpty)
@@ -1539,6 +1560,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               subtitle: Text(item['date'] as String),
               trailing: Text(_money(item['remaining_after_cents'] as int)),
             ),
+          ],
         ])),
       ],
     ),);
