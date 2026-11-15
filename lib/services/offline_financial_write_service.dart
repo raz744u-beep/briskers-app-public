@@ -11,6 +11,7 @@ import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
 import 'local_financial_cache.dart';
 import 'local_financial_totals_journal.dart';
+import 'payroll_expense_link_store.dart';
 
 typedef FinancialMediaDirectoryProvider = Future<Directory> Function();
 
@@ -625,6 +626,12 @@ class OfflineFinancialWriteService {
         'transaction:$localId',
         'transaction:$serverId',
         newTransactionId: serverId,
+      );
+      // Preserve payroll-operation identity when the offline financial row
+      // receives its canonical server ID. Same SQLite transaction as cache
+      // and totals remapping; retry cannot orphan the payment link.
+      await PayrollExpenseLinkStore(_database).remap(
+        businessId, localId, serverId,
       );
 
       final detail = await _cache.loadTransactionDetail(businessId, localId);
