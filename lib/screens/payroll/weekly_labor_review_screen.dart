@@ -485,7 +485,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
               const SizedBox(height:9),
               TextField(controller:note,minLines:1,maxLines:2,
                 decoration:const InputDecoration(
-                  labelText:'Optional payment note',
+                  labelText:'Payment note or adjustment reason',
                   border:OutlineInputBorder(),),),
               const SizedBox(height:7),
               const Text('This records the payment in Briskers.',
