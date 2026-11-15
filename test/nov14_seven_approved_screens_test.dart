@@ -522,4 +522,40 @@ void main() {
       await t.pumpWidget(const SizedBox.shrink());
     },
   );
+  testWidgets('issue459: Work survives Payroll Reports Taxes round trip', (t) async {
+    size(t);
+    final identity = await PayrollLanIdentity.fromSeed(List.filled(32, 8));
+    final values = <String, String>{};
+    final lease = PayrollOwnerLease(
+      identity: identity, business: 'shop', anchor: identity.deviceId,
+      read: (k) async => values[k],
+      write: (k, v) async { values[k] = v; },
+    );
+    final network = PayrollOwnerLan(
+      lease: lease, database: database, actor: who.actorId,
+      approve: (_) async => null,
+    );
+    addTearDown(network.close);
+    await t.pumpWidget(app(PayrollUiScope(
+      database: database, unlock: auth.authorizeSession,
+      connection: network, debugAllowOwnerView: true,
+      child: OwnerPayrollScreen(
+        businessId: 'shop', employeeId: 'm',
+        employeeName: 'Chris', employeeRole: 'Mechanic',
+        initialWeek: week, initialTab: 0, database: database,
+        unlockOwner: auth.authorizeSession, ownerConnection: network,
+      ),
+    ), GlobalKey()));
+    await settle(t);
+    expect(find.byKey(const Key('employee-work-review')), findsOneWidget);
+    for (final tab in ['Payroll', 'Reports', 'Taxes', 'Work']) {
+      await t.tap(find.byKey(ValueKey('profile-tab-$tab')));
+      await t.pumpAndSettle();
+    }
+    expect(find.byKey(const Key('employee-work-review')), findsOneWidget);
+    expect(find.textContaining('Currently Assigned Tasks'), findsWidgets);
+    expect(t.takeException(), isNull);
+    await t.pumpWidget(const SizedBox.shrink());
+  });
+
 }
