@@ -131,7 +131,7 @@ class _PayableHoursDialogState extends State<PayableHoursDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Container(
-                padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
+                padding: const EdgeInsets.fromLTRB(16, 6, 4, 6),
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
                     colors: [Color(0xFF174D91), taskNavy],
@@ -160,12 +160,12 @@ class _PayableHoursDialogState extends State<PayableHoursDialog> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         color: taskCanvas,
                         borderRadius: BorderRadius.circular(12),
@@ -184,20 +184,21 @@ class _PayableHoursDialogState extends State<PayableHoursDialog> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 10),
                     LaborBalanceTiles(
                       total: widget.total,
                       paid: widget.paid,
                       remaining: widget.remaining,
+                      compact: true,
                       totalLabel: 'Total Hours',
                       paidLabel: 'Previously Paid',
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 12),
                     const Text(
                       'Hours to Pay This Week',
                       style: TextStyle(fontWeight: FontWeight.w800),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     TextField(
                       key: const Key('payable-hours-input'),
                       controller: input,
@@ -220,7 +221,7 @@ class _PayableHoursDialogState extends State<PayableHoursDialog> {
                             : 'Enter 0.00 to ${widget.remaining.toStringAsFixed(2)} hours.',
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 12),
                     Row(
                       children: [
                         Expanded(
@@ -229,7 +230,7 @@ class _PayableHoursDialogState extends State<PayableHoursDialog> {
                             child: const Text('Cancel'),
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: FilledButton.icon(
                             style: FilledButton.styleFrom(
