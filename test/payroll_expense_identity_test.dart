@@ -19,6 +19,21 @@ void main() {
     expect(PayrollExpenseIdentity.verifiedNetCents(payment), 65000);
   });
 
+  test('financial option resolution requires exactly one saved ID', () {
+    final accounts = [
+      {'id': 'real-checking-id', 'name': 'Business Checking – 9858'},
+      {'id': 'another-id', 'name': 'Capital One – 8938'},
+    ];
+    expect(PayrollExpenseIdentity.uniqueOptionId(
+      accounts, 'Business Checking – 9858'), 'real-checking-id');
+    expect(PayrollExpenseIdentity.uniqueOptionId(
+      accounts, 'Business Checking – 0000'), isNull);
+    expect(PayrollExpenseIdentity.uniqueOptionId(
+      [...accounts, accounts.first], 'Business Checking – 9858'), isNull);
+    expect(PayrollExpenseIdentity.uniqueOptionId(
+      [{'name': 'Payroll'}], 'Payroll'), isNull);
+  });
+
   test('backfill only when no exact operation link exists', () {
     final payment = {
       'operation_id': 'pay-1', 'verified_date': '2026-11-13',
