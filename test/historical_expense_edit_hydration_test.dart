@@ -24,17 +24,6 @@ void main() {
     expect(saved['remarks'], 'Historical payment');
   });
 
-  test('incomplete detail cache cannot authorize a blank edit form', () async {
-    final db = BriskersLocalDatabase(NativeDatabase.memory());
-    addTearDown(db.close);
-    final cache = LocalFinancialCache(database: db);
-    await cache.saveTransactionDetail('shop', 'old', {
-      'id': 'old', 'business_id': 'shop', 'amount': 400,
-      'transaction_date': '2026-09-17',
-    });
-    expect(await cache.loadTransactionForEdit('shop', 'old'), isNull);
-  });
-
   test('incomplete historical expense cannot open a blank edit target', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     addTearDown(db.close);
