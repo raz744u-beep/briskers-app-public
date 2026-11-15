@@ -340,9 +340,15 @@ class OfflineFinancialWriteService {
           ? (direction == 'income' ? 'Income' : 'Expense')
           : counterpartyName!.trim();
 
-      final existing =
-          await _cache.loadTransactionDetail(businessId, transactionId) ??
-          <String, dynamic>{};
+      // Never queue an update against an unknown historical record. Recover
+      // the exact saved row when no detail snapshot exists, or fail closed.
+      final editTarget = await _cache.loadTransactionForEdit(
+        businessId, transactionId,
+      );
+      if (editTarget == null) {
+        throw StateError('Original expense details are unavailable. No changes were saved.');
+      }
+      final existing = editTarget;
 
       if (existing['recurring_engine_owned'] == true) {
         throw StateError('Edit this expense from Recurring transactions so its occurrence identity is preserved.');
