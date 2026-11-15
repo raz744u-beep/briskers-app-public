@@ -792,9 +792,33 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                         ),
                         child: Text(description,style:const TextStyle(color:Color(0xFF17202A)))),
               if(task['carry_week']!=null && task['work_end_date']==null)const Text('Warranty rework · Carry-forward'),
-              Wrap(alignment:WrapAlignment.spaceBetween,children:[
-                TextButton.icon(key:ValueKey('view-payable-task-$id'),onPressed:widget.onOpenTask==null?null:()=>widget.onOpenTask!(task),icon:const Icon(Icons.open_in_new),label:const Text('View Task')),
-                TextButton(onPressed:_saving?null:()=>_editHours(task),child:const Text('Payable Hours')),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: TextButton.icon(
+                  key: ValueKey('view-payable-task-$id'),
+                  style: TextButton.styleFrom(
+                    backgroundColor: const Color(0xFFDDF0FF),
+                    foregroundColor: const Color(0xFF0753B5),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 9),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: widget.onOpenTask == null ? null : () => widget.onOpenTask!(task),
+                  icon: const Icon(Icons.open_in_new, size: 19),
+                  label: const FittedBox(fit: BoxFit.scaleDown, child: Text('View Task', style: TextStyle(fontWeight: FontWeight.w800))),
+                )),
+                const SizedBox(width: 10),
+                Expanded(child: TextButton.icon(
+                  key: ValueKey('edit-payable-hours-$id'),
+                  style: TextButton.styleFrom(
+                    backgroundColor: const Color(0xFFE4F7E6),
+                    foregroundColor: const Color(0xFF087A17),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 9),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: _saving ? null : () => _editHours(task),
+                  icon: const Icon(Icons.schedule_outlined, size: 19),
+                  label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Payable Hours', style: TextStyle(fontWeight: FontWeight.w800))),
+                )),
               ]),
             ])),
           ]),
