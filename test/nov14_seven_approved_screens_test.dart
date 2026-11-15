@@ -343,7 +343,14 @@ void main() {
       businessId: 'shop', employeeId: 'm', nicknameStore: Nicknames(),
       unlockOwner: auth.authorizeSession,
     ), GlobalKey()));
-    await settle(t);
+    for (var i = 0; i < 20; i++) {
+      await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await t.pump();
+      if (find.text('Default Payment Method').evaluate().isNotEmpty) {
+        break;
+      }
+    }
+    expect(find.text('Default Payment Method'), findsOneWidget);
     await t.tap(find.text('Edit Details'));
     await t.pump(const Duration(milliseconds: 300));
     expect(find.text('Default payment method'), findsOneWidget);
