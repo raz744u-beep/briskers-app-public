@@ -22,13 +22,14 @@ class SecureEmployeeDetailsCache {
     'hourly_rate',
     'weekly_rate',
     'active',
+    'nickname',
+    'default_payment_method',
   };
   static const safeKeys = {
     ...editable,
     'id',
     'position',
     'ssn_last4',
-    'default_payment_method',
     'w9_status',
     'user_linked',
     'positions',
@@ -100,6 +101,18 @@ class SecureEmployeeDetailsCache {
     if (patch.containsKey('name') && '${patch['name'] ?? ''}'.trim().isEmpty) {
       throw ArgumentError('Employee name is required.');
     }
+    if (patch.containsKey('nickname') &&
+        (patch['nickname'] is! String ||
+            (patch['nickname'] as String).length > 32 ||
+            (patch['nickname'] as String).contains(RegExp(r'[\r\n]')))) {
+      throw ArgumentError('Invalid employee nickname.');
+    }
+    if (patch.containsKey('default_payment_method') &&
+        patch['default_payment_method'] != null &&
+        !const {'Cash', 'Zelle', 'Check', 'ACH', 'Card', 'Other'}
+            .contains(patch['default_payment_method'])) {
+      throw ArgumentError('Invalid default payment method.');
+    }
     await _write(shop, employee, grant, (old) async {
       if (old == null) {
         throw StateError(
@@ -119,7 +132,11 @@ class SecureEmployeeDetailsCache {
           if (!pending.containsKey(entry.key)) {
             base[entry.key] = details[entry.key];
           }
-          pending[entry.key] = entry.value;
+          if (base[entry.key] == entry.value) {
+            pending.remove(entry.key);
+          } else {
+            pending[entry.key] = entry.value;
+          }
         }
       }
       return {

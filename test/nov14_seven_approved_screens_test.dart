@@ -15,6 +15,7 @@ import 'package:briskers_app/app.dart';
 import 'package:briskers_app/core/connection_mode.dart';
 import 'package:briskers_app/services/local_owner_authorization.dart';
 import 'package:briskers_app/services/secure_employee_details_cache.dart';
+import 'package:briskers_app/services/local_employee_details.dart';
 import 'package:briskers_app/services/employee_nickname_store.dart';
 import 'package:briskers_app/screens/settings/local_employee_details_screen.dart';
 import 'package:briskers_app/screens/payroll/approved_tasks_ui.dart';
@@ -205,6 +206,86 @@ void main() {
       await expectLater(cache.read('shop', 'm', grant), throwsStateError);
     },
   );
+  test('existing server profile hydrates securely, edits survive restart and reach another device', () async {
+    final grant = await auth.authorizeSession('shop');
+    final aliasA = Nicknames()..value = 'Kam';
+    final server = <String, dynamic>{...detail, 'phone': '5045550100'};
+    final metadata = <String, dynamic>{
+      'id': 'm', 'nickname': '', 'default_payment_method': null,
+    };
+    Future<Map<String, dynamic>> patch(
+      Map<String, dynamic> target,
+      Map<String, dynamic> base,
+      Map<String, dynamic> changes,
+    ) async {
+      final conflict = [
+        for (final key in changes.keys)
+          if (!base.containsKey(key) ||
+              (target[key] != base[key] && target[key] != changes[key])) key,
+      ];
+      if (conflict.isNotEmpty) return {'conflict': true, 'fields': conflict};
+      target.addAll(changes);
+      return {'conflict': false, 'details': {...target}};
+    }
+    LocalEmployeeDetails service(Nicknames aliases) => LocalEmployeeDetails(
+      nicknameStore: aliases,
+      readProfile: (_, _) async => {...server},
+      readMetadata: (_, _) async => {...metadata},
+      patchProfile: (_, _, base, changes) => patch(server, base, changes),
+      patchMetadata: (_, _, base, changes) => patch(metadata, base, changes),
+    );
+    await BriskersConnectionModeController.instance.setMode(BriskersConnectionMode.auto);
+    await service(aliasA).sync('shop', 'm', grant);
+    var saved = (await cache.read('shop', 'm', grant))!;
+    expect((saved['details'] as Map)['email'], 'fixture@example.invalid');
+    expect((saved['details'] as Map)['ssn_last4'], '6789');
+    expect(metadata['nickname'], 'Kam'); // Upgrade the old device-only alias.
+    await BriskersConnectionModeController.instance.setMode(BriskersConnectionMode.offline);
+    await cache.edit('shop', 'm', {
+      'phone': '5045550111',
+      'default_payment_method': 'Zelle',
+      'hourly_rate': 40,
+    }, grant);
+    // A new cache instance reads the platform-encrypted values after restart.
+    saved = (await const SecureEmployeeDetailsCache().read('shop', 'm', grant))!;
+    expect((saved['pending'] as Map).length, 3);
+    expect((saved['details'] as Map)['address'], 'Synthetic address');
+    await expectLater(service(aliasA).sync('shop', 'm', grant), throwsStateError);
+    expect(server['phone'], '5045550100');
+    await BriskersConnectionModeController.instance.setMode(BriskersConnectionMode.auto);
+    await service(aliasA).sync('shop', 'm', grant);
+    expect(server['phone'], '5045550111');
+    expect(server['hourly_rate'], 40);
+    expect(metadata['default_payment_method'], 'Zelle');
+    expect(server['email'], 'fixture@example.invalid');
+    expect((await cache.read('shop', 'm', grant))!['pending'], isEmpty);
+
+    // A different device starts with no encrypted profile and no SQLite alias.
+    FlutterSecureStorage.setMockInitialValues({});
+    final aliasB = Nicknames()..value = '';
+    await service(aliasB).sync('shop', 'm', grant);
+    saved = (await cache.read('shop', 'm', grant))!;
+    expect((saved['details'] as Map)['phone'], '5045550111');
+    expect((saved['details'] as Map)['default_payment_method'], 'Zelle');
+    expect(aliasB.value, 'Kam');
+    expect((saved['details'] as Map).containsKey('ssn'), false);
+    metadata['nickname'] = '';
+    await service(aliasB).sync('shop', 'm', grant);
+    expect(aliasB.value, ''); // Another device's explicit clear is not resurrected.
+    await cache.edit('shop', 'm', {'phone': '5045550112'}, grant);
+    server['phone'] = '5045550199';
+    await expectLater(service(aliasB).sync('shop', 'm', grant),
+        throwsA(isA<EmployeeDetailsConflict>()));
+    saved = (await cache.read('shop', 'm', grant))!;
+    expect((saved['pending'] as Map)['phone'], '5045550112');
+    expect(server['phone'], '5045550199');
+    await cache.resolveConflict('shop', 'm', server,
+        {'phone': '5045550112'}, true, grant);
+    await service(aliasB).sync('shop', 'm', grant);
+    expect(server['phone'], '5045550112');
+    await auth.revoke();
+    await expectLater(cache.read('shop', 'm', grant), throwsStateError);
+  });
   testWidgets(
     'employee details render offline and edit only explicit fields; no invented payment method or W9',
     (t) async {
