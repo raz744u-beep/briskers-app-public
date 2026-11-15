@@ -117,6 +117,35 @@ void main(){
     expect((await repo.tasks()).single['description'],'Corrected task only');expect((detail['lines'] as List).single['description'],'Original invoice description');
     expect(await db.customSelect('SELECT * FROM regular_payroll_payments').get(),isEmpty);
   });
+  test('legacy task metadata gains optional name without rewriting saved dates, text or paid work',()async{
+    final id=await create('legacy-text',treatment:'paid');await edit(id,'legacy-date',datesEdited:true);
+    final before=(await repo.work()).single;final finances=await financial();
+    await db.customStatement('ALTER TABLE regular_task_metadata DROP COLUMN task_name');
+    final metadata=(await db.customSelect('SELECT * FROM regular_task_metadata').get()).single.data;
+    await db.close();open();await repo.prepare();
+    final restored=(await db.customSelect('SELECT * FROM regular_task_metadata').get()).single.data;
+    expect(restored['task_name'],isNull);
+    expect(Map.of(restored)..remove('task_name'),metadata);
+    expect((await repo.work()).single,before);expect(await financial(),finances);
+  });
+  test('independent task name and description preserve paid Done labor through restart and sync',()async{
+    final id=await create('independent-text',treatment:'paid');
+    final before=(await repo.work()).single;final finances=await financial();
+    Future<void> save(String op,String name,String description)=>repo.saveServiceTask(operation:op,task:id,job:'j56',taskName:name,description:description,mechanics:[{'employee':'chris','previous':'chris','name':'Chris','minutes':300}],start:'2026-11-13',end:'2026-11-13',priority:'Normal',status:'Done',treatment:'preserve');
+    await save('set-name','Replace engine','Original detailed work');
+    await save('description-only','Replace engine','Corrected detailed work');
+    expect((await repo.tasks()).single['task_name'],'Replace engine');
+    await save('name-only','Replace complete engine','Corrected detailed work');
+    await save('name-only','Replace complete engine','Corrected detailed work'); // Idempotent save.
+    Future<void> check(LocalPayrollRepository r,BriskersLocalDatabase database)async{
+      final row=(await r.work()).single;
+      expect(row['task_name'],'Replace complete engine');expect(row['description'],'Corrected detailed work');
+      for(final key in ['id','task_id','state','estimated_minutes','actual_minutes','paid','paid_minutes','remaining_minutes','completed_date','work_start_date','work_end_date']){expect(row[key],before[key],reason:key);}
+      expect((await r.tasks()).single['task_name'],'Replace complete engine');
+    }
+    await check(repo,db);expect(await financial(),finances);
+    await db.close();open();await check(repo,db);expect(await financial(),finances);await replicaCheck(check);
+  });
   test('customer history only calls a repair completed when every active assignment is Done',()async{
     final id=await create('history');
     expect(await CompletedTaskHistory(db).read('shop',job:'j56',wholeTasksOnly:true),hasLength(1));

@@ -1589,7 +1589,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Future<void> _newServiceTask() => _serviceEditor();
-  Future<void> _serviceEditor([Map<String, dynamic>? source]) async {
+  Future<void> _serviceEditor([Map<String, dynamic>? source, bool focusDescription = false]) async {
     if (!mounted || !_canView) return;
     final known = await _viewRepository.employees();
     final roster=await OfflineJobAdminService(database:_db,).cachedEmployees(widget.businessId);
@@ -1634,6 +1634,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             final details=await LocalCustomerRepository(database:_db).customerDetail(widget.businessId,customer['id'] as String);
             return {...customer,'vehicles':details?['vehicles']??[]};
           },
+          focusDescription: focusDescription,
           editing: task != null,
           onOpenJob: (id) => _openRecordedWork(id, invoice: false),
           onLinkInvoiceLabor:widget.jobId==null?null:(){Navigator.pop(context,false);unawaited(_newJobLabor());},
@@ -1642,6 +1643,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           payrollLocked: settled,
           initial: ServiceTaskDraft(
             job: job,
+            taskName: source?['task_name'] as String?,
             description: (source?['description'] ?? source?['title'] ?? '')
                 .toString(),
             mechanics: allocations.isEmpty
@@ -1684,6 +1686,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               task: task,
               job: jobId,
               description: v.description,
+              taskName: v.taskName,
               mechanics: v.mechanics
                   .map(
                     (m) => <String, dynamic>{
@@ -1871,6 +1874,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     await Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>ApprovedTaskDetails(
       initialTask:data.task,allocations:data.allocations,general:general,employeeName:_employeeLabel,reload:snapshot,
       onEdit:()async{final current=await snapshot();if(general){await _generalEditor(current.task);}else{await _serviceEditor(current.task);}},
+      onEditDescription:()async{final current=await snapshot();if(general){await _generalEditor(current.task);}else{await _serviceEditor(current.task,true);}},
       onPriority:(p)async{final current=await snapshot();await _priority(current.task,general,p);},
       onProgress:(finish)async{
         final current=await snapshot();

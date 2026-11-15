@@ -11,6 +11,27 @@ class LocalTaskMetadata {
       "date_mode TEXT NOT NULL DEFAULT 'unknown',revision INTEGER NOT NULL DEFAULT 0,"
       'PRIMARY KEY(business_id,task_id))',
     );
+    // Additive presentation metadata only; existing task/payment rows stay intact.
+    await db.transaction(() async {
+      final columns = await db
+          .customSelect('PRAGMA table_info(regular_task_metadata)')
+          .get();
+      if (!columns.any((r) => r.data['name'] == 'task_name')) {
+        await db.customStatement(
+          'ALTER TABLE regular_task_metadata ADD COLUMN task_name TEXT',
+        );
+      }
+    });
+  }
+
+  Future<void> name(String business, String task, String value) async {
+    if (value.trim().isEmpty) throw ArgumentError('Enter a task name.');
+    await prepare();
+    await db.customStatement(
+      'INSERT INTO regular_task_metadata(business_id,task_id,task_name) VALUES(?,?,?) '
+      'ON CONFLICT(business_id,task_id) DO UPDATE SET task_name=excluded.task_name,revision=revision+1',
+      [business, task, value.trim()],
+    );
   }
 
   Future<void> description(String business, String task, String value) async {

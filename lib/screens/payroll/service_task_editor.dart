@@ -28,11 +28,13 @@ class ServiceTaskDraft {
     required this.priority,
     required this.status,
     required this.treatment,
+    this.taskName,
     this.datesEdited = false,
     this.newCustomer,
     this.newVehicle,
   });
   final String job, description, start, end, priority, status, treatment;
+  final String? taskName;
   final List<TaskMechanicDraft> mechanics;
   final bool datesEdited;
   final Map<String, dynamic>? newCustomer, newVehicle;
@@ -46,6 +48,7 @@ class ServiceTaskEditor extends StatefulWidget {
     required this.employees,
     required this.initial,
     required this.save,
+    this.focusDescription = false,
     this.editing = false,
     this.invoiceLabor = false,
     this.statusLocked = false,
@@ -57,7 +60,7 @@ class ServiceTaskEditor extends StatefulWidget {
   final List<Map<String, dynamic>> jobs, employees;
   final ServiceTaskDraft initial;
   final Future<void> Function(ServiceTaskDraft) save;
-  final bool editing, invoiceLabor, statusLocked, payrollLocked;
+  final bool editing, invoiceLabor, statusLocked, payrollLocked, focusDescription;
   final VoidCallback? onLinkInvoiceLabor;
   final ValueChanged<String>? onOpenJob;
   final Future<Map<String, dynamic>?> Function()? pickCustomer;
@@ -67,7 +70,7 @@ class ServiceTaskEditor extends StatefulWidget {
 
 class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
   final _form = GlobalKey<FormState>();
-  late final TextEditingController _description;
+  late final TextEditingController _description, _name;
   late String _job, _priority, _status, _treatment;
   late DateTime _start, _end;
   late List<TaskMechanicDraft> _mechanics;
@@ -81,6 +84,7 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
     super.initState();
     final v = widget.initial;
     _description = TextEditingController(text: v.description);
+    _name = TextEditingController(text: v.taskName ?? v.description);
     _job = v.job;
     _start = LocalTaskSchedule.parse(v.start)!;
     _end = LocalTaskSchedule.parse(v.end)!;
@@ -103,6 +107,7 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
   @override
   void dispose() {
     _description.dispose();
+    _name.dispose();
     for(final controller in _hours){controller.dispose();}
     super.dispose();
   }
@@ -442,6 +447,7 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
           job: _job,
           newCustomer: _customer,
           newVehicle: _vehicle,
+          taskName: _name.text.trim().isEmpty ? _description.text.trim() : _name.text.trim(),
           description: _description.text.trim(),
           mechanics: _mechanics,
           start: LocalTaskSchedule.day(_start),
@@ -573,9 +579,19 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
                         ),
                       ],
                       const SizedBox(height: 16),
+                      _heading('Task Name'),
+                      TextFormField(
+                        key: const ValueKey('task-name'),
+                        controller: _name,
+                        readOnly: _saving,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: const InputDecoration(hintText: 'Short task name'),
+                      ),
+                      const SizedBox(height: 12),
                       _heading('Task Description'),
                       TextFormField(
                         key: const ValueKey('task-description'),
+                        autofocus: widget.focusDescription,
                         controller: _description,
                         readOnly: _saving,
                         minLines: 2,

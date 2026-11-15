@@ -51,8 +51,9 @@ void main(){
       editing:true,invoiceLabor:true,statusLocked:true,jobs:const [{'id':'j56','job_number':'J-56','customer_name':'Terrance Sanders','vehicle_label':'2016 Mercedes'}],employees:const [{'id':'chris','name':'Chris'},{'id':'kam','name':'Kam'}],
       initial:ServiceTaskDraft(job:'j56',description:'Remove oil pan. Replace pip control valve.',mechanics:[TaskMechanicDraft('chris',300,originalEmployee:'chris')],start:'2026-11-13',end:'2026-11-13',priority:'Normal',status:'Done',treatment:'unpaid'),save:(v)async{saved=v;},
     ))));await tester.pumpAndSettle();
-    final description=find.byType(TextFormField).first;expect(tester.widget<TextFormField>(description).enabled,isNot(false));
+    final description=find.byKey(const ValueKey('task-description'));expect(tester.widget<TextFormField>(description).enabled,isNot(false));
     await tester.enterText(description,'Remove oil pan. Replace oil control valve.');
+    expect(tester.widget<TextFormField>(find.byKey(const ValueKey('task-name'))).controller!.text,'Remove oil pan. Replace pip control valve.');
     await tester.tap(find.text('Chris').first);await tester.pumpAndSettle();await tester.tap(find.text('Kam').last);await tester.pumpAndSettle();
     FocusManager.instance.primaryFocus?.unfocus();await tester.pumpAndSettle();
     await capture(tester,key,'bugs36-edit-done-task');

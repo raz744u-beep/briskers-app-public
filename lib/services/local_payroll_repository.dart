@@ -550,7 +550,7 @@ class LocalPayrollRepository {
 
   /// Atomic editor save. Scheduling never rewrites completion or payment dates.
   Future<void> saveServiceTask({required String operation,String? task,
-    required String job,required String description,required List<Map<String,dynamic>> mechanics,
+    required String job,required String description,String? taskName,required List<Map<String,dynamic>> mechanics,
     required String start,required String end,required String priority,
     required String status,required String treatment,bool datesEdited=false}) async {
     _authorize();await prepare();
@@ -561,7 +561,7 @@ class LocalPayrollRepository {
     await db.transaction(() async {
       final existing=task!=null;
       final id=task??jsonEncode([job,'job',operation]);
-      final request=jsonEncode({'task':id,'description':description,'mechanics':mechanics,'start':start,'end':end,'priority':priority,'status':status,'treatment':treatment,'datesEdited':datesEdited});
+      final request=jsonEncode({'task':id,if(taskName!=null)'task_name':taskName.trim(),'description':description,'mechanics':mechanics,'start':start,'end':end,'priority':priority,'status':status,'treatment':treatment,'datesEdited':datesEdited});
       final savedOperation=await _read("SELECT payload FROM regular_payroll_audit WHERE business_id=? AND operation_id=? AND event='service_editor_saved'",[business,operation]);
       if(savedOperation.isNotEmpty) {
         if(savedOperation.single['payload']!=request) {
@@ -582,6 +582,12 @@ class LocalPayrollRepository {
         if(saved['description']!=description.trim()) {
           await LocalTaskMetadata(db).description(business,id,description);
           await db.customStatement('UPDATE regular_payroll_tasks SET description=? WHERE business_id=? AND id=?',[description.trim(),business,id]);
+        }
+      }
+      if (taskName != null) {
+        final current = (await tasks()).singleWhere((r) => r['id'] == id);
+        if (current['task_name'] != taskName.trim()) {
+          await LocalTaskMetadata(db).name(business, id, taskName);
         }
       }
       for(final paid in before.where((r)=>r['paid']==1 || r['owner_prior_paid']==1 || (r['paid_minutes'] as int? ?? 0)>0)) {
@@ -1269,7 +1275,7 @@ class LocalPayrollRepository {
       'c.task_id,c.job_id AS credit_job,c.labor_line_id AS credit_labor,'
       'c.actual_minutes AS total_credit_minutes,c.revision AS credit_revision,p.state,p.completed_date,'
       'COALESCE(at.minutes,c.actual_minutes) AS recorded_actual_minutes,'
-      'COALESCE(tm.description,t.description) AS description,t.planned,s.invoice_id AS invoice,s.line_id AS line,'
+      'COALESCE(tm.description,t.description) AS description,tm.task_name,t.planned,s.invoice_id AS invoice,s.line_id AS line,'
       'sch.start_date AS work_start_date,sch.end_date AS work_end_date,COALESCE((SELECT po.priority FROM task_priority_overrides_v1 po WHERE po.business_id=t.business_id AND po.task_kind=\'labor\' AND po.task_id=t.id),sch.priority) AS priority,sch.payroll_treatment,sch.revision AS schedule_revision,tm.date_mode,'
       's.source_kind AS kind,CASE WHEN m.active=0 THEN 0 ELSE s.active END AS active,e.minutes AS estimated_minutes '
       'FROM local_mechanic_work_credits_v1 c '
@@ -1489,6 +1495,9 @@ class LocalPayrollRepository {
             throw StateError('Invalid date origin.');
           }
           await db.customStatement('INSERT INTO regular_task_metadata(business_id,task_id,date_mode) VALUES(?,?,?) ON CONFLICT(business_id,task_id) DO UPDATE SET date_mode=excluded.date_mode',[business,task,mode]);
+        }
+        if (payload['task_name'] is String && (payload['task_name'] as String).trim().isNotEmpty) {
+          await LocalTaskMetadata(db).name(business, task, payload['task_name'] as String);
         }
         await _applyCanonicalProgress(id, employee, payload);
         final priorPaidAt=payload['prior_paid_at'];
@@ -1760,7 +1769,7 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     return _read(
-      'SELECT t.business_id,t.id,t.job_id,t.labor_id,t.planned,COALESCE(tm.description,t.description) AS description,sch.start_date AS work_start_date,sch.end_date AS work_end_date,COALESCE((SELECT po.priority FROM task_priority_overrides_v1 po WHERE po.business_id=t.business_id AND po.task_kind=\'labor\' AND po.task_id=t.id),sch.priority) AS priority,sch.payroll_treatment,j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,'
+      'SELECT t.business_id,t.id,t.job_id,t.labor_id,t.planned,COALESCE(tm.description,t.description) AS description,tm.task_name,sch.start_date AS work_start_date,sch.end_date AS work_end_date,COALESCE((SELECT po.priority FROM task_priority_overrides_v1 po WHERE po.business_id=t.business_id AND po.task_kind=\'labor\' AND po.task_id=t.id),sch.priority) AS priority,sch.payroll_treatment,j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,'
       '(SELECT MIN(document_date) FROM local_documents jd WHERE jd.business_id=t.business_id AND jd.job_id=t.job_id) AS job_document_date,'
       "d.document_number AS invoice_number,d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,s.source_kind,CASE WHEN d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,"
       's.invoice_id,s.line_id AS source_line_id FROM regular_payroll_tasks t '
@@ -1783,7 +1792,7 @@ class LocalPayrollRepository {
       "CASE WHEN s.source_kind='invoice' AND (date(d.document_date) IS NULL OR date(d.document_date)!=d.document_date OR d.document_date < '${LocalInvoiceTaskStore.payrollCutover}') AND NOT EXISTS "
       "(SELECT 1 FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id "
       "AND a.event='owner_reviewed_unpaid_carry') THEN 1 ELSE 0 END AS archived_labor,"
-      "COALESCE(cw.week,(SELECT json_extract(a.payload,'\$.week') FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id AND a.event='owner_reviewed_unpaid_carry' ORDER BY a.id DESC LIMIT 1)) AS carry_week,cw.reason AS carry_reason,e.rate AS saved_rate,e.base_enabled,p.state,p.completed_date,c.revision AS version,COALESCE(tm.description,t.description) AS description,t.job_id,"
+      "COALESCE(cw.week,(SELECT json_extract(a.payload,'\$.week') FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id AND a.event='owner_reviewed_unpaid_carry' ORDER BY a.id DESC LIMIT 1)) AS carry_week,cw.reason AS carry_reason,e.rate AS saved_rate,e.base_enabled,p.state,p.completed_date,c.revision AS version,COALESCE(tm.description,t.description) AS description,tm.task_name,t.job_id,"
       "j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,"
       "(SELECT MIN(document_date) FROM local_documents jd WHERE jd.business_id=t.business_id AND jd.job_id=t.job_id) AS job_document_date,"
       "d.document_number AS invoice_number,d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,c.completed AS credit_completed,"

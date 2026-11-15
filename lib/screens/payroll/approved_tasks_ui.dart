@@ -188,16 +188,16 @@ class _HeaderWave extends CustomPainter {
 }
 
 class TaskStatusPill extends StatelessWidget {
-  const TaskStatusPill(this.status, {super.key, this.icon = true});
+  const TaskStatusPill(this.status, {super.key, this.icon = true, this.filled = false});
   final Object? status;
-  final bool icon;
+  final bool icon, filled;
   @override
   Widget build(BuildContext context) {
     final label = taskStatus(status), color = taskStatusColor(status);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
-        color: label == 'Done'
+        color: filled ? color : label == 'Done'
             ? taskGreen
             : label == 'Open'
             ? const Color(0xFFFFE9CA)
@@ -212,7 +212,7 @@ class TaskStatusPill extends StatelessWidget {
             Icon(
               taskStatusIcon(status),
               size: 17,
-              color: label == 'Done' ? Colors.white : color,
+              color: filled || label == 'Done' ? Colors.white : color,
             ),
             const SizedBox(width: 4),
           ],
@@ -221,7 +221,7 @@ class TaskStatusPill extends StatelessWidget {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w700,
-              color: label == 'Done' ? Colors.white : color,
+              color: filled || label == 'Done' ? Colors.white : color,
             ),
           ),
         ],

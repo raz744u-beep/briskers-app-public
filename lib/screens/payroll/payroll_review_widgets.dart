@@ -24,11 +24,13 @@ class LaborBalanceTiles extends StatelessWidget {
     required this.total,
     required this.paid,
     required this.remaining,
+    this.compact = false,
     this.totalLabel = 'Total',
     this.paidLabel = 'Paid',
     this.remainingLabel = 'Remaining',
   });
   final double total, paid, remaining;
+  final bool compact;
   final String totalLabel, paidLabel, remainingLabel;
   @override
   Widget build(BuildContext context) => Row(
@@ -40,32 +42,35 @@ class LaborBalanceTiles extends StatelessWidget {
       ])
         Expanded(
           child: Container(
-            height: 88,
+            height: compact ? 56 : 88,
             margin: const EdgeInsets.symmetric(horizontal: 3),
-            padding: const EdgeInsets.all(8),
+            padding: compact ? const EdgeInsets.symmetric(horizontal: 6, vertical: 4) : const EdgeInsets.all(8),
             decoration: BoxDecoration(
               color: item.$3,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              mainAxisAlignment: compact ? MainAxisAlignment.center : MainAxisAlignment.spaceBetween,
               children: [
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   child: Text(
                     item.$1,
                     style: TextStyle(
+                      height: compact ? 1.1 : null,
                       fontWeight: FontWeight.w700,
                       color: item.$4,
                     ),
                   ),
                 ),
+                if (compact) const SizedBox(height: 1),
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   child: Text(
                     '${item.$2.toStringAsFixed(2)} h',
                     style: TextStyle(
                       fontSize: 23,
+                      height: compact ? 1.1 : null,
                       fontWeight: FontWeight.w800,
                       color: item.$4,
                     ),

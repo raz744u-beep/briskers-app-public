@@ -17,6 +17,7 @@ class ApprovedTaskDetails extends StatefulWidget {
     required this.onEdit,
     required this.onPriority,
     required this.onProgress,
+    this.onEditDescription,
     this.onJob,
     this.onInvoice,
     this.onActions,
@@ -31,6 +32,7 @@ class ApprovedTaskDetails extends StatefulWidget {
   Function()
   reload;
   final Future<void> Function() onEdit;
+  final Future<void> Function()? onEditDescription;
   final Future<void> Function(String) onPriority;
   final Future<void> Function(bool) onProgress;
   final VoidCallback? onJob, onInvoice, onActions;
@@ -147,12 +149,14 @@ class _ApprovedTaskDetailsState extends State<ApprovedTaskDetails> {
         canProgress &&
         (widget.general ||
             editable.every((r) => (r['estimated_minutes'] as int? ?? 0) > 0));
-    final title =
+    final description =
         (task['custom_description'] ??
                 task['source_description'] ??
                 task['description'] ??
                 'Task')
             .toString();
+    final savedName = task['task_name']?.toString().trim() ?? '';
+    final title = savedName.isEmpty ? description : savedName;
     final names = widget.general
         ? widget.employeeName(task['employee_id']?.toString())
         : allocations
@@ -349,22 +353,22 @@ class _ApprovedTaskDetailsState extends State<ApprovedTaskDetails> {
                         top: Radius.circular(14),
                       ),
                     ),
-                    child: const Row(
+                    key: const Key('task-details-header'),
+                    child: Row(
                       children: [
-                        Icon(Icons.build_outlined, color: taskGreen, size: 28),
-                        SizedBox(width: 12),
-                        Text(
+                        const Icon(Icons.build_outlined, color: taskGreen, size: 28),
+                        const SizedBox(width: 8),
+                        const Expanded(child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(
                           'Task Details',
-                          style: TextStyle(
-                            fontSize: 21,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
+                          style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800),
+                        ))),
+                        const SizedBox(width: 8),
+                        TaskStatusPill(status, key: const Key('task-details-status'), filled: status == 'In Progress'),
                       ],
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 10, 10, 13),
+                    padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -381,8 +385,9 @@ class _ApprovedTaskDetailsState extends State<ApprovedTaskDetails> {
                                 ),
                                 child: Text(
                                   title,
+                                  key: const Key('task-details-name'),
                                   style: const TextStyle(
-                                    fontSize: 22,
+                                    fontSize: 20,
                                     fontWeight: FontWeight.w800,
                                   ),
                                 ),
@@ -395,7 +400,6 @@ class _ApprovedTaskDetailsState extends State<ApprovedTaskDetails> {
                                     ? null
                                     : (p) => run(() => widget.onPriority(p)),
                               ),
-                              TaskStatusPill(status),
                             ],
                           ),
                         ),
@@ -447,14 +451,14 @@ class _ApprovedTaskDetailsState extends State<ApprovedTaskDetails> {
                             ),
                           ),
                         if (!widget.general) ...[
-                          const SizedBox(height: 12),
+                          const Divider(height: 16),
                           for (final allocation in allocations)
                             Container(
                               key: ValueKey(
                                 'labor-payment-${allocation['id']}',
                               ),
                               margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.all(10),
+                              padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
                                 border: Border.all(
                                   color: const Color(0xFFDCE2EA),
@@ -484,8 +488,9 @@ class _ApprovedTaskDetailsState extends State<ApprovedTaskDetails> {
                                       ),
                                     ],
                                   ),
-                                  const SizedBox(height: 9),
+                                  const SizedBox(height: 6),
                                   LaborBalanceTiles(
+                                    compact: true,
                                     total:
                                         (allocation['estimated_minutes']
                                                 as int? ??
@@ -562,16 +567,18 @@ class _ApprovedTaskDetailsState extends State<ApprovedTaskDetails> {
                               ),
                             ),
                         ],
-                        const Divider(height: 20),
-                        const Text(
-                          'Description',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 16,
+                        const Divider(height: 12),
+                        Row(children: [
+                          const Expanded(child: Text('Description', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
+                          IconButton(
+                            tooltip: 'Edit description',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.edit_outlined, size: 22),
+                            onPressed: busy ? null : () => run(widget.onEditDescription ?? widget.onEdit),
                           ),
-                        ),
-                        Text(title, style: const TextStyle(fontSize: 15)),
-                        const SizedBox(height: 14),
+                        ]),
+                        Text(description, key: const Key('task-details-description'), style: const TextStyle(fontSize: 15)),
+                        const SizedBox(height: 12),
                         if (error != null)
                           Text(
                             error!,
