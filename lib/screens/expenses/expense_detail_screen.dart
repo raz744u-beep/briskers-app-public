@@ -1721,7 +1721,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                     title: Text('Edit transaction'),
                   ),
                 ),
-                const PopupMenuItem(
+                if (editable)
+                  const PopupMenuItem(
                   value: 'copy',
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
