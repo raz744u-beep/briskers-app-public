@@ -359,7 +359,9 @@ void main() {
       await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
       await t.pump();
       if (((await t.runAsync(() => cache.read('shop', 'm', grant)))?['pending'] as Map?)
-              ?.containsKey('default_payment_method') == true) break;
+              ?.containsKey('default_payment_method') == true) {
+        break;
+      }
     }
     final saved = (await t.runAsync(() => cache.read('shop', 'm', grant)))!;
     expect(saved['pending'], {'hourly_rate': 40, 'default_payment_method': 'Zelle'});
