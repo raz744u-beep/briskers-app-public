@@ -257,7 +257,12 @@ class OfflineFinancialWriteService {
           .transactionId(businessId, payrollOperation);
       if (existing != null) {
         final saved = await _cache.loadTransactionDetail(businessId, existing);
-        if (saved == null) {
+        if (saved == null ||
+            saved['payroll_operation_id'] != payrollOperation ||
+            saved['direction'] != 'expense' ||
+            saved['amount'] is! num ||
+            ((saved['amount'] as num) * 100).round() !=
+                (amount * 100).round()) {
           throw StateError('Linked payroll expense requires reconciliation.');
         }
         return saved;
