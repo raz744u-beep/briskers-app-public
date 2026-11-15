@@ -25,4 +25,36 @@ class PayrollExpenseIdentity {
     }
     return net;
   }
+
+  /// Decide whether a verified settlement needs a financial projection.
+  ///
+  /// Existing expenses are matched by a durable operation link, never by
+  /// employee name, date, or amount (those may coincide across payments).
+  /// A conflicting or ambiguous link blocks posting for Owner review.
+  static PayrollExpenseDecision classify({
+    required String businessId,
+    required Map<String, dynamic> payment,
+    required List<Map<String, dynamic>> existingExpenses,
+  }) {
+    verifiedNetCents(payment);
+    final operationId = payment['operation_id'] as String;
+    final expectedId = transactionId(businessId, operationId);
+    final linked = existingExpenses.where((expense) =>
+        expense['payroll_operation_id'] == operationId ||
+        expense['id'] == expectedId).toList();
+    if (linked.isEmpty) return PayrollExpenseDecision.create;
+    if (linked.length != 1) return PayrollExpenseDecision.review;
+    final expense = linked.single;
+    final linkedOperation = expense['payroll_operation_id'];
+    if ((linkedOperation != null && linkedOperation != operationId) ||
+        expense['direction'] != 'expense' ||
+        expense['business_id'] != null && expense['business_id'] != businessId ||
+        expense['amount'] is! num ||
+        ((expense['amount'] as num) * 100).round() != payment['net']) {
+      return PayrollExpenseDecision.review;
+    }
+    return PayrollExpenseDecision.alreadyLinked;
+  }
 }
+
+enum PayrollExpenseDecision { create, alreadyLinked, review }
