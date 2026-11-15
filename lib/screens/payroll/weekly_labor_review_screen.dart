@@ -352,7 +352,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
               ],
             ),
           ),
-          content:SingleChildScrollView(child:Column(
+          content:SizedBox(width:double.maxFinite,child:SingleChildScrollView(child:Column(
             mainAxisSize:MainAxisSize.min,
             crossAxisAlignment:CrossAxisAlignment.start,
             children:[
@@ -394,7 +394,8 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   baseOffset:0,extentOffset:amount.text.length,),
               ),
               const SizedBox(height:9),
-              DropdownButtonFormField<String>(
+              Row(crossAxisAlignment:CrossAxisAlignment.start,children:[Expanded(child:DropdownButtonFormField<String>(
+                isExpanded:true,
                 initialValue:method,
                 decoration:const InputDecoration(
                   labelText:'Payment method',border:OutlineInputBorder(),),
@@ -409,11 +410,9 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                 onChanged:(value){
                   if(value!=null) {update(()=>method=value);}
                 },
-              ),
-              ListTile(
-                title: const Text('Payment date'),
-                subtitle: Text(DateFormat.yMMMd().format(paidDate)),
-                trailing: const Icon(Icons.calendar_today_outlined),
+              )),
+              const SizedBox(width:8),
+              Expanded(child:InkWell(
                 onTap: () async {
                   final date = await showDatePicker(
                     context: dialog, initialDate: paidDate,
@@ -422,7 +421,8 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   if (date != null && dialog.mounted) { update(() => paidDate = date);
                     }
                 },
-              ),
+                child:InputDecorator(decoration:const InputDecoration(labelText:'Payment date',border:OutlineInputBorder()),child:Row(children:[const Icon(Icons.calendar_today_outlined,size:18),const SizedBox(width:6),Expanded(child:Text(DateFormat.yMMMd().format(paidDate),maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:13)))])),
+              )),]),
               if(debt>0) ...[
                 const SizedBox(height:8),
                 // Opening details does not authorize a payroll deduction.
@@ -483,7 +483,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   ],);
               },),
               const SizedBox(height:9),
-              TextField(controller:note,maxLines:2,
+              TextField(controller:note,minLines:1,maxLines:2,
                 decoration:const InputDecoration(
                   labelText:'Payment note or adjustment reason',
                   border:OutlineInputBorder(),),),
@@ -491,11 +491,11 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
               const Text('This records the payment in Briskers.',
                 style:TextStyle(fontSize:11),),
             ],
-          ),),
+          ),)),
           actions:[
-            TextButton(onPressed:()=>Navigator.pop(dialog,false),
+            OutlinedButton(onPressed:()=>Navigator.pop(dialog,false),
               child:const Text('Cancel'),),
-            FilledButton(onPressed:(){
+            FilledButton(style:FilledButton.styleFrom(backgroundColor:taskGreen),onPressed:(){
               final gross=double.tryParse(amount.text.trim());
               final repayment=deduct
                 ? double.tryParse(debtInput.text.trim()):0.0;
