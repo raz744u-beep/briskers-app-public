@@ -362,16 +362,35 @@ class _LocalEmployeeDetailsScreenState
         (v) => Map<String, dynamic>.from(v as Map),
       ),
     );
+    Widget groupTitle(String title, IconData icon) => Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 12),
+      child: Row(children: [
+        Icon(icon, size: 18, color: const Color(0xFF24558D)),
+        const SizedBox(width: 8),
+        Text(title, style: const TextStyle(
+          fontSize: 15, fontWeight: FontWeight.w800, color: Color(0xFF173E71),
+        )),
+      ]),
+    );
+    InputDecoration editorField(String label, {String? prefixText}) =>
+        InputDecoration(
+          labelText: label,
+          prefixText: prefixText,
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          border: const OutlineInputBorder(),
+        );
     editing = true;
     final saved = await showDialog<bool>(
       context: context,
       builder: (dialog) => StatefulBuilder(
         builder: (dialog, update) => AlertDialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
           backgroundColor: Colors.white,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           clipBehavior: Clip.antiAlias,
           titlePadding: EdgeInsets.zero,
-          contentPadding: EdgeInsets.fromLTRB(16, nicknameOnly ? 12 : 16, 16, 8),
+          contentPadding: EdgeInsets.fromLTRB(16, nicknameOnly ? 18 : 16, 16, 12),
           actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
           title: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
@@ -390,11 +409,13 @@ class _LocalEmployeeDetailsScreenState
               key: form,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  if (!nicknameOnly) groupTitle('Contact Information', Icons.badge_outlined),
                   if (!nicknameOnly)
                     for (final entry in fields.entries)
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.only(bottom: 14),
                         child: TextFormField(
                           controller: entry.value,
                           keyboardType: entry.key == 'phone'
@@ -402,16 +423,13 @@ class _LocalEmployeeDetailsScreenState
                               : entry.key == 'email'
                               ? TextInputType.emailAddress
                               : TextInputType.text,
-                          maxLines: entry.key == 'address' ? 3 : 1,
-                          decoration: InputDecoration(
-                            labelText: switch (entry.key) {
+                          maxLines: entry.key == 'address' ? 2 : 1,
+                          decoration: editorField(switch (entry.key) {
                               'name' => 'Full name',
                               'phone' => 'Phone',
                               'email' => 'Email',
                               _ => 'Address',
-                            },
-                            border: const OutlineInputBorder(),
-                          ),
+                            }),
                           validator: (v) {
                             if (entry.key == 'name' &&
                                 (v ?? '').trim().isEmpty) {
@@ -426,89 +444,115 @@ class _LocalEmployeeDetailsScreenState
                           },
                         ),
                       ),
+                  if (!nicknameOnly) groupTitle('Employment', Icons.work_outline),
                   if (!nicknameOnly &&
                       positions.any((v) => v['id'] == position))
-                    DropdownButtonFormField<String>(
-                      initialValue: position,
-                      decoration: const InputDecoration(labelText: 'Position'),
-                      items: [
-                        for (final p in positions)
-                          DropdownMenuItem(
-                            value: p['id'] as String,
-                            child: Text(p['name']?.toString() ?? 'Position'),
-                          ),
-                      ],
-                      onChanged: (v) => update(() => position = v),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: DropdownButtonFormField<String>(
+                        initialValue: position,
+                        isExpanded: true,
+                        decoration: editorField('Position'),
+                        items: [
+                          for (final p in positions)
+                            DropdownMenuItem(
+                              value: p['id'] as String,
+                              child: Text(p['name']?.toString() ?? 'Position'),
+                            ),
+                        ],
+                        onChanged: (v) => update(() => position = v),
+                      ),
                     ),
                   if (!nicknameOnly && details.containsKey('active'))
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Active employee'),
-                      value: active,
-                      onChanged: (v) => update(() => active = v),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF2F6FA),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: SwitchListTile(
+                          dense: true,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                          title: const Text('Active employee'),
+                          value: active,
+                          onChanged: (v) => update(() => active = v),
+                        ),
+                      ),
                     ),
                   if (!nicknameOnly && details['compensation_enabled'] == true &&
                       details.containsKey('payment_type')) ...[
-                    DropdownButtonFormField<String>(
-                      initialValue: payType,
-                      decoration: const InputDecoration(labelText: 'Payment type'),
-                      items: const [
-                        DropdownMenuItem(value: 'hourly', child: Text('Hourly')),
-                        DropdownMenuItem(value: 'fixed_weekly', child: Text('Fixed weekly')),
-                      ],
-                      onChanged: (v) => update(() {
-                        payType = v!;
-                        payRate.text = '${details[v == 'hourly' ? 'hourly_rate' : 'weekly_rate'] ?? ''}';
-                      }),
-                    ),
-                    TextFormField(
-                      controller: payRate,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(
-                        labelText: payType == 'hourly' ? 'Hourly rate' : 'Weekly pay',
-                        prefixText: r'$ ',
+                    groupTitle('Pay Settings', Icons.payments_outlined),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: DropdownButtonFormField<String>(
+                        initialValue: payType,
+                        isExpanded: true,
+                        decoration: editorField('Payment type'),
+                        items: const [
+                          DropdownMenuItem(value: 'hourly', child: Text('Hourly')),
+                          DropdownMenuItem(value: 'fixed_weekly', child: Text('Fixed weekly')),
+                        ],
+                        onChanged: (v) => update(() {
+                          payType = v!;
+                          payRate.text = '${details[v == 'hourly' ? 'hourly_rate' : 'weekly_rate'] ?? ''}';
+                        }),
                       ),
-                      validator: (v) {
-                        if ((v ?? '').trim().isEmpty &&
-                            initialAmount == null && payType == initialPayType) {
-                          return null; // Preserve an existing unknown rate.
-                        }
-                        final amount = num.tryParse(v ?? '');
-                        return amount == null || !amount.isFinite || amount < 0 ||
-                                amount > 1000000 || ((amount * 100).round() - amount * 100).abs() > 0.00001
-                            ? 'Enter a valid amount with at most two decimals'
-                            : null;
-                      },
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: TextFormField(
+                        controller: payRate,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: editorField(
+                          payType == 'hourly' ? 'Hourly rate' : 'Weekly pay',
+                          prefixText: r'$ ',
+                        ),
+                        validator: (v) {
+                          if ((v ?? '').trim().isEmpty &&
+                              initialAmount == null && payType == initialPayType) {
+                            return null; // Preserve an existing unknown rate.
+                          }
+                          final amount = num.tryParse(v ?? '');
+                          return amount == null || !amount.isFinite || amount < 0 ||
+                                  amount > 1000000 || ((amount * 100).round() - amount * 100).abs() > 0.00001
+                              ? 'Enter a valid amount with at most two decimals'
+                              : null;
+                        },
+                      ),
                     ),
                   ],
                   if (!nicknameOnly && details.containsKey('default_payment_method'))
-                    DropdownButtonFormField<String>(
-                      initialValue: method,
-                      decoration: const InputDecoration(labelText: 'Default payment method'),
-                      items: const [
-                        DropdownMenuItem(value: '', child: Text('Not set')),
-                        DropdownMenuItem(value: 'Cash', child: Text('Cash')),
-                        DropdownMenuItem(value: 'Zelle', child: Text('Zelle')),
-                        DropdownMenuItem(value: 'Check', child: Text('Check')),
-                        DropdownMenuItem(value: 'ACH', child: Text('ACH')),
-                        DropdownMenuItem(value: 'Card', child: Text('Card')),
-                        DropdownMenuItem(value: 'Other', child: Text('Other')),
-                      ],
-                      onChanged: (v) => update(() => method = v ?? ''),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: DropdownButtonFormField<String>(
+                        initialValue: method,
+                        isExpanded: true,
+                        decoration: editorField('Default payment method'),
+                        items: const [
+                          DropdownMenuItem(value: '', child: Text('Not set')),
+                          DropdownMenuItem(value: 'Cash', child: Text('Cash')),
+                          DropdownMenuItem(value: 'Zelle', child: Text('Zelle')),
+                          DropdownMenuItem(value: 'Check', child: Text('Check')),
+                          DropdownMenuItem(value: 'ACH', child: Text('ACH')),
+                          DropdownMenuItem(value: 'Card', child: Text('Card')),
+                          DropdownMenuItem(value: 'Other', child: Text('Other')),
+                        ],
+                        onChanged: (v) => update(() => method = v ?? ''),
+                      ),
                     ),
+                  if (!nicknameOnly) groupTitle('Display Name', Icons.sell_outlined),
                   TextFormField(
                     controller: alias,
                     maxLength: 32,
-                    decoration: const InputDecoration(
-                      labelText: 'Nickname (optional)',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                    ),
+                    decoration: editorField('Nickname (optional)'),
                   ),
                   const SizedBox(height: 10),
-                  const Text(
-                    'Saving a nickname keeps existing payments and paid hours unchanged.',
-                    style: TextStyle(fontSize: 13, height: 1.35),
+                  Text(
+                    nicknameOnly
+                        ? 'Saving a nickname keeps existing payments and paid hours unchanged.'
+                        : 'Changes save on this device first. Existing payments and paid hours stay unchanged.',
+                    style: const TextStyle(fontSize: 13, height: 1.35),
                   ),
                 ],
               ),

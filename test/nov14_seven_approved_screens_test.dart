@@ -312,8 +312,15 @@ void main() {
       expect(find.text('Direct Deposit'), findsNothing);
       expect(find.text('On File'), findsNothing);
       await capture(t, key, 'next-employee-details');
+      t.view.physicalSize = const Size(360, 780);
+      await t.pumpAndSettle();
       await t.tap(find.text('Edit Details'));
       await t.pumpAndSettle();
+      await capture(t, key, 'edit-full-details-top');
+      await t.drag(find.byType(SingleChildScrollView).last, const Offset(0, -450));
+      await t.pumpAndSettle();
+      await capture(t, key, 'edit-full-details-bottom');
+      await t.ensureVisible(find.widgetWithText(TextFormField, 'Phone'));
       await t.enterText(
         find.widgetWithText(TextFormField, 'Phone'),
         '5045550102',
