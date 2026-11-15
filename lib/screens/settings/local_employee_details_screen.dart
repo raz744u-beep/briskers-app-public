@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/connection_mode.dart';
 import '../../core/formatters.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/device_owner_authorization.dart';
+import '../../services/briskers_api.dart';
 import '../../services/employee_nickname_store.dart';
 import '../../services/local_employee_details.dart';
 import '../../services/local_owner_authorization.dart';
@@ -22,12 +24,14 @@ class LocalEmployeeDetailsScreen extends StatefulWidget {
     this.nicknameStore,
     this.unlockOwner,
     this.currentOwner,
+    this.revealSsn,
   });
   final String businessId, employeeId;
   final String? rosterName, rosterPosition;
   final EmployeeNicknameStore? nicknameStore;
   final Future<LocalOwnerGrant> Function(String)? unlockOwner;
   final OwnerSessionIdentity? Function()? currentOwner;
+  final Future<String?> Function(String, String)? revealSsn;
   @override
   State<LocalEmployeeDetailsScreen> createState() =>
       _LocalEmployeeDetailsScreenState();
@@ -225,6 +229,80 @@ class _LocalEmployeeDetailsScreenState
     return v == null || '$v'.trim().isEmpty ? fallback : '$v';
   }
 
+  String employeePhone(String raw) {
+    final digits = digitsOnly(raw);
+    if (digits.length == 10) return formatUsPhone(digits);
+    if (digits.length == 11 && digits.startsWith('1')) {
+      return '1-${formatUsPhone(digits.substring(1))}';
+    }
+    return raw;
+  }
+
+  Future<void> openAddress() async {
+    final address = value('address', fallback: '').trim();
+    if (grant == null || address.isEmpty) return;
+    grant!.assertValid(widget.businessId, grant!.actorId);
+    final uri = Uri.https('www.google.com', '/maps/search/', {
+      'api': '1', 'query': address,
+    });
+    try {
+      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        throw StateError('No maps app available');
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Could not open this address in Maps.'),
+        ));
+      }
+    }
+  }
+
+  Future<void> showSsn() async {
+    if (grant == null || busy || details.isEmpty) return;
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Full SSN needs an online Owner connection. The last four digits remain available offline.'),
+      ));
+      return;
+    }
+    setState(() => busy = true);
+    try {
+      grant!.assertValid(widget.businessId, grant!.actorId);
+      BriskersConnectionModeController.instance.ensureNetworkAllowed();
+      final ssn = await (widget.revealSsn?.call(widget.businessId, widget.employeeId) ??
+          const BriskersApi().revealEmployeeSsn(widget.businessId, widget.employeeId));
+      grant!.assertValid(widget.businessId, grant!.actorId);
+      if (!mounted) return;
+      final digits = digitsOnly(ssn ?? '');
+      if (digits.length != 9) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No full SSN is available for this employee.'),
+        ));
+        return;
+      }
+      await showDialog<void>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('Employee SSN'),
+          content: Text('${digits.substring(0, 3)}-${digits.substring(3, 5)}-${digits.substring(5)}',
+              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w700)),
+          actions: [TextButton(
+            onPressed: () => Navigator.pop(dialog), child: const Text('Hide'),
+          )],
+        ),
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Owner verification could not reveal the SSN. Reconnect and try again.'),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   Future<void> reviewConflicts() async {
     if (grant == null || editing || busy) return;
     editing = true;
@@ -340,7 +418,9 @@ class _LocalEmployeeDetailsScreenState
     final fields = {
       for (final k in ['name', 'phone', 'email', 'address'])
         if (details.containsKey(k))
-          k: TextEditingController(text: details[k]?.toString() ?? ''),
+          k: TextEditingController(text: k == 'phone'
+              ? employeePhone(details[k]?.toString() ?? '')
+              : details[k]?.toString() ?? ''),
     };
     final alias = TextEditingController(text: nickname);
     var payType = details['payment_type']?.toString() ?? 'hourly';
@@ -423,6 +503,8 @@ class _LocalEmployeeDetailsScreenState
                               : entry.key == 'email'
                               ? TextInputType.emailAddress
                               : TextInputType.text,
+                          inputFormatters: entry.key == 'phone'
+                              ? const [WarrantyPhoneTextInputFormatter()] : null,
                           maxLines: entry.key == 'address' ? 2 : 1,
                           decoration: editorField(switch (entry.key) {
                               'name' => 'Full name',
@@ -437,8 +519,9 @@ class _LocalEmployeeDetailsScreenState
                             }
                             if (entry.key == 'phone' &&
                                 (v ?? '').isNotEmpty &&
-                                digitsOnly(v!).length != 10) {
-                              return 'Enter a 10-digit phone';
+                                !(digitsOnly(v!).length == 10 ||
+                                  (digitsOnly(v).length == 11 && digitsOnly(v).startsWith('1')))) {
+                              return 'Enter a 10-digit phone (or 1 + 10 digits)';
                             }
                             return null;
                           },
@@ -590,7 +673,9 @@ class _LocalEmployeeDetailsScreenState
             'position_id': position,
           if (!nicknameOnly)
             for (final e in fields.entries)
-              if (e.value.text.trim() != (details[e.key]?.toString() ?? ''))
+              if ((e.key == 'phone' ? digitsOnly(e.value.text) : e.value.text.trim()) !=
+                  (e.key == 'phone' ? digitsOnly(details[e.key]?.toString() ?? '') :
+                      details[e.key]?.toString() ?? ''))
                 e.key: e.key == 'phone'
                     ? digitsOnly(e.value.text)
                     : e.value.text.trim(),
@@ -807,6 +892,8 @@ class _LocalEmployeeDetailsScreenState
     VoidCallback? onTap,
     Color? color,
     bool inline = false,
+    bool link = false,
+    String? actionLabel,
   }) => inline
       ? InkWell(
           onTap: onTap,
@@ -828,10 +915,14 @@ class _LocalEmployeeDetailsScreenState
                 Expanded(
                   child: Text(
                     text,
-                    style: TextStyle(fontSize: 14, color: color ?? taskNavy),
+                    style: TextStyle(fontSize: 14, color: link ? taskBlue : color ?? taskNavy,
+                      decoration: link ? TextDecoration.underline : null),
                   ),
                 ),
-                if (onTap != null) const Icon(Icons.chevron_right, size: 19),
+                if (actionLabel != null && onTap != null)
+                  TextButton(onPressed: onTap, child: Text(actionLabel))
+                else if (onTap != null)
+                  Icon(link ? Icons.open_in_new : Icons.chevron_right, size: 19),
               ],
             ),
           ),
@@ -1013,7 +1104,7 @@ class _LocalEmployeeDetailsScreenState
             ),
           ]),
           section('Contact Information', Icons.badge_outlined, [
-            detail('Phone', value('phone'), Icons.phone_outlined, inline: true),
+            detail('Phone', employeePhone(value('phone')), Icons.phone_outlined, inline: true),
             const Divider(height: 1),
             detail('Email', value('email'), Icons.mail_outline, inline: true),
             const Divider(height: 1),
@@ -1022,16 +1113,20 @@ class _LocalEmployeeDetailsScreenState
               value('address'),
               Icons.location_on_outlined,
               inline: true,
+              link: value('address', fallback: '').trim().isNotEmpty,
+              onTap: value('address', fallback: '').trim().isNotEmpty ? openAddress : null,
             ),
           ]),
           section('Tax Information', Icons.description_outlined, [
             detail(
-              'SSN (Last 4)',
+              'SSN',
               inline: true,
               details['ssn_last4'] == null
                   ? 'Not saved locally'
                   : '***-**-${details['ssn_last4']}',
               Icons.badge_outlined,
+              onTap: grant != null && details.isNotEmpty ? showSsn : null,
+              actionLabel: grant != null && details.isNotEmpty ? 'Show' : null,
             ),
             const Divider(height: 1),
             detail(
