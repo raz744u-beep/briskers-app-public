@@ -11,6 +11,8 @@ import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
 import 'local_financial_cache.dart';
 import 'local_financial_totals_journal.dart';
+import 'payroll_expense_link_store.dart';
+import 'payroll_expense_identity.dart';
 
 typedef FinancialMediaDirectoryProvider = Future<Directory> Function();
 
@@ -231,12 +233,59 @@ class OfflineFinancialWriteService {
     String? contextLabel,
     required List<Map<String, dynamic>> receipts,
     Map<String, dynamic>? receiptExtraction,
+    String? verifiedPayrollOperationId,
   }) async {
-    final operationId = _operationId('financial-create');
-    final localId = 'local-transaction-$operationId';
+    final payrollOperation = verifiedPayrollOperationId?.trim();
+    if (verifiedPayrollOperationId != null &&
+        (payrollOperation == null || payrollOperation.isEmpty ||
+         direction != 'expense' || amount <= 0 || receipts.isNotEmpty ||
+         receiptExtraction != null)) {
+      throw ArgumentError('Invalid verified payroll expense projection.');
+    }
+    final operationId = payrollOperation == null
+        ? _operationId('financial-create')
+        : 'payroll-financial-${PayrollExpenseIdentity.transactionId(businessId, payrollOperation)}';
+    final localId = payrollOperation == null
+        ? 'local-transaction-$operationId'
+        : PayrollExpenseIdentity.transactionId(businessId, payrollOperation);
     final attachments = <Map<String, dynamic>>[];
 
+    // A retry after an interrupted UI action must return the original expense,
+    // not create a second financial outbox entry.
+    if (payrollOperation != null) {
+      final existing = await PayrollExpenseLinkStore(_database)
+          .transactionId(businessId, payrollOperation);
+      if (existing != null) {
+        final saved = await _cache.loadTransactionDetail(businessId, existing);
+        if (saved == null ||
+            saved['payroll_operation_id'] != payrollOperation ||
+            saved['direction'] != 'expense' ||
+            saved['amount'] is! num ||
+            ((saved['amount'] as num) * 100).round() !=
+                (amount * 100).round()) {
+          throw StateError('Linked payroll expense requires reconciliation.');
+        }
+        return saved;
+      }
+    }
+
     return _database.transaction(() async {
+      if (payrollOperation != null) {
+        // A caller cannot create a "payroll" expense from an unverified
+        // draft or arbitrary amount: require the immutable payroll receipt.
+        final receipts = await _database.customSelect(
+          'SELECT net FROM regular_payroll_payments '
+          'WHERE business_id=? AND operation_id=?',
+          variables: [
+            Variable<String>(businessId),
+            Variable<String>(payrollOperation),
+          ],
+        ).get();
+        if (receipts.length != 1 ||
+            receipts.single.read<int>('net') != (amount * 100).round()) {
+          throw StateError('Verified payroll settlement does not match expense.');
+        }
+      }
       await _enqueue(businessId, 'financial_create', localId, 'create', {
         'operation_id': operationId,
         'local_transaction_id': localId,
@@ -291,6 +340,8 @@ class OfflineFinancialWriteService {
         'receipt_count': attachments.length,
         'recurring': false,
         'sync_state': 'pending',
+        if (payrollOperation != null)
+          'payroll_operation_id': payrollOperation,
       };
       await _upsertSummary(businessId, summary);
       // Financial projection is committed atomically with the queue and local
@@ -309,6 +360,10 @@ class OfflineFinancialWriteService {
           ..._receiptProjection(localId, receiptExtraction),
       };
       await _cache.saveTransactionDetail(businessId, localId, detail);
+      if (payrollOperation != null) {
+        await PayrollExpenseLinkStore(_database)
+            .link(businessId, payrollOperation, localId);
+      }
       return detail;
     });
   }
@@ -625,6 +680,12 @@ class OfflineFinancialWriteService {
         'transaction:$localId',
         'transaction:$serverId',
         newTransactionId: serverId,
+      );
+      // Preserve payroll-operation identity when the offline financial row
+      // receives its canonical server ID. Same SQLite transaction as cache
+      // and totals remapping; retry cannot orphan the payment link.
+      await PayrollExpenseLinkStore(_database).remap(
+        businessId, localId, serverId,
       );
 
       final detail = await _cache.loadTransactionDetail(businessId, localId);
