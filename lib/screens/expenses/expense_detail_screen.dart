@@ -1032,7 +1032,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   Future<void> _edit() async {
     final detail = _detail;
     if (detail == null || _busy ||
-        (detail['editable'] != true && !widget.canDeleteTransaction)) return;
+        (detail['editable'] != true && !widget.canDeleteTransaction)) {
+      return;
+    }
     var generation = _loadGeneration;
 
     // The Owner may correct historical expenses even when the server's
