@@ -12,6 +12,7 @@ import 'local_job_quarantine.dart';
 import 'local_financial_cache.dart';
 import 'local_financial_totals_journal.dart';
 import 'payroll_expense_link_store.dart';
+import 'payroll_expense_identity.dart';
 
 typedef FinancialMediaDirectoryProvider = Future<Directory> Function();
 
@@ -232,10 +233,36 @@ class OfflineFinancialWriteService {
     String? contextLabel,
     required List<Map<String, dynamic>> receipts,
     Map<String, dynamic>? receiptExtraction,
+    String? verifiedPayrollOperationId,
   }) async {
-    final operationId = _operationId('financial-create');
-    final localId = 'local-transaction-$operationId';
+    final payrollOperation = verifiedPayrollOperationId?.trim();
+    if (verifiedPayrollOperationId != null &&
+        (payrollOperation == null || payrollOperation.isEmpty ||
+         direction != 'expense' || amount <= 0 || receipts.isNotEmpty ||
+         receiptExtraction != null)) {
+      throw ArgumentError('Invalid verified payroll expense projection.');
+    }
+    final operationId = payrollOperation == null
+        ? _operationId('financial-create')
+        : 'payroll-financial-${PayrollExpenseIdentity.transactionId(businessId, payrollOperation)}';
+    final localId = payrollOperation == null
+        ? 'local-transaction-$operationId'
+        : PayrollExpenseIdentity.transactionId(businessId, payrollOperation);
     final attachments = <Map<String, dynamic>>[];
+
+    // A retry after an interrupted UI action must return the original expense,
+    // not create a second financial outbox entry.
+    if (payrollOperation != null) {
+      final existing = await PayrollExpenseLinkStore(_database)
+          .transactionId(businessId, payrollOperation);
+      if (existing != null) {
+        final saved = await _cache.loadTransactionDetail(businessId, existing);
+        if (saved == null) {
+          throw StateError('Linked payroll expense requires reconciliation.');
+        }
+        return saved;
+      }
+    }
 
     return _database.transaction(() async {
       await _enqueue(businessId, 'financial_create', localId, 'create', {
@@ -292,6 +319,8 @@ class OfflineFinancialWriteService {
         'receipt_count': attachments.length,
         'recurring': false,
         'sync_state': 'pending',
+        if (payrollOperation != null)
+          'payroll_operation_id': payrollOperation,
       };
       await _upsertSummary(businessId, summary);
       // Financial projection is committed atomically with the queue and local
@@ -310,6 +339,10 @@ class OfflineFinancialWriteService {
           ..._receiptProjection(localId, receiptExtraction),
       };
       await _cache.saveTransactionDetail(businessId, localId, detail);
+      if (payrollOperation != null) {
+        await PayrollExpenseLinkStore(_database)
+            .link(businessId, payrollOperation, localId);
+      }
       return detail;
     });
   }
