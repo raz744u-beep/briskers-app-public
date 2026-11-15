@@ -53,7 +53,7 @@ void main() {
     final expenses = await File('lib/screens/expenses_screen.dart').readAsString();
     expect(jobs, contains("tooltip: 'New Job'"));
     expect(jobs, contains('onPressed: _createNewJob'));
-    expect(documents, contains("ValueKey('documents-inline-new')"));
+    expect(documents, contains("floatingActionButtonLocation: FloatingActionButtonLocation.endFloat"));
     expect(documents, contains('onPressed: _showCloseInvoices'));
     expect(expenses, contains("ValueKey('expenses-new-floating')"));
     expect(expenses, contains('onPressed: _importing ? null : _showAddMenu'));
