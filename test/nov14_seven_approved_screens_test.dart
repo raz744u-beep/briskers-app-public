@@ -345,17 +345,22 @@ void main() {
     ), GlobalKey()));
     await settle(t);
     await t.tap(find.text('Edit Details'));
-    await t.pumpAndSettle();
+    await t.pump(const Duration(milliseconds: 300));
     expect(find.text('Default payment method'), findsOneWidget);
     await t.enterText(find.widgetWithText(TextFormField, 'Hourly rate'), '40.00');
     final method = find.widgetWithText(DropdownButtonFormField<String>, 'Default payment method');
     await t.ensureVisible(method);
     await t.tap(method);
-    await t.pumpAndSettle();
+    await t.pump(const Duration(milliseconds: 300));
     await t.tap(find.text('Zelle').last);
-    await t.pumpAndSettle();
+    await t.pump(const Duration(milliseconds: 300));
     await t.tap(find.text('Save').last);
-    await settle(t);
+    for (var i = 0; i < 30; i++) {
+      await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await t.pump();
+      if (((await t.runAsync(() => cache.read('shop', 'm', grant)))?['pending'] as Map?)
+              ?.containsKey('default_payment_method') == true) break;
+    }
     final saved = (await t.runAsync(() => cache.read('shop', 'm', grant)))!;
     expect(saved['pending'], {'hourly_rate': 40, 'default_payment_method': 'Zelle'});
     expect((saved['details'] as Map)['phone'], '5045550100');
