@@ -396,34 +396,32 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
                       style: const TextStyle(fontSize: 12),
                     ),
                     const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      children: [
-                        if (row['task_id'] is String &&
-                            widget.onOpenTask != null)
-                          ActionChip(
-                            avatar: const Icon(Icons.build_outlined, size: 16),
-                            label: const Text('View Task'),
+                    Row(children: [
+                        if (row['task_id'] is String && widget.onOpenTask != null)
+                          Expanded(child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 8), visualDensity: VisualDensity.compact),
                             onPressed: () => widget.onOpenTask!(row),
-                          ),
+                            icon: const Icon(Icons.build_outlined, size: 15),
+                            label: const FittedBox(fit: BoxFit.scaleDown, child: Text('View Task')),
+                          )),
+                        if (row['task_id'] is String && widget.onOpenTask != null && (job != null || invoice != null))
+                          const SizedBox(width: 5),
                         if (job != null)
-                          ActionChip(
-                            avatar: const Icon(Icons.work_outline, size: 16),
-                            label: const Text('Open Job'),
+                          Expanded(child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 8), visualDensity: VisualDensity.compact),
                             onPressed: () => widget.onOpenJob(job),
-                          ),
+                            icon: const Icon(Icons.work_outline, size: 15),
+                            label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Open Job')),
+                          )),
+                        if (job != null && invoice != null) const SizedBox(width: 5),
                         if (invoice != null)
-                          ActionChip(
-                            avatar: const Icon(
-                              Icons.receipt_long_outlined,
-                              size: 16,
-                            ),
-                            label: const Text('Open Invoice'),
+                          Expanded(child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 8), visualDensity: VisualDensity.compact),
                             onPressed: () => widget.onOpenInvoice(invoice),
-                          ),
-                      ],
-                    ),
+                            icon: const Icon(Icons.receipt_long_outlined, size: 15),
+                            label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Open Invoice')),
+                          )),
+                      ]),
                     if (row['task_id'] == null ||
                         job == null ||
                         invoice == null)
