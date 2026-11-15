@@ -5993,16 +5993,25 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           ),
         ],
       ),
-      bottomNavigationBar: Column(mainAxisSize: MainAxisSize.min, children: [
-        if (_canEditFindings || _canManage)
-          SafeArea(top: false, bottom: widget.bottomNavigationBar == null,
-            child: Align(alignment: Alignment.centerRight,
-              child: Padding(padding: const EdgeInsets.fromLTRB(12,4,12,6),
-                child: FloatingActionButton.extended(
-        onPressed: _busy ? null : _showNewMenu, backgroundColor: BriskersColors.jobs, foregroundColor: Colors.white, icon: const Icon(Icons.add), label: const Text('New', style: TextStyle(fontWeight: FontWeight.w800)),
-      )))),
-        if (widget.bottomNavigationBar != null) widget.bottomNavigationBar!,
-      ]),
+      // The navigation dock is the only bottom bar. Keep the New action
+      // floating above it so the surrounding area remains transparent.
+      bottomNavigationBar: widget.bottomNavigationBar,
+      floatingActionButton: (_canEditFindings || _canManage) &&
+              MediaQuery.viewInsetsOf(context).bottom == 0
+          ? FloatingActionButton.extended(
+              heroTag: 'job-detail-new-${widget.jobId}',
+              onPressed: _busy ? null : _showNewMenu,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              backgroundColor: BriskersColors.jobs,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
+            )
+          : null,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       body: Stack(
         children: [
           RefreshIndicator(
