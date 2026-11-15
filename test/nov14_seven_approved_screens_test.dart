@@ -362,7 +362,7 @@ void main() {
     await settle(t);
     await t.scrollUntilVisible(find.text('SSN'), 250);
     expect(find.text('***-**-6789'), findsOneWidget);
-    await t.tap(find.widgetWithText(TextButton, 'Show'));
+    await t.tap(find.text('Show'));
     await t.pump();
     expect(revealCalls, 0);
     expect(find.textContaining('Full SSN needs an online Owner connection'), findsOneWidget);

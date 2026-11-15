@@ -920,7 +920,10 @@ class _LocalEmployeeDetailsScreenState
                   ),
                 ),
                 if (actionLabel != null && onTap != null)
-                  TextButton(onPressed: onTap, child: Text(actionLabel))
+                  Text(actionLabel, style: const TextStyle(
+                    color: taskBlue, fontWeight: FontWeight.w700,
+                    decoration: TextDecoration.underline,
+                  ))
                 else if (onTap != null)
                   Icon(link ? Icons.open_in_new : Icons.chevron_right, size: 19),
               ],
