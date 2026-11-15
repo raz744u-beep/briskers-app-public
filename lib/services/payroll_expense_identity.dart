@@ -42,6 +42,44 @@ class PayrollExpenseIdentity {
     return matches.single['id'].toString();
   }
 
+  /// Build a financial row only from an immutable, verified payment and
+  /// already-resolved account/category identities. No cashflow is posted here.
+  static Map<String, dynamic> expenseProjection({
+    required String businessId,
+    required Map<String, dynamic> payment,
+    required String employeeName,
+    required String accountId,
+    required String categoryId,
+  }) {
+    final cents = verifiedNetCents(payment);
+    if (businessId.trim().isEmpty || employeeName.trim().isEmpty ||
+        accountId.trim().isEmpty || categoryId.trim().isEmpty ||
+        cents == 0) {
+      throw StateError('Payroll expense requires verified positive net and saved options.');
+    }
+    final operationId = payment['operation_id'] as String;
+    final date = DateTime.parse(payment['verified_date'] as String);
+    final dateText = date.toIso8601String().split('T').first;
+    final amount = cents / 100;
+    return <String, dynamic>{
+      'id': transactionId(businessId, operationId),
+      'business_id': businessId,
+      'payroll_operation_id': operationId,
+      'direction': 'expense',
+      'amount': amount,
+      'signed_amount': -amount,
+      'date': dateText,
+      'transaction_date': dateText,
+      'counterparty': employeeName.trim(),
+      'category': 'Payroll',
+      'category_id': categoryId,
+      'account': 'Business Checking – 9858',
+      'account_id': accountId,
+      'payment_method': payment['method'],
+      'remarks': 'Verified payroll payment',
+    };
+  }
+
   /// Decide whether a verified settlement needs a financial projection.
   ///
   /// Existing expenses are matched by a durable operation link, never by
