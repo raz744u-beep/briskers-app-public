@@ -439,7 +439,6 @@ class LocalFinancialCache {
     final saved=<String,dynamic>{...?summary,
       if(detail!=null) for(final field in detail.entries)
         if(field.value!=null)field.key:field.value};
-    final recurring=saved['recurring_rule_id']!=null || saved['recurring_engine_owned']==true;
     // A historical posted row may have been downloaded before detail caching
     // existed. Only hydrate from the exact matching saved transaction when
     // all required edit fields are present. Never open a blank edit form.
