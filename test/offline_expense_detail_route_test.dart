@@ -163,6 +163,20 @@ void main() {
     expect(find.text('Delete transaction'), findsNothing);
   });
 
+  testWidgets('Owner can access Edit on historical full detail marked read-only', (
+    tester,
+  ) async {
+    final detail = _fullDetail()
+      ..['editable'] = false
+      ..['deletable'] = false;
+    await open(tester, api: _Api(), cache: _Cache(database, detail: detail));
+    expect(find.text('Saved full detail'), findsOneWidget);
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit transaction'), findsOneWidget);
+    expect(find.text('Delete transaction'), findsNothing);
+  });
+
   testWidgets('offline linked summary opens read-only without cached detail', (
     tester,
   ) async {
