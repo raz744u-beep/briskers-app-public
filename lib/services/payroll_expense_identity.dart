@@ -26,6 +26,22 @@ class PayrollExpenseIdentity {
     return net;
   }
 
+  /// Resolve a real cached financial option, never synthesize an account or
+  /// category ID. Duplicate labels are ambiguous and require Owner review.
+  static String? uniqueOptionId(
+    List<Map<String, dynamic>> options,
+    String expectedName,
+  ) {
+    final matches = options.where((row) {
+      final name = (row['name'] ?? row['label'])?.toString().trim();
+      return name != null &&
+          name.toLowerCase() == expectedName.trim().toLowerCase() &&
+          row['id']?.toString().trim().isNotEmpty == true;
+    }).toList();
+    if (matches.length != 1) return null;
+    return matches.single['id'].toString();
+  }
+
   /// Decide whether a verified settlement needs a financial projection.
   ///
   /// Existing expenses are matched by a durable operation link, never by
