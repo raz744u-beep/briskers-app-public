@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/connection_mode.dart';
 import '../../core/formatters.dart';
 import '../../local/local_database_provider.dart';
@@ -86,14 +87,32 @@ class _LocalEmployeeDetailsScreenState
   }
 
   void connectionChanged() {
+    if (mounted) setState(() {});
     if (!BriskersConnectionModeController.instance.forceOffline && !editing) {
       unawaited(load());
     }
   }
 
+  String syncFailure(Object error) {
+    if (error is PostgrestException) {
+      final code = error.code;
+      if (code == 'P0002') {
+        return 'This employee ID was not found in the connected shop. Existing local records are unchanged. Contact support before editing this profile.';
+      }
+      if (code == '42501' || code == 'PGRST301') {
+        return 'The server did not authorize this Owner session. Sign in again as Owner, then tap Refresh / Sync. Existing local records are unchanged.';
+      }
+      return 'Could not load existing employee information (server code ${code ?? 'unknown'}). Check the Owner connection and tap Refresh / Sync. Existing records are unchanged.';
+    }
+    if (error is StateError && '$error'.contains('identity differs')) {
+      return 'The employee ID does not match the server profile. Existing records are unchanged. Contact support before editing.';
+    }
+    return 'Could not load existing employee information. Check the Owner connection and tap Refresh / Sync. Existing records are unchanged.';
+  }
+
   Future<void> load() async {
     if (busy) return;
-    busy = true;
+    setState(() => busy = true);
     try {
       final access =
           await (widget.unlockOwner?.call(widget.businessId) ??
@@ -118,15 +137,15 @@ class _LocalEmployeeDetailsScreenState
               conflicts = error.fields;
             });
           }
-        } catch (_) {
+        } catch (error) {
           if (mounted) {
             await readLocal();
-            setState(
-              () => message =
-                  'Saved details remain available. Connect as Owner and tap Refresh / Sync to load or send existing employee information.',
-            );
+            setState(() => message = syncFailure(error));
           }
         }
+      } else if (mounted && details.isEmpty) {
+        setState(() => message =
+            'Turn off Force Offline, then tap Load Existing Details once. No existing employee information has been changed.');
       }
     } catch (_) {
       if (mounted) {
@@ -372,10 +391,6 @@ class _LocalEmployeeDetailsScreenState
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (!nicknameOnly && details.isEmpty)
-                    const Text(
-                      'Connect once to securely save the existing employee profile. Unknown fields cannot be replaced with a blank profile.',
-                    ),
                   if (!nicknameOnly)
                     for (final entry in fields.entries)
                       Padding(
@@ -487,11 +502,13 @@ class _LocalEmployeeDetailsScreenState
                     decoration: const InputDecoration(
                       labelText: 'Nickname (optional)',
                       border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                     ),
                   ),
+                  const SizedBox(height: 10),
                   const Text(
-                    'Saved locally. Existing payments and paid hours stay unchanged.',
-                    style: TextStyle(fontSize: 12),
+                    'Saving a nickname keeps existing payments and paid hours unchanged.',
+                    style: TextStyle(fontSize: 13, height: 1.35),
                   ),
                 ],
               ),
@@ -867,11 +884,36 @@ class _LocalEmployeeDetailsScreenState
               style: OutlinedButton.styleFrom(
                 visualDensity: VisualDensity.compact,
               ),
-              onPressed: grant == null ? null : () => editDetails(),
+              onPressed: grant == null || details.isEmpty ? null : () => editDetails(),
               icon: const Icon(Icons.edit_outlined),
               label: const Text('Edit Details'),
             ),
           ),
+          if (grant != null && details.isEmpty)
+            Card(
+              color: const Color(0xFFEAF3FA),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Load existing employee details',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 8),
+                    Text(BriskersConnectionModeController.instance.forceOffline
+                        ? 'Turn off Force Offline first. This device has not saved the existing profile yet.'
+                        : 'Connect as Owner to securely save the existing profile on this device. Empty fields cannot overwrite it.'),
+                    const SizedBox(height: 8),
+                    FilledButton.icon(
+                      onPressed: busy || BriskersConnectionModeController.instance.forceOffline
+                          ? null : load,
+                      icon: const Icon(Icons.sync),
+                      label: const Text('Load Existing Details'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           if (conflicts.isNotEmpty)
             OutlinedButton.icon(
               onPressed: reviewConflicts,
@@ -913,7 +955,7 @@ class _LocalEmployeeDetailsScreenState
                   child: Column(
                     children: [
                       detail(
-                        'Default Payment Method',
+                        'Pay Method',
                         value('default_payment_method'),
                         Icons.credit_card,
                         onTap: grant != null &&

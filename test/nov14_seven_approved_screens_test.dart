@@ -333,6 +333,28 @@ void main() {
       await t.pumpWidget(const SizedBox.shrink());
     },
   );
+  testWidgets('an empty local employee profile asks for an online load without opening a blank editor',
+      (t) async {
+    size(t, width: 360, height: 780);
+    final key = GlobalKey();
+    await t.pumpWidget(app(LocalEmployeeDetailsScreen(
+      businessId: 'shop', employeeId: 'm', rosterName: 'Synthetic Mechanic',
+      rosterPosition: 'Mechanic', nicknameStore: Nicknames(),
+      unlockOwner: auth.authorizeSession,
+    ), key));
+    await settle(t);
+    expect(find.text('Load existing employee details'), findsOneWidget);
+    expect(find.textContaining('Turn off Force Offline first'), findsOneWidget);
+    expect(t.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Edit Details')).onPressed,
+        isNull);
+    await t.scrollUntilVisible(find.text('Nickname'), 250);
+    await t.tap(find.text('Nickname'));
+    await t.pumpAndSettle();
+    expect(find.text('Edit Nickname'), findsOneWidget);
+    expect(find.textContaining('Connect once'), findsNothing);
+    expect(t.takeException(), isNull);
+    await t.pumpWidget(const SizedBox.shrink());
+  });
   testWidgets(
     'compact summary and real editable gross retain payment arithmetic',
     (t) async {
