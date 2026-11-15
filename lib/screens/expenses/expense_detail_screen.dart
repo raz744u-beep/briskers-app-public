@@ -1657,7 +1657,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     final recordGeneration = _recordGeneration;
     final income = detail['direction']?.toString() == 'income';
     final editable = detail['editable'] == true;
-    final ownerCanEdit = widget.canDeleteTransaction;
+    // A list-only preview cannot safely open an edit form. Owner access is
+    // unrestricted by transaction age once a real local/server detail loads.
+    final ownerCanEdit = widget.canDeleteTransaction && _detailSource != 'preview';
     final deletable =
         widget.canDeleteTransaction &&
         _canDeleteRecords &&
