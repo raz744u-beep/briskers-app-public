@@ -307,8 +307,15 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       if (!_isCurrent(generation) || _hasAuthoritativeDetail || saved == null) {
         return;
       }
+      // A cached historical detail is a valid edit source while the online
+      // refresh is pending. Require a complete matching edit target; the
+      // server still enforces mutation permissions on save.
+      final editTarget = await _localFinancial.loadTransactionForEdit(
+        widget.businessId, widget.transactionId,
+      );
+      if (!_isCurrent(generation) || _hasAuthoritativeDetail) return;
       final detail = _normalizedDetail(saved)
-        ..['editable'] = saved['recurring_engine_owned'] == true
+        ..['editable'] = editTarget != null
         ..['deletable'] = false;
       setState(() {
         _detail = detail;
