@@ -256,14 +256,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         });
         return;
       }
-      // An offline preview is not an editable financial record. Require an
-      // exact, fully hydrated saved edit target before offering Edit.
-      final editTarget = await _localFinancial.loadTransactionForEdit(
-        businessId, transactionId,
-      );
-      if (!mounted || !_isCurrent(generation)) return;
       final detail = _normalizedDetail(rawDetail)
-        ..['editable'] = editTarget != null
+        ..['editable'] = saved != null
         ..['deletable'] = false;
       setState(() {
         _detail = detail;
@@ -307,15 +301,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       if (!_isCurrent(generation) || _hasAuthoritativeDetail || saved == null) {
         return;
       }
-      // A cached historical detail is a valid edit source while the online
-      // refresh is pending. Require a complete matching edit target; the
-      // server still enforces mutation permissions on save.
-      final editTarget = await _localFinancial.loadTransactionForEdit(
-        widget.businessId, widget.transactionId,
-      );
-      if (!_isCurrent(generation) || _hasAuthoritativeDetail) return;
       final detail = _normalizedDetail(saved)
-        ..['editable'] = editTarget != null
+        ..['editable'] = saved['recurring_engine_owned'] == true
         ..['deletable'] = false;
       setState(() {
         _detail = detail;
