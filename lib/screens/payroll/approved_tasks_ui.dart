@@ -467,10 +467,10 @@ class ApprovedProfileTabs extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = DefaultTabController.of(context);
     const entries = [
-      ('Work', taskBlue),
-      ('Payroll', taskGreen),
-      ('Reports', Color(0xFF9500C7)),
-      ('Taxes', Color(0xFF62666D)),
+      ('Work', Color(0xFF52647B)),
+      ('Payroll', Color(0xFF52647B)),
+      ('Reports', Color(0xFF52647B)),
+      ('Taxes', Color(0xFF52647B)),
     ];
     return AnimatedBuilder(
       animation: controller,
@@ -511,7 +511,7 @@ class ApprovedProfileTabs extends StatelessWidget {
                                   ),
                                 ),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 9),
                             child: FittedBox(
                               fit: BoxFit.scaleDown,
                               child: Row(
@@ -523,13 +523,13 @@ class ApprovedProfileTabs extends StatelessWidget {
                                       Icons.bar_chart,
                                       Icons.description_outlined,
                                     ][i],
-                                    size: 19,
+                                    size: 16,
                                   ),
-                                  const SizedBox(width: 4),
+                                  const SizedBox(width: 3),
                                   Text(
                                     entry.$1,
                                     style: const TextStyle(
-                                      fontSize: 17,
+                                      fontSize: 14,
                                       fontWeight: FontWeight.w800,
                                     ),
                                   ),
