@@ -237,13 +237,13 @@ void main() {
       final fixedBounds=t.getRect(stripe);
       await shot(t, key, 'work-overview');
       await t.tap(find.text('Review & Pay'));await t.pumpAndSettle();
-      expect(t.widget<ColoredBox>(stripe).color,taskGreen);
+      expect(t.widget<ColoredBox>(stripe).color,const Color(0xFF52647B));
       expect(find.text('Oil Change'),findsOneWidget,reason:'Payroll retains individual labor selection');
       expect(find.byType(Checkbox),findsWidgets);
       await t.drag(find.byKey(const Key('employee-payroll-preparation')),const Offset(0,-400));await t.pumpAndSettle();
       expect(t.getRect(stripe),fixedBounds,reason:'Stripe stays pinned while Payroll scrolls');
       await t.tap(find.text('Work'));await t.pumpAndSettle();
-      expect(t.widget<ColoredBox>(stripe).color,taskBlue);
+      expect(t.widget<ColoredBox>(stripe).color,const Color(0xFF52647B));
       // A smaller viewport must scroll to the same end without moving the tab row.
       t.view.physicalSize=const Size(360,640);await t.pumpAndSettle();
       final smallStripe=t.getRect(stripe);
