@@ -256,8 +256,14 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         });
         return;
       }
+      // An offline preview is not an editable financial record. Require an
+      // exact, fully hydrated saved edit target before offering Edit.
+      final editTarget = await _localFinancial.loadTransactionForEdit(
+        businessId, transactionId,
+      );
+      if (!mounted || !_isCurrent(generation)) return;
       final detail = _normalizedDetail(rawDetail)
-        ..['editable'] = saved != null
+        ..['editable'] = editTarget != null
         ..['deletable'] = false;
       setState(() {
         _detail = detail;
