@@ -270,6 +270,22 @@ class OfflineFinancialWriteService {
     }
 
     return _database.transaction(() async {
+      if (payrollOperation != null) {
+        // A caller cannot create a "payroll" expense from an unverified
+        // draft or arbitrary amount: require the immutable payroll receipt.
+        final receipts = await _database.customSelect(
+          'SELECT net FROM regular_payroll_payments '
+          'WHERE business_id=? AND operation_id=?',
+          variables: [
+            Variable<String>(businessId),
+            Variable<String>(payrollOperation),
+          ],
+        ).get();
+        if (receipts.length != 1 ||
+            receipts.single.read<int>('net') != (amount * 100).round()) {
+          throw StateError('Verified payroll settlement does not match expense.');
+        }
+      }
       await _enqueue(businessId, 'financial_create', localId, 'create', {
         'operation_id': operationId,
         'local_transaction_id': localId,
