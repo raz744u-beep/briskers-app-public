@@ -19,6 +19,38 @@ void main() {
     expect(PayrollExpenseIdentity.verifiedNetCents(payment), 65000);
   });
 
+  test('backfill only when no exact operation link exists', () {
+    final payment = {
+      'operation_id': 'pay-1', 'verified_date': '2026-11-13',
+      'gross': 70000, 'repayment': 5000, 'net': 65000,
+    };
+    final expense = {
+      'id': 'existing-expense', 'business_id': 'shop',
+      'payroll_operation_id': 'pay-1', 'direction': 'expense',
+      'amount': 650.0,
+    };
+    expect(PayrollExpenseIdentity.classify(
+      businessId: 'shop', payment: payment, existingExpenses: []),
+      PayrollExpenseDecision.create);
+    expect(PayrollExpenseIdentity.classify(
+      businessId: 'shop', payment: payment, existingExpenses: [expense]),
+      PayrollExpenseDecision.alreadyLinked);
+    expect(PayrollExpenseIdentity.classify(
+      businessId: 'shop', payment: payment,
+      existingExpenses: [expense, {...expense, 'id': 'duplicate'}]),
+      PayrollExpenseDecision.review);
+    expect(PayrollExpenseIdentity.classify(
+      businessId: 'shop', payment: payment,
+      existingExpenses: [{...expense, 'amount': 700.0}]),
+      PayrollExpenseDecision.review);
+    // A coincidental employee/date/amount match is not payment proof.
+    expect(PayrollExpenseIdentity.classify(
+      businessId: 'shop', payment: payment,
+      existingExpenses: [{'id': 'unlinked', 'direction': 'expense',
+        'amount': 650.0, 'counterparty': 'Chris'}]),
+      PayrollExpenseDecision.create);
+  });
+
   test('rejects draft, incomplete, or inconsistent payments', () {
     final valid = {
       'operation_id': 'verified-1', 'verified_date': '2026-11-13',
