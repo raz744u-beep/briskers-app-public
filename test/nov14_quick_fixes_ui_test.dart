@@ -57,7 +57,7 @@ void main(){
     size(t);
     final boundary=GlobalKey();
     const labels=['Work','Payroll','Reports','Taxes'];
-    const colors=[taskBlue,taskGreen,Color(0xFF9500C7),Color(0xFF62666D)];
+    const colors=[Color(0xFF52647B),Color(0xFF52647B),Color(0xFF52647B),Color(0xFF52647B)];
     await t.pumpWidget(MaterialApp(home:DefaultTabController(length:4,child:Scaffold(body:Column(children:[
       RepaintBoundary(key:boundary,child:const ApprovedProfileTabs()),
       Expanded(child:TabBarView(children:[for(final n in labels)Text('$n body')])),
