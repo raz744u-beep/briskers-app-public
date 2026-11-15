@@ -31,5 +31,44 @@ try {
  await assert.rejects(patch({phone:'5045550101'},{phone:'5045550102'}),/Owner access/);
  assert.equal((await db.query('select email from briskers.employees')).rows[0].email,'fixture@example.invalid');
  assert.equal((await db.query("select has_function_privilege('anon','public.briskers_patch_employee_details_v1(uuid,uuid,jsonb,jsonb)','execute') allowed")).rows[0].allowed,false);
- console.log('Passed: Owner access, explicit baseline, conflict preservation, retry deduplication, protected-field rejection, contact edits preserve compensation and other fields.');
+ // A real profile already has contact, compensation and protected tax data.
+ // Installing metadata columns must leave each existing value and row intact.
+ await db.exec(`update briskers.memberships set role_code='owner';
+ alter table briskers.employees add column compensation_enabled boolean default true;
+ alter table briskers.employees add column payment_type text default 'hourly';
+ alter table briskers.employees add column user_id uuid;
+ alter table briskers.employee_positions add column name text default 'Mechanic';
+ create table briskers.employee_compensation(business_id uuid,employee_id uuid,
+   payment_type text,hourly_rate numeric,weekly_rate numeric,effective_from date);
+ insert into briskers.employee_compensation values('${shop}','${employee}','hourly',35,null,current_date);
+ create table briskers.employee_private(business_id uuid,employee_id uuid,ssn_last4 text);
+ insert into briskers.employee_private values('${shop}','${employee}','1234');`);
+ const original=(await db.query('select display_name,phone,email,address,row_version from briskers.employees')).rows[0];
+ await db.exec(readFileSync(new URL('../../../supabase/migrations/20261115165703_employee_details_metadata_sync.sql',import.meta.url),'utf8'));
+ const unchanged=(await db.query('select display_name,phone,email,address,row_version from briskers.employees')).rows[0];
+ assert.deepEqual(unchanged,original);
+ const metadata=async()=> (await db.query('select public.briskers_employee_profile_metadata_v1($1,$2) result',[shop,employee])).rows[0].result;
+ const saveMetadata=async(base,change)=> (await db.query('select public.briskers_patch_employee_profile_metadata_v1($1,$2,$3,$4) result',[shop,employee,base,change])).rows[0].result;
+ assert.deepEqual(await metadata(),{id:employee,nickname:'',default_payment_method:null});
+ const fullDetail=async()=> (await db.query('select public.briskers_employee_settings_detail($1,$2) result',[shop,employee])).rows[0].result;
+ assert.equal((await fullDetail()).ssn_last4,'1234');
+ assert.equal((await saveMetadata({nickname:''},{nickname:'Kam'})).conflict,false);
+ assert.equal((await saveMetadata({nickname:''},{nickname:'Kam'})).conflict,false);
+ assert.equal((await db.query('select row_version from briskers.employees')).rows[0].row_version,3);
+ assert.equal((await saveMetadata({default_payment_method:null},{default_payment_method:'Zelle'})).conflict,false);
+ assert.equal((await metadata()).default_payment_method,'Zelle');
+ assert.equal((await saveMetadata({nickname:''},{nickname:'Other name'})).conflict,true);
+ assert.equal((await metadata()).nickname,'Kam');
+ assert.equal((await saveMetadata({}, {nickname:''})).conflict,true);
+ await assert.rejects(saveMetadata({ssn_last4:'1234'},{ssn_last4:'0000'}),/Unsupported/);
+ await assert.rejects(saveMetadata({default_payment_method:'Zelle'},{default_payment_method:'Wire'}),/Invalid payment method/);
+ assert.equal((await db.query('select email from briskers.employees')).rows[0].email,'fixture@example.invalid');
+ assert.equal((await db.query('select count(*)::int n from briskers.employee_compensation_calls')).rows[0].n,0);
+ await db.exec("update briskers.memberships set role_code='office'");
+ assert.equal((await fullDetail()).ssn_last4,null);
+ await assert.rejects(metadata(),/Owner access/);
+ await assert.rejects(saveMetadata({nickname:'Kam'},{nickname:'New'}),/Owner access/);
+ assert.equal((await db.query("select has_function_privilege('anon','public.briskers_employee_profile_metadata_v1(uuid,uuid)','execute') allowed")).rows[0].allowed,false);
+ assert.equal((await db.query("select has_function_privilege('anon','public.briskers_patch_employee_profile_metadata_v1(uuid,uuid,jsonb,jsonb)','execute') allowed")).rows[0].allowed,false);
+ console.log('Passed: existing details retained; Owner-only tax metadata, explicit patch, conflict and retry safety, unrelated payroll/contact preserved.');
 }finally{await db.close();}

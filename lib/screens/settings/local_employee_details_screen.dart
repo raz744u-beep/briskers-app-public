@@ -4,7 +4,6 @@ import '../../core/connection_mode.dart';
 import '../../core/formatters.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/device_owner_authorization.dart';
-import '../../services/briskers_api.dart';
 import '../../services/employee_nickname_store.dart';
 import '../../services/local_employee_details.dart';
 import '../../services/local_owner_authorization.dart';
@@ -103,17 +102,9 @@ class _LocalEmployeeDetailsScreenState
               ));
       grant = access;
       await readLocal();
-      unawaited(
-        nicknames
-            .get(widget.businessId, widget.employeeId)
-            .then((value) {
-              if (mounted) setState(() => nickname = value ?? '');
-            })
-            .catchError((Object _) {}),
-      );
       if (!BriskersConnectionModeController.instance.forceOffline) {
         try {
-          await const LocalEmployeeDetails().sync(
+          await LocalEmployeeDetails(nicknameStore: nicknames).sync(
             widget.businessId,
             widget.employeeId,
             access,
@@ -129,9 +120,10 @@ class _LocalEmployeeDetailsScreenState
           }
         } catch (_) {
           if (mounted) {
+            await readLocal();
             setState(
               () => message =
-                  'Saved local details remain available. Sync could not complete; retry when connected.',
+                  'Saved details remain available. Connect as Owner and tap Refresh / Sync to load or send existing employee information.',
             );
           }
         }
@@ -165,21 +157,42 @@ class _LocalEmployeeDetailsScreenState
         .where((row) => row['id'] == widget.employeeId)
         .firstOrNull;
     final defaults = await repo.weeklyDefaults(widget.employeeId);
+    String? savedAlias;
+    try {
+      savedAlias = await nicknames.get(widget.businessId, widget.employeeId);
+    } catch (_) {
+      // A nickname storage failure cannot hide protected employee details.
+    }
     grant!.assertValid(widget.businessId, grant!.actorId);
     if (!mounted) return;
+    final savedDetails = Map<String, dynamic>.from(value?['details'] as Map? ?? {});
+    final verifiedType = savedDetails['payment_type']?.toString();
+    final verifiedRate = num.tryParse(
+      '${savedDetails[verifiedType == 'fixed_weekly' ? 'weekly_rate' : 'hourly_rate'] ?? ''}',
+    );
     setState(() {
-      localPayType = employee == null
+      localPayType = verifiedType == 'hourly' || verifiedType == 'fixed_weekly'
+          ? verifiedType
+          : employee == null
           ? null
           : employee['base_enabled'] == 1
           ? 'fixed_weekly'
           : 'hourly';
-      localPayCents = employee == null
+      localPayCents = verifiedRate != null
+          ? (verifiedRate * 100).round()
+          : employee == null
           ? null
           : localPayType == 'fixed_weekly'
           ? (defaults?['base_cents'] as int?)
           : (employee['rate'] as int?);
-      details = Map<String, dynamic>.from(value?['details'] as Map? ?? {});
+      details = savedDetails;
       pending = Map<String, dynamic>.from(value?['pending'] as Map? ?? {});
+      final syncedAlias = savedDetails['nickname']?.toString() ?? '';
+      nickname = savedDetails.containsKey('nickname') &&
+              (syncedAlias.isNotEmpty || pending.containsKey('nickname') ||
+                  (savedAlias ?? '').isEmpty)
+          ? syncedAlias
+          : savedAlias ?? '';
       message = value == null
           ? 'Contact and tax details are not saved locally yet. The existing server record has not been removed.'
           : pending.isEmpty
@@ -198,9 +211,9 @@ class _LocalEmployeeDetailsScreenState
     editing = true;
     try {
       BriskersConnectionModeController.instance.ensureNetworkAllowed();
-      final remote = await const BriskersApi()
-          .employeeSettingsDetail(widget.businessId, widget.employeeId)
-          .timeout(const Duration(seconds: 10));
+      final remote = await const LocalEmployeeDetails().remoteDetail(
+        widget.businessId, widget.employeeId, grant!,
+      );
       grant!.assertValid(widget.businessId, grant!.actorId);
       final reviewed = {
         for (final key in conflicts)
@@ -256,6 +269,12 @@ class _LocalEmployeeDetailsScreenState
           keepLocal,
           grant!,
         );
+        if (!keepLocal && reviewed.containsKey('nickname')) {
+          await nicknames.save(
+            widget.businessId, widget.employeeId,
+            remote['nickname']?.toString() ?? '',
+          );
+        }
         if (!keepLocal &&
             reviewed.keys.any(
               (key) =>
@@ -305,7 +324,17 @@ class _LocalEmployeeDetailsScreenState
           k: TextEditingController(text: details[k]?.toString() ?? ''),
     };
     final alias = TextEditingController(text: nickname);
-    _editControllers.addAll([...fields.values, alias]);
+    var payType = details['payment_type']?.toString() ?? 'hourly';
+    if (!['hourly', 'fixed_weekly'].contains(payType)) payType = 'hourly';
+    final payRate = TextEditingController(
+      text: localPayCents == null
+          ? '${details[payType == 'hourly' ? 'hourly_rate' : 'weekly_rate'] ?? ''}'
+          : (localPayCents! / 100).toStringAsFixed(2),
+    );
+    var method = details['default_payment_method']?.toString() ?? '';
+    final initialPayType = payType;
+    final initialAmount = num.tryParse(payRate.text);
+    _editControllers.addAll([...fields.values, alias, payRate]);
     final form = GlobalKey<FormState>();
     var active = details['active'] == true;
     var position = details['position_id']?.toString();
@@ -403,6 +432,55 @@ class _LocalEmployeeDetailsScreenState
                       value: active,
                       onChanged: (v) => update(() => active = v),
                     ),
+                  if (!nicknameOnly && details['compensation_enabled'] == true &&
+                      details.containsKey('payment_type')) ...[
+                    DropdownButtonFormField<String>(
+                      initialValue: payType,
+                      decoration: const InputDecoration(labelText: 'Payment type'),
+                      items: const [
+                        DropdownMenuItem(value: 'hourly', child: Text('Hourly')),
+                        DropdownMenuItem(value: 'fixed_weekly', child: Text('Fixed weekly')),
+                      ],
+                      onChanged: (v) => update(() {
+                        payType = v!;
+                        payRate.text = '${details[v == 'hourly' ? 'hourly_rate' : 'weekly_rate'] ?? ''}';
+                      }),
+                    ),
+                    TextFormField(
+                      controller: payRate,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: InputDecoration(
+                        labelText: payType == 'hourly' ? 'Hourly rate' : 'Weekly pay',
+                        prefixText: r'$ ',
+                      ),
+                      validator: (v) {
+                        if ((v ?? '').trim().isEmpty &&
+                            initialAmount == null && payType == initialPayType) {
+                          return null; // Preserve an existing unknown rate.
+                        }
+                        final amount = num.tryParse(v ?? '');
+                        return amount == null || !amount.isFinite || amount < 0 ||
+                                amount > 1000000 || ((amount * 100).round() - amount * 100).abs() > 0.00001
+                            ? 'Enter a valid amount with at most two decimals'
+                            : null;
+                      },
+                    ),
+                  ],
+                  if (!nicknameOnly && details.containsKey('default_payment_method'))
+                    DropdownButtonFormField<String>(
+                      initialValue: method,
+                      decoration: const InputDecoration(labelText: 'Default payment method'),
+                      items: const [
+                        DropdownMenuItem(value: '', child: Text('Not set')),
+                        DropdownMenuItem(value: 'Cash', child: Text('Cash')),
+                        DropdownMenuItem(value: 'Zelle', child: Text('Zelle')),
+                        DropdownMenuItem(value: 'Check', child: Text('Check')),
+                        DropdownMenuItem(value: 'ACH', child: Text('ACH')),
+                        DropdownMenuItem(value: 'Card', child: Text('Card')),
+                        DropdownMenuItem(value: 'Other', child: Text('Other')),
+                      ],
+                      onChanged: (v) => update(() => method = v ?? ''),
+                    ),
                   TextFormField(
                     controller: alias,
                     maxLength: 32,
@@ -436,7 +514,15 @@ class _LocalEmployeeDetailsScreenState
     );
     try {
       if (saved == true) {
-        final patch = {
+        final payEnabled = !nicknameOnly && details['compensation_enabled'] == true &&
+            details.containsKey('payment_type');
+        final amount = payEnabled ? num.tryParse(payRate.text) : null;
+        final payChanged = payEnabled &&
+            (payType != initialPayType ||
+                (amount == null ? initialAmount != null :
+                    initialAmount == null ||
+                    (amount * 100).round() != (initialAmount * 100).round()));
+        final patch = <String, dynamic>{
           if (!nicknameOnly &&
               details.containsKey('active') &&
               active != details['active'])
@@ -449,9 +535,34 @@ class _LocalEmployeeDetailsScreenState
                 e.key: e.key == 'phone'
                     ? digitsOnly(e.value.text)
                     : e.value.text.trim(),
+          if (payChanged) ...{
+            'payment_type': payType,
+            'hourly_rate': payType == 'hourly' ? amount : null,
+            'weekly_rate': payType == 'fixed_weekly' ? amount : null,
+          },
+          if (!nicknameOnly && details.containsKey('default_payment_method') &&
+              (method.isEmpty ? null : method) != details['default_payment_method'])
+            'default_payment_method': method.isEmpty ? null : method,
+          if (details.containsKey('nickname') && alias.text.trim() != nickname)
+            'nickname': alias.text.trim(),
         };
         if (patch.isNotEmpty) {
           await cache.edit(widget.businessId, widget.employeeId, patch, grant!);
+        }
+        if (payChanged) {
+          await LocalPayrollRepository(
+            localDatabase,
+            business: widget.businessId,
+            owner: true,
+            assertOwnerGrant: () => grant!.assertValid(widget.businessId, grant!.actorId),
+          ).saveLocalPayBasis(
+            employee: widget.employeeId,
+            name: fields['name']?.text.trim().isNotEmpty == true
+                ? fields['name']!.text.trim()
+                : value('name', fallback: widget.rosterName ?? 'Employee'),
+            paymentType: payType,
+            amountCents: (amount! * 100).round(),
+          );
         }
         grant!.assertValid(widget.businessId, grant!.actorId);
         await nicknames.save(widget.businessId, widget.employeeId, alias.text);
@@ -805,6 +916,10 @@ class _LocalEmployeeDetailsScreenState
                         'Default Payment Method',
                         value('default_payment_method'),
                         Icons.credit_card,
+                        onTap: grant != null &&
+                                details.containsKey('default_payment_method')
+                            ? () => editDetails()
+                            : null,
                       ),
                       detail('Position', role, Icons.engineering_outlined),
                     ],
