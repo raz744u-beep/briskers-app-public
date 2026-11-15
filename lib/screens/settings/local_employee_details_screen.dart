@@ -466,11 +466,9 @@ class _LocalEmployeeDetailsScreenState
                   if (!nicknameOnly && details.containsKey('active'))
                     Padding(
                       padding: const EdgeInsets.only(bottom: 16),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF2F6FA),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
+                      child: Material(
+                        color: const Color(0xFFF2F6FA),
+                        borderRadius: BorderRadius.circular(10),
                         child: SwitchListTile(
                           dense: true,
                           contentPadding: const EdgeInsets.symmetric(horizontal: 12),
