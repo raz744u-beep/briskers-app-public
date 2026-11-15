@@ -19,6 +19,39 @@ void main() {
     expect(PayrollExpenseIdentity.verifiedNetCents(payment), 65000);
   });
 
+  test('projection preserves verified net, method, date and operation', () {
+    final payment = {
+      'operation_id': 'paid-7', 'verified_date': '2026-11-13',
+      'gross': 80000, 'repayment': 15000, 'net': 65000,
+      'method': 'Zelle',
+    };
+    final row = PayrollExpenseIdentity.expenseProjection(
+      businessId: 'shop', payment: payment, employeeName: 'Chris',
+      accountId: 'saved-checking', categoryId: 'saved-payroll');
+    expect(row['id'], PayrollExpenseIdentity.transactionId('shop', 'paid-7'));
+    expect(row['payroll_operation_id'], 'paid-7');
+    expect(row['amount'], 650.0);
+    expect(row['signed_amount'], -650.0);
+    expect(row['transaction_date'], '2026-11-13');
+    expect(row['payment_method'], 'Zelle');
+    expect(row['account_id'], 'saved-checking');
+    expect(row['category_id'], 'saved-payroll');
+    expect(PayrollExpenseIdentity.classify(
+      businessId: 'shop', payment: payment, existingExpenses: [row]),
+      PayrollExpenseDecision.alreadyLinked);
+  });
+
+  test('zero-net settlement cannot produce a cash expense', () {
+    final payment = {
+      'operation_id': 'paid-zero', 'verified_date': '2026-11-13',
+      'gross': 10000, 'repayment': 10000, 'net': 0,
+    };
+    expect(() => PayrollExpenseIdentity.expenseProjection(
+      businessId: 'shop', payment: payment, employeeName: 'Chris',
+      accountId: 'saved-checking', categoryId: 'saved-payroll'),
+      throwsStateError);
+  });
+
   test('financial option resolution requires exactly one saved ID', () {
     final accounts = [
       {'id': 'real-checking-id', 'name': 'Business Checking – 9858'},
