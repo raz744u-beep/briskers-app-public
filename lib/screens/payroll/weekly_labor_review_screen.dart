@@ -398,7 +398,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                 isExpanded:true,
                 initialValue:method,
                 decoration:const InputDecoration(
-                  labelText:'Payment method',border:OutlineInputBorder(),),
+                  labelText:'Payment method',isDense:true,contentPadding:EdgeInsets.symmetric(horizontal:10,vertical:12),border:OutlineInputBorder(),),
                 items:const [
                   DropdownMenuItem(value:'Zelle',child:Text('Zelle')),
                   DropdownMenuItem(value:'Cash',child:Text('Cash')),
@@ -421,7 +421,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   if (date != null && dialog.mounted) { update(() => paidDate = date);
                     }
                 },
-                child:InputDecorator(decoration:const InputDecoration(labelText:'Payment date',border:OutlineInputBorder()),child:Row(children:[const Icon(Icons.calendar_today_outlined,size:18),const SizedBox(width:6),Expanded(child:Text(DateFormat.yMMMd().format(paidDate),maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:13)))])),
+                child:InputDecorator(decoration:const InputDecoration(labelText:'Payment date',isDense:true,contentPadding:EdgeInsets.symmetric(horizontal:10,vertical:12),border:OutlineInputBorder()),child:Row(children:[const Icon(Icons.calendar_today_outlined,size:18),const SizedBox(width:6),Expanded(child:Text(DateFormat.yMMMd().format(paidDate),maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:13)))])),
               )),]),
               if(debt>0) ...[
                 const SizedBox(height:8),
@@ -485,7 +485,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
               const SizedBox(height:9),
               TextField(controller:note,minLines:1,maxLines:2,
                 decoration:const InputDecoration(
-                  labelText:'Payment note or adjustment reason',
+                  labelText:'Optional payment note',
                   border:OutlineInputBorder(),),),
               const SizedBox(height:7),
               const Text('This records the payment in Briskers.',
@@ -908,7 +908,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                       : taskGreen,
                   fontFeatures: const [FontFeature.tabularFigures()],),),
             ),],),),);
-    Widget summary(String label,String value)=>Padding(padding:const EdgeInsets.symmetric(vertical:6),child:Row(children:[Expanded(child:Text(label)),Text(value,style:const TextStyle(fontWeight:FontWeight.w800)),],),);
+    Widget summary(String label,String value)=>Padding(padding:const EdgeInsets.symmetric(vertical:6),child:Row(crossAxisAlignment:CrossAxisAlignment.baseline,textBaseline:TextBaseline.alphabetic,children:[Expanded(child:Text(label)),Text(value,style:const TextStyle(fontWeight:FontWeight.w800)),],),);
     return ListView(key:const Key('employee-payroll-preparation'),padding: EdgeInsets.fromLTRB(12,
         12,
         12,
