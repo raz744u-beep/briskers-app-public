@@ -24,7 +24,7 @@ void main() {
       'if (BriskersConnectionModeController.instance.forceOffline) {',
       source.indexOf('Future<void> _createEstimateForCustomer()'),
     );
-    final nextStep = source.indexOf('final history = await _api.customerServiceHistory(',
+    final nextStep = source.indexOf('final history = await LocalJobRepository().forCustomer(',
         offlineStart);
     expect(offlineStart, greaterThan(0));
     expect(nextStep, greaterThan(offlineStart));

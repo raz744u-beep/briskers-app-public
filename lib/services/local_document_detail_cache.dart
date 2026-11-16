@@ -144,8 +144,8 @@ class LocalDocumentDetailCache {
     return _database.transaction(
       () => _serialized(key, () async {
         if (await _blocked(businessId, documentId, detail)) return;
-        final numbered = await _estimateNumber(businessId, documentId, detail);
-        final encoded = jsonEncode(numbered);
+        await _estimateNumber(businessId, documentId, detail);
+        final encoded = jsonEncode(detail);
         if (await RecoveryCommitStore.isOriginal(_database,businessId,documentId)) return;
         if (await RecoveryCommitStore.snapshot(_database,businessId,documentId) != null) {
           await _database.customStatement(
