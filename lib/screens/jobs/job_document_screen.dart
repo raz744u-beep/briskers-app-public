@@ -465,7 +465,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Future<Map<String, dynamic>> _numberedEstimate(Map<String, dynamic> detail) async {
     if (detail['kind'] != 'estimate' ||
-        LocalEstimateNumber.existing(detail['document_number']) != null) return detail;
+        LocalEstimateNumber.existing(detail['document_number']) != null) {
+      return detail;
+    }
     final id = detail['id']?.toString() ?? widget.documentId;
     final saved = await LocalEstimateNumber.stored(localDatabase, widget.businessId, id);
     return saved == null
