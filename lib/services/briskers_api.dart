@@ -1731,6 +1731,26 @@ class BriskersApi {
     return result.toString();
   }
 
+  Future<void> syncPayrollExpenseAmount(
+    String businessId, {
+    required String operation,
+    required String transactionId,
+    required num previous,
+    required num amount,
+    required String date,
+    required int revision,
+  }) async {
+    await networkSupabase.rpc('briskers_sync_payroll_expense_amount_v1', params: {
+      'p_business_id': businessId,
+      'p_payroll_operation': operation,
+      'p_transaction_id': transactionId,
+      'p_expected_amount': previous,
+      'p_amount': amount,
+      'p_verified_date': date,
+      'p_revision': revision,
+    });
+  }
+
   Future<void> syncPayrollExpenseReversal(
     String businessId, {
     required String operation,

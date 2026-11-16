@@ -19,7 +19,7 @@ class PayrollOwnerLedger {
     'regular_payroll_portions', 'local_mechanic_work_credits_v1', 'regular_payroll_progress_claims', 'regular_payroll_assignment_outgoing',
     'regular_payroll_advances', 'regular_payroll_payments',
     'regular_payroll_paid_work', 'regular_payroll_paid_base',
-    'regular_payroll_work_coverage', 'regular_payroll_reversals_v1', 'regular_payroll_weekly_defaults',
+    'regular_payroll_work_coverage', 'regular_payroll_reversals_v1', 'regular_payroll_amount_edits_v1', 'regular_payroll_weekly_defaults',
     'regular_payroll_audit', 'regular_payroll_sync_outbox',
     'regular_payroll_owner_prior_paid_v1',
     'regular_payroll_assignment_meta', 'regular_payroll_task_policy', 'regular_payroll_actual_time', 'regular_payroll_job_lead',
@@ -27,7 +27,7 @@ class PayrollOwnerLedger {
   static const immutable = {
     'regular_payroll_owner_prior_paid_v1',
     'regular_payroll_payments', 'regular_payroll_paid_work',
-    'regular_payroll_paid_base', 'regular_payroll_work_coverage', 'regular_payroll_reversals_v1',
+    'regular_payroll_paid_base', 'regular_payroll_work_coverage', 'regular_payroll_reversals_v1', 'regular_payroll_amount_edits_v1',
   };
   Future<void> prepare() async {
     await LocalPayrollRepository(db, business: business, owner: true).prepare();
@@ -50,10 +50,15 @@ class PayrollOwnerLedger {
 
   Future<String> export() async {
     await prepare();
-    return db.transaction(() async => jsonEncode({'business': business,
-      'version': 2, 'references': await _references(), 'tables': {
-        for (final table in tables) table: await _rows(table),
-      }}));
+    return db.transaction(() async {
+      final snapshot = {for (final table in tables) table: await _rows(table)};
+      const edits = 'regular_payroll_amount_edits_v1';
+      if (snapshot[edits]!.isEmpty) snapshot.remove(edits);
+      return jsonEncode({
+        'business': business, 'version': 2,
+        'references': await _references(), 'tables': snapshot,
+      });
+    });
   }
 
   Future<Map<String, dynamic>> _references() async {
@@ -89,6 +94,7 @@ class PayrollOwnerLedger {
       throw StateError('Payroll snapshot belongs to a different shop.');
     }
     final incoming = Map<String, dynamic>.from(bundle['tables'] as Map);
+    incoming.putIfAbsent('regular_payroll_amount_edits_v1', () => []);
     if (incoming.keys.any((key) => !tables.contains(key)) ||
         tables.any((table) => incoming[table] is! List)) {
       throw const PayrollPending('Both Owner devices must use the current Briskers payroll version before sharing this ledger. Existing records were preserved.');

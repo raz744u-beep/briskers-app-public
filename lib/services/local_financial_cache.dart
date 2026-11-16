@@ -535,7 +535,13 @@ class LocalFinancialCache {
     final existing = await loadTransactionDetail(businessId, transactionId);
     if (existing?['sync_state'] == 'reversed') return;
     if (existing?['payroll_account_pending'] == true &&
-        !detail.containsKey('payroll_account_pending')) {
+        !detail.containsKey('payroll_account_pending') &&
+        detail['sync_state'] != 'reversed') {
+      return;
+    }
+    if (existing?['payroll_amount_pending'] == true &&
+        !detail.containsKey('payroll_amount_pending') &&
+        detail['sync_state'] != 'reversed') {
       return;
     }
     if (existing?['recurring_engine_owned'] == true &&
@@ -550,6 +556,10 @@ class LocalFinancialCache {
       jsonEncode({
         'copy_number': ?existing?['copy_number'],
         ...detail,
+        if (existing?['payroll_operation_id'] != null) ...{
+          'payroll_operation_id': existing!['payroll_operation_id'],
+          'payment_method': existing['payment_method'],
+        },
         if (existing?['payroll_operation_id'] != null) ...{
           'payroll_operation_id': existing!['payroll_operation_id'],
           'payment_method': existing['payment_method'],

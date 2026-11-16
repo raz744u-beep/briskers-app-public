@@ -264,6 +264,7 @@ class WorkPayrollSummary extends StatefulWidget {
     required this.week,
     required this.rows,
     this.recorded,
+    this.paymentBalance = 0,
     this.historyLoaded = true,
     this.historyLoading = false,
     required this.loadDraft,
@@ -273,6 +274,7 @@ class WorkPayrollSummary extends StatefulWidget {
   final DateTime week;
   final List<Map<String, dynamic>> rows;
   final VerifiedPayrollWeek? recorded;
+  final int paymentBalance;
   final bool historyLoaded, historyLoading;
   final Future<Map<String, dynamic>?> Function(DateTime) loadDraft;
   final VoidCallback onReview;
@@ -350,7 +352,7 @@ class _WorkPayrollSummaryState extends State<WorkPayrollSummary> {
             (draft!['repayment'] as int? ?? 0);
       }
     }
-    final paidInFull = state == 'Paid' && !widget.rows.any((row) =>
+    final paidInFull = state == 'Paid' && widget.paymentBalance <= 0 && !widget.rows.any((row) =>
         (row['remaining_minutes'] as int? ?? 0) > 0 &&
         EmployeeWorkReview.fallsInWeek(row, widget.week) &&
         row['state'] == 'Done' && row['archived_labor'] != 1 &&
@@ -373,7 +375,7 @@ class _WorkPayrollSummaryState extends State<WorkPayrollSummary> {
                   ),
                 ),
                 Text(
-                  state,
+                  state == 'Paid' && widget.paymentBalance > 0 ? 'Partially paid' : state,
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     color: state == 'Paid' ? taskGreen : taskNavy,
@@ -406,6 +408,14 @@ class _WorkPayrollSummaryState extends State<WorkPayrollSummary> {
                     ),
                   ),
                 ],
+              ),
+            if (recorded != null && widget.paymentBalance != 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '${widget.paymentBalance > 0 ? 'Remaining payment' : 'Overpayment'} · '
+                  '${payrollMoney(widget.paymentBalance.abs())}',
+                ),
               ),
             const SizedBox(height: 8),
             FilledButton.icon(

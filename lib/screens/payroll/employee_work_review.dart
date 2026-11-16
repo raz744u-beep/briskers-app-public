@@ -304,49 +304,44 @@ class EmployeeWorkReview extends StatelessWidget {
                     ),
                     child: IntrinsicHeight(
                       child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          for (final state in [
-                            'Done',
-                            'In Progress',
-                            'Open',
-                          ]) ...[
+                          for (final state in ['Done', 'In Progress', 'Open']) ...[
                             if (state != 'Done')
                               const VerticalDivider(
                                 width: 1,
                                 color: Color(0xFFAAC8BD),
                               ),
                             Expanded(
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 5,
-                                  ),
-                                  child: Column(
-                                    children: [
-                                      Icon(
-                                        taskStatusIcon(state),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 5),
+                                child: Column(
+                                  children: [
+                                    Icon(
+                                      taskStatusIcon(state),
+                                      color: color(state),
+                                      size: 18,
+                                    ),
+                                    Text(
+                                      '${state == 'Done'
+                                          ? 'Completed'
+                                          : state == 'Open'
+                                          ? 'Not Started'
+                                          : state}\n${hrs(sum(visible.where((r) => r['state'] == state)))} hrs',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 16,
                                         color: color(state),
-                                        size: 18,
                                       ),
+                                    ),
+                                    if (state == 'In Progress' && inProgressPaid > 0)
                                       Text(
-                                        '${state == 'Done'
-                                            ? 'Completed'
-                                            : state == 'Open'
-                                            ? 'Not Started'
-                                            : state}\n${hrs(sum(visible.where((r) => r['state'] == state)))} hrs',
+                                        '(includes ${hrs(inProgressPaid)} hrs paid on these tasks)',
                                         textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 16,
-                                          color: color(state),
-                                        ),
+                                        style: const TextStyle(fontSize: 11),
                                       ),
-                                      if (state == 'In Progress' && inProgressPaid > 0)
-                                        Text('(includes ${hrs(inProgressPaid)} hrs paid on these tasks)',
-                                          style: const TextStyle(fontSize: 11)),
-                                    ],
-                                  ),
+                                  ],
                                 ),
                               ),
                             ),

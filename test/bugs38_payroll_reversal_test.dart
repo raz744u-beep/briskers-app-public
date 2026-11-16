@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:briskers_app/core/connection_mode.dart';
 import 'package:briskers_app/local/briskers_local_database.dart'
     show BriskersLocalDatabase;
 import 'package:briskers_app/services/briskers_api.dart';
@@ -6,9 +9,12 @@ import 'package:briskers_app/services/local_payroll_repository.dart';
 import 'package:briskers_app/services/offline_financial_write_service.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _ExpenseSync extends BriskersApi {
   final reversals = <String>[];
+  final creates = <num>[];
+  final corrections = <(num, num, int)>[];
 
   @override
   Future<Map<String, dynamic>> syncCreateManualTransaction(
@@ -24,7 +30,26 @@ class _ExpenseSync extends BriskersApi {
     String? counterpartyId,
     String? counterpartyName,
     String? remarks,
-  }) async => {'transaction_id': 'canonical-expense'};
+  }) async {
+    creates.add(amount);
+    return {'transaction_id': 'canonical-expense'};
+  }
+
+  @override
+  Future<void> syncPayrollExpenseAmount(
+    String businessId, {
+    required String operation,
+    required String transactionId,
+    required num previous,
+    required num amount,
+    required String date,
+    required int revision,
+  }) async {
+    expect(operation, 'original');
+    expect(transactionId, 'canonical-expense');
+    expect(date, '2026-11-13');
+    corrections.add((previous, amount, revision));
+  }
 
   @override
   Future<void> syncPayrollExpenseReversal(
@@ -39,6 +64,7 @@ class _ExpenseSync extends BriskersApi {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  SharedPreferences.setMockInitialValues({});
 
   test(
     'Owner reversal restores an advance and syncs just the linked expense',
@@ -147,6 +173,166 @@ void main() {
       expect(await settle('original'), isFalse);
       expect(await settle('replacement'), isTrue);
       expect(await repo.advance('employee'), 10000);
+    },
+  );
+  test(
+    'Owner corrects a linked amount offline, through restart, sync and deletion',
+    () async {
+      final dir = await Directory.systemTemp.createTemp(
+        'briskers-payment-edit-',
+      );
+      final file = File('${dir.path}/fixture.sqlite');
+      var db = BriskersLocalDatabase(NativeDatabase(file));
+      final mode = BriskersConnectionModeController.instance;
+      await mode.setMode(BriskersConnectionMode.offline);
+      addTearDown(() async {
+        await db.close();
+        await dir.delete(recursive: true);
+        await mode.setMode(BriskersConnectionMode.auto);
+      });
+
+      var mayEdit = true;
+      LocalPayrollRepository ledger({bool owner = true}) =>
+          LocalPayrollRepository(
+            db,
+            business: 'shop',
+            owner: owner,
+            deviceId: 'trusted',
+            assertOwnerGrant: () {
+              if (!mayEdit) throw StateError('Owner signed out');
+            },
+          );
+      var repo = ledger();
+      await repo.bindPaymentAuthority(
+        writerDeviceId: 'trusted',
+        assertVerifiedPairing: () {},
+      );
+      await repo.saveEmployeeCompensation(
+        employee: 'employee',
+        name: 'Fixture',
+        rate: 0,
+        weeklyBase: true,
+      );
+      await repo.recordOpeningAdvance('employee', 20000);
+      await repo.verify(
+        operation: 'original',
+        employee: 'employee',
+        date: '2026-11-13',
+        week: '2026-11-09',
+        selected: [],
+        method: 'Zelle',
+        base: 50000,
+        hourlyAdjustment: 0,
+        adjustmentReason: '',
+        repayment: 10000,
+        confirmedNet: 40000,
+      );
+      var cache = LocalFinancialCache(database: db);
+      await cache.saveOptions('shop', {
+        'accounts': [
+          {'id': 'checking', 'name': 'Business Checking - 9858'},
+        ],
+        'categories': [
+          {'id': 'payroll', 'name': 'Payroll', 'normal_direction': 'expense'},
+        ],
+      });
+      final api = _ExpenseSync();
+      OfflineFinancialWriteService financial() =>
+          OfflineFinancialWriteService(database: db, api: api);
+      await financial().materializePendingPayrollExpenses('shop');
+      final original = (await cache.loadTransactions('shop')).single;
+      final id = original['id'] as String;
+      final detail = (await cache.loadTransactionDetail('shop', id))!;
+      await cache.saveTransactionDetail('shop', id, {
+        ...detail,
+        'attachments': [
+          {'id': 'original-photo'},
+        ],
+      });
+      Future<bool> edit(int revision, int amount, {bool owner = true}) =>
+          ledger(owner: owner).editPaymentAmount(
+            operation: 'original',
+            employee: 'employee',
+            actorId: 'owner',
+            expectedRevision: revision,
+            net: amount,
+          );
+      await expectLater(edit(0, 35000, owner: false), throwsStateError);
+      mayEdit = false;
+      await expectLater(edit(0, 35000), throwsStateError);
+      mayEdit = true;
+      expect(await edit(0, 35000), isTrue);
+      expect(await edit(0, 35000), isFalse);
+      await expectLater(edit(0, 36000), throwsStateError);
+      expect((await cache.loadTransactions('shop')).single['amount'], 350);
+      expect((await repo.history('employee')).single['gross'], 45000);
+      expect((await repo.history('employee')).single['original_net'], 40000);
+      expect(await repo.advance('employee'), 10000);
+      expect(
+        (await repo.verifiedPayrollWeeks('employee'))['2026-11-09']?.netCents,
+        35000,
+      );
+      expect(
+        (await repo.verifiedPayrollWeeks('employee'))['2026-11-16'],
+        isNull,
+      );
+      await financial().flush('shop');
+      expect(api.creates, isEmpty);
+
+      await db.close();
+      db = BriskersLocalDatabase(NativeDatabase(file));
+      cache = LocalFinancialCache(database: db);
+      repo = ledger();
+      expect((await repo.paymentForExpense(id))!['net'], 35000);
+      expect((await cache.loadTransactionDetail('shop', id))!['attachments'], [
+        {'id': 'original-photo'},
+      ]);
+      await mode.setMode(BriskersConnectionMode.auto);
+      await financial().flush('shop');
+      expect(api.creates, [350]);
+      final canonical = (await cache.loadTransactions('shop')).single;
+      expect(canonical['id'], 'canonical-expense');
+      await mode.setMode(BriskersConnectionMode.offline);
+      expect(await edit(1, 37500), isTrue);
+      await cache.mergeServerTransactions('shop', [canonical]);
+      expect((await cache.loadTransactions('shop')).single['amount'], 375);
+
+      await repo.reversePayment(
+        operation: 'original',
+        employee: 'employee',
+        actorId: 'owner',
+        expectedRevision: 2,
+        reason: 'Fixture deletion',
+      );
+      expect(await cache.loadTransactions('shop'), isEmpty);
+      expect(await repo.advance('employee'), 20000);
+      expect(await repo.verifiedPayrollWeeks('employee'), isEmpty);
+      expect(
+        (await repo.history('employee')).single['reversal_reason'],
+        'Fixture deletion',
+      );
+      expect(
+        (await db
+                .customSelect('SELECT net FROM regular_payroll_payments')
+                .getSingle())
+            .read<int>('net'),
+        40000,
+      );
+      await mode.setMode(BriskersConnectionMode.auto);
+      await financial().flush('shop');
+      await financial().flush('shop');
+      expect(api.corrections, [(350, 375, 2)]);
+      expect(api.reversals, [
+        'shop/original/canonical-expense/375.0/2026-11-13',
+      ]);
+      expect(await cache.loadTransactions('shop'), isEmpty);
+      expect(
+        (await cache.loadTransactionDetail(
+          'shop',
+          'canonical-expense',
+        ))!['status'],
+        'void',
+      );
     },
   );
 }

@@ -80,6 +80,64 @@ void main() {
     ),
   );
 
+  testWidgets('Weekly Labor note wraps without resizing any column', (t) async {
+    size(t, width: 360);
+    await t.pumpWidget(app(Scaffold(body: EmployeeWorkReview(
+      week: week,
+      rows: [row()],
+      jobs: const [],
+      employeeName: 'Chris',
+      onWeekChanged: (_) {},
+      onJob: (_) {},
+      paidMinutesThisWeek: 0,
+    ))));
+    await t.pumpAndSettle();
+    final note = find.text('(includes 8.00 hrs paid on these tasks)');
+    await t.ensureVisible(note);
+    await t.pumpAndSettle();
+
+    final metrics = [
+      find.text('Completed\n0.00 hrs'),
+      find.text('In Progress\n20.00 hrs'),
+      find.text('Not Started\n0.00 hrs'),
+    ];
+    final widths = <double>[];
+    for (final metric in metrics) {
+      expect(t.widget<Text>(metric).style?.fontSize, 16);
+      expect(find.ancestor(of: metric, matching: find.byType(FittedBox)), findsNothing);
+      final column = find.ancestor(of: metric, matching: find.byType(Column)).first;
+      final columnParent = find.ancestor(of: column, matching: find.byType(Padding)).first;
+      widths.add(t.getSize(columnParent).width);
+      expect(t.getTopLeft(metric).dy, t.getTopLeft(metrics.first).dy);
+      expect(t.widget<Icon>(find.descendant(of: column, matching: find.byType(Icon))).size, 18);
+    }
+    expect(widths[1], closeTo(widths[0], 0.01));
+    expect(widths[2], closeTo(widths[0], 0.01));
+    expect(t.widget<Text>(note).style?.fontSize, 11);
+    expect(t.getSize(note).height, greaterThan(20));
+    expect(find.text('Total Paid This Week'), findsOneWidget);
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('Corrected cash balance is displayed for the recorded week', (t) async {
+    size(t, width: 360);
+    await t.pumpWidget(app(Scaffold(body: WorkPayrollSummary(
+      week: week,
+      rows: [row()],
+      recorded: (minutes: 480, netCents: 30000),
+      paymentBalance: 2000,
+      loadDraft: (_) async => null,
+      onReview: () {},
+      revision: 0,
+    ))));
+    await t.pumpAndSettle();
+    expect(find.text('Partially paid'), findsOneWidget);
+    expect(find.text('Recorded hours: 8.00'), findsOneWidget);
+    expect(find.text(r'$300.00'), findsOneWidget);
+    expect(find.text(r'Remaining payment · $20.00'), findsOneWidget);
+    expect(t.takeException(), isNull);
+  });
+
   testWidgets(
     'Work summary uses only selected-week saved draft or recorded payroll',
     (t) async {

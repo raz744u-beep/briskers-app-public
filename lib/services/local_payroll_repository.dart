@@ -98,6 +98,26 @@ class LocalPayrollRepository {
         business_id TEXT NOT NULL,operation_id TEXT NOT NULL,actor_id TEXT NOT NULL,
         reason TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(business_id,operation_id)
       )""",
+      """CREATE TABLE IF NOT EXISTS regular_payroll_amount_edits_v1 (
+        business_id TEXT NOT NULL,operation_id TEXT NOT NULL,revision INTEGER NOT NULL,
+        old_net INTEGER NOT NULL,new_net INTEGER NOT NULL,actor_id TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,PRIMARY KEY(business_id,operation_id,revision)
+      )""",
+      """CREATE TRIGGER IF NOT EXISTS regular_payroll_amount_edit_no_update
+        BEFORE UPDATE ON regular_payroll_amount_edits_v1
+        BEGIN SELECT RAISE(ABORT,'Payroll correction is immutable'); END""",
+      """CREATE TRIGGER IF NOT EXISTS regular_payroll_amount_edit_no_delete
+        BEFORE DELETE ON regular_payroll_amount_edits_v1
+        BEGIN SELECT RAISE(ABORT,'Payroll correction is immutable'); END""",
+      """CREATE VIEW IF NOT EXISTS regular_payroll_effective_payments_v1 AS
+        SELECT p.business_id,p.operation_id,p.employee_id,p.week,p.payload,
+          p.gross-p.net+COALESCE(e.new_net,p.net) AS gross,p.repayment,
+          COALESCE(e.new_net,p.net) AS net,p.method,p.verified_date,
+          p.net AS original_net,COALESCE(e.revision,0) AS amount_revision
+        FROM regular_payroll_payments p LEFT JOIN regular_payroll_amount_edits_v1 e
+          ON e.business_id=p.business_id AND e.operation_id=p.operation_id
+          AND e.revision=(SELECT MAX(revision) FROM regular_payroll_amount_edits_v1
+            WHERE business_id=p.business_id AND operation_id=p.operation_id)""",
       """CREATE VIEW IF NOT EXISTS regular_payroll_active_coverage_v1 AS
         SELECT w.* FROM regular_payroll_work_coverage w WHERE NOT EXISTS (
           SELECT 1 FROM regular_payroll_reversals_v1 r
@@ -2221,7 +2241,7 @@ class LocalPayrollRepository {
     await prepare();
     return _read(
       'SELECT p.*, o.state AS reconciliation_state, r.reason AS reversal_reason, '
-      'r.recorded_at AS reversed_at FROM regular_payroll_payments p '
+      'r.recorded_at AS reversed_at FROM regular_payroll_effective_payments_v1 p '
       'LEFT JOIN regular_payroll_reversals_v1 r ON r.business_id=p.business_id AND r.operation_id=p.operation_id '
       'LEFT JOIN regular_payroll_sync_outbox o ON o.business_id=p.business_id '
       'AND o.operation_id=p.operation_id WHERE p.business_id=? AND p.employee_id=? '
@@ -2240,7 +2260,7 @@ class LocalPayrollRepository {
       'SELECT p.week, SUM(p.net) AS net_cents, '
       'SUM(COALESCE((SELECT SUM(c.minutes) FROM regular_payroll_work_coverage c '
       'WHERE c.business_id=p.business_id AND c.operation_id=p.operation_id),0)) AS minutes '
-      'FROM regular_payroll_payments p '
+      'FROM regular_payroll_effective_payments_v1 p '
       'WHERE p.business_id=? AND p.employee_id=? AND NOT EXISTS ('
       'SELECT 1 FROM regular_payroll_reversals_v1 r '
       'WHERE r.business_id=p.business_id AND r.operation_id=p.operation_id) '
@@ -2447,6 +2467,70 @@ class LocalPayrollRepository {
       { throw ArgumentError('Use YYYY-MM-DD'); }
   }
 
+  Future<Map<String, dynamic>?> paymentForExpense(String transactionId) async {
+    _authorize();
+    await prepare();
+    await PayrollExpenseLinkStore(db).prepare();
+    final rows = await _read(
+      'SELECT p.*,e.name AS employee_name FROM regular_payroll_effective_payments_v1 p '
+      'JOIN payroll_expense_links_v1 l ON l.business_id=p.business_id AND l.payroll_operation_id=p.operation_id '
+      'JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id '
+      'WHERE p.business_id=? AND l.transaction_id=? AND NOT EXISTS ('
+      'SELECT 1 FROM regular_payroll_reversals_v1 r WHERE r.business_id=p.business_id AND r.operation_id=p.operation_id)',
+      [business, transactionId],
+    );
+    _authorize();
+    return rows.singleOrNull;
+  }
+
+  /// Correct the recorded transfer without reallocating any paid work.
+  Future<bool> editPaymentAmount({
+    required String operation,
+    required String employee,
+    required String actorId,
+    required int expectedRevision,
+    required int net,
+  }) async {
+    _authorize();
+    if (assertOwnerGrant == null || actorId.isEmpty) {
+      throw StateError('An active signed-in Owner session is required.');
+    }
+    if (net <= 0 || net > 100000000) {
+      throw ArgumentError('Enter a positive payment amount up to \$1,000,000.');
+    }
+    await prepare();
+    return db.transaction(() async {
+      await _assertPaymentAuthority();
+      final payment = (await _read(
+        'SELECT p.*,o.state FROM regular_payroll_effective_payments_v1 p '
+        'JOIN regular_payroll_sync_outbox o ON o.business_id=p.business_id AND o.operation_id=p.operation_id '
+        'WHERE p.business_id=? AND p.operation_id=? AND p.employee_id=?',
+        [business, operation, employee],
+      )).singleOrNull;
+      if (payment == null || payment['state'] != 'held_local') {
+        throw StateError('This receipt must be reconciled on the original payroll device.');
+      }
+      final revision = payment['amount_revision'] as int;
+      final previous = payment['net'] as int;
+      if (revision != expectedRevision) {
+        if (revision == expectedRevision + 1 && previous == net) return false;
+        throw StateError('The payment changed. Reopen it to edit the amount.');
+      }
+      if (previous == net) return false;
+      await OfflineFinancialWriteService(database: db).editPayrollExpenseAmount(
+        business, operation, previous: previous, net: net,
+        verifiedDate: payment['verified_date'] as String, revision: revision + 1,
+      );
+      await db.customStatement(
+        'INSERT INTO regular_payroll_amount_edits_v1 VALUES(?,?,?,?,?,?,?)',
+        [business, operation, revision + 1, previous, net, actorId, DateTime.now().toUtc().toIso8601String()],
+      );
+      await _assertPaymentAuthority();
+      _authorize();
+      return true;
+    });
+  }
+
   /// The selected versions, hours and rates are part of the exact replay
   /// payload. Same-ID/same-content retries return false; any conflict fails.
   /// Corrects an erroneous local record only after validating the original
@@ -2456,6 +2540,7 @@ class LocalPayrollRepository {
     required String employee,
     required String actorId,
     required String reason,
+    int? expectedRevision,
   }) async {
     _authorize();
     final explanation = reason.trim();
@@ -2469,10 +2554,13 @@ class LocalPayrollRepository {
     return db.transaction(() async {
       await _assertPaymentAuthority();
       final payment = (await _read(
-        'SELECT * FROM regular_payroll_payments WHERE business_id=? AND operation_id=? AND employee_id=?',
+        'SELECT * FROM regular_payroll_effective_payments_v1 WHERE business_id=? AND operation_id=? AND employee_id=?',
         [business, operation, employee],
       )).singleOrNull;
       if (payment == null) throw StateError('The original payroll receipt is unavailable.');
+      if (expectedRevision != null && payment['amount_revision'] != expectedRevision) {
+        throw StateError('The payment changed. Reopen it to delete the entry.');
+      }
       final prior = (await _read(
         'SELECT actor_id,reason FROM regular_payroll_reversals_v1 WHERE business_id=? AND operation_id=?',
         [business, operation],

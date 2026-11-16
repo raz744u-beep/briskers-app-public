@@ -41,6 +41,7 @@ import '../../services/payroll_lan_identity.dart';
 import '../../services/payroll_owner_lease.dart';
 import '../../services/payroll_owner_ledger.dart';
 import 'owner_payroll_connection.dart';
+import 'payroll_payment_correction.dart';
 import 'payroll_ui_scope.dart';
 import '../../services/payroll_lan_workflow.dart';
 import '../jobs/job_detail_screen.dart';
@@ -1771,7 +1772,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
   Widget _tasksTab() => Builder(builder: (context) {
     final week = EmployeeWorkReview.monday(_week);
-    final recorded = _verifiedWeeks?[_date(week)];
+    final weekKey = _date(week);
+    final recorded = _verifiedWeeks?[weekKey];
+    final balance = _history.where((payment) =>
+      payment['week'] == weekKey && payment['employee_id'] == widget.employeeId &&
+      payment['reversed_at'] == null,
+    ).fold<int>(0, (sum, payment) {
+      final net = payment['net'] as int;
+      return sum + (payment['original_net'] as int? ?? net) - net;
+    });
     return EmployeeWorkReview(
         key: PageStorageKey('${widget.employeeId}-WorkScroll'),
         week: week,
@@ -1788,6 +1797,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           week: week,
           rows: _work,
           recorded: recorded,
+          paymentBalance: balance,
           historyLoaded: _verifiedWeeks != null,
           historyLoading: _loadingLocal,
           revision: _draftRevision,
@@ -2081,53 +2091,18 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         : _loadingLocal ? 'Loading saved $name…' : 'Saved $name has not loaded. Use Retry above.',),),);
   }
 
-  Future<bool> _reverseRecordedPayment(Map<String, dynamic> payment) async {
+  Future<bool> _correctRecordedPayment(
+    Map<String, dynamic> payment, PayrollPaymentAction action,
+  ) async {
     if (_busy || !_canView) return false;
-    var reason = '';
-    var confirmedNoTransfer = false;
-    final employee = payment['employee_id'] as String;
-    final net = NumberFormat.simpleCurrency().format((payment['net'] as int) / 100);
-    final accepted = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => StatefulBuilder(
-        builder: (context, update) => OwnerConfirmationDialog(
-          title: 'Reverse payroll entry',
-          confirm: 'Record reversal',
-          destructive: true,
-          canConfirm: confirmedNoTransfer && reason.trim().isNotEmpty,
-          sections: [
-            Text('${_employeeLabel(employee)} · ${payment['verified_date']} · $net'),
-            const SizedBox(height: 12),
-            const Text('The original receipt and your reason stay in Payroll History. The reversal restores the affected unpaid balance.'),
-            TextField(
-              decoration: const InputDecoration(labelText: 'Reason for reversal'),
-              onChanged: (value) => update(() => reason = value),
-            ),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              value: confirmedNoTransfer,
-              onChanged: (value) => update(() => confirmedNoTransfer = value ?? false),
-              title: const Text('I verified this entry did not represent an actual transfer.'),
-            ),
-          ],
-        ),
-      ),
+    final correction = await PayrollPaymentCorrection.confirm(
+      context, payment, _employeeLabel(payment['employee_id'] as String), action,
     );
-    if (accepted != true || !mounted) return false;
+    if (correction == null || !mounted) return false;
     try {
       await _run(() async {
-        final identity = await PayrollLanIdentity.load();
-        final peer = await PayrollLanEnrollment(identity).ownerPeer(widget.businessId, employee);
-        if (peer != null) {
-          throw StateError('This employee has a paired payroll device. Review both ledgers before reversing the receipt.');
-        }
-        final operation = payment['operation_id'] as String;
-        final ledger = await _localPaymentLedger(
-          operation: await PayrollOwnerLease.digest('reverse:$operation'),
-        );
-        await ledger.reversePayment(
-          operation: operation, employee: employee, actorId: _grant!.actorId, reason: reason,
-        );
+        await correction.apply(widget.businessId, _grant!.actorId,
+          (operation) => _localPaymentLedger(operation: operation));
       }, rethrowError: true);
       return true;
     } catch (error) {
@@ -2163,7 +2138,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           child: const Text("Connect"),),],),
     Expanded(child: PayrollHistoryPanel(
               payments: _history,
-              onReversePayment: _reverseRecordedPayment,
+              onPaymentAction: _correctRecordedPayment,
               employeeName: _employeeLabel(widget.employeeId ?? _employee),
               onOpenTask: (row) => unawaited(_openTaskDetails({...row, 'line_id': row['task_id']}, false)),
               unlocked: _historyUnlocked,

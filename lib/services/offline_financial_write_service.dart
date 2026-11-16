@@ -460,6 +460,69 @@ class OfflineFinancialWriteService {
     });
   }
 
+  /// The ledger calls this inside the amount correction transaction.
+  Future<void> editPayrollExpenseAmount(
+    String businessId,
+    String operation, {
+    required int previous,
+    required int net,
+    required String verifiedDate,
+    required int revision,
+  }) async {
+    final id = await PayrollExpenseLinkStore(_database).transactionId(businessId, operation);
+    final detail = id == null ? null : await _cache.loadTransactionDetail(businessId, id);
+    final amount = num.tryParse(detail?['amount']?.toString() ?? '');
+    if (id == null || detail == null || detail['payroll_operation_id'] != operation ||
+        detail['direction'] != 'expense' || detail['sync_state'] == 'reversed' ||
+        amount == null || (amount * 100).round() != previous ||
+        (detail['transaction_date'] ?? detail['date']) != verifiedDate) {
+      throw StateError('Review the linked expense before editing this payment.');
+    }
+
+    final local = id == PayrollExpenseIdentity.transactionId(businessId, operation);
+    if (local) {
+      final create = await _database.customSelect(
+        'SELECT id,payload_json FROM sync_outbox WHERE business_id=? AND entity_id=? '
+        "AND entity_type='financial_create' AND state='pending' AND last_attempt_at IS NULL AND attempt_count=0",
+        variables: [Variable(businessId), Variable(id)],
+      ).getSingleOrNull();
+      if (create == null) {
+        throw StateError('Verify the expense synchronization result before editing this payment.');
+      }
+      final payload = Map<String, dynamic>.from(jsonDecode(create.read<String>('payload_json')) as Map);
+      if (payload['operation_id'] != PayrollExpenseIdentity.expenseCreateOperation(businessId, operation) ||
+          ((payload['amount'] as num) * 100).round() != previous) {
+        throw StateError('The queued expense does not match the original payment.');
+      }
+      payload['amount'] = net / 100;
+      await _database.customStatement(
+        'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+        [jsonEncode(payload), create.read<int>('id')],
+      );
+    } else {
+      await _enqueue(businessId, 'financial_update', id, 'update', {
+        'payroll_amount_revision': revision,
+        'transaction_id': id,
+        'payroll_operation': operation,
+        'expected_amount': previous / 100,
+        'amount': net / 100,
+        'verified_date': verifiedDate,
+      });
+    }
+
+    final changes = {
+      'id': id, 'amount': net / 100, 'sync_state': 'pending',
+      if (!local) 'payroll_amount_pending': true,
+    };
+    final rows = await _allTransactions(businessId);
+    final before = rows.where((row) => row['id'] == id).singleOrNull ?? detail;
+    await _cache.saveTransactionDetail(businessId, id, {...detail, ...changes});
+    await _upsertSummary(businessId, {...before, ...changes});
+    await LocalFinancialTotalsJournal(database: _database).record(
+      businessId, 'transaction:$id', before: before, after: {...before, ...changes},
+    );
+  }
+
   /// Called inside the same SQLite transaction as the payroll reversal.
   Future<void> reversePayrollExpense(
     String businessId, String operation, {required int net, required String verifiedDate,}
@@ -910,8 +973,8 @@ class OfflineFinancialWriteService {
       // The successful acknowledgment removes the replay fence just before
       // remapping the expense. Keep a durable dispatch marker across that gap.
       final marked = await _database.customUpdate(
-        "UPDATE sync_outbox SET last_attempt_at=? WHERE business_id=? AND id=? AND state='pending'",
-        variables: [Variable(_unixNow()), Variable(businessId), Variable(outboxId)],
+        "UPDATE sync_outbox SET last_attempt_at=? WHERE business_id=? AND id=? AND state='pending' AND payload_json=?",
+        variables: [Variable(_unixNow()), Variable(businessId), Variable(outboxId), Variable(jsonEncode(payload))],
       );
       if (marked == 0) return;
     }
@@ -1071,16 +1134,27 @@ class OfflineFinancialWriteService {
     Map<String, dynamic> payload,
   ) async {
     final transactionId = payload['transaction_id'].toString();
-    if (payload['payroll_account_only'] == true) {
+    final amountRevision = payload['payroll_amount_revision'] as int?;
+    if (payload['payroll_account_only'] == true || amountRevision != null) {
       await LocalJobQuarantine.guardReplay(
         _database,
         businessId,
-        () => _api.syncPayrollExpenseAccount(
-          businessId,
-          transactionId,
-          expectedAccountId: payload['expected_account_id'].toString(),
-          accountId: payload['account_id'].toString(),
-        ),
+        () => amountRevision == null
+            ? _api.syncPayrollExpenseAccount(
+                businessId,
+                transactionId,
+                expectedAccountId: payload['expected_account_id'].toString(),
+                accountId: payload['account_id'].toString(),
+              )
+            : _api.syncPayrollExpenseAmount(
+                businessId,
+                transactionId: transactionId,
+                operation: payload['payroll_operation'] as String,
+                previous: payload['expected_amount'] as num,
+                amount: payload['amount'] as num,
+                date: payload['verified_date'] as String,
+                revision: amountRevision,
+              ),
         outboxId: outboxId,
       );
       await _database.transaction(() async {
@@ -1095,8 +1169,14 @@ class OfflineFinancialWriteService {
         ).getSingleOrNull();
         if (remaining != null) return;
         final detail = await _cache.loadTransactionDetail(businessId, transactionId);
-        if (detail != null && detail['payroll_account_pending'] == true) {
-          final syncState = {'sync_state': 'synced', 'payroll_account_pending': false};
+        if (detail != null && detail['sync_state'] != 'reversed' &&
+            (detail['payroll_account_pending'] == true ||
+            detail['payroll_amount_pending'] == true)) {
+          final syncState = {
+            'sync_state': 'synced',
+            'payroll_account_pending': false,
+            'payroll_amount_pending': false,
+          };
           await _cache.saveTransactionDetail(businessId, transactionId, {...detail, ...syncState});
           await _upsertSummary(businessId, {'id': transactionId, ...syncState});
         }

@@ -18,8 +18,8 @@ class LocalPayrollExpenseReview {
     final tables =
         (await database
                 .customSelect(
-                  "SELECT name FROM sqlite_master WHERE type='table' AND name IN ("
-                  "'regular_payroll_payments','regular_payroll_employees','regular_payroll_reversals_v1',"
+                  "SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name IN ("
+                  "'regular_payroll_payments','regular_payroll_effective_payments_v1','regular_payroll_employees','regular_payroll_reversals_v1',"
                   "'payroll_expense_links_v1','payroll_expense_projection_pending_v1')",
                 )
                 .get())
@@ -34,7 +34,7 @@ class LocalPayrollExpenseReview {
           'SELECT p.operation_id,p.employee_id,p.gross,p.repayment,p.net,p.method,p.verified_date,'
           'e.name AS employee_name '
           '${tables.contains('regular_payroll_reversals_v1') ? ',r.recorded_at AS reversed_at ' : ''}'
-          'FROM regular_payroll_payments p LEFT JOIN regular_payroll_employees e '
+          'FROM ${tables.contains('regular_payroll_effective_payments_v1') ? 'regular_payroll_effective_payments_v1' : 'regular_payroll_payments'} p LEFT JOIN regular_payroll_employees e '
           'ON e.business_id=p.business_id AND e.id=p.employee_id '
           '${tables.contains('regular_payroll_reversals_v1') ? 'LEFT JOIN regular_payroll_reversals_v1 r ON r.business_id=p.business_id AND r.operation_id=p.operation_id ' : ''}'
           'WHERE p.business_id=? AND p.week=? AND (? IS NULL OR p.employee_id=?) '

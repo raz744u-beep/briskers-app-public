@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
 import 'approved_tasks_ui.dart';
+import 'payroll_payment_correction.dart';
 
 /// Restored from Tasks TEST. All figures come from recorded settlements and
 /// their immutable work snapshots, grouped by the selected payroll week.
@@ -18,11 +19,11 @@ class PayrollHistoryPanel extends StatefulWidget {
     required this.unlocked,
     this.employeeName,
     this.onOpenTask,
-    this.onReversePayment,
+    this.onPaymentAction,
   });
 
   final String? employeeName;
-  final Future<bool> Function(Map<String, dynamic>)? onReversePayment;
+  final Future<bool> Function(Map<String, dynamic>, PayrollPaymentAction)? onPaymentAction;
   final ValueChanged<Map<String, dynamic>>? onOpenTask;
 
   final List<Map<String, dynamic>> payments;
@@ -174,7 +175,7 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
                               children: [
                                 _detailMetric(
                                   'Gross Pay',
-                                  week.gross,
+                                  week.gross + week.balance,
                                   const Color(0xFFD6E9FF),
                                   taskNavy,
                                 ),
@@ -192,6 +193,11 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
                                 ),
                               ],
                             ),
+                            if (week.balance != 0)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text('${week.balance > 0 ? 'Remaining payment' : 'Overpayment'} · ${_money(week.balance.abs())}'),
+                              ),
                             const SizedBox(height: 12),
                             Wrap(
                               alignment: WrapAlignment.spaceBetween,
@@ -236,20 +242,30 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
                           child: Text('Load More · ${work.length - visibleTaskCount} remaining'),
                         ),
                       for (final payment in week.payments)
-                        if ((payment['work'] as List).isEmpty || payment['reversed_at'] != null || widget.onReversePayment != null)
+                        if ((payment['work'] as List).isEmpty || payment['reversed_at'] != null || widget.onPaymentAction != null)
                           ListTile(
                             title: Text('${payment['reversed_at'] == null ? 'Payment' : 'Reversed payment'} · ${_money(payment['net'] as int)}'),
                             subtitle: Text('${payment['method']} · ${payment['verified_date']}'
                                 '${payment['reversal_reason'] == null ? '' : '\n${payment['reversal_reason']}'}'),
-                            trailing: widget.onReversePayment == null || payment['reversed_at'] != null
+                            trailing: widget.onPaymentAction == null || payment['reversed_at'] != null
                                 ? null
-                                : TextButton(
-                                    onPressed: () async {
-                                      if (await widget.onReversePayment!(payment) && context.mounted) {
+                                : PopupMenuButton<PayrollPaymentAction>(
+                                    tooltip: 'Payment actions',
+                                    onSelected: (action) async {
+                                      if (await widget.onPaymentAction!(payment, action) && context.mounted) {
                                         Navigator.of(context).pop();
                                       }
                                     },
-                                    child: const Text('Reverse'),
+                                    itemBuilder: (_) => const [
+                                      PopupMenuItem(
+                                        value: PayrollPaymentAction.edit,
+                                        child: Text('Edit'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: PayrollPaymentAction.delete,
+                                        child: Text('Delete'),
+                                      ),
+                                    ],
                                   ),
                           ),
                             if (work.isEmpty && week.payments.isEmpty)
@@ -490,11 +506,14 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
             Row(children: [
               _metric('Hours', (week.minutes / 60).toStringAsFixed(1),
                 const Color(0xFF101828)),
-              _metric('Gross', _money(week.gross), const Color(0xFF101828)),
+              _metric('Gross', _money(week.gross + week.balance), const Color(0xFF101828)),
               // Recorded gross was settled through net transfer and any
               // debt repayment. Remaining unrecorded tasks are not included.
               _metric('Paid', _money(week.gross), const Color(0xFF117C56)),
-              _metric('Balance', '—', const Color(0xFF64748B)),
+              if (week.balance == 0)
+                _metric('Balance', '—', const Color(0xFF64748B))
+              else
+                _metric('Balance', _money(week.balance), const Color(0xFF64748B)),
             ]),
           ]),
         ),
@@ -515,7 +534,7 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
     // Paid denotes verified gross compensation, while net bank/cash
     // transfer is separately visible in each week detail alongside debt repaid.
     final paid = weeks.fold<int>(0, (sum, week) => sum + week.gross);
-    final gross = weeks.fold<int>(0, (sum, week) => sum + week.gross);
+    final gross = weeks.fold<int>(0, (sum, week) => sum + week.gross + week.balance);
     return Column(children: [
       Padding(
         padding:const EdgeInsets.fromLTRB(12,10,12,9),
@@ -616,5 +635,9 @@ class _RecordedWeek {
   int get gross => _sum('gross');
   int get repaid => _sum('repayment');
   int get net => _sum('net');
+  int get balance => payments.fold(0, (sum, row) {
+    final net = row['net'] as int;
+    return row['reversed_at'] == null ? sum + (row['original_net'] as int? ?? net) - net : sum;
+  });
   int _sum(String field) => payments.fold(0, (sum, row) => sum + (row['reversed_at'] == null ? row[field] as int : 0));
 }
