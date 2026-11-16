@@ -158,6 +158,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
 
   bool get _editing => widget.editTransactionId != null;
   bool get _copying => widget.copyTransactionId != null;
+  bool get _missingOriginal => (_editing || _copying) && !_editTargetLoaded;
   bool get _linked => _jobId != null || _documentId != null;
 
   @override
@@ -1297,7 +1298,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       await _saveOwnerAccount();
       return;
     }
-    if (_saving || (_editing && !_editTargetLoaded)) return;
+    if (_saving || _missingOriginal) return;
     final amount = num.tryParse(_amountController.text.trim());
     if (amount == null || amount <= 0) {
       setState(() => _error = 'Enter a valid amount.');
@@ -1552,7 +1553,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
         backgroundColor: BriskersColors.expenses.withValues(alpha: 0.10),
         title: Text(title),
         actions: [
-          if (!_editing)
+          if (!_editing && !_missingOriginal)
             Padding(
               padding: const EdgeInsets.only(right: 8, top: 7, bottom: 7),
               child: Tooltip(
@@ -1624,7 +1625,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
             ),
         ],
       ),
-      bottomNavigationBar: _loading
+      bottomNavigationBar: _loading || _missingOriginal
           ? null
           : SafeArea(
               top: false,
@@ -1637,7 +1638,6 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                 ),
                 onPressed:
                     _saving ||
-                        (_editing && !_editTargetLoaded) ||
                         _optionsLoading ||
                         _accounts.isEmpty ||
                         _categories.isEmpty
@@ -1654,6 +1654,16 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
             ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
+          : _missingOriginal
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  _error ?? 'The original expense details are unavailable.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            )
           : _ownerAccountEdit
           ? _ownerAccountFields()
           : ListView(

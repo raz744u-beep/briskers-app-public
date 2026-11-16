@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'package:drift/native.dart';
+import 'package:flutter/material.dart';
+import 'package:briskers_app/local/local_database_provider.dart';
+import 'package:briskers_app/screens/expenses/expense_entry_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/core/connection_mode.dart';
 import 'package:briskers_app/services/local_owner_authorization.dart';
@@ -193,4 +196,50 @@ void main() {
     );
     expect(await cache.loadTransactionForEdit('shop', 'old-payment'), isNull);
   });
+  testWidgets(
+    'an unavailable original shows an explanation instead of an edit form',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      debugUseLocalDatabase(db);
+      addTearDown(() => debugUseLocalDatabase(null));
+      final connection = BriskersConnectionModeController.instance;
+      await connection.setMode(BriskersConnectionMode.offline);
+      addTearDown(() => connection.setMode(BriskersConnectionMode.auto));
+
+      await tester.runAsync(
+        () => cache.saveOptions('shop', {
+          'accounts': [
+            {'id': 'checking', 'name': 'Checking'},
+          ],
+          'categories': [
+            {'id': 'payroll', 'name': 'Payroll'},
+          ],
+        }),
+      );
+      for (final copy in [false, true]) {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ExpenseEntryScreen(
+              key: ValueKey(copy),
+              businessId: 'shop',
+              editTransactionId: copy ? null : 'unavailable',
+              copyTransactionId: copy ? 'unavailable' : null,
+            ),
+          ),
+        );
+        final message = find.text(
+          'The original expense details are unavailable on this device.',
+        );
+        for (var n = 0; n < 25 && message.evaluate().isEmpty; n++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+          await tester.pump();
+        }
+        expect(message, findsOneWidget);
+        expect(find.byType(TextField), findsNothing);
+        expect(find.byType(FilledButton), findsNothing);
+      }
+    },
+  );
 }
