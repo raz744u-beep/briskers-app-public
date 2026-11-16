@@ -370,7 +370,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
         final data = await _localFinancial.loadOptions(widget.businessId);
         Map<String, dynamic>? detail;
         if (sourceId != null) {
-          detail = await _localFinancial.loadTransactionForEdit(
+          if (_editing) {
+            detail = await _localFinancial.loadPayrollExpenseForAccountEdit(
+              widget.businessId, sourceId,
+            );
+          }
+          detail ??= await _localFinancial.loadTransactionForEdit(
             widget.businessId,
             sourceId,
           );
@@ -1261,7 +1266,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       children: [
         Text(_counterpartyController.text, style: Theme.of(context).textTheme.titleLarge),
         Text('\$${_amountController.text} · ${_date.month}/${_date.day}/${_date.year}'),
-        Text(_selectedCategoryName()),
+        Text(original['category']?.toString() ?? 'Payroll'),
         if (_contextLabel != null) Text(_contextLabel!),
         if (_remarksController.text.isNotEmpty) Text(_remarksController.text),
         if (original['payment_method'] != null)

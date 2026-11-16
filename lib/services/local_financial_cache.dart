@@ -536,6 +536,61 @@ class LocalFinancialCache {
     }, businessId, transactionId);
   }
 
+  /// Historical payroll may only have a saved list row, including older
+  /// snapshots with account names but no category ID. Changing its account
+  /// does not require reconstructing category, amount, or payment data.
+  Future<Map<String, dynamic>?> loadPayrollExpenseForAccountEdit(
+    String businessId, String transactionId,
+  ) async {
+    final detail = await loadTransactionDetail(businessId, transactionId);
+    final rows = await loadTransactions(businessId);
+    final summary = rows.where((row) => row['id'] == transactionId &&
+      matchesTransaction(row, businessId, transactionId)).singleOrNull;
+    if (detail == null && summary == null) return null;
+    final source = <String, dynamic>{
+      ...?summary,
+      for (final field in (detail ?? {}).entries)
+        if (field.value != null && field.value != '') field.key: field.value,
+    };
+    if (!matchesTransaction(source, businessId, transactionId) ||
+        (!requiresOwnerAccountEdit(detail) && !requiresOwnerAccountEdit(summary)) ||
+        source['direction'] == 'income' ||
+        source['transfer_group_id'] != null || source['recurring_rule_id'] != null ||
+        source['recurring_engine_owned'] == true ||
+        source['sync_state'] == 'reversed' ||
+        (source['status'] != null && source['status'] != 'posted')) {
+      return null;
+    }
+    final amount = num.tryParse(
+      (source['amount'] ?? source['signed_amount'])?.toString() ?? '',
+    );
+    final date = source['date'] ?? source['transaction_date'];
+    if (amount == null || !amount.isFinite || amount == 0 ||
+        DateTime.tryParse(date?.toString() ?? '') == null) {
+      return null;
+    }
+    var accountId = source['account_id']?.toString().trim() ?? '';
+    if (accountId.isEmpty) {
+      final label = source['account']?.toString().trim().toLowerCase();
+      if (label == null || label.isEmpty) return null;
+      final options = await loadOptions(businessId);
+      final account = (options['accounts'] as List? ?? []).whereType<Map>()
+          .where((row) => row['name']?.toString().trim().toLowerCase() == label)
+          .singleOrNull;
+      accountId = account?['id']?.toString().trim() ?? '';
+      if (accountId.isEmpty) return null;
+    }
+    return {
+      ...source,
+      'id': transactionId, 'business_id': businessId, 'direction': 'expense',
+      'amount': amount.abs(), 'date': date, 'transaction_date': source['transaction_date'] ?? date,
+      'account_id': accountId,
+      'category': requiresOwnerAccountEdit(detail) ? source['category'] : summary?['category'],
+      'counterparty': source['counterparty'] ?? source['payee_text'],
+      'counterparty_id': source['counterparty_id'] ?? source['vendor_id'],
+    };
+  }
+
   static Map<String, dynamic>? validatedEditSource(
     Map<String, dynamic>? source,
     String businessId,

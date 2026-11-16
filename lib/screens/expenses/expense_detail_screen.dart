@@ -1063,33 +1063,31 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     }
   }
 
+  bool get _showPayrollAccountAction => widget.canDeleteTransaction &&
+      (LocalFinancialCache.requiresOwnerAccountEdit(_detail) ||
+       LocalFinancialCache.requiresOwnerAccountEdit(widget.cachedDetail));
+
   Future<void> _loadPayrollAccountPermission(int generation) async {
-    if (!widget.canDeleteTransaction ||
-        (!LocalFinancialCache.requiresOwnerAccountEdit(_detail) &&
-         !LocalFinancialCache.requiresOwnerAccountEdit(widget.cachedDetail))) {
-      return;
-    }
-    try {
-      final source = await _localFinancial.loadTransactionForEdit(
-        widget.businessId, widget.transactionId,
-      );
-      if (!LocalFinancialCache.requiresOwnerAccountEdit(source)) return;
-      final allowed = await DeviceOwnerAuthorization.instance
-          .canViewSavedOwnerPayroll(widget.businessId);
-      if (_isCurrent(generation)) {
-        setState(() => _canEditPayrollAccount = allowed);
-      }
-    } catch (_) {
-      // The original and local permission must both be available to edit.
+    if (!_showPayrollAccountAction) return;
+    final allowed = await DeviceOwnerAuthorization.instance
+        .canViewSavedOwnerPayroll(widget.businessId);
+    if (_isCurrent(generation)) {
+      setState(() => _canEditPayrollAccount = allowed);
     }
   }
 
   Future<void> _edit() async {
     final detail = _detail;
     if (detail == null || _busy ||
-        (detail['editable'] != true && !_canEditPayrollAccount)) {
+        (detail['editable'] != true && !_showPayrollAccountAction)) {
       return;
     }
+    if (_showPayrollAccountAction && !_canEditPayrollAccount &&
+        !await DeviceOwnerAuthorization.instance.canViewSavedOwnerPayroll(widget.businessId)) {
+      if (mounted) setState(() => _error = 'Open the saved Briskers Owner account to edit this expense.');
+      return;
+    }
+    if (!mounted) return;
     var generation = _loadGeneration;
 
     if (BriskersConnectionModeController.instance.forceOffline ||
@@ -1724,7 +1722,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     );
     final recordGeneration = _recordGeneration;
     final income = detail['direction']?.toString() == 'income';
-    final editable = detail['editable'] == true;
+    final editable = detail['editable'] == true &&
+        (!LocalFinancialCache.requiresOwnerAccountEdit(detail) || widget.canDeleteTransaction);
     final deletable =
         widget.canDeleteTransaction &&
         _canDeleteRecords &&
@@ -1775,7 +1774,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         backgroundColor: color.withValues(alpha: 0.10),
         title: Text(income ? 'Income' : 'Expense'),
         actions: [
-          if (editable || _canEditPayrollAccount)
+          if (editable || _showPayrollAccountAction)
             PopupMenuButton<String>(
               onSelected: (value) {
                 if (mounted && recordGeneration == _recordGeneration) {
@@ -1783,12 +1782,12 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                 }
               },
               itemBuilder: (_) => [
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'edit',
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.edit_outlined),
-                    title: Text('Edit transaction'),
+                    leading: const Icon(Icons.edit_outlined),
+                    title: Text(_showPayrollAccountAction ? 'Edit account' : 'Edit transaction'),
                   ),
                 ),
                 if (editable && !LocalFinancialCache.requiresOwnerAccountEdit(detail))

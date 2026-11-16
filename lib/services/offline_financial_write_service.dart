@@ -411,27 +411,46 @@ class OfflineFinancialWriteService {
           variables: [Variable(businessId), Variable(operation)],
         ).getSingleOrNull();
         if (payment == null) continue;
-        final projection = PayrollExpenseIdentity.expenseProjection(
-          businessId: businessId,
-          payment: payment.data,
-          employeeName: payment.read<String>('employee_name'),
-          accountId: accountId,
-          categoryId: categoryId,
-        );
-        await createLocalTransaction(
-          businessId,
-          direction: 'expense',
-          accountId: accountId,
-          accountName: accountName as String,
-          categoryId: categoryId,
-          categoryName: 'Payroll',
-          amount: projection['amount'] as num,
-          date: DateTime.parse(projection['date'] as String),
-          counterpartyName: projection['counterparty'] as String,
-          remarks: projection['remarks'] as String,
-          receipts: const [],
-          verifiedPayrollOperationId: operation,
-        );
+        try {
+          final existing = await _cache.loadTransactions(businessId, direction: 'expense');
+          final match = PayrollExpenseIdentity.classify(
+            businessId: businessId, payment: payment.data, existingExpenses: existing,
+          );
+          if (match == PayrollExpenseDecision.review) continue;
+          if (match == PayrollExpenseDecision.alreadyLinked) {
+            final expected = PayrollExpenseIdentity.transactionId(businessId, operation);
+            final row = existing.singleWhere((row) =>
+                row['payroll_operation_id'] == operation || row['id'] == expected);
+            if ((row['transaction_date'] ?? row['date']) != payment.data['verified_date']) continue;
+            await PayrollExpenseLinkStore(_database)
+                .link(businessId, operation, row['id'] as String);
+          } else {
+            final projection = PayrollExpenseIdentity.expenseProjection(
+              businessId: businessId,
+              payment: payment.data,
+              employeeName: payment.read<String>('employee_name'),
+              accountId: accountId,
+              categoryId: categoryId,
+            );
+            await createLocalTransaction(
+              businessId,
+              direction: 'expense',
+              accountId: accountId,
+              accountName: accountName as String,
+              categoryId: categoryId,
+              categoryName: 'Payroll',
+              amount: projection['amount'] as num,
+              date: DateTime.parse(projection['date'] as String),
+              counterpartyName: projection['counterparty'] as String,
+              remarks: projection['remarks'] as String,
+              receipts: const [],
+              verifiedPayrollOperationId: operation,
+            );
+          }
+        } on StateError {
+          // Keep this payout for review and continue with the other saved payouts.
+          continue;
+        }
         await _database.customStatement(
           'DELETE FROM payroll_expense_projection_pending_v1 '
           'WHERE business_id = ? AND operation_id = ?',
@@ -513,7 +532,7 @@ class OfflineFinancialWriteService {
   }) async {
     grant.assertValid(businessId, grant.actorId);
     await _database.transaction(() async {
-      final original = await _cache.loadTransactionForEdit(businessId, transactionId);
+      final original = await _cache.loadPayrollExpenseForAccountEdit(businessId, transactionId);
       if (original == null || !LocalFinancialCache.requiresOwnerAccountEdit(original) ||
           original['recurring_rule_id'] != null ||
           original['account_id'] != expectedAccountId) {

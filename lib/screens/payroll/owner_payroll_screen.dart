@@ -1,3 +1,4 @@
+import 'payroll_expense_review.dart';
 import 'payroll_review_widgets.dart';
 import 'approved_tasks_ui.dart';
 import 'approved_task_details.dart';
@@ -2132,6 +2133,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           employeeName: _employeeLabel(widget.employeeId ?? _employee),
           access: _historyUnlocked, canView: () => mounted && _canView,
           cache: expenses.LocalFinancialCache(database: _db),),),
+
+    if (_canView)
+      TextButton.icon(
+        icon: const Icon(Icons.payments_outlined),
+        label: const Text('Review payroll expenses'),
+        onPressed: () => showPayrollExpenseReview(context,
+          database: _db, business: widget.businessId, week: _week,
+          employeeId: widget.employeeId ?? _employee),
+      ),
 
     if (_pendingPayments.isNotEmpty)
       MaterialBanner(content: Text(

@@ -1,3 +1,5 @@
+import '../local/local_database_provider.dart';
+import 'payroll/payroll_expense_review.dart';
 import 'dart:async';
 import '../core/navigation_content_timing.dart';
 import 'dart:io';
@@ -1644,7 +1646,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
     if (!mounted) return;
 
-    final editable = _showingLocal ? true : detail['editable'] == true;
+    final payroll = LocalFinancialCache.requiresOwnerAccountEdit(detail) ||
+        LocalFinancialCache.requiresOwnerAccountEdit(transaction);
+    final editable = payroll ? _owner : _showingLocal || detail['editable'] == true;
     final deletable = !_showingLocal && _owner && detail['deletable'] == true;
 
     final action = await showModalBottomSheet<String>(
@@ -1663,10 +1667,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
             if (editable)
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
-                title: const Text('Edit transaction'),
+                title: Text(payroll ? 'Edit account' : 'Edit transaction'),
                 onTap: () => Navigator.pop(sheetContext, 'edit'),
               ),
-            if (editable)
+            if (editable && !payroll)
               ListTile(
                 leading: const Icon(Icons.copy_outlined),
                 title: const Text('Copy transaction'),
@@ -2324,6 +2328,16 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       ),
                     ),
                   ),
+                  if (_owner)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        icon: const Icon(Icons.payments_outlined),
+                        label: const Text('Review payroll expenses'),
+                        onPressed: () => showPayrollExpenseReview(context,
+                          database: localDatabase, business: widget.businessId),
+                      ),
+                    ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
