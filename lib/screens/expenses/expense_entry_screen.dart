@@ -350,7 +350,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       if (!localShown) {
         setState(() {
           _loading = false;
-          _error = error.toString();
+          _error = sourceId != null
+              ? 'Could not load the original transaction for editing. '
+                  'No changes were made. Details: $error'
+              : error.toString();
         });
       }
     }
