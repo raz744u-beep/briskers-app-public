@@ -18,11 +18,15 @@ class CustomersScreen extends StatefulWidget {
     required this.businessId,
     required this.roleCode,
     this.refreshToken = 0,
+    this.onCustomerReviewed,
+    this.detailBottomNavigationBar,
   });
 
   final String businessId;
   final String roleCode;
   final int refreshToken;
+  final ValueChanged<String>? onCustomerReviewed;
+  final Widget? detailBottomNavigationBar;
 
   @override
   State<CustomersScreen> createState() => _CustomersScreenState();
@@ -37,11 +41,13 @@ class _CustomersScreenState extends State<CustomersScreen> {
   final _search = TextEditingController();
   Timer? _searchDebounce;
   int _searchRequest = 0;
+  int _loadRequest = 0;
   List<Map<String, dynamic>>? _rows;
   int _totalCustomers = 0;
   String? _error;
   bool _onlineReady = false;
   bool _showingLocal = false;
+  bool _refreshFailed = false;
   bool get _canManageCustomers => const {'owner', 'manager', 'office'}.contains(widget.roleCode);
 
   @override
@@ -66,41 +72,67 @@ class _CustomersScreenState extends State<CustomersScreen> {
   }
 
   Future<void> _load({bool refreshOnline = true}) async {
+    final request = ++_loadRequest;
     final query = _search.text.trim();
     var localAvailable = false;
+    bool current() => mounted && request == _loadRequest &&
+        query == _search.text.trim();
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
     if (!forceOnline) {
       try {
-      final results = await Future.wait<dynamic>([
-        _localCustomers.customers(
+        // Paint available saved customer rows before waiting for the total or
+        // bootstrap bookkeeping. A slow count must not block the first frame.
+        final rows = await _localCustomers.customers(
           widget.businessId,
           search: query.isEmpty ? null : query,
-        ),
-        _localCustomers.customerTotal(widget.businessId),
-        _localCustomers.hasBootstrap(widget.businessId),
-      ]);
-
-      final rows =
-          List<Map<String, dynamic>>.from(results[0] as List);
-      final total = results[1] as int;
-      final bootstrapped = results[2] == true;
-      localAvailable = bootstrapped || rows.isNotEmpty;
-
-      if (mounted && localAvailable) {
-        setState(() {
-          _rows = rows;
-          _totalCustomers = total;
-          _showingLocal = !_onlineReady;
-          _error = null;
-        });
-      }
-    } catch (_) {
-      // The online refresh below can still populate the local cache.
+        );
+        if (!current()) return;
+        if (rows.isNotEmpty) {
+          localAvailable = true;
+          setState(() {
+            _rows = rows;
+            _showingLocal = true;
+            _error = null;
+          });
+        }
+        // The count is independent from painting the list. Preserve the last
+        // known nonzero total until this business's actual count is read.
+        unawaited(Future<void>(() async {
+          try {
+            final total = await _localCustomers.customerTotal(widget.businessId);
+            final bootstrapped = await _localCustomers.hasBootstrap(widget.businessId);
+            if (!current()) return;
+            if (!_onlineReady && (bootstrapped || rows.isNotEmpty || total > 0)) {
+              localAvailable = true;
+              setState(() {
+                _totalCustomers = total;
+                _rows ??= rows;
+                _showingLocal = !_onlineReady;
+              });
+            }
+          } catch (_) {
+            // Keep previously painted records while bookkeeping retries.
+          }
+        }));
+      } catch (_) {
+        // The online refresh below can still populate the local cache.
       }
     }
 
     if (!refreshOnline) return;
+
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (!current()) return;
+      setState(() {
+        _rows ??= const <Map<String, dynamic>>[];
+        _onlineReady = false;
+        _showingLocal = true;
+        _refreshFailed = false;
+        _error = null;
+      });
+      return;
+    }
 
     try {
       await _sync.pull(widget.businessId);
@@ -114,7 +146,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
         _localCustomers.customerTotal(widget.businessId),
       ]);
 
-      if (!mounted) return;
+      if (!current()) return;
       setState(() {
         _rows = List<Map<String, dynamic>>.from(
           results[0] as List,
@@ -122,29 +154,57 @@ class _CustomersScreenState extends State<CustomersScreen> {
         _totalCustomers = results[1] as int;
         _onlineReady = bootstrapped;
         _showingLocal = !bootstrapped;
+        _refreshFailed = !bootstrapped;
         _error = null;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!current()) return;
+      // An unrelated interrupted bootstrap may have populated another
+      // screen's cache since this request began. Keep any already displayed
+      // customers instead of replacing them with a blank/error screen.
+      final savedVisible = _rows != null && _rows!.isNotEmpty;
       setState(() {
         _onlineReady = false;
-        if (localAvailable && !forceOnline) {
-          _showingLocal = true;
-          _error = null;
-        } else {
-          _rows ??= const [];
-          _error = error.toString();
-        }
+        _refreshFailed = true;
+        _showingLocal = !forceOnline && (localAvailable || savedVisible);
+        _rows ??= const <Map<String, dynamic>>[];
+        _error = _friendlySyncError(error);
       });
     }
   }
 
+  static String _friendlySyncError(Object error) {
+    final description = error.toString().toLowerCase();
+    if (description.contains('failed host lookup') ||
+        description.contains('socketexception') ||
+        description.contains('network is unreachable')) {
+      return 'Cannot reach the Briskers server (network/DNS issue). '
+          'Previously saved customers remain on this device. '
+          'Check Wi-Fi or mobile data and refresh when connected.';
+    }
+    if (description.contains('timeout')) {
+      return 'Customer download timed out. Saved customers are unchanged; '
+          'retry after the connection stabilizes.';
+    }
+    return 'Customer download did not finish. Any locally saved customers '
+        'remain available; try refreshing when the connection is stable.';
+  }
+
   void _onSearchChanged(String _) {
+    // Invalidate stale local/server results immediately, even while the
+    // debounce runs. Clearing the field restores the local list at once.
+    ++_loadRequest;
+    ++_searchRequest;
     _searchDebounce?.cancel();
-    _searchDebounce = Timer(
-      const Duration(milliseconds: 250),
-      _runSearch,
-    );
+    if (_search.text.isEmpty) {
+      unawaited(_runSearch());
+    } else {
+      _searchDebounce = Timer(
+        const Duration(milliseconds: 250),
+        _runSearch,
+      );
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _runSearch() async {
@@ -170,6 +230,29 @@ class _CustomersScreenState extends State<CustomersScreen> {
         _showingLocal = !forceOnline && !_onlineReady;
         _error = null;
       });
+      // A failed multi-page bootstrap can leave only a subset available
+      // offline. A typed search may query authorized server customers while
+      // the full local directory is still rebuilding. Never treat a limited
+      // online search page as the complete customer total.
+      if (query.isNotEmpty && !forceOnline && !_onlineReady &&
+          !BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          final authorized = await _api.customers(
+            widget.businessId, search: query, limit: 100);
+          if (!mounted || request != _searchRequest ||
+              _search.text.trim() != query) {
+            return;
+          }
+          setState(() {
+            _rows = authorized;
+            _showingLocal = false;
+            _error = null;
+          });
+        } catch (_) {
+          // The local search results above stay usable if the remote read
+          // times out or access is revoked. No guessed results are added.
+        }
+      }
     } catch (error) {
       if (!mounted || request != _searchRequest) return;
       setState(() => _error = error.toString());
@@ -195,6 +278,11 @@ class _CustomersScreenState extends State<CustomersScreen> {
           businessId: widget.businessId,
           customerId: '${customer['id']}',
           roleCode: widget.roleCode,
+          // This row is already visible and permission-scoped on the list.
+          // It is only a read-only preview, never authoritative detail.
+          initialCustomerSummary: Map<String, dynamic>.from(customer),
+          sharedBottomNavigationBar: widget.detailBottomNavigationBar,
+          onReviewed: () => widget.onCustomerReviewed?.call(customer['id'].toString()),
         ),
       ),
     );
@@ -203,8 +291,10 @@ class _CustomersScreenState extends State<CustomersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Stack(
       children: [
+        Column(
+          children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
           child: Row(
@@ -217,8 +307,23 @@ class _CustomersScreenState extends State<CustomersScreen> {
                       ),
                 ),
               ),
+              if (_showingLocal &&
+                  (BriskersConnectionModeController.instance.forceOffline ||
+                      _refreshFailed))
+                Tooltip(
+                  message: _refreshFailed
+                      ? 'Customer refresh needs attention; saved customers shown'
+                      : 'Offline: showing saved customers',
+                  child: const Padding(
+                    padding: EdgeInsets.only(right: 8),
+                    child: Icon(Icons.cloud_off_outlined,
+                      size: 18, color: Color(0xFF667085)),
+                  ),
+                ),
               Text(
-                '${tr('total')} $_totalCustomers',
+                _rows == null && _totalCustomers == 0
+                    ? '${tr('total')} …'
+                    : '${tr('total')} $_totalCustomers',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -235,6 +340,16 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   controller: _search,
                   hintText: tr('searchCustomers'),
                   leading: const Icon(Icons.search),
+                  trailing: _search.text.isEmpty ? null : [
+                    IconButton(
+                      tooltip: 'Clear customer search',
+                      icon: const Icon(Icons.close),
+                      onPressed: () {
+                        _search.clear();
+                        _onSearchChanged('');
+                      },
+                    ),
+                  ],
                   onChanged: _onSearchChanged,
                   onSubmitted: (_) {
                     _searchDebounce?.cancel();
@@ -242,45 +357,10 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   },
                 ),
               ),
-              const SizedBox(width: 8),
-              IconButton.filled(
-                style: IconButton.styleFrom(
-                  backgroundColor: BriskersColors.actionBlue,
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: _canManageCustomers ? _add : null,
-                tooltip: tr('addCustomer'),
-                icon: const Icon(Icons.person_add),
-              ),
+
             ],
           ),
         ),
-        if (_showingLocal)
-          Container(
-            margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 10,
-              vertical: 8,
-            ),
-            decoration: BoxDecoration(
-              color: Theme.of(context)
-                  .colorScheme
-                  .surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(9),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.cloud_off_outlined, size: 18),
-                const SizedBox(width: 7),
-                Expanded(
-                  child: Text(
-                    tr('savedCustomersOffline'),
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ],
-            ),
-          ),
         if (_error != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -295,6 +375,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView.builder(
+                    padding: const EdgeInsets.only(bottom: 96),
                     itemCount: _rows!.length,
                     itemBuilder: (context, index) {
                       final customer = _rows![index];
@@ -347,6 +428,26 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   ),
                 ),
         ),
+      ],
+        ),
+        if (_canManageCustomers && MediaQuery.viewInsetsOf(context).bottom == 0)
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: FloatingActionButton.extended(
+              heroTag: 'customers_screen-quick-create',
+              tooltip: tr('addCustomer'),
+              onPressed: _add,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              backgroundColor: BriskersColors.actionBlue,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ),
       ],
     );
   }

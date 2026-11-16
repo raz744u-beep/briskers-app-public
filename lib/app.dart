@@ -8,36 +8,9 @@ import 'screens/auth_gate.dart';
 class BriskersApp extends StatelessWidget {
   const BriskersApp({super.key});
 
-  @override
-  Widget build(BuildContext context) {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF3B82F6),
-      brightness: Brightness.light,
-    );
-
-    return AnimatedBuilder(
-      animation: BriskersLanguageController.instance,
-      builder: (context, _) => MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Briskers',
-      locale: BriskersLanguageController.instance.locale,
-      supportedLocales: const [
-        Locale('en'),
-        Locale('es'),
-      ],
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      builder: (context, child) {
-        final media = MediaQuery.of(context);
-        return MediaQuery(
-          data: media.copyWith(textScaler: TextScaler.noScaling),
-          child: child ?? const SizedBox.shrink(),
-        );
-      },
-      theme: ThemeData(
+  static ThemeData get applicationTheme {
+    final scheme=ColorScheme.fromSeed(seedColor:const Color(0xFF3B82F6),brightness:Brightness.light);
+    return ThemeData(
         colorScheme: scheme,
         useMaterial3: true,
         fontFamily: 'Roboto',
@@ -60,7 +33,34 @@ class BriskersApp extends StatelessWidget {
           filled: true,
           fillColor: Colors.white,
         ),
-      ),
+      );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: BriskersLanguageController.instance,
+      builder: (context, _) => MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Briskers',
+      locale: BriskersLanguageController.instance.locale,
+      supportedLocales: const [
+        Locale('en'),
+        Locale('es'),
+      ],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      builder: (context, child) {
+        final media = MediaQuery.of(context);
+        return MediaQuery(
+          data: media.copyWith(textScaler: TextScaler.noScaling),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
+      theme: applicationTheme,
       home: const AuthGate(),
       ),
     );

@@ -1,3 +1,4 @@
+import 'payroll/owner_payroll_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -286,6 +287,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
             label: 'Reports',
             icon: Icons.bar_chart_outlined,
             color: BriskersColors.reports,
+            onTap: widget.roleCode == 'owner' && OwnerPayrollScreen.enabled
+                ? () => Navigator.push<void>(
+                    context,
+                    MaterialPageRoute(builder: (_) => OwnerPayrollScreen(
+                      businessId: widget.businessId, reportsOnly: true,
+                    )),
+                  )
+                : null,
           ),
           _homeTile(
             label: 'Chat',
@@ -949,7 +958,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => JobDocumentScreen(
-            businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          businessId: widget.businessId,
             documentId: invoiceId,
             isOwner: widget.roleCode == 'owner',
           ),
@@ -972,7 +982,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => JobDocumentScreen(
-            businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          businessId: widget.businessId,
             documentId: estimateId,
             isOwner: widget.roleCode == 'owner',
           ),

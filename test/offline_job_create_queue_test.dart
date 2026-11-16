@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'support/replay_cooldown.dart';
 import 'dart:convert';
 import 'package:drift/native.dart';
 import 'package:drift/drift.dart';
@@ -30,7 +32,7 @@ void main() {
       ).getSingle();
       expect(job.read<String>('sync_state'),'pending');
       expect(job.read<String>('title'),'Test repair');
-      expect(job.read<String>('job_number'),'Pending sync');
+      expect(job.read<String>('job_number'),'J-1');
       expect(job.read<double>('planned_hours'),2.0);
       expect(job.read<String>('assigned_employee_id'),'mechanic-1');
       expect(job.read<String>('assigned_employee_name'),'Chris');
@@ -52,7 +54,7 @@ void main() {
     }
   });
 
-  test('uncertain server replay uses the same ID and one Job', () async {
+  test('legacy unnumbered Job replay uses the same ID and one Job', () async {
     final db=BriskersLocalDatabase(NativeDatabase.memory());
     final api=FakeJobApi()..failUpdateOnce=true;
     final service=OfflineJobAdminService(database:db,api:api);
@@ -60,11 +62,16 @@ void main() {
       final jobId=await service.queueJobCreate('shop-1',
         customerId:'customer-1',customerName:'Test',
         title:'Offline created job');
+      final legacy=await db.customSelect("SELECT id,payload_json FROM sync_outbox WHERE entity_type='job_create'").getSingle();
+      final payload=Map<String,dynamic>.from(jsonDecode(legacy.read<String>('payload_json')) as Map)..remove('local_job_number');
+      await db.customStatement('UPDATE sync_outbox SET payload_json=? WHERE id=?',[jsonEncode(payload),legacy.read<int>('id')]);
+      await expireSyncReplayCooldown(db);
       await service.flushCreates('shop-1');
       expect(api.createdIds,[jobId]);
       final retained=await db.customSelect(
         "SELECT id FROM sync_outbox WHERE entity_type='job_create'").get();
       expect(retained.length,1);
+      await expireSyncReplayCooldown(db);
       await service.flushCreates('shop-1');
       expect(api.createdIds,[jobId]);
       final pending=await db.customSelect(
@@ -111,7 +118,7 @@ class FakeJobApi extends BriskersApi {
   }) async {
     if(failUpdateOnce) {
       failUpdateOnce=false;
-      throw StateError('simulated transient network loss');
+      throw TimeoutException('simulated transient network loss');
     }
   }
   @override

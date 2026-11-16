@@ -4,9 +4,32 @@ import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/supabase_config.dart';
+import '../local/local_database_provider.dart';
+import 'sync_replay_fence.dart';
+
+/// A queued replay can checkpoint each mutation within a multi-stage upload.
+/// Keeping the actual response inside the guard also preserves late receipts.
+typedef AttachmentReplayGuard = Future<T> Function<T>(
+  Future<T> Function() operation,
+);
+
+Future<T> runAttachmentMutation<T>(
+  Future<T> Function() operation, {
+  AttachmentReplayGuard? replayGuard,
+}) => replayGuard == null ? operation() : replayGuard<T>(operation);
 
 class BriskersApi {
   const BriskersApi();
+
+  Future<dynamic> _fencedRpc(String name,
+      {required Map<String, dynamic> params}) =>
+      SyncReplayFence(localDatabase).run(
+        params['p_business_id'].toString(),
+        // Full revision-bound request identity; no random retry IDs. This is
+        // local-only state, never a second server idempotency mechanism.
+        'rpc:$name:${jsonEncode(params)}',
+        () => networkSupabase.rpc(name, params: params),
+      );
 
   Future<List<Map<String, dynamic>>> myBusinesses() async {
     final result = await networkSupabase.rpc('briskers_my_businesses');
@@ -130,13 +153,14 @@ class BriskersApi {
     required String attachmentId,
     required String mimeType,
     required Uint8List bytes,
+    AttachmentReplayGuard? replayGuard,
   }) async {
     try {
-      await networkSupabase.storage.from(bucket).uploadBinary(
+      await runAttachmentMutation(() => networkSupabase.storage.from(bucket).uploadBinary(
         key,
         bytes,
         fileOptions: FileOptions(contentType: mimeType, upsert: false),
-      );
+      ), replayGuard: replayGuard);
     } on StorageException catch (error) {
       final status = error.statusCode?.toString();
       final message = error.message.toLowerCase();
@@ -145,14 +169,14 @@ class BriskersApi {
       if (!alreadyExists) rethrow;
     }
 
-    await networkSupabase.rpc(
+    await runAttachmentMutation(() async => await networkSupabase.rpc(
       'briskers_finalize_attachment',
       params: {
         'p_business_id': businessId,
         'p_attachment_id': attachmentId,
         'p_byte_size': bytes.length,
       },
-    );
+    ), replayGuard: replayGuard);
   }
 
   Future<Map<String, dynamic>?> currentVisitSync(
@@ -920,31 +944,32 @@ class BriskersApi {
     required String filename,
     required String mimeType,
     required Uint8List bytes,
+    AttachmentReplayGuard? replayGuard,
   }) async {
-    final registration = await registerCustomerNotePhoto(
+    final registration = await runAttachmentMutation(() => registerCustomerNotePhoto(
       businessId,
       noteId,
       filename: filename,
       mimeType: mimeType,
-    );
+    ), replayGuard: replayGuard);
     final bucket = registration['bucket'].toString();
     final key = registration['key'].toString();
     final attachmentId = registration['attachment_id'].toString();
 
-    await networkSupabase.storage.from(bucket).uploadBinary(
+    await runAttachmentMutation(() => networkSupabase.storage.from(bucket).uploadBinary(
       key,
       bytes,
       fileOptions: FileOptions(contentType: mimeType, upsert: false),
-    );
+    ), replayGuard: replayGuard);
 
-    await networkSupabase.rpc(
+    await runAttachmentMutation(() async => await networkSupabase.rpc(
       'briskers_finalize_attachment',
       params: {
         'p_business_id': businessId,
         'p_attachment_id': attachmentId,
         'p_byte_size': bytes.length,
       },
-    );
+    ), replayGuard: replayGuard);
   }
 
   Future<Map<String, dynamic>?> jobPreInspection(String businessId, String jobId) async {
@@ -1521,17 +1546,31 @@ class BriskersApi {
         .toList();
   }
 
-  Future<List<Map<String, dynamic>>> transactions(
-    String businessId, {
-    int limit = 500,
+  /// Permission-checked, read-only inventory. Payments are NOT finalized here.
+  Future<List<Map<String, dynamic>>> invoiceReceipts(String businessId, {
+    int limit = 250,
+    int offset = 0,
   }) async {
     final result = await networkSupabase.rpc(
-      'briskers_list_transactions',
-      params: {'p_business_id': businessId, 'p_limit': limit},
+      'briskers_invoice_receipts_v1',
+      params: {'p_business_id': businessId, 'p_limit': limit, 'p_offset': offset},
     );
     return (result as List<dynamic>)
-        .map((row) => Map<String, dynamic>.from(row as Map))
-        .toList();
+        .map((row) => Map<String, dynamic>.from(row as Map)).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> transactions(
+    String businessId, {int limit = 500}
+  ) async {
+    final count = limit.clamp(1, 2000);
+    final rows = <Map<String,dynamic>>[];
+    while (rows.length < count) {
+      final size = (count - rows.length).clamp(1, 200);
+      final page = await transactionsPaged(businessId, limit: size, offset: rows.length);
+      rows.addAll(page);
+      if (page.length < size) break;
+    }
+    return rows;
   }
 
   Future<List<Map<String, dynamic>>> transactionsPaged(
@@ -1547,7 +1586,7 @@ class BriskersApi {
     String? counterpartyId,
   }) async {
     final result = await networkSupabase.rpc(
-      'briskers_list_transactions_v2',
+      'briskers_list_transactions_recurring_v1',
       params: {
         'p_business_id': businessId,
         'p_limit': limit,
@@ -1566,6 +1605,30 @@ class BriskersApi {
     return (result as List<dynamic>)
         .map((row) => Map<String, dynamic>.from(row as Map))
         .toList();
+  }
+
+  /// An explicit single-record download, allowed without enabling general
+  /// synchronization. The RPC only reads already-posted expenses.
+  Future<Map<String, dynamic>?> downloadRecurringExpenseOccurrence(
+    String businessId,
+    String ruleId,
+    String dueDate,
+  ) async {
+    final client = supabase;
+    final session = client.auth.currentSession;
+    if (session == null) throw StateError('An active Briskers sign-in is required.');
+    final result = await client.rpc(
+      'briskers_read_recurring_expense_occurrence',
+      params: {
+        'p_business_id': businessId,
+        'p_rule_id': ruleId,
+        'p_due_date': dueDate,
+      },
+    ).timeout(const Duration(seconds: 15));
+    if (client.auth.currentSession?.user.id != session.user.id) {
+      throw StateError('The Briskers account changed during download.');
+    }
+    return result == null ? null : Map<String, dynamic>.from(result as Map);
   }
 
   Future<Map<String, dynamic>> transactionDetail(
@@ -1666,6 +1729,23 @@ class BriskersApi {
       },
     );
     return result.toString();
+  }
+
+  Future<void> syncPayrollExpenseAccount(
+    String businessId,
+    String transactionId, {
+    required String expectedAccountId,
+    required String accountId,
+  }) async {
+    await networkSupabase.rpc(
+      'briskers_sync_payroll_expense_account_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+        'p_expected_account_id': expectedAccountId,
+        'p_account_id': accountId,
+      },
+    );
   }
 
   Future<void> updateManualTransaction(
@@ -2659,12 +2739,27 @@ class BriskersApi {
     );
   }
 
+  /// Owner-only, read-only proof for the exact disposable mock appointment.
+  /// A false reply or missing RPC MUST NOT retire any local pending deletion.
+  Future<bool> confirmOrphanMockAppointmentAbsent(
+    String businessId, String appointmentId,
+  ) async {
+    final result = await networkSupabase.rpc(
+      'briskers_confirm_orphan_mock_absent_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+      },
+    );
+    return result == true;
+  }
+
   Future<bool> syncOfflineAppointmentDelete(
     String businessId, String appointmentId, {
     required String operationId,
     required int baseVersion,
   }) async {
-    final result = await networkSupabase.rpc(
+    final result = await _fencedRpc(
       'briskers_sync_offline_appointment_delete',
       params: {
         'p_business_id': businessId,
@@ -2799,6 +2894,13 @@ class BriskersApi {
     return result.toString();
   }
 
+  Future<void> markFindingNotApplicable(String businessId,String findingId,
+    {required String originalBody,required String body})async{
+    await networkSupabase.rpc('briskers_mark_finding_not_applicable',params:{
+      'p_business_id':businessId,'p_finding_id':findingId,
+      'p_original_body':originalBody,'p_body':body});
+  }
+
   Future<void> updateVehicleFinding(
     String businessId,
     String findingId, {
@@ -2856,31 +2958,32 @@ class BriskersApi {
     required String filename,
     required String mimeType,
     required Uint8List bytes,
+    AttachmentReplayGuard? replayGuard,
   }) async {
-    final registration = await registerVehicleFindingPhoto(
+    final registration = await runAttachmentMutation(() => registerVehicleFindingPhoto(
       businessId,
       findingId,
       filename: filename,
       mimeType: mimeType,
-    );
+    ), replayGuard: replayGuard);
     final bucket = registration['bucket'].toString();
     final key = registration['key'].toString();
     final attachmentId = registration['attachment_id'].toString();
 
-    await networkSupabase.storage.from(bucket).uploadBinary(
+    await runAttachmentMutation(() => networkSupabase.storage.from(bucket).uploadBinary(
       key,
       bytes,
       fileOptions: FileOptions(contentType: mimeType, upsert: false),
-    );
+    ), replayGuard: replayGuard);
 
-    await networkSupabase.rpc(
+    await runAttachmentMutation(() async => await networkSupabase.rpc(
       'briskers_finalize_attachment',
       params: {
         'p_business_id': businessId,
         'p_attachment_id': attachmentId,
         'p_byte_size': bytes.length,
       },
-    );
+    ), replayGuard: replayGuard);
   }
 
   Future<void> deleteVehicleFindingPhoto(
@@ -3321,18 +3424,47 @@ class BriskersApi {
     );
   }
 
-  Future<Map<String, dynamic>> documentDetail(
+  Future<Map<String, dynamic>> documentDetailV4(
     String businessId,
     String documentId,
   ) async {
     final result = await networkSupabase.rpc(
-      'briskers_document_detail_v3',
-      params: {
-        'p_business_id': businessId,
-        'p_document_id': documentId,
-      },
+      'briskers_document_detail_v4',
+      params: {'p_business_id':businessId,'p_document_id':documentId},
     );
-    return Map<String, dynamic>.from(result as Map);
+    return Map<String,dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> documentDetail(
+    String businessId,
+    String documentId,
+  ) async {
+    // v5 adds explicit mileage readings. Older installations do not expose
+    // this RPC; only a missing-function response permits v4 fallback.
+    try {
+      final response = await networkSupabase.rpc(
+        'briskers_document_detail_v5',
+        params: {'p_business_id': businessId, 'p_document_id': documentId},
+      );
+      return Map<String, dynamic>.from(response as Map);
+    } on PostgrestException catch (error) {
+      if (error.code != 'PGRST202') rethrow;
+    }
+    try {
+      return await documentDetailV4(businessId, documentId);
+    } on PostgrestException catch (error) {
+      // Mixed-version deployments: no accidental fallback on permission,
+      // conflict or database errors. Only missing v4 function is expected.
+      if (error.code != 'PGRST202') rethrow;
+      final result = await networkSupabase.rpc(
+        'briskers_document_detail_v3',
+        params: {
+          'p_business_id': businessId,
+          'p_document_id': documentId,
+        },
+      );
+      return Map<String, dynamic>.from(result as Map);
+    }
   }
 
   Future<List<Map<String, dynamic>>> itemCategories(
@@ -3492,6 +3624,40 @@ class BriskersApi {
     );
   }
 
+  /// Exact-total recovery is separate from the normal v1 sync path.
+  /// Call this only from Owner's targeted recovery after confirming the
+  /// source snapshot. A missing v2 backend function must fail closed.
+  Future<String> syncOfflineQuickInvoiceExactTotal(
+    String businessId, {
+    required String customerId,
+    String? vehicleId,
+    required String operationId,
+    required String documentDate,
+    required List<Map<String, dynamic>> lines,
+    String? memo,
+    required int expectedNetCents,
+    required int expectedTaxCents,
+  }) async {
+    if (expectedNetCents < 0 || expectedTaxCents < 0) {
+      throw StateError('Invalid exact-total invoice recovery amounts.');
+    }
+    final id = await networkSupabase.rpc(
+      'briskers_sync_offline_quick_invoice_v2',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_operation_id': operationId,
+        'p_document_date': documentDate,
+        'p_lines': lines,
+        'p_memo': memo,
+        'p_expected_net_cents': expectedNetCents,
+        'p_expected_tax_cents': expectedTaxCents,
+      },
+    );
+    return id.toString();
+  }
+
   /// Upload an offline invoice atomically. Repeating the same UUID is safe.
   Future<String> syncOfflineQuickInvoice(
     String businessId, {
@@ -3579,6 +3745,27 @@ class BriskersApi {
         'p_document_date': documentDate.toIso8601String().split('T').first,
       },
     );
+  }
+
+  /// Explicit departure odometer (schema v2 only). The backend RPC must
+  /// atomically validate invoice/job/vehicle scope and preserve the historical
+  /// document odometer_in field. Never fall back to the legacy setter.
+  Future<Map<String, dynamic>> saveInvoiceMileageOut(
+    String businessId,
+    String documentId, {
+    required int expectedVersion,
+    required num? mileageOut,
+  }) async {
+    final result = await _fencedRpc(
+      'briskers_save_invoice_mileage_out_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_expected_version': expectedVersion,
+        'p_mileage_out': mileageOut,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
   }
 
   Future<void> updateDocumentMileage(
@@ -3782,6 +3969,26 @@ class BriskersApi {
     return result.toString();
   }
 
+  /// Version-checked, field-level update. Older servers leave this queued
+  /// locally until the standard-note styling migration has been deployed.
+  Future<Map<String, dynamic>> patchDocumentNoteTemplate(
+    String businessId, {
+    required String templateId,
+    required int expectedVersion,
+    required Map<String, dynamic> patch,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_patch_document_note_template_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_template_id': templateId,
+        'p_expected_version': expectedVersion,
+        'p_patch': patch,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<List<Map<String, dynamic>>> disclaimerTemplates(
     String businessId, {
     bool includeInactive = false,
@@ -3975,6 +4182,28 @@ class BriskersApi {
     String key,
   ) async {
     return networkSupabase.storage.from(bucket).download(key);
+  }
+
+  /// One audited server transaction updates all ordinary taxable invoice lines.
+  /// It never edits pending receipts or finalizes any payment.
+  Future<Map<String, dynamic>> updateInvoiceTaxRate(
+    String businessId,
+    String invoiceId, {
+    required int expectedVersion,
+    required num oldRate,
+    required num newRate,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_update_invoice_tax_rate_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+        'p_expected_version': expectedVersion,
+        'p_old_rate': oldRate,
+        'p_new_rate': newRate,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
   }
 
   Future<void> updateDocumentLineV2(
@@ -4248,7 +4477,7 @@ class BriskersApi {
     String documentId, {
     required int expectedVersion,
   }) async {
-    final result = await networkSupabase.rpc(
+    final result = await _fencedRpc(
       'briskers_issue_document',
       params: {
         'p_business_id': businessId,
@@ -4325,6 +4554,32 @@ class BriskersApi {
     return result.toString();
   }
 
+  /// Date-aware, idempotent payment capture. Only enabled after the
+  /// reviewed v2 server contract is deployed; otherwise replay fails closed.
+  Future<String> addPendingInvoicePaymentOnceV2(
+    String businessId,
+    String invoiceId, {
+    required num amount,
+    required String methodId,
+    required String operationId,
+    required String paymentDate,
+    List<dynamic> localEditHistory = const [],
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_add_pending_invoice_payment_once_v2',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+        'p_amount': amount,
+        'p_method_id': methodId,
+        'p_operation_id': operationId,
+        'p_payment_date': paymentDate,
+        'p_local_edit_history': localEditHistory,
+      },
+    );
+    return result.toString();
+  }
+
   Future<void> updatePendingInvoicePayment(
     String businessId,
     String paymentId, {
@@ -4342,6 +4597,28 @@ class BriskersApi {
     );
   }
 
+  /// Version-checked amount/method/date edit; never mutate posted receipts.
+  Future<void> updatePendingInvoicePaymentV2(
+    String businessId,
+    String paymentId, {
+    required num amount,
+    required String methodId,
+    required String paymentDate,
+    required int expectedRowVersion,
+  }) async {
+    await networkSupabase.rpc(
+      'briskers_update_pending_invoice_payment_v2',
+      params: {
+        'p_business_id':businessId,
+        'p_payment_id':paymentId,
+        'p_amount':amount,
+        'p_method_id':methodId,
+        'p_payment_date':paymentDate,
+        'p_expected_row_version':expectedRowVersion,
+      },
+    );
+  }
+
   Future<void> deletePendingInvoicePayment(
     String businessId,
     String paymentId,
@@ -4353,6 +4630,14 @@ class BriskersApi {
         'p_payment_id': paymentId,
       },
     );
+  }
+
+  Future<Map<String,dynamic>> finalizeInvoiceOnce(String businessId,
+      String invoiceId,String operationId,Map<String,dynamic> request) async {
+    final result = await networkSupabase.rpc('briskers_finalize_invoice_once_v1',
+      params:{'p_business_id':businessId,'p_invoice_id':invoiceId,
+        'p_operation_id':operationId,'p_request':request});
+    return Map<String,dynamic>.from(result as Map);
   }
 
   Future<String> finalizePendingInvoicePayment(
@@ -4382,3 +4667,4 @@ class BriskersApi {
     );
   }
 }
+

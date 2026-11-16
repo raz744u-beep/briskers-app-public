@@ -1,8 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/connection_mode.dart';
+import '../core/supabase_config.dart';
+import '../local/local_database_provider.dart';
+import '../services/offline_recurring_repository.dart';
+import '../services/local_financial_cache.dart';
+import '../services/recurring_financial_projection.dart';
 import '../services/briskers_api.dart';
 import '../services/local_job_repository.dart';
 import '../services/local_document_repository.dart';
@@ -18,6 +25,9 @@ import 'jobs/estimate_job_setup_screen.dart';
 import 'jobs/identifix_estimate_import_screen.dart';
 import 'jobs/job_document_screen.dart';
 import 'jobs/job_detail_screen.dart';
+import 'payroll/mechanic_labor_screen.dart';
+import 'payroll/owner_payroll_screen.dart';
+import 'settings/employees_settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -57,7 +67,48 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  bool _recurringCatchUpRunning = false;
+
+  Future<void> _catchUpRecurring() async {
+    if (_recurringCatchUpRunning || widget.roleCode != 'owner') return;
+    _recurringCatchUpRunning = true;
+    try {
+      final user = supabase.auth.currentUser?.id;
+      if (user == null) return;
+      final business = widget.businessId;
+      bool allowed() => mounted && widget.businessId == business &&
+          widget.roleCode == 'owner' && supabase.auth.currentUser?.id == user;
+      final repository = OfflineRecurringRepository(database: localDatabase,
+        businessId: business, userId: user,
+        currentUserId: () => supabase.auth.currentUser?.id,
+        canRead: allowed, canWrite: allowed,
+        projectOccurrence: RecurringFinancialProjection(business).call);
+      // Same local calendar convention used by the shop's expense entry screen.
+      // This only processes previously saved rules and never opens the network.
+      final date = OfflineRecurringRepository.dateText(DateTime.now());
+      final cache=LocalFinancialCache();
+      for(final row in await cache.loadTransactions(business)) {
+        if(row['recurring_rule_id']==null || row['recurring_occurrence_date']==null)continue;
+        final detail=await cache.loadTransactionForEdit(business,row['id'].toString());
+        if(detail!=null) {
+          try { await repository.adoptSavedExpense(detail); } on ArgumentError { continue; }
+        }
+      }
+      await repository.generateThrough(date);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content:
+          Text('Recurring expenses need review: $error')));
+      }
+    } finally { _recurringCatchUpRunning = false; }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_catchUpRecurring());
+  }
+
   static const _api = BriskersApi();
   final LocalJobRepository _localJobs = LocalJobRepository();
   final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
@@ -68,6 +119,10 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _expandedSection;
   Map<String, dynamic> _attention = const {};
   bool _attentionLoading = false;
+  bool _attentionRefreshQueued = false;
+  // In Auto keep the last authorized server counts visible while refreshing.
+  // A temporary local count may legitimately differ until reconciliation.
+  bool _attentionServerVerified = false;
   BriskersWeatherSnapshot? _weather;
   bool _weatherLoading = false;
 
@@ -82,6 +137,10 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_catchUpRecurring());
+    });
     _loadAttention();
     _loadWeather();
     BriskersConnectionModeController.instance.addListener(_onConnectionMode);
@@ -93,6 +152,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     BriskersConnectionModeController.instance.removeListener(_onConnectionMode);
     super.dispose();
   }
@@ -100,6 +160,15 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void didUpdateWidget(covariant HomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId || oldWidget.roleCode != widget.roleCode) {
+      unawaited(_catchUpRecurring());
+    }
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.roleCode != widget.roleCode) {
+      // Never reuse another shop's or permission group's attention data.
+      _attention = const {};
+      _attentionServerVerified = false;
+    }
     if (oldWidget.businessId != widget.businessId ||
         oldWidget.roleCode != widget.roleCode ||
         oldWidget.jobsCount != widget.jobsCount ||
@@ -179,48 +248,68 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadAttention() async {
-    if (_attentionLoading) return;
+    if (_attentionLoading) {
+      // Coalesce multiple Home, sync and badge notifications rather than
+      // starting overlapping server/local reads or dropping the last change.
+      _attentionRefreshQueued = true;
+      return;
+    }
     _attentionLoading = true;
+    final businessId = widget.businessId;
+    final roleCode = widget.roleCode;
+    bool sameScope() => mounted && widget.businessId == businessId &&
+        widget.roleCode == roleCode;
 
     try {
       final localJobs = await _localJobs.unassignedOpenJobs(
-        widget.businessId,
+        businessId,
         limit: 25,
       );
       final localCount =
-          await _localJobs.unassignedOpenJobCount(widget.businessId);
+          await _localJobs.unassignedOpenJobCount(businessId);
       final localPending = await _localDocuments.pendingCloseAttention(
-        widget.businessId,
+        businessId,
       );
+      if (!sameScope()) return;
 
-      if (mounted) {
-        final currentCounts = _attention['counts'] is Map
-            ? Map<String, dynamic>.from(_attention['counts'] as Map)
-            : <String, dynamic>{};
-        final next = Map<String, dynamic>.from(_attention)
-          ..['unassigned_jobs'] = localJobs
-          ..['pending_close_invoices'] = localPending['items']
-          ..['counts'] = {
-            ...currentCounts,
-            'unassigned_jobs': localCount,
-            'pending_close_invoices': localPending['count'],
-          };
-        setState(() => _attention = next);
-      }
+      final currentCounts = _attention['counts'] is Map
+          ? Map<String, dynamic>.from(_attention['counts'] as Map)
+          : <String, dynamic>{};
+      final localSnapshot = Map<String, dynamic>.from(_attention)
+        ..['unassigned_jobs'] = localJobs
+        ..['pending_close_invoices'] = localPending['items']
+        ..['counts'] = {
+          ...currentCounts,
+          'unassigned_jobs': localCount,
+          'pending_close_invoices': localPending['count'],
+        };
 
-      if (BriskersConnectionModeController.instance.forceOffline) {
-        return;
+      final connection = BriskersConnectionModeController.instance;
+      if (connection.forceOffline || !_attentionServerVerified) {
+        // First visit / Force Offline: saved authorized counts are usable.
+        // On later Auto visits do not flash a provisional local number before
+        // the server confirms whether Pending Close actually changed.
+        setState(() => _attention = localSnapshot);
       }
+      if (connection.forceOffline) return;
 
       try {
-        final data = await _api.needsAttention(widget.businessId);
-        if (!mounted) return;
+        final data = await _api.needsAttention(businessId)
+            .timeout(const Duration(seconds: 8));
+        if (!sameScope() || connection.forceOffline) return;
+        _attentionServerVerified = true;
         setState(() => _attention = data);
       } catch (_) {
-        // Keep the local unassigned-jobs result and the last server snapshot.
+        if (!sameScope() || connection.forceOffline) return;
+        // Preserve the last verified server snapshot if an Auto refresh fails.
+        // Before the first verification the local snapshot is already visible.
       }
     } finally {
       _attentionLoading = false;
+      if (_attentionRefreshQueued && mounted) {
+        _attentionRefreshQueued = false;
+        unawaited(_loadAttention());
+      }
     }
   }
 
@@ -264,6 +353,7 @@ class _HomeScreenState extends State<HomeScreen> {
           businessId: widget.businessId,
           jobId: id,
           roleCode: widget.roleCode,
+          bottomNavigationBar: widget.estimatesNavigationBar,
         ),
       ),
     );
@@ -680,15 +770,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _openDocument(String documentId) async {
+  Future<void> _openDocument(String documentId, {
+    bool freshlyCreated = false,
+  }) async {
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: documentId,
           isOwner: widget.roleCode == 'owner',
           canManageExpenses: _canManage,
+          freshlyCreated: freshlyCreated,
         ),
       ),
     );
@@ -856,10 +950,12 @@ class _HomeScreenState extends State<HomeScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => JobDocumentScreen(
-            businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          businessId: widget.businessId,
             documentId: invoiceId,
             isOwner: widget.roleCode == 'owner',
             canManageExpenses: _canManage,
+            freshlyCreated: true,
             initialAction: 'edit',
           ),
         ),
@@ -875,7 +971,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final documentId = await _api.createInvoice(widget.businessId, jobId);
       if (!mounted) return;
-      await _openDocument(documentId);
+      await _openDocument(documentId, freshlyCreated: true);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1174,6 +1270,32 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 8),
             _HomeTiles(
+              onPayrollTap: OwnerPayrollScreen.enabled && widget.roleCode == 'owner'
+                ? () => Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>OwnerPayrollScreen(businessId:widget.businessId))) : null,
+              onEmployeesTap: OwnerPayrollScreen.enabled && widget.roleCode == 'owner'
+                ? () => Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>EmployeesSettingsScreen(businessId:widget.businessId,isOwner:true))) : null,
+              onTasksTap: OwnerPayrollScreen.enabled && widget.roleCode == 'owner'
+                  ? () => Navigator.of(context).push<void>(MaterialPageRoute(
+                      builder: (_) => OwnerPayrollScreen(
+                        businessId: widget.businessId, globalTasks: true,
+                      ),
+                    ))
+                  : null,
+              onReportsTap: () {
+                if (OwnerPayrollScreen.enabled && widget.roleCode == 'owner') {
+                  Navigator.of(context).push<void>(MaterialPageRoute(
+                    builder: (_) => OwnerPayrollScreen(
+                      businessId: widget.businessId, reportsOnly: true,
+                    ),
+                  ));
+                } else if (OwnerPayrollScreen.enabled && widget.roleCode == 'mechanic') {
+                  Navigator.of(context).push<void>(MaterialPageRoute(
+                    builder: (_) => MechanicLaborScreen(businessId: widget.businessId),
+                  ));
+                } else {
+                  widget.onMoreTap();
+                }
+              },
               expandedSection: _expandedSection,
               onToggle: _toggleSection,
               customersDrawer: KeyedSubtree(
@@ -1472,6 +1594,10 @@ class _HomeTiles extends StatelessWidget {
     required this.expensesDrawer,
     required this.onJobsTap,
     required this.onMoreTap,
+    required this.onReportsTap,
+    this.onTasksTap,
+    this.onPayrollTap,
+    this.onEmployeesTap,
     required this.jobsCount,
     required this.appointmentsCount,
     required this.customersNewCount,
@@ -1488,6 +1614,9 @@ class _HomeTiles extends StatelessWidget {
   final Widget expensesDrawer;
   final VoidCallback onJobsTap;
   final VoidCallback onMoreTap;
+  final VoidCallback onReportsTap;
+  final VoidCallback? onTasksTap;
+  final VoidCallback? onPayrollTap,onEmployeesTap;
   final int jobsCount;
   final int appointmentsCount;
   final int customersNewCount;
@@ -1634,13 +1763,25 @@ class _HomeTiles extends StatelessWidget {
             expensesDrawer,
           ],
           const SizedBox(height: 5),
+          if (onTasksTap != null) ...[
+            _tile('Tasks', 'Service & General Tasks', Icons.assignment_outlined,
+              BriskersColors.jobs, onTasksTap!),
+            const SizedBox(height: 5),
+          ],
+          if(onPayrollTap!=null && onEmployeesTap!=null) ...[
+            row(
+              _tile('Payroll','Weekly labor & balances',Icons.account_balance_wallet_outlined,BriskersColors.invoices,onPayrollTap!),
+              _tile('Employees','Profiles & details',Icons.badge_outlined,BriskersColors.estimates,onEmployeesTap!),
+            ),
+            const SizedBox(height:5),
+          ],
           row(
             _tile(
               'Reports',
               'View Reports',
               Icons.bar_chart_outlined,
               BriskersColors.reports,
-              onMoreTap,
+              onReportsTap,
             ),
             _tile(
               'Chat',
@@ -1715,3 +1856,4 @@ class _ActionDrawer extends StatelessWidget {
     );
   }
 }
+

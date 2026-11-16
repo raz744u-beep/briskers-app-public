@@ -1,0 +1,34 @@
+{
+  "scope": "Synthetic host CPU timing, not device/end-to-end latency",
+  "rows": 5000,
+  "warmups_per_operation": 5,
+  "samples_per_operation": 15,
+  "equal_snapshots_separately_materialized": true,
+  "measurements": [
+    {
+      "name": "previous_json_encode_equality",
+      "median_us": 22656,
+      "min_us": 16407,
+      "max_us": 33570
+    },
+    {
+      "name": "structural_equality",
+      "median_us": 2676,
+      "min_us": 2357,
+      "max_us": 3613
+    },
+    {
+      "name": "previous_number_parsing_in_comparator",
+      "median_us": 113117,
+      "min_us": 90076,
+      "max_us": 275942
+    },
+    {
+      "name": "parse_once_snapshot_sort",
+      "median_us": 44861,
+      "min_us": 36271,
+      "max_us": 64273
+    }
+  ],
+  "warm_filter_rebuild_sort_count": 0
+}

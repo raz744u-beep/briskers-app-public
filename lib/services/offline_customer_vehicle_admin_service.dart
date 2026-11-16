@@ -1,3 +1,4 @@
+import 'sync_replay_fence.dart';
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
@@ -15,6 +16,8 @@ class OfflineCustomerVehicleAdminService {
 
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
+  // Share each in-flight upload across Auto and manual Sync Now on this device.
+  static final Expando<Map<String, Future<void>>> _activeFlushes = Expando();
 
   Future<String> queueCustomerCreate(
     String businessId, {
@@ -397,7 +400,18 @@ class OfflineCustomerVehicleAdminService {
     });
   }
 
-  Future<void> flush(String businessId) async {
+  Future<void> flush(String businessId) {
+    final active = _activeFlushes[_database] ??= <String, Future<void>>{};
+    final existing = active[businessId];
+    if (existing != null) return existing;
+    final work = _flushInternal(businessId);
+    active[businessId] = work;
+    return work.whenComplete(() {
+      if (identical(active[businessId], work)) active.remove(businessId);
+    });
+  }
+
+  Future<void> _flushInternal(String businessId) async {
     final rows = await _database.customSelect(
       '''
       SELECT id, entity_type, entity_id, payload_json, attempt_count
@@ -441,7 +455,8 @@ class OfflineCustomerVehicleAdminService {
       }
       try {
         if (type == 'customer_create') {
-          final serverId=await _api.createCustomerOfflineIdempotent(
+          final serverId=await SyncReplayFence(_database).run(businessId, 'outbox:$outboxId',
+            () => _api.createCustomerOfflineIdempotent(
             businessId,
             operationId:payload['operation_id'].toString(),
             name:payload['name'].toString(),
@@ -449,13 +464,14 @@ class OfflineCustomerVehicleAdminService {
             email:payload['email']?.toString(),
             billingAddress:Map<String,dynamic>.from(
               payload['billing_address'] as Map? ?? const {}),
-          );
+          ), outboxId: outboxId);
           await reconcileCreatedCustomerId(
             businessId,entityId,serverId,outboxId,
           );
           continue;
         } else if (type == 'customer_profile') {
-          await _api.updateCustomerProfile(
+          await SyncReplayFence(_database).run(businessId, 'outbox:$outboxId',
+            () => _api.updateCustomerProfile(
             businessId,
             entityId,
             name: payload['name']?.toString() ?? '',
@@ -464,20 +480,22 @@ class OfflineCustomerVehicleAdminService {
             billingAddress: Map<String, dynamic>.from(
               payload['billing_address'] as Map? ?? const {},
             ),
-          );
+          ), outboxId: outboxId);
           await _database.customStatement(
             "UPDATE local_customers SET sync_state = 'synced' WHERE business_id = ? AND id = ?",
             [businessId, entityId],
           );
         } else if (type == 'customer_flag') {
-          await _api.setCustomerProblemFlag(
+          await SyncReplayFence(_database).run(businessId, 'outbox:$outboxId',
+            () => _api.setCustomerProblemFlag(
             businessId,
             entityId,
             flagged: payload['flagged'] == true,
             note: payload['note']?.toString(),
-          );
+          ), outboxId: outboxId);
         } else if (type == 'vehicle_update') {
-          await _api.updateVehicle(
+          await SyncReplayFence(_database).run(businessId, 'outbox:$outboxId',
+            () => _api.updateVehicle(
             businessId,
             entityId,
             make: payload['make']?.toString() ?? '',
@@ -489,7 +507,7 @@ class OfflineCustomerVehicleAdminService {
             mileage: num.tryParse(payload['mileage']?.toString() ?? ''),
             color: payload['color']?.toString(),
             keyPassword: payload['key_password']?.toString(),
-          );
+          ), outboxId: outboxId);
           await _database.customStatement(
             "UPDATE local_vehicles SET sync_state = 'synced' WHERE business_id = ? AND id = ?",
             [businessId, entityId],
@@ -501,7 +519,8 @@ class OfflineCustomerVehicleAdminService {
             // Keep the existing operation untouched for a later sync pass.
             continue;
           }
-          final serverId = await _api.createVehicleOfflineIdempotent(
+          final serverId = await SyncReplayFence(_database).run(businessId, 'outbox:$outboxId',
+            () => _api.createVehicleOfflineIdempotent(
             businessId,
             payload['customer_id']?.toString() ?? '',
             operationId: 'vehicle-create-$entityId',
@@ -515,7 +534,7 @@ class OfflineCustomerVehicleAdminService {
             mileage: num.tryParse(payload['mileage']?.toString() ?? ''),
             color: payload['color']?.toString(),
             keyPassword: payload['key_password']?.toString(),
-          );
+          ), outboxId: outboxId);
           await reconcileCreatedVehicleId(businessId,entityId,serverId,outboxId);
           continue;
         }

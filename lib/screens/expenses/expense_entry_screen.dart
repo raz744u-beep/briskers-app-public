@@ -1,12 +1,74 @@
-import 'package:flutter/material.dart';
+import '../../services/local_recurring_expense_edit.dart';
+import '../../services/receipt_scanning_notice.dart';
+import 'dart:async';
+
+import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+
+import '../../core/module_modal_theme.dart';
+
 import 'package:image_picker/image_picker.dart';
+import '../../services/receipt_ai_gateway_access.dart';
+
+import '../../services/independent_receipt_ai_gateway.dart';
+import 'receipt_review_sheet.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
 import '../../core/briskers_i18n.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_financial_cache.dart';
+import '../../services/device_owner_authorization.dart';
 import '../../services/offline_financial_write_service.dart';
+import 'expense_receipt_attachments.dart';
+
+// Never display raw HTTP exception bodies, access tokens or receipt data.
+// Classify failures next to the scanner so the Owner can act without
+// scrolling to an unrelated Save Transaction error.
+@visibleForTesting
+String receiptAiFailureMessage(Object error) {
+  final message = error.toString().toLowerCase();
+  if (message.contains('saved owner account') ||
+      message.contains('owner account changed')) {
+    return 'Open the saved Briskers Owner account to pair receipt AI. '
+        'Your original photo remains attached and shop sync stays offline.';
+  }
+  if (message.contains('active briskers sign-in') ||
+      message.contains('authorization is not configured') ||
+      message.contains('http 401') || message.contains('http 403')) {
+    return 'Receipt AI sign-in authorization was rejected. Use Scan attached '
+        'receipt to reconnect the existing gateway or use manual entry. '
+        'Your photo is still attached; no expense was submitted. '
+        'Shop sync stays offline.';
+  }
+  if (message.contains('rejected business identity')) {
+    return 'The receipt AI Worker did not recognize this Briskers business. '
+        'Check the gateway shop authorization. The photo is still attached; '
+        'no expense was submitted, and shop sync stays offline.';
+  }
+  if (message.contains('http 429')) {
+    return 'Receipt AI reached its request limit. Your photo is safe. '
+        'Use manual entry or retry the scan later.';
+  }
+  if (message.contains('timeout') ||
+      message.contains('socketexception') ||
+      message.contains('connection') ||
+      message.contains('http 502') ||
+      message.contains('http 503') ||
+      message.contains('http 504')) {
+    return 'Receipt AI service or internet connection is unavailable. '
+        'The photo remains attached and manual entry still works.';
+  }
+  if (message.contains('no extraction') ||
+      message.contains('unexpected receipt') ||
+      message.contains('format') ||
+      message.contains('http 200')) {
+    return 'Receipt AI did not return readable receipt details. '
+        'You can retry with a clearer photo or enter it manually.';
+  }
+  return 'Receipt AI could not complete the scan. The photo is still '
+      'attached; retry or use manual entry. Shop sync stays unchanged.';
+}
+
 
 class ExpenseEntryScreen extends StatefulWidget {
   const ExpenseEntryScreen({
@@ -38,9 +100,13 @@ class ExpenseEntryScreen extends StatefulWidget {
   State<ExpenseEntryScreen> createState() => _ExpenseEntryScreenState();
 }
 
-class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
+class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
+    with ModuleModalState<ExpenseEntryScreen> {
+  @override
+  Color get modalAccent => BriskersColors.expenses;
   static const _api = BriskersApi();
   final _picker = ImagePicker();
+  final _receiptGatewayAccess = ReceiptAiGatewayAccess();
   final LocalFinancialCache _localFinancial = LocalFinancialCache();
   final OfflineFinancialWriteService _offlineFinancial =
       OfflineFinancialWriteService();
@@ -72,7 +138,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   DateTime? _endDate;
   String? _recurringRuleId;
 
+  bool _localRecurring = false;
+  bool _editTargetLoaded = false;
   bool _loading = true;
+  bool _optionsLoading = true;
   bool _saving = false;
   bool _readingReceipt = false;
   bool _autoScanLaunched = false;
@@ -81,6 +150,11 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   bool _applyReceiptSurcharge = false;
   String? _receiptReadMessage;
   String? _error;
+
+  Map<String, dynamic>? _original;
+
+  bool get _ownerAccountEdit =>
+      _editing && LocalFinancialCache.requiresOwnerAccountEdit(_original);
 
   bool get _editing => widget.editTransactionId != null;
   bool get _copying => widget.copyTransactionId != null;
@@ -93,6 +167,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     _jobId = widget.jobId;
     _documentId = widget.documentId;
     _contextLabel = widget.contextLabel;
+    // A new expense is an immediately usable local form. Account/category
+    // options hydrate in place; don't hide the entire screen behind a spinner.
+    _loading = _editing || _copying;
     _load();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -111,7 +188,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   }
 
   DateTime _parseDate(Object? raw, {DateTime? fallback}) {
-    return DateTime.tryParse(raw?.toString() ?? '') ?? fallback ?? DateTime.now();
+    return DateTime.tryParse(raw?.toString() ?? '') ??
+        fallback ??
+        DateTime.now();
   }
 
   String _categoryName(String? categoryId) {
@@ -130,9 +209,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       final ad = a['normal_direction']?.toString() == _direction ? 0 : 1;
       final bd = b['normal_direction']?.toString() == _direction ? 0 : 1;
       if (ad != bd) return ad.compareTo(bd);
-      return (a['name']?.toString() ?? '')
-          .toLowerCase()
-          .compareTo((b['name']?.toString() ?? '').toLowerCase());
+      return (a['name']?.toString() ?? '').toLowerCase().compareTo(
+        (b['name']?.toString() ?? '').toLowerCase(),
+      );
     });
     return rows;
   }
@@ -165,16 +244,26 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     final categories = List<dynamic>.from(data['categories'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
-    final counterparties =
-        List<dynamic>.from(data['counterparties'] ?? const [])
-            .map((raw) => Map<String, dynamic>.from(raw as Map))
-            .toList();
-    final quickTemplates =
-        List<dynamic>.from(data['quick_templates'] ?? const [])
-            .map((raw) => Map<String, dynamic>.from(raw as Map))
-            .toList();
+    final counterparties = List<dynamic>.from(
+      data['counterparties'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).where((row) =>
+        row['active'] != false || row['id'] == detail?['counterparty_id']).toList();
+    final quickTemplates = List<dynamic>.from(
+      data['quick_templates'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
 
+    if(detail!=null) {
+      for(final spec in [(accounts,'account_id','account'),(categories,'category_id','category'),(counterparties,'counterparty_id','counterparty')]) {
+        final id=detail[spec.$2]?.toString();
+        if(id!=null && id.isNotEmpty && !spec.$1.any((r)=>r['id']==id)) {
+          spec.$1.add({'id':id,'name':detail[spec.$3]?.toString()??'Saved selection'});
+        }
+      }
+    }
     setState(() {
+      _original = detail;
+      _editTargetLoaded = detail != null;
+      _localRecurring=_editing && detail!=null && (detail['recurring_rule_id']!=null || detail['recurring_engine_owned']==true);
       _accounts = accounts;
       _categories = categories;
       _counterparties = counterparties;
@@ -186,8 +275,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
             : 'expense';
         _amountController.text = detail['amount']?.toString() ?? '';
         _remarksController.text = detail['remarks']?.toString() ?? '';
-        _counterpartyController.text =
-            detail['counterparty']?.toString() ?? '';
+        _counterpartyController.text = detail['counterparty']?.toString() ?? '';
         final detailAccount = detail['account_id']?.toString();
         final detailCategory = detail['category_id']?.toString();
         final detailCounterparty = detail['counterparty_id']?.toString();
@@ -196,10 +284,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
             : null;
         _categoryId =
             categories.any((x) => x['id']?.toString() == detailCategory)
-                ? detailCategory
-                : null;
-        _counterpartyId = counterparties
-                .any((x) => x['id']?.toString() == detailCounterparty)
+            ? detailCategory
+            : null;
+        _counterpartyId =
+            counterparties.any((x) => x['id']?.toString() == detailCounterparty)
             ? detailCounterparty
             : null;
         _jobId = detail['job_id']?.toString();
@@ -219,9 +307,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           _repeat = false;
           _recurringRuleId = null;
         } else {
-          _date = _parseDate(
-            detail['date'] ?? detail['transaction_date'],
-          );
+          _date = _parseDate(detail['date'] ?? detail['transaction_date']);
           final recurring = detail['recurring_rule'];
           if (widget.allowRecurring && recurring is Map) {
             final rule = Map<String, dynamic>.from(recurring);
@@ -272,16 +358,15 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       }
 
       _loading = false;
+      _optionsLoading = false;
       _error = null;
     });
   }
 
   Future<void> _load() async {
     var localShown = false;
-    final forceOnline =
-        BriskersConnectionModeController.instance.forceOnline;
-    final forceOffline =
-        BriskersConnectionModeController.instance.forceOffline;
+    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
+    final forceOffline = BriskersConnectionModeController.instance.forceOffline;
     final sourceId = widget.editTransactionId ?? widget.copyTransactionId;
 
     if (!forceOnline) {
@@ -289,20 +374,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
         final data = await _localFinancial.loadOptions(widget.businessId);
         Map<String, dynamic>? detail;
         if (sourceId != null) {
-          detail = _editing
-              ? await _localFinancial.loadTransactionForEdit(
-                  widget.businessId,
-                  sourceId,
-                )
-              : await _localFinancial.loadTransactionDetail(
-                  widget.businessId,
-                  sourceId,
-                );
+          detail = await _localFinancial.loadTransactionForEdit(
+            widget.businessId,
+            sourceId,
+          );
         }
-        // Editing or copying requires the original transaction, not just
-        // cached account/category options. Never display an empty new-entry
-        // form for an existing transaction.
-        if (data.isNotEmpty && (sourceId == null || detail != null)) {
+        if ((data.isNotEmpty || detail!=null) && (sourceId==null || detail!=null)) {
           localShown = true;
           if (mounted) _applyLoadedOptions(data, detail);
         }
@@ -311,15 +388,26 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       }
     }
 
+    if ((_localRecurring || _ownerAccountEdit) && localShown) return;
     if (forceOffline) {
+      // AI Scan Receipt must open the camera from the existing expenses
+      // shortcut even when all app synchronization remains Force Offline.
+      if (widget.autoScanReceipt &&
+          !_autoScanLaunched &&
+          !_editing &&
+          !_copying) {
+        _autoScanLaunched = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _takeReceiptPhoto(scanWithAi: true);
+        });
+      }
       if (!localShown && mounted) {
         setState(() {
           _loading = false;
+          _optionsLoading = false;
           _error = sourceId != null
-              ? 'The original transaction details are not available locally. '
-                  'Editing is blocked to protect the saved expense. '
-                  'Reconnect once to retrieve this transaction before editing.'
-              : 'Expense setup has not been cached yet. Go online once to sync accounts and categories.';
+              ? 'The original expense details are unavailable on this device.'
+              : 'Expense setup has not been cached yet.';
         });
       }
       return;
@@ -329,20 +417,13 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       final data = await _api.transactionOptions(widget.businessId);
       Map<String, dynamic>? detail;
       if (sourceId != null) {
-        detail = await _api.transactionDetail(widget.businessId, sourceId);
-        if (_editing) {
-          final amount = num.tryParse(detail['amount']?.toString() ?? '');
-          final date = detail['date'] ?? detail['transaction_date'];
-          final id = detail['id']?.toString();
-          if ((id != null && id.isNotEmpty && id != sourceId) ||
-              amount == null ||
-              DateTime.tryParse(date?.toString() ?? '') == null ||
-              (detail['account_id']?.toString().isNotEmpty != true) ||
-              (detail['category_id']?.toString().isNotEmpty != true)) {
-            throw StateError(
-              'Original transaction fields are incomplete; edit cancelled.',
-            );
-          }
+        final onlineDetail = await _api.transactionDetail(widget.businessId, sourceId);
+        detail = _editing
+            ? LocalFinancialCache.validatedEditSource(
+                onlineDetail, widget.businessId, sourceId)
+            : onlineDetail;
+        if (detail == null) {
+          throw StateError('The original expense fields are incomplete.');
         }
         await _localFinancial.saveTransactionDetail(
           widget.businessId,
@@ -353,7 +434,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       await _localFinancial.saveOptions(widget.businessId, data);
 
       if (!mounted) return;
-      _applyLoadedOptions(data, detail);
+      final merged = await _localFinancial.loadOptions(widget.businessId);
+      if (!mounted) return;
+      _applyLoadedOptions(merged, detail);
 
       if (widget.autoScanReceipt &&
           !_autoScanLaunched &&
@@ -361,7 +444,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           !_copying) {
         _autoScanLaunched = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _takeReceiptPhoto();
+          if (mounted) _takeReceiptPhoto(scanWithAi: true);
         });
       }
     } catch (error) {
@@ -369,18 +452,15 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       if (!localShown) {
         setState(() {
           _loading = false;
-          _error = sourceId != null
-              ? 'Could not load the original transaction for editing. '
-                  'No changes were made. Details: $error'
-              : error.toString();
+          _optionsLoading = false;
+          _error = error.toString();
         });
       }
     }
   }
 
-  String _normalizePayee(String value) => value
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  String _normalizePayee(String value) =>
+      value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
 
   Map<String, dynamic>? _matchCounterparty(String vendorName) {
     final normalized = _normalizePayee(vendorName);
@@ -396,7 +476,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       for (final item in _counterparties) {
         final candidate = _normalizePayee(item['name']?.toString() ?? '');
         if (candidate.length >= 4 &&
-            (candidate.contains(normalized) || normalized.contains(candidate))) {
+            (candidate.contains(normalized) ||
+                normalized.contains(candidate))) {
           return item;
         }
       }
@@ -404,8 +485,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     return null;
   }
 
-  num _numValue(Object? value) =>
-      num.tryParse(value?.toString() ?? '') ?? 0;
+  num _numValue(Object? value) => num.tryParse(value?.toString() ?? '') ?? 0;
 
   void _setAmountFromReceipt() {
     final base = _receiptBaseAmount;
@@ -417,10 +497,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     _amountController.text = amount.toStringAsFixed(2);
   }
 
-  String _receiptNote(
-    Map<String, dynamic> extraction, {
-    num? finalAmount,
-  }) {
+  String _receiptNote(Map<String, dynamic> extraction, {num? finalAmount}) {
     final rawItems = extraction['items'];
     final descriptions = <String>[];
     if (rawItems is List) {
@@ -469,80 +546,198 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     }
   }
 
+  bool _receiptAiAuthorizationRejected(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('http 401') || message.contains('http 403');
+  }
+
+  /// Pair the deployed Cloudflare Worker without placing its shared secret
+  /// in the APK, local preferences, logs, or a support message.
+  Future<String?> _promptReceiptGatewayToken({bool expired = false}) async {
+    final controller = TextEditingController();
+    ModalRoute<dynamic>? route;
+    final token = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        route ??= ModalRoute.of(dialogContext);
+        return AlertDialog(
+          title: Text(expired
+              ? 'Reconnect receipt AI'
+              : 'Connect receipt AI'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(expired
+                  ? 'The saved gateway authorization was rejected. '
+                    'Enter the current token from your Briskers Cloudflare Worker.'
+                  : 'Connect the independent Briskers receipt AI Worker once. '
+                    'Enter its gateway token directly on this Owner phone.'),
+              const SizedBox(height: 10),
+              const Text(
+                'Cloudflare hides stored secrets. Use the token you created '
+                'last night, or rotate BRISKERS_GATEWAY_TOKEN on your Mac '
+                'before entering the replacement here. Never paste it into '
+                'ChatGPT. Shop sync stays offline.',
+                style: TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                obscureText: true,
+                enableSuggestions: false,
+                autocorrect: false,
+                textCapitalization: TextCapitalization.none,
+                decoration: const InputDecoration(
+                  labelText: 'Gateway token',
+                  hintText: 'Paste the current Worker token',
+                  helperText: 'At least 16 characters, no spaces',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                // Require a real random Worker secret, not a dummy or an
+                // accidentally pasted business identifier.
+                if (value.length < 16 || value.length > 4096 ||
+                    value.contains(RegExp(r'\s'))) {
+                  return;
+                }
+                Navigator.pop(dialogContext, value);
+              },
+              child: const Text('Connect and scan'),
+            ),
+          ],
+        );
+      },
+    );
+    await route?.completed;
+    controller.dispose();
+    return token;
+  }
+
   Future<void> _readReceipt(XFile file) async {
     if (_readingReceipt) return;
-    if (BriskersConnectionModeController.instance.forceOffline) {
-      if (mounted) {
-        setState(() {
-          _receiptReadMessage =
-              'Receipt saved locally. Automatic reading will be available when online.';
-          _error = null;
-        });
-      }
+    // Receipt AI is independent of the Supabase sync connection. Never
+    // silently fall back to the Supabase Edge Function.
+    const gateway = IndependentReceiptAiGateway();
+    if (!gateway.configured) {
+      setState(() {
+        _receiptReadMessage = 'Online receipt AI is not configured. Photo attached; use Quick Transaction or Full Manual.';
+        _error = null;
+      });
       return;
+    }
+    final showNotice = await ReceiptScanningNotice.shown(widget.businessId);
+    if (!mounted) return;
+    if (showNotice) {
+      var remember = false;
+      final consent = await showDialog<bool>(
+        context: context,
+        builder: (context) => StatefulBuilder(builder: (context, update) => AlertDialog(
+          title: const Text('Read receipt with online AI?'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('Send this receipt photo to the Briskers receipt AI service for recognition. Review the suggestions before saving. Shop synchronization stays unchanged.'),
+            CheckboxListTile(
+              title: const Text("Don't show this again"),
+              value: remember,
+              onChanged: (value) => update(() => remember = value ?? false),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Enter manually')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Read receipt')),
+          ],
+        )),
+      );
+      if (consent != true || !mounted) return;
+      if (remember) await ReceiptScanningNotice.setShown(widget.businessId, false);
+      if (!mounted) return;
     }
     setState(() {
       _readingReceipt = true;
-      _receiptReadMessage = 'Reading receipt...';
+      _receiptReadMessage = 'Reading receipt using internet AI...';
       _error = null;
     });
 
     try {
-      final bytes = await file.readAsBytes();
-      final result = await _api.parseReceiptImage(
-        widget.businessId,
-        bytes: bytes,
-        mimeType: _mimeType(file.name),
-        vendorId: _counterpartyId,
-      );
-      final rawExtraction = result['extraction'];
-      if (rawExtraction is! Map) {
-        throw Exception('The receipt reader returned no usable data.');
+      var token = await _receiptGatewayAccess.read(widget.businessId);
+      var newlyPaired = false;
+      if (token == null) {
+        token = await _promptReceiptGatewayToken();
+        if (!mounted || token == null) {
+          if (mounted) {
+            setState(() => _receiptReadMessage =
+                'Connect the existing receipt AI gateway to scan. '
+                'Your photo is attached; no transaction was submitted.');
+          }
+          return;
+        }
+        newlyPaired = true;
       }
-      final extraction = Map<String, dynamic>.from(rawExtraction);
+      Map<String, dynamic> suggestion;
+      try {
+        suggestion = await gateway.enhance(
+          receipt: file,
+          businessId: widget.businessId,
+          accessToken: token,
+          mimeType: _mimeType(file.name),
+        );
+      } catch (error) {
+        // Do not loop on 401/403. Give the Owner one explicit opportunity to
+        // replace an expired token, then send exactly one more request.
+        if (!newlyPaired && _receiptAiAuthorizationRejected(error) && mounted) {
+          final updated = await _promptReceiptGatewayToken(expired: true);
+          if (updated == null || !mounted) rethrow;
+          suggestion = await gateway.enhance(
+            receipt: file,
+            businessId: widget.businessId,
+            accessToken: updated,
+            mimeType: _mimeType(file.name),
+          );
+          token = updated;
+          newlyPaired = true;
+        } else {
+          rethrow;
+        }
+      }
+      if (!mounted) return;
+      if (newlyPaired) {
+        // The token is written to device-protected storage only *after* a
+        // successful real receipt extraction, never after an HTTP 401/403.
+        await _receiptGatewayAccess.saveVerified(widget.businessId, token);
+      }
+      if (!mounted) return;
+      final extraction = await showModalBottomSheet<Map<String, dynamic>>(
+        context: context,
+        isScrollControlled: true,
+        builder: (_) => ReceiptReviewSheet(extraction: suggestion),
+      );
+      if (extraction == null || !mounted) return;
       final vendorName = extraction['vendor_name']?.toString().trim() ?? '';
-      final matched =
-          vendorName.isEmpty ? null : _matchCounterparty(vendorName);
+      final matched = vendorName.isEmpty
+          ? null
+          : _matchCounterparty(vendorName);
 
       final visibleTotal = _numValue(extraction['receipt_total']);
-      final visibleSubtotal = _numValue(extraction['subtotal']);
-      final visibleSurcharge = _numValue(extraction['surcharge_percent']);
-      final visibleSurchargeAmount =
-          _numValue(extraction['surcharge_amount']);
+      // The reviewed printed total already includes tax and fees. Never
+      // reapply a supplier default surcharge or infer total from subtotal.
+      final num? baseAmount = visibleTotal > 0 ? visibleTotal : null;
+      const num surchargePercent = 0;
+      const applySurcharge = false;
 
-      num? baseAmount;
-      num surchargePercent = 0;
-      var applySurcharge = false;
-
-      if (visibleSurcharge > 0) {
-        surchargePercent = visibleSurcharge;
-        applySurcharge = true;
-        if (visibleSubtotal > 0) {
-          baseAmount = visibleSubtotal;
-        } else if (visibleTotal > 0) {
-          baseAmount = visibleTotal / (1 + visibleSurcharge / 100);
-        }
-      } else if (visibleSurchargeAmount > 0 && visibleTotal > 0) {
-        baseAmount = visibleSubtotal > 0
-            ? visibleSubtotal
-            : visibleTotal - visibleSurchargeAmount;
-        if (baseAmount > 0) {
-          surchargePercent = (visibleSurchargeAmount / baseAmount) * 100;
-          applySurcharge = true;
-        }
-      } else {
-        baseAmount = visibleTotal > 0
-            ? visibleTotal
-            : (visibleSubtotal > 0 ? visibleSubtotal : null);
-        if (matched != null) {
-          surchargePercent =
-              _numValue(matched['default_surcharge_percent']);
-          applySurcharge = surchargePercent > 0;
-        }
-      }
-
-      final receiptDate =
-          DateTime.tryParse(extraction['receipt_date']?.toString() ?? '');
+      final receiptDate = DateTime.tryParse(
+        extraction['receipt_date']?.toString() ?? '',
+      );
 
       if (!mounted) return;
       setState(() {
@@ -556,13 +751,11 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           _counterpartyId = (id ?? '').isEmpty ? null : id;
           _counterpartyController.text =
               matched['name']?.toString() ?? vendorName;
-          final defaultCategoryId =
-              matched['default_category_id']?.toString();
+          final defaultCategoryId = matched['default_category_id']?.toString();
           if (_direction == 'expense' &&
               (defaultCategoryId ?? '').isNotEmpty &&
               _categories.any(
-                (category) =>
-                    category['id']?.toString() == defaultCategoryId,
+                (category) => category['id']?.toString() == defaultCategoryId,
               )) {
             _categoryId = defaultCategoryId;
           }
@@ -576,22 +769,16 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
         }
 
         _setAmountFromReceipt();
-        final finalAmount =
-            num.tryParse(_amountController.text.trim());
-        _mergeReceiptNote(
-          _receiptNote(
-            extraction,
-            finalAmount: finalAmount,
-          ),
-        );
+        final finalAmount = num.tryParse(_amountController.text.trim());
+        _mergeReceiptNote(_receiptNote(extraction, finalAmount: finalAmount));
         _receiptReadMessage = tr('receiptReadReview');
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _receiptReadMessage =
-            'Could not read this receipt automatically. You can still enter it manually.';
-        _error = error.toString();
+        _receiptReadMessage = receiptAiFailureMessage(error);
+        // The cause is shown at the scanner, not as an unrelated save error.
+        _error = null;
       });
     } finally {
       if (mounted) setState(() => _readingReceipt = false);
@@ -622,9 +809,11 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
         final selected = _counterparties.firstWhere(
           (x) => x['id']?.toString() == vendor,
         );
-        if (_receiptBaseAmount != null) {
-          _receiptSurchargePercent =
-              _numValue(selected['default_surcharge_percent']);
+        if (_receiptBaseAmount != null &&
+            _receiptExtraction?['review_confirmed'] != true) {
+          _receiptSurchargePercent = _numValue(
+            selected['default_surcharge_percent'],
+          );
           _applyReceiptSurcharge = _receiptSurchargePercent > 0;
           _setAmountFromReceipt();
         }
@@ -662,9 +851,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
         _categoryId = defaultCategoryId;
       }
 
-      if (_receiptBaseAmount != null) {
-        _receiptSurchargePercent =
-            _numValue(item['default_surcharge_percent']);
+      if (_receiptBaseAmount != null &&
+          _receiptExtraction?['review_confirmed'] != true) {
+        _receiptSurchargePercent = _numValue(item['default_surcharge_percent']);
         _applyReceiptSurcharge = _receiptSurchargePercent > 0;
         _setAmountFromReceipt();
         if (_receiptExtraction != null) {
@@ -724,8 +913,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                         autofocus: true,
                         textInputAction: TextInputAction.search,
                         decoration: InputDecoration(
-                          labelText:
-                              _direction == 'income' ? tr('findPayer') : tr('findPayee'),
+                          labelText: _direction == 'income'
+                              ? tr('findPayer')
+                              : tr('findPayee'),
                           hintText: tr('searchByName'),
                           prefixIcon: const Icon(Icons.search),
                           border: const OutlineInputBorder(),
@@ -744,15 +934,13 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                               leading: const Icon(Icons.add_circle_outline),
                               title: Text('Use "$query"'),
                               subtitle: Text(tr('newPayee')),
-                              onTap: () => Navigator.pop(
-                                sheetContext,
-                                <String, dynamic>{
-                                  'id': null,
-                                  'name': query,
-                                  'default_category_id': null,
-                                  'default_surcharge_percent': 0,
-                                },
-                              ),
+                              onTap: () =>
+                                  Navigator.pop(sheetContext, <String, dynamic>{
+                                    'id': null,
+                                    'name': query,
+                                    'default_category_id': null,
+                                    'default_surcharge_percent': 0,
+                                  }),
                             ),
                           ...matches.map(
                             (item) => ListTile(
@@ -803,10 +991,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                         ? const Icon(Icons.check_circle)
                         : const Icon(Icons.circle_outlined),
                     title: Text(item['name']?.toString() ?? ''),
-                    onTap: () => Navigator.pop(
-                      sheetContext,
-                      item['id']?.toString(),
-                    ),
+                    onTap: () =>
+                        Navigator.pop(sheetContext, item['id']?.toString()),
                   ),
                 )
                 .toList(),
@@ -824,7 +1010,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     if (_quickTemplates.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('No quick transactions are defined yet. Add them in Settings.'),
+          content: Text(
+            'No quick transactions are defined yet. Add them in Settings.',
+          ),
         ),
       );
       return;
@@ -872,20 +1060,74 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     if (selected != null && mounted) _applyQuickTemplate(selected);
   }
 
+  DateTime _calculatedNextTransaction(String frequency) {
+    final start = DateTime(_date.year, _date.month, _date.day);
+    final today = DateTime.now();
+    final cutoff = DateTime(today.year, today.month, today.day);
+    DateTime occurrence(int n) {
+      if (frequency == 'daily') {
+        return DateTime(start.year, start.month, start.day + n);
+      }
+      if (frequency == 'weekly') {
+        return DateTime(start.year, start.month, start.day + 7 * n);
+      }
+      if (frequency == 'biweekly') {
+        return DateTime(start.year, start.month, start.day + 14 * n);
+      }
+      final months = frequency == 'yearly' ? 12 * n : n;
+      final targetFirst = DateTime(start.year, start.month + months);
+      final end = DateTime(targetFirst.year, targetFirst.month + 1, 0).day;
+      return DateTime(
+        targetFirst.year,
+        targetFirst.month,
+        start.day <= end ? start.day : end,
+      );
+    }
+
+    for (var n = 1; n < 200000; n++) {
+      final next = occurrence(n);
+      if (!next.isBefore(cutoff)) return next;
+    }
+    throw StateError('Cannot calculate next transaction date.');
+  }
+
   Future<void> _pickDate() async {
     _counterpartyFocusNode.unfocus();
     final value = await showDatePicker(
       context: context,
+      builder: (pickerContext, child) => Theme(
+        data: moduleModalTheme(
+          Theme.of(pickerContext),
+          _direction == 'income'
+              ? BriskersColors.invoices
+              : BriskersColors.expenses,
+        ),
+        child: child!,
+      ),
       initialDate: _date,
       firstDate: DateTime(2000),
       lastDate: DateTime.now().add(const Duration(days: 3650)),
     );
-    if (value != null && mounted) setState(() => _date = value);
+    if (value != null && mounted) {
+      setState(() {
+        _date = value;
+        if (_repeat) _nextDate = _calculatedNextTransaction(_repeatPreset);
+      });
+    }
   }
 
   Future<void> _pickNextDate() async {
     final value = await showDatePicker(
       context: context,
+      builder: (pickerContext, child) => Theme(
+        data: moduleModalTheme(
+          Theme.of(pickerContext),
+          _direction == 'income'
+              ? BriskersColors.invoices
+              : BriskersColors.expenses,
+        ),
+        child: child!,
+      ),
       initialDate: _nextDate,
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 3650)),
@@ -896,6 +1138,15 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   Future<void> _pickEndDate() async {
     final value = await showDatePicker(
       context: context,
+      builder: (pickerContext, child) => Theme(
+        data: moduleModalTheme(
+          Theme.of(pickerContext),
+          _direction == 'income'
+              ? BriskersColors.invoices
+              : BriskersColors.expenses,
+        ),
+        child: child!,
+      ),
       initialDate: _endDate ?? _nextDate.add(const Duration(days: 365)),
       firstDate: _nextDate,
       lastDate: DateTime.now().add(const Duration(days: 7300)),
@@ -903,7 +1154,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     if (value != null && mounted) setState(() => _endDate = value);
   }
 
-  Future<void> _takeReceiptPhoto() async {
+  Future<void> _takeReceiptPhoto({bool scanWithAi = false}) async {
     _counterpartyFocusNode.unfocus();
     final file = await _picker.pickImage(
       source: ImageSource.camera,
@@ -912,11 +1163,11 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     );
     if (file != null && mounted) {
       setState(() => _receipts = [..._receipts, file]);
-      await _readReceipt(file);
+      if (scanWithAi) await _readReceipt(file);
     }
   }
 
-  Future<void> _addReceipts() async {
+  Future<void> _addReceipts({bool scanWithAi = false}) async {
     _counterpartyFocusNode.unfocus();
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
@@ -926,14 +1177,20 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+              leading: const Icon(
+                Icons.camera_alt_outlined,
+                color: Color(0xFF167F43),
+              ),
+              title: Text(tr('takePhoto')),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.camera_alt_outlined),
-              title: const Text('Take photo'),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+              leading: const Icon(
+                Icons.photo_library_outlined,
+                color: Color(0xFF2468BB),
+              ),
+              title: Text(tr('chooseFromGallery')),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
             ),
           ],
         ),
@@ -948,10 +1205,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       );
       if (files.isNotEmpty && mounted) {
         setState(() => _receipts = [..._receipts, ...files]);
-        await _readReceipt(files.first);
+        if (scanWithAi) await _readReceipt(files.first);
       }
     } else {
-      await _takeReceiptPhoto();
+      await _takeReceiptPhoto(scanWithAi: scanWithAi);
     }
   }
 
@@ -977,8 +1234,70 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     }
   }
 
+  Future<void> _saveOwnerAccount() async {
+    if (_saving || _accountId == null) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final grant = await DeviceOwnerAuthorization.instance.authority
+          .authorizeSession(widget.businessId);
+      await _offlineFinancial.updatePayrollExpenseAccount(
+        widget.businessId,
+        widget.editTransactionId!,
+        expectedAccountId: _original!['account_id'].toString(),
+        accountId: _accountId!,
+        grant: grant,
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Widget _ownerAccountFields() {
+    final original = _original!;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text(_counterpartyController.text, style: Theme.of(context).textTheme.titleLarge),
+        Text('\$${_amountController.text} · ${_date.month}/${_date.day}/${_date.year}'),
+        Text(_selectedCategoryName()),
+        if (_contextLabel != null) Text(_contextLabel!),
+        if (_remarksController.text.isNotEmpty) Text(_remarksController.text),
+        if (original['payment_method'] != null)
+          Text(original['payment_method'].toString()),
+        const SizedBox(height: 16),
+        DropdownButtonFormField<String>(
+          initialValue: _accountId,
+          decoration: const InputDecoration(labelText: 'Account'),
+          items: [
+            for (final account in _accounts)
+              if (account['active'] != false || account['id'] == _accountId)
+                DropdownMenuItem(
+                  value: account['id'].toString(),
+                  child: Text(account['name'].toString()),
+                ),
+          ],
+          onChanged: _saving ? null : (value) => setState(() => _accountId = value),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 12),
+          Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        ],
+      ],
+    );
+  }
+
   Future<void> _save() async {
-    if (_saving) return;
+    if (_ownerAccountEdit) {
+      await _saveOwnerAccount();
+      return;
+    }
+    if (_saving || (_editing && !_editTargetLoaded)) return;
     final amount = num.tryParse(_amountController.text.trim());
     if (amount == null || amount <= 0) {
       setState(() => _error = 'Enter a valid amount.');
@@ -998,12 +1317,32 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       final rounded = num.parse(amount.toStringAsFixed(2));
       final counterpartyName = _counterpartyController.text.trim();
 
-      if (BriskersConnectionModeController.instance.forceOffline) {
+      if(_localRecurring) {
+        final receipts=<Map<String,dynamic>>[];
+        for(final photo in _receipts) {
+          receipts.add({'filename':photo.name,'mime_type':_mimeType(photo.name),'bytes':await photo.readAsBytes()});
+        }
+        await LocalRecurringExpenseEdit.save(widget.businessId,widget.editTransactionId!,{
+          'amount_minor':(rounded*100).round(),'account_id':_accountId,'account':_selectedAccountName(),
+          'category_id':_categoryId,'category':_selectedCategoryName(),'vendor_id':_counterpartyId,
+          'counterparty':counterpartyName,'date':_date.toIso8601String().substring(0,10),
+          'remarks':_remarksController.text.trim(),'job_id':_jobId,'document_id':_documentId,
+        },receipts,extraction:_receiptExtraction==null?null:{..._receiptExtraction!,'review_confirmed':true,'extraction_source':'independent_online_ai'});
+        if(mounted)Navigator.pop(context,true);
+        return;
+      }
+
+      // Ordinary income and expenses are local-first even in Auto mode.
+      // Recurring rules still require online operations. Reviewed receipt
+      // details and photos commit atomically with ordinary local transactions.
+      final localFirst =
+          BriskersConnectionModeController.instance.forceOffline ||
+          (!_repeat && _recurringRuleId == null);
+      if (localFirst) {
         if (_repeat) {
           setState(() {
             _saving = false;
-            _error =
-                'Recurring scheduling needs a connection. Turn Repeat off to save this transaction offline.';
+            _error = 'Recurring scheduling needs a connection. Turn Repeat off to save this transaction offline.';
           });
           return;
         }
@@ -1031,12 +1370,23 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
             jobId: _jobId,
             documentId: _documentId,
             counterpartyId: _counterpartyId,
-            counterpartyName:
-                counterpartyName.isEmpty ? null : counterpartyName,
+            counterpartyName: counterpartyName.isEmpty
+                ? null
+                : counterpartyName,
             remarks: _remarksController.text.trim().isEmpty
                 ? null
                 : _remarksController.text.trim(),
             contextLabel: _contextLabel,
+            receipts: stagedReceipts,
+            // Save Transaction is the owner's explicit confirmation of the
+            // scanned suggestion; never upload or persist an unconfirmed scan.
+            receiptExtraction: _receiptExtraction == null
+                ? null
+                : {
+                    ..._receiptExtraction!,
+                    'review_confirmed': true,
+                    'extraction_source': 'independent_online_ai',
+                  },
           );
         } else {
           await _offlineFinancial.createLocalTransaction(
@@ -1051,16 +1401,35 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
             jobId: _jobId,
             documentId: _documentId,
             counterpartyId: _counterpartyId,
-            counterpartyName:
-                counterpartyName.isEmpty ? null : counterpartyName,
+            counterpartyName: counterpartyName.isEmpty
+                ? null
+                : counterpartyName,
             remarks: _remarksController.text.trim().isEmpty
                 ? null
                 : _remarksController.text.trim(),
             contextLabel: _contextLabel,
             receipts: stagedReceipts,
+            // Save Transaction is the owner's explicit confirmation of the
+            // scanned suggestion; never upload or persist an unconfirmed scan.
+            receiptExtraction: _receiptExtraction == null
+                ? null
+                : {
+                    ..._receiptExtraction!,
+                    'review_confirmed': true,
+                    'extraction_source': 'independent_online_ai',
+                  },
           );
         }
 
+        if (!BriskersConnectionModeController.instance.forceOffline) {
+          // The local transaction and totals were committed already. Sync is
+          // best-effort and never delays or reverses the successful local save.
+          unawaited(
+            _offlineFinancial
+                .flush(widget.businessId)
+                .catchError((Object _) {}),
+          );
+        }
         if (!mounted) return;
         Navigator.pop(context, true);
         return;
@@ -1081,8 +1450,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           jobId: _jobId,
           documentId: _documentId,
           counterpartyId: _counterpartyId,
-          counterpartyName:
-              counterpartyName.isEmpty ? null : counterpartyName,
+          counterpartyName: counterpartyName.isEmpty ? null : counterpartyName,
           remarks: _remarksController.text.trim().isEmpty
               ? null
               : _remarksController.text.trim(),
@@ -1098,8 +1466,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           jobId: _jobId,
           documentId: _documentId,
           counterpartyId: _counterpartyId,
-          counterpartyName:
-              counterpartyName.isEmpty ? null : counterpartyName,
+          counterpartyName: counterpartyName.isEmpty ? null : counterpartyName,
           remarks: _remarksController.text.trim().isEmpty
               ? null
               : _remarksController.text.trim(),
@@ -1124,7 +1491,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
         );
       }
 
-      if (widget.allowRecurring && !_linked && !_copying) {
+      if (widget.allowRecurring && !_linked && !_copying && !_localRecurring) {
         if (_repeat) {
           var recurringVendorId = _counterpartyId;
           if (recurringVendorId == null && counterpartyName.isNotEmpty) {
@@ -1175,10 +1542,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     final title = _editing
         ? tr('editTransaction')
         : _copying
-            ? tr('copyTransaction')
-            : _direction == 'income'
-                ? tr('addIncome')
-                : tr('addExpense');
+        ? tr('copyTransaction')
+        : _direction == 'income'
+        ? tr('addIncome')
+        : tr('addExpense');
 
     return Scaffold(
       appBar: AppBar(
@@ -1257,12 +1624,48 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
             ),
         ],
       ),
+      bottomNavigationBar: _loading
+          ? null
+          : SafeArea(
+              top: false,
+              minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: BriskersColors.expenses,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(52),
+                ),
+                onPressed:
+                    _saving ||
+                        (_editing && !_editTargetLoaded) ||
+                        _optionsLoading ||
+                        _accounts.isEmpty ||
+                        _categories.isEmpty
+                    ? null
+                    : _save,
+                icon: _saving
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save_outlined),
+                label: Text(_saving ? tr('saving') : tr('saveTransaction')),
+              ),
+            ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
+          : _ownerAccountEdit
+          ? _ownerAccountFields()
           : ListView(
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               children: [
+                if (_optionsLoading) ...[
+                  const LinearProgressIndicator(),
+                  const SizedBox(height: 8),
+                  const Text('Loading saved accounts and categories…'),
+                  const SizedBox(height: 16),
+                ],
                 if ((_contextLabel ?? '').isNotEmpty) ...[
                   Card(
                     margin: EdgeInsets.zero,
@@ -1297,41 +1700,82 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   onSelectionChanged: _saving
                       ? null
                       : (value) => setState(() {
-                            _direction = value.first;
-                            _categoryId = null;
-                            if (_linked && _direction == 'expense') {
-                              for (final item in _categories) {
-                                if ((item['name']
-                                            ?.toString()
-                                            .trim()
-                                            .toLowerCase() ??
-                                        '') ==
-                                    'customer parts') {
-                                  _categoryId = item['id']?.toString();
-                                  break;
-                                }
+                          _direction = value.first;
+                          _categoryId = null;
+                          if (_linked && _direction == 'expense') {
+                            for (final item in _categories) {
+                              if ((item['name']
+                                          ?.toString()
+                                          .trim()
+                                          .toLowerCase() ??
+                                      '') ==
+                                  'customer parts') {
+                                _categoryId = item['id']?.toString();
+                                break;
                               }
                             }
-                          }),
+                          }
+                        }),
                 ),
                 const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: _saving || _readingReceipt ? null : _addReceipts,
-                  icon: _readingReceipt
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.document_scanner_outlined),
-                  label: Text(
-                    _readingReceipt
-                        ? tr('readingReceipt')
-                        : (_receipts.isEmpty
-                            ? tr('scanAddReceipt')
-                            : '${_receipts.length} receipt photo(s)'),
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _saving || _readingReceipt
+                            ? null
+                            : () => _addReceipts(),
+                        icon: const Icon(
+                          Icons.add_a_photo_outlined,
+                          color: Color(0xFF167F43),
+                        ),
+                        label: Text(
+                          _receipts.isEmpty
+                              ? tr('attachPhoto')
+                              : '${_receipts.length} ${tr('photosAttached')}',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _saving || _readingReceipt
+                            ? null
+                            : () => _addReceipts(scanWithAi: true),
+                        icon: _readingReceipt
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(
+                                Icons.document_scanner_outlined,
+                                color: Color(0xFF2468BB),
+                              ),
+                        label: Text(
+                          _readingReceipt
+                              ? tr('readingReceipt')
+                              : tr('scanWithAi'),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
+                // Re-use the *already attached* photo after enrollment or
+                // a transient failure, without adding a duplicate attachment.
+                if (_receipts.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: _saving || _readingReceipt
+                          ? null
+                          : () => _readReceipt(_receipts.first),
+                      icon: const Icon(Icons.auto_fix_high_outlined, size: 17),
+                      label: const Text('Scan attached receipt'),
+                    ),
+                  ),
                 if ((_receiptReadMessage ?? '').isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
@@ -1343,29 +1787,32 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                       ),
                     ),
                   ),
+                if ((_receiptReadMessage ?? '').isNotEmpty &&
+                    (_receiptReadMessage!.contains('could not') ||
+                     _receiptReadMessage!.contains('unavailable') ||
+                     _receiptReadMessage!.contains('expired') ||
+                     _receiptReadMessage!.contains('limit') ||
+                     _receiptReadMessage!.contains('did not return')))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'No expense has been submitted by this failed scan. '
+                      'The attached receipt can be saved with manual details.',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
                 if (_receipts.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
-                    child: Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: _receipts
-                          .map(
-                            (file) => Chip(
-                              label: Text(
-                                file.name,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              onDeleted: _saving
-                                  ? null
-                                  : () => setState(
-                                        () => _receipts = _receipts
-                                            .where((item) => item.path != file.path)
-                                            .toList(),
-                                      ),
-                            ),
-                          )
-                          .toList(),
+                    child: ExpenseReceiptAttachments(
+                      receipts: _receipts,
+                      enabled: !_saving && !_readingReceipt,
+                      onChanged: (receipts) => setState(() {
+                        _receipts = receipts;
+                      }),
                     ),
                   ),
                 const SizedBox(height: 12),
@@ -1373,8 +1820,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   controller: _amountController,
                   focusNode: _amountFocusNode,
                   autofocus: false,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   textInputAction: TextInputAction.next,
                   style: const TextStyle(
                     fontSize: 18,
@@ -1392,12 +1840,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(
-                      'Add ${_receiptSurchargePercent.toStringAsFixed(
-                        _receiptSurchargePercent ==
-                                _receiptSurchargePercent.roundToDouble()
-                            ? 0
-                            : 2,
-                      )}% surcharge',
+                      'Add ${_receiptSurchargePercent.toStringAsFixed(_receiptSurchargePercent == _receiptSurchargePercent.roundToDouble() ? 0 : 2)}% surcharge',
                     ),
                     subtitle: Text(
                       'Receipt amount \$${_receiptBaseAmount!.toStringAsFixed(2)}'
@@ -1407,17 +1850,17 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                     onChanged: _saving
                         ? null
                         : (value) => setState(() {
-                              _applyReceiptSurcharge = value;
-                              _setAmountFromReceipt();
-                              if (_receiptExtraction != null) {
-                                _remarksController.text = _receiptNote(
-                                  _receiptExtraction!,
-                                  finalAmount: num.tryParse(
-                                    _amountController.text.trim(),
-                                  ),
-                                );
-                              }
-                            }),
+                            _applyReceiptSurcharge = value;
+                            _setAmountFromReceipt();
+                            if (_receiptExtraction != null) {
+                              _remarksController.text = _receiptNote(
+                                _receiptExtraction!,
+                                finalAmount: num.tryParse(
+                                  _amountController.text.trim(),
+                                ),
+                              );
+                            }
+                          }),
                   ),
                 ],
                 const SizedBox(height: 12),
@@ -1426,7 +1869,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   onTap: _saving ? null : _pickCounterparty,
                   child: InputDecorator(
                     decoration: InputDecoration(
-                      labelText: _direction == 'income' ? tr('payer') : tr('payee'),
+                      labelText: _direction == 'income'
+                          ? tr('payer')
+                          : tr('payee'),
                       hintText: _direction == 'income'
                           ? tr('selectPayer')
                           : tr('selectPayee'),
@@ -1436,8 +1881,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                     child: Text(
                       _counterpartyController.text.trim().isEmpty
                           ? (_direction == 'income'
-                              ? 'Select a payer'
-                              : 'Select a payee')
+                                ? 'Select a payer'
+                                : 'Select a payee')
                           : _counterpartyController.text.trim(),
                       style: TextStyle(
                         fontSize: 17,
@@ -1478,7 +1923,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   initialValue: _accountId,
                   isExpanded: true,
                   decoration: InputDecoration(
-                    labelText: _direction == 'income' ? tr('depositedTo') : tr('paidFrom'),
+                    labelText: _direction == 'income'
+                        ? tr('depositedTo')
+                        : tr('paidFrom'),
                     hintText: _direction == 'income'
                         ? tr('selectDepositAccount')
                         : tr('selectPaymentAccount'),
@@ -1507,8 +1954,20 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                 ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 4),
                   leading: const Icon(Icons.calendar_today_outlined),
-                  title: Text(tr('transactionDate')),
-                  subtitle: Text('${_date.month}/${_date.day}/${_date.year}'),
+                  title: Text(
+                    tr('transactionDate'),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '${_date.month}/${_date.day}/${_date.year}',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: _saving ? null : _pickDate,
                 ),
@@ -1524,7 +1983,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   ),
                 ),
 
-                if (widget.allowRecurring && !_linked && !_copying) ...[
+                if (widget.allowRecurring && !_linked && !_copying && !_localRecurring) ...[
                   const SizedBox(height: 8),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
@@ -1533,8 +1992,16 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                       'Repeating transactions also appear in the Recurring Transactions list.',
                     ),
                     value: _repeat,
-                    onChanged:
-                        _saving ? null : (value) => setState(() => _repeat = value),
+                    onChanged: _saving
+                        ? null
+                        : (value) => setState(() {
+                            _repeat = value;
+                            if (value) {
+                              _nextDate = _calculatedNextTransaction(
+                                _repeatPreset,
+                              );
+                            }
+                          }),
                   ),
                   if (_repeat) ...[
                     DropdownButtonFormField<String>(
@@ -1545,19 +2012,31 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                       ),
                       items: const [
                         DropdownMenuItem(value: 'daily', child: Text('Daily')),
-                        DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
+                        DropdownMenuItem(
+                          value: 'weekly',
+                          child: Text('Weekly'),
+                        ),
                         DropdownMenuItem(
                           value: 'biweekly',
                           child: Text('Every 2 weeks'),
                         ),
-                        DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
-                        DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
+                        DropdownMenuItem(
+                          value: 'monthly',
+                          child: Text('Monthly'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'yearly',
+                          child: Text('Yearly'),
+                        ),
                       ],
                       onChanged: _saving
                           ? null
                           : (value) {
                               if (value != null) {
-                                setState(() => _repeatPreset = value);
+                                setState(() {
+                                  _repeatPreset = value;
+                                  _nextDate = _calculatedNextTransaction(value);
+                                });
                               }
                             },
                     ),
@@ -1585,8 +2064,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                           ? const Icon(Icons.chevron_right)
                           : IconButton(
                               tooltip: 'No end date',
-                              onPressed:
-                                  _saving ? null : () => setState(() => _endDate = null),
+                              onPressed: _saving
+                                  ? null
+                                  : () => setState(() => _endDate = null),
                               icon: const Icon(Icons.close),
                             ),
                       onTap: _saving ? null : _pickEndDate,
@@ -1602,21 +2082,6 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                     ),
                   ),
                 ],
-                const SizedBox(height: 18),
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: BriskersColors.expenses,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: _saving ? null : _save,
-                  icon: _saving
-                      ? const SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.save_outlined),
-                  label: Text(_saving ? tr('saving') : tr('saveTransaction')),
-                ),
               ],
             ),
     );

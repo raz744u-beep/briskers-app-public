@@ -1,19 +1,56 @@
+import '../../services/local_recurring_expense_edit.dart';
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+import 'package:flutter/services.dart' show MethodChannel;
+
+import '../../core/module_modal_theme.dart';
+
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:saf/saf.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
+import '../../core/navigation_content_timing.dart';
 import '../../services/briskers_api.dart';
+import '../../services/warranty_receipt_reporting.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_financial_cache.dart';
+import '../../services/device_owner_authorization.dart';
 import '../../services/expenseiq_local_photo_sync.dart';
 import 'expense_entry_screen.dart';
 import 'transaction_recurring_dialog.dart';
+import '../../core/recurring_schedule_status.dart';
+
+/// True for Android SAF folder grants that can be restored by user selection.
+@visibleForTesting
+bool expensePhotoNeedsFolderPermission(Object error) {
+  final message = error.toString().toLowerCase();
+  return message.contains('safpermissionexception') ||
+      message.contains('permission denial') ||
+      message.contains('securityexception');
+}
+
+/// Bottom-sheet useSafeArea does not protect Android system navigation.
+@visibleForTesting
+double expenseEditSheetBottomInset({
+  required double keyboardInset,
+  required double systemNavigationInset,
+}) =>
+    (keyboardInset > 0 ? keyboardInset : systemNavigationInset) + 16;
+
+@visibleForTesting
+double expenseEditSheetHeight({
+  required double screenHeight,
+  required double bottomInset,
+}) {
+  final available = (screenHeight - bottomInset - 32)
+      .clamp(0.0, screenHeight);
+  return (screenHeight * 0.82).clamp(0.0, available).toDouble();
+}
 
 class ExpenseDetailScreen extends StatefulWidget {
   const ExpenseDetailScreen({
@@ -23,97 +60,341 @@ class ExpenseDetailScreen extends StatefulWidget {
     this.allowRecurring = true,
     this.canDeleteTransaction = false,
     this.cachedDetail,
+    this.api = const BriskersApi(),
+    this.financialCache,
+    this.localPhotoSync,
+    this.receiptReporting,
+    this.localPhotoReader,
+    this.onChanged,
   });
 
+  final VoidCallback? onChanged;
   final String businessId;
   final String transactionId;
   final bool allowRecurring;
   final bool canDeleteTransaction;
   final Map<String, dynamic>? cachedDetail;
+  final BriskersApi api;
+  final LocalFinancialCache? financialCache;
+  final ExpenseIqLocalPhotoSync? localPhotoSync;
+  final WarrantyReceiptReporting? receiptReporting;
+  final Future<Uint8List> Function(String uri)? localPhotoReader;
 
   @override
   State<ExpenseDetailScreen> createState() => _ExpenseDetailScreenState();
 }
 
-class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
-  static const _api = BriskersApi();
+class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
+    with ModuleModalState<ExpenseDetailScreen> {
+  @override
+  Color get modalAccent => BriskersColors.expenses;
+  BriskersApi get _api => widget.api;
   final _picker = ImagePicker();
-  final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
-  final LocalFinancialCache _localFinancial = LocalFinancialCache();
-  final ExpenseIqLocalPhotoSync _localExpenseIq = ExpenseIqLocalPhotoSync();
+  static const _expenseIqChannel = MethodChannel('com.briskers/expenseiq');
+  late LocalAttachmentCache _attachmentCache;
+  late LocalFinancialCache _localFinancial;
+  late ExpenseIqLocalPhotoSync _localExpenseIq;
   Map<String, dynamic>? _localExpenseIqPhoto;
 
   Map<String, dynamic>? _detail;
   bool _loading = true;
   bool _canDeleteRecords = false;
+  bool _canEditPayrollAccount = false;
   bool _uploading = false;
+  bool _reconnectingPhoto = false;
   String? _deletingAttachmentId;
   bool _busy = false;
   String? _error;
   final Map<String, Future<String>> _attachmentUrls = {};
+  final Map<String, Future<File?>> _attachmentFiles = {};
+  final Map<String, Future<Uint8List>> _localPhotoBytes = {};
+  int _loadGeneration = 0;
+  int _recordGeneration = 0;
+  bool _hasAuthoritativeDetail = false;
+  String _detailSource = 'preview';
+  final Set<Timer> _readDeadlines = {};
+
+  Future<T> _boundedRead<T>(Future<T> operation) {
+    final result = Completer<T>();
+    late Timer deadline;
+    void finish() {
+      deadline.cancel();
+      _readDeadlines.remove(deadline);
+    }
+    deadline = Timer(const Duration(seconds: 15), () {
+      finish();
+      if (!result.isCompleted) {
+        result.completeError(TimeoutException('Expense read timed out. Saved local records remain available.'));
+      }
+    });
+    _readDeadlines.add(deadline);
+    unawaited(operation.then<void>((value) {
+      finish();
+      if (!result.isCompleted) result.complete(value);
+    }, onError: (Object error, StackTrace stack) {
+      finish();
+      if (!result.isCompleted) result.completeError(error, stack);
+    }));
+    return result.future;
+  }
+
+  void _cancelReadDeadlines() {
+    for (final timer in _readDeadlines) {
+      timer.cancel();
+    }
+    _readDeadlines.clear();
+  }
+
+  @override
+  void dispose() {
+    _cancelReadDeadlines();
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
-    final cached = widget.cachedDetail;
-    if (cached != null) {
-      _loadCached(cached);
-    } else {
-      _load();
+    _initializeRecord();
+  }
+
+  @override
+  void didUpdateWidget(covariant ExpenseDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.transactionId != widget.transactionId ||
+        oldWidget.api != widget.api ||
+        oldWidget.financialCache != widget.financialCache ||
+        oldWidget.localPhotoSync != widget.localPhotoSync ||
+        oldWidget.receiptReporting != widget.receiptReporting ||
+        oldWidget.localPhotoReader != widget.localPhotoReader) {
+      _initializeRecord();
     }
-    _loadLocalExpenseIqPhoto();
   }
 
-  Future<void> _loadCached(Map<String, dynamic> summary) async {
-    final saved = await _localFinancial.loadTransactionDetail(
-      widget.businessId,
-      widget.transactionId,
-    );
-    final detail = Map<String, dynamic>.from(saved ?? summary)
-      ..['editable'] = true
-      ..['deletable'] = false
-      ..['date'] = (saved ?? summary)['date'] ??
-          (saved ?? summary)['transaction_date']
-      ..['attachments'] =
-          (saved ?? summary)['attachments'] ?? const <dynamic>[];
-
-    if (!mounted) return;
-    setState(() {
-      _detail = detail;
-      _loading = false;
-      _error = null;
-    });
+  void _initializeRecord() {
+    _cancelReadDeadlines();
+    // Also invalidates every old response when Flutter reuses this State for
+    // another transaction or business, including an A -> B -> A navigation.
+    _loadGeneration++;
+    _recordGeneration++;
+    _attachmentCache = LocalAttachmentCache(api: _api);
+    _localFinancial = widget.financialCache ?? LocalFinancialCache();
+    _localExpenseIq = widget.localPhotoSync ?? ExpenseIqLocalPhotoSync();
+    _detail = null;
+    _localExpenseIqPhoto = null;
+    _attachmentUrls.clear();
+    _attachmentFiles.clear();
+    _localPhotoBytes.clear();
+    _loading = true;
+    _hasAuthoritativeDetail = false;
+    _canDeleteRecords = false;
+    _canEditPayrollAccount = false;
+    _uploading = false;
+    _reconnectingPhoto = false;
+    _deletingAttachmentId = null;
+    _busy = false;
+    _error = null;
+    final cached = widget.cachedDetail;
+    final offline = BriskersConnectionModeController.instance.forceOffline;
+    if (cached != null && LocalFinancialCache.matchesTransaction(
+        cached, widget.businessId, widget.transactionId)) {
+      _loadCached(cached, offline: offline);
+    } else if (offline) {
+      unawaited(_loadOffline());
+    } else {
+      unawaited(_load());
+    }
   }
 
-  Future<void> _load() async {
+  bool _isCurrent(int generation) => mounted && generation == _loadGeneration;
+
+  Map<String, dynamic> _normalizedDetail(Map<String, dynamic> raw) {
+    if (!LocalFinancialCache.matchesTransaction(
+        raw, widget.businessId, widget.transactionId)) {
+      throw StateError('Expense identity differs from the selected record. No changes were made.');
+    }
+    return {
+      ...raw,
+      'date': raw['date'] ?? raw['transaction_date'],
+      'attachments': raw['attachments'] ?? const <dynamic>[],
+    };
+  }
+
+  Future<Map<String, dynamic>> _withReceiptReporting(
+    Map<String, dynamic> raw, {
+    required String businessId,
+    required String transactionId,
+  }) async {
     try {
-      // The transaction is independently readable. Do not wait for permission
-      // lookups, disk caching, or receipt prefetch before the first paint.
-      final detail = Map<String, dynamic>.from(
-        await _api.transactionDetail(widget.businessId, widget.transactionId),
+      final reporting =
+          widget.receiptReporting ?? WarrantyReceiptReporting(api: _api);
+      return (await reporting.enrich(businessId, [
+        {...raw, 'id': transactionId},
+      ], refresh: false)).single;
+    } catch (_) {
+      return WarrantyReceiptReporting.unverified(raw);
+    }
+  }
+
+  Future<void> _loadOffline() async {
+    final generation = ++_loadGeneration;
+    final businessId = widget.businessId;
+    final transactionId = widget.transactionId;
+    final summary = widget.cachedDetail;
+    _canDeleteRecords = false;
+    _canEditPayrollAccount = false;
+    unawaited(_loadLocalExpenseIqPhoto(generation));
+    try {
+      final saved = await _localFinancial.loadTransactionDetail(
+        businessId,
+        transactionId,
       );
-      if (!mounted) return;
+      if (!mounted || !_isCurrent(generation)) return;
+      final rawDetail = saved ?? summary;
+      if (rawDetail == null) {
+        setState(() {
+          _loading = false;
+          _error =
+              'This expense has not been cached on this device. '
+              'Open it while online first to make it available offline.';
+        });
+        return;
+      }
+      final detail = _normalizedDetail(rawDetail)
+        ..['editable'] = saved != null
+        ..['deletable'] = false;
       setState(() {
         _detail = detail;
-        _canDeleteRecords = false; // Fail closed until permissions resolve.
+        _detailSource = saved == null ? 'preview' : 'local';
         _loading = false;
         _error = null;
       });
-      // Follow-up work should never turn a readable transaction into a
-      // full-screen loading indicator or hide it when a receipt fetch fails.
-      _loadPermissions();
-      _prepareDetailCache(detail);
+      unawaited(_enrichVisibleExpense(detail, generation));
+      unawaited(_loadPayrollAccountPermission(generation));
     } catch (error) {
-      // A previously cached transaction can still be read offline.
+      if (!mounted || !_isCurrent(generation)) return;
+      setState(() {
+        _loading = false;
+        _error = 'Offline expense details unavailable: $error';
+      });
+    }
+  }
+
+  // Paint the tapped list row without waiting for disk or network. A list
+  // summary or online disk fallback never grants mutation permissions.
+  void _loadCached(Map<String, dynamic> summary, {bool offline = false}) {
+    _detailSource = 'preview';
+    _detail = _normalizedDetail(summary)
+      ..['editable'] = false
+      ..['deletable'] = false;
+    _loading = false;
+    _error = null;
+    _canDeleteRecords = false;
+    _canEditPayrollAccount = false;
+    if (offline) {
+      unawaited(_loadOffline());
+    } else {
+      unawaited(_load(hydrateLocal: true));
+    }
+  }
+
+  Future<void> _loadLocalPreview(int generation) async {
+    try {
       final saved = await _localFinancial.loadTransactionDetail(
         widget.businessId,
         widget.transactionId,
       );
-      if (saved != null) {
-        await _loadCached(saved);
+      if (!_isCurrent(generation) || _hasAuthoritativeDetail || saved == null) {
         return;
       }
-      if (!mounted) return;
+      final detail = _normalizedDetail(saved)
+        ..['editable'] = saved['recurring_engine_owned'] == true
+        ..['deletable'] = false;
+      setState(() {
+        _detail = detail;
+        _detailSource = 'local';
+        _loading = false;
+      });
+      unawaited(_enrichVisibleExpense(detail, generation));
+      unawaited(_loadPayrollAccountPermission(generation));
+    } catch (_) {
+      // Keep the already visible list summary if local storage is unavailable.
+    }
+  }
+
+  Future<void> _enrichVisibleExpense(
+    Map<String, dynamic> raw,
+    int generation,
+  ) async {
+    final enriched = await _withReceiptReporting(
+      raw,
+      businessId: widget.businessId,
+      transactionId: widget.transactionId,
+    );
+    if (!_isCurrent(generation) || !identical(_detail, raw)) return;
+    setState(() {
+      // Reporting only owns this projection. It must never restore old
+      // attachments, values, or permissions after a newer detail/action.
+      _detail = {...raw}
+        ..remove('reporting_amount')
+        ..remove('reporting_processor_fee')
+        ..remove('reporting_status');
+      for (final key in const [
+        'reporting_amount',
+        'reporting_processor_fee',
+        'reporting_status',
+      ]) {
+        if (enriched.containsKey(key)) _detail![key] = enriched[key];
+      }
+    });
+  }
+
+  Future<void> _load({bool hydrateLocal = true}) async {
+    if (widget.cachedDetail?['recurring_engine_owned'] == true ||
+        _detail?['recurring_engine_owned'] == true ||
+        widget.transactionId.startsWith('local-recurring-')) {
+      await _loadOffline();
+      return;
+    }
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      await _loadOffline();
+      return;
+    }
+    final generation = ++_loadGeneration;
+    final businessId = widget.businessId;
+    final transactionId = widget.transactionId;
+    final api = _api;
+    setState(() => _canDeleteRecords = false);
+    unawaited(_loadLocalExpenseIqPhoto(generation));
+    if (hydrateLocal) unawaited(_loadLocalPreview(generation));
+    try {
+      final rawDetail = Map<String, dynamic>.from(
+        await _boundedRead(api.transactionDetail(businessId, transactionId)),
+      );
+      if (!_isCurrent(generation) ||
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
+      }
+      if (_detail?['recurring_engine_owned'] == true) return;
+      final detail = _normalizedDetail(rawDetail);
+      setState(() {
+        _detail = detail;
+        _detailSource = 'server';
+        // A metadata refresh must not invalidate in-flight thumbnail URLs.
+        // Each URL is already keyed by storage bucket + object key; a newly
+        // uploaded/replaced photo naturally uses a different key.
+        _hasAuthoritativeDetail = true;
+        _loading = false;
+        _error = null;
+      });
+      unawaited(_enrichVisibleExpense(detail, generation));
+      unawaited(_loadDeletePermission(generation, api, businessId));
+      unawaited(
+        _cacheExpenseDetail(rawDetail, generation, businessId, transactionId)
+            .then((_) => _loadPayrollAccountPermission(generation)),
+      );
+    } catch (error) {
+      if (!mounted || !_isCurrent(generation)) return;
       setState(() {
         _loading = false;
         _error = error.toString();
@@ -121,52 +402,164 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     }
   }
 
-  Future<void> _loadPermissions() async {
+  Future<void> _loadDeletePermission(
+    int generation,
+    BriskersApi api,
+    String businessId,
+  ) async {
     try {
-      final permissions = await _api.myPermissions(widget.businessId);
-      if (mounted) {
-        setState(() {
-          _canDeleteRecords = permissions.contains('records.delete');
-        });
+      final permissions = await api.myPermissions(businessId);
+      if (!_isCurrent(generation) ||
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
       }
+      setState(
+        () => _canDeleteRecords = permissions.contains('records.delete'),
+      );
     } catch (_) {
-      // The detail remains readable; privileged delete stays unavailable.
+      // Permission-dependent actions remain disabled.
     }
   }
 
-  Future<void> _prepareDetailCache(Map<String, dynamic> detail) async {
+  Future<void> _cacheExpenseDetail(
+    Map<String, dynamic> rawDetail,
+    int generation,
+    String businessId,
+    String transactionId,
+  ) async {
     try {
+      if (!mounted || !_isCurrent(generation)) return;
+      // Warm the actual receipt files immediately, in parallel with saving
+      // metadata to SQLite. Previously the image download could not begin
+      // until the detail save finished, adding a visible delay.
+      final attachments = List<dynamic>.from(
+        rawDetail['attachments'] ?? const [],
+      ).whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
+      if (!BriskersConnectionModeController.instance.forceOffline &&
+          attachments.isNotEmpty) {
+        unawaited(_prefetchLocalAttachments(attachments, generation)
+            .catchError((Object _) {}));
+      }
       await _localFinancial.saveTransactionDetail(
-        widget.businessId,
-        widget.transactionId,
-        detail,
+        businessId,
+        transactionId,
+        rawDetail,
       );
-      await _prefetchLocalAttachments(
-        List<dynamic>.from(detail['attachments'] ?? const [])
-            .whereType<Map>()
-            .map((row) => Map<String, dynamic>.from(row))
-            .toList(),
-      );
+      // Do not clear _attachmentFiles after warming. Active thumbnails should
+      // never be forced to re-check the same cache or lose an already-painted
+      // image simply because background photo work finished.
     } catch (_) {
       // Saving a local copy or warming receipt thumbnails is best-effort.
     }
   }
 
-  Future<void> _loadLocalExpenseIqPhoto() async {
+  Future<void> _loadLocalExpenseIqPhoto(int generation) async {
     try {
       final photo = await _localExpenseIq.localForExpense(
-        widget.businessId, widget.transactionId,
+        widget.businessId,
+        widget.transactionId,
       );
-      if (mounted) setState(() => _localExpenseIqPhoto = photo);
+      if (_isCurrent(generation)) {
+        setState(() => _localExpenseIqPhoto = photo);
+      }
     } catch (_) {
       // Online receipt view remains available.
     }
   }
 
-  Future<void> _openLocalExpenseIqPhoto(String uri) async {
+  void _showOriginalPhotoError(Object error) {
+    if (!mounted) return;
+    final needsGrant = expensePhotoNeedsFolderPermission(error);
+    final message = needsGrant
+        ? 'Android no longer allows Briskers to read the original photo. '
+          'The file may still be in ExpenseIQ/photos.'
+        : 'This original receipt could not be opened. '
+          'It may still be in your ExpenseIQ/photos folder.';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      action: Platform.isAndroid && _localExpenseIqPhoto != null
+          ? SnackBarAction(
+              label: 'Reconnect',
+              onPressed: () => unawaited(_reconnectOriginalPhotoFolder()),
+            )
+          : null,
+    ));
+  }
+
+  /// Ask Android to grant the original folder again. This intentionally does
+  /// NOT call the cloud importer, upload queue, or financial write API.
+  Future<void> _reconnectOriginalPhotoFolder() async {
+    if (!Platform.isAndroid || _reconnectingPhoto) return;
+    final photo = _localExpenseIqPhoto;
+    final filename = photo?['filename']?.toString() ?? '';
+    final previousUri = photo?['source_uri']?.toString() ?? '';
+    if (filename.isEmpty || previousUri.isEmpty) {
+      _showOriginalPhotoError(StateError('Original receipt reference missing.'));
+      return;
+    }
+    final generation = _loadGeneration;
+    setState(() => _reconnectingPhoto = true);
     try {
-      final bytes = await Saf().readFileBytes(uri);
-      if (!mounted) return;
+      final picked = await _expenseIqChannel.invokeMethod<Map<dynamic, dynamic>>(
+        'reconnectExpenseIqPhoto', {'filename': filename},
+      );
+      if (!_isCurrent(generation) || picked == null) return;
+      final newFilename = picked['name']?.toString() ?? '';
+      final verifiedUri = picked['uri']?.toString() ?? '';
+      if (newFilename != filename || verifiedUri.isEmpty) {
+        throw StateError(
+          'The selected folder does not contain this exact receipt photo.',
+        );
+      }
+      // A new URI must be readable before any saved reference changes.
+      final reader = widget.localPhotoReader ?? Saf().readFileBytes;
+      final bytes = await reader(verifiedUri);
+      if (!_isCurrent(generation)) return;
+      if (bytes.isEmpty) throw StateError('The selected photo is empty.');
+      await _localExpenseIq.reconnectOriginalPhoto(
+        businessId: widget.businessId,
+        transactionId: widget.transactionId,
+        expectedFilename: filename,
+        previousUri: previousUri,
+        verifiedUri: verifiedUri,
+      );
+      if (!mounted || !_isCurrent(generation)) return;
+      _localPhotoBytes.remove(previousUri);
+      _localPhotoBytes.remove(verifiedUri);
+      setState(() => _localExpenseIqPhoto = {
+            ...photo!,
+            'source_uri': verifiedUri,
+          });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(
+          'Original receipt access restored on this phone.',
+        )),
+      );
+    } catch (error) {
+      if (mounted && _isCurrent(generation)) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+            'Could not reconnect this original receipt. '
+            'Select Internal storage / ExpenseIQ / photos. '
+            'No records were changed. $error',
+          ),
+        ));
+      }
+    } finally {
+      if (_isCurrent(generation)) {
+        setState(() => _reconnectingPhoto = false);
+      }
+    }
+  }
+
+  Future<bool> _openLocalExpenseIqPhoto(String uri, {bool reportError = true}) async {
+    final generation = _loadGeneration;
+    try {
+      final bytes = await _readLocalPhoto(uri);
+      if (!mounted || !_isCurrent(generation)) return false;
+      if (bytes.isEmpty) throw StateError('Original photo is empty.');
       await showDialog<void>(
         context: context,
         builder: (_) => Dialog(
@@ -177,13 +570,35 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
           ),
         ),
       );
+      return true;
     } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Original photo unavailable: $error')),
-        );
+      if (reportError && mounted && _isCurrent(generation)) {
+        _showOriginalPhotoError(error);
       }
+      return false;
     }
+  }
+
+  Future<Uint8List> _readLocalPhoto(String uri) =>
+      _localPhotoBytes.putIfAbsent(uri,
+        () => (widget.localPhotoReader ?? Saf().readFileBytes)(uri));
+
+  // The original is looked up by this exact business + expense. A filename
+  // alone must never connect images from separate expenses or ambiguous rows.
+  String? _originalPhotoUriFor(Map<String, dynamic> attachment) {
+    final photo = _localExpenseIqPhoto;
+    if (photo == null) return null;
+    final filename = photo['filename']?.toString() ?? '';
+    final uri = photo['source_uri']?.toString() ?? '';
+    if (filename.isEmpty || uri.isEmpty ||
+        attachment['filename']?.toString() != filename ||
+        (attachment['transaction_id'] != null &&
+         attachment['transaction_id']?.toString() != widget.transactionId)) {
+      return null;
+    }
+    final rows = (_detail?['attachments'] as List? ?? const []).whereType<Map>();
+    return rows.where((row) => row['filename']?.toString() == filename).length == 1
+        ? uri : null;
   }
 
   Widget _localExpenseIqReceiptCard() {
@@ -195,25 +610,32 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         leading: uri.isEmpty
             ? const Icon(Icons.image_not_supported_outlined)
             : FutureBuilder<Uint8List>(
-                future: Saf().readFileBytes(uri),
-                builder: (context, snapshot) =>
-                    snapshot.hasData
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(6),
-                            child: Image.memory(
-                              snapshot.data!,
-                              width: 50, height: 50,
-                              fit: BoxFit.cover,
-                            ),
-                          )
-                        : const Icon(Icons.image_outlined),
+                future: _readLocalPhoto(uri),
+                builder: (context, snapshot) => snapshot.hasData
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Image.memory(
+                          snapshot.data!,
+                          width: 50,
+                          height: 50,
+                          fit: BoxFit.cover,
+                        ),
+                      )
+                    : Icon(
+                        snapshot.hasError
+                            ? Icons.image_not_supported_outlined
+                            : Icons.image_outlined,
+                      ),
               ),
         title: Text(photo['filename']?.toString() ?? 'ExpenseIQ photo'),
         subtitle: Text(
-          state == 'uploaded' ? 'Synced to cloud' :
-          state == 'missing' ? 'Original file not found' :
-          state == 'failed' ? 'Upload pending retry' :
-          'Available locally · awaiting sync',
+          state == 'uploaded'
+              ? 'Uploaded previously · original file location saved'
+              : state == 'missing'
+              ? 'Original file not found'
+              : state == 'failed'
+              ? 'Upload pending retry'
+              : 'Available locally · awaiting sync',
         ),
         trailing: const Icon(Icons.zoom_in_outlined),
         onTap: uri.isEmpty ? null : () => _openLocalExpenseIqPhoto(uri),
@@ -231,23 +653,28 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     final cacheKey = _attachmentCacheKey(attachment);
     return _attachmentUrls.putIfAbsent(
       cacheKey,
-      () => _api.signedAttachmentUrl(
+      () => _boundedRead(_api.signedAttachmentUrl(
         attachment['bucket']?.toString() ?? 'briskers-private',
         attachment['key']?.toString() ?? '',
-      ),
+      )),
     );
   }
 
   Future<void> _prefetchLocalAttachments(
     List<Map<String, dynamic>> attachments,
+    int generation,
   ) async {
+    final attachmentCache = _attachmentCache;
     final pending = <Future<File?>>[];
     for (final attachment in attachments) {
-      final bucket =
-          attachment['bucket']?.toString() ?? 'briskers-private';
+      if (!_isCurrent(generation) ||
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
+      }
+      final bucket = attachment['bucket']?.toString() ?? 'briskers-private';
       final key = attachment['key']?.toString() ?? '';
       if (key.isEmpty) continue;
-      pending.add(_attachmentCache.getOrDownload(bucket, key));
+      pending.add(attachmentCache.getOrDownload(bucket, key));
       if (pending.length >= 4) {
         await Future.wait(pending);
         pending.clear();
@@ -256,13 +683,17 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     if (pending.isNotEmpty) await Future.wait(pending);
   }
 
-  void _preloadAttachments(List<Map<String, dynamic>> attachments) {
-    _prefetchLocalAttachments(attachments);
+  Future<File?> _localAttachment(Map<String, dynamic> attachment) {
+    final cacheKey =
+        '${_attachmentCacheKey(attachment)}|'
+        '${attachment['local_file_path'] ?? ''}';
+    return _attachmentFiles.putIfAbsent(
+      cacheKey,
+      () => _findLocalAttachment(attachment),
+    );
   }
 
-  Future<File?> _localAttachment(
-    Map<String, dynamic> attachment,
-  ) async {
+  Future<File?> _findLocalAttachment(Map<String, dynamic> attachment) async {
     final localPath = attachment['local_file_path']?.toString() ?? '';
     if (localPath.isNotEmpty) {
       final file = File(localPath);
@@ -273,6 +704,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       attachment['key']?.toString() ?? '',
     );
   }
+
   String _money(Object? raw) {
     final value = num.tryParse(raw?.toString() ?? '') ?? 0;
     return NumberFormat.currency(symbol: '\$').format(value);
@@ -286,7 +718,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   }
 
   Future<void> _addReceipt() async {
-    if (_uploading) return;
+    if (_detail?['editable'] != true || _uploading) return;
+    final generation = _loadGeneration;
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       showDragHandle: true,
@@ -295,20 +728,26 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
-            ),
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined),
+              leading: const Icon(
+                Icons.camera_alt_outlined,
+                color: Color(0xFF167F43),
+              ),
               title: const Text('Take photo'),
               onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.photo_library_outlined,
+                color: Color(0xFF2468BB),
+              ),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
             ),
           ],
         ),
       ),
     );
-    if (source == null) return;
+    if (source == null || !_isCurrent(generation)) return;
 
     List<XFile> files = const [];
     if (source == ImageSource.gallery) {
@@ -320,35 +759,52 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       );
       if (file != null) files = [file];
     }
-    if (files.isEmpty) return;
+    if (files.isEmpty || !_isCurrent(generation)) return;
 
+    final actionGeneration = ++_loadGeneration;
+    final recordGeneration = _recordGeneration;
+    final businessId = widget.businessId;
+    final transactionId = widget.transactionId;
+    final api = _api;
     setState(() {
       _uploading = true;
       _error = null;
     });
 
     try {
+      if (_detail?['recurring_engine_owned']==true) {
+        await LocalRecurringExpenseEdit.save(businessId,transactionId,{},[
+          for(final file in files) {'filename':file.name,'mime_type':_mimeType(file.name),'bytes':await file.readAsBytes()},
+        ]);
+      } else {
       for (final file in files) {
-        await _api.uploadExpensePhoto(
-          widget.businessId,
-          widget.transactionId,
+        if (!_isCurrent(actionGeneration)) return;
+        await api.uploadExpensePhoto(
+          businessId,
+          transactionId,
           filename: file.name,
           mimeType: _mimeType(file.name),
           bytes: await file.readAsBytes(),
         );
       }
-      await _load();
+      }
+      widget.onChanged?.call();
+      if (_isCurrent(actionGeneration)) await _load();
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (_isCurrent(actionGeneration)) {
+        setState(() => _error = error.toString());
+      }
     } finally {
-      if (mounted) setState(() => _uploading = false);
+      if (mounted && recordGeneration == _recordGeneration) {
+        setState(() => _uploading = false);
+      }
     }
   }
 
-  Future<void> _replaceReceipt(
-    Map<String, dynamic> attachment,
-  ) async {
+  Future<void> _replaceReceipt(Map<String, dynamic> attachment) async {
+    if(_detail?['recurring_engine_owned']==true) { await _addReceipt(); return; }
     final editable = _detail?['editable'] == true;
+    final generation = _loadGeneration;
     if (!editable || _uploading || _deletingAttachmentId != null) {
       return;
     }
@@ -374,7 +830,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         ),
       ),
     );
-    if (source == null) return;
+    if (source == null || !_isCurrent(generation)) return;
 
     XFile? file;
     if (source == ImageSource.gallery) {
@@ -388,49 +844,73 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         imageQuality: 92,
       );
     }
-    if (file == null || !mounted) return;
+    if (file == null || !_isCurrent(generation)) return;
 
+    final actionGeneration = ++_loadGeneration;
+    final recordGeneration = _recordGeneration;
+    final businessId = widget.businessId;
+    final transactionId = widget.transactionId;
+    final api = _api;
     setState(() {
       _uploading = true;
       _error = null;
     });
 
     try {
-      await _api.uploadExpensePhoto(
-        widget.businessId,
-        widget.transactionId,
+      await api.uploadExpensePhoto(
+        businessId,
+        transactionId,
         filename: file.name,
         mimeType: _mimeType(file.name),
         bytes: await file.readAsBytes(),
       );
 
+      if (!_isCurrent(actionGeneration)) return;
       final attachmentId = attachment['attachment_id']?.toString() ?? '';
       if (attachmentId.isNotEmpty) {
-        await _api.archiveExpensePhotoForReplace(
-          widget.businessId,
-          widget.transactionId,
+        await api.archiveExpensePhotoForReplace(
+          businessId,
+          transactionId,
           attachmentId,
           bucket: attachment['bucket']?.toString() ?? 'briskers-private',
           key: attachment['key']?.toString() ?? '',
         );
       }
 
-      await _load();
+      widget.onChanged?.call();
+      if (_isCurrent(actionGeneration)) await _load();
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (_isCurrent(actionGeneration)) {
+        setState(() => _error = error.toString());
+      }
     } finally {
-      if (mounted) setState(() => _uploading = false);
+      if (mounted && recordGeneration == _recordGeneration) {
+        setState(() => _uploading = false);
+      }
     }
   }
 
   Future<void> _openAttachment(Map<String, dynamic> attachment) async {
+    final generation = _loadGeneration;
     try {
+      final originalUri = _originalPhotoUriFor(attachment);
+      if (originalUri != null &&
+          await _openLocalExpenseIqPhoto(originalUri, reportError: false)) {
+        return;
+      }
+      if (!_isCurrent(generation)) return;
       final local = await _localAttachment(attachment);
       String? url;
+      if (!mounted || !_isCurrent(generation)) return;
       if (local == null) {
+        if (BriskersConnectionModeController.instance.forceOffline) {
+          throw StateError(
+            'This receipt photo has not been cached on this device.',
+          );
+        }
         url = await _attachmentUrl(attachment);
       }
-      if (!mounted) return;
+      if (!mounted || !_isCurrent(generation)) return;
       final editable = _detail?['editable'] == true;
       await showDialog<void>(
         context: context,
@@ -448,9 +928,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                         fit: BoxFit.contain,
                         errorBuilder: (_, _, _) => const SizedBox(
                           height: 300,
-                          child: Center(
-                            child: Text('Could not load receipt.'),
-                          ),
+                          child: Center(child: Text('Could not load receipt.')),
                         ),
                       ),
               ),
@@ -469,7 +947,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                   child: FilledButton.icon(
                     onPressed: () async {
                       Navigator.pop(dialogContext);
-                      await _deleteAttachment(attachment);
+                      if (_isCurrent(generation)) {
+                        await _deleteAttachment(attachment);
+                      }
                     },
                     style: FilledButton.styleFrom(
                       backgroundColor: Theme.of(context).colorScheme.error,
@@ -483,23 +963,27 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         ),
       );
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (_isCurrent(generation)) {
+        setState(() => _error = error.toString());
+      }
     }
   }
 
-  Future<void> _deleteAttachment(
-    Map<String, dynamic> attachment,
-  ) async {
+  Future<void> _deleteAttachment(Map<String, dynamic> attachment) async {
     final attachmentId = attachment['attachment_id']?.toString() ?? '';
-    if (attachmentId.isEmpty || _deletingAttachmentId != null) return;
+    if (attachmentId.isEmpty ||
+        _deletingAttachmentId != null ||
+        _detail?['editable'] != true ||
+        !_canDeleteRecords) {
+      return;
+    }
+    final generation = _loadGeneration;
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete receipt photo?'),
-        content: const Text(
-          'The photo will be removed from this transaction.',
-        ),
+        content: const Text('The photo will be removed from this transaction.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -515,7 +999,17 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         ],
       ),
     );
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true ||
+        !_isCurrent(generation) ||
+        _detail?['editable'] != true ||
+        !_canDeleteRecords) {
+      return;
+    }
+
+    final actionGeneration = ++_loadGeneration;
+    final recordGeneration = _recordGeneration;
+    final businessId = widget.businessId;
+    final transactionId = widget.transactionId;
 
     setState(() {
       _deletingAttachmentId = attachmentId;
@@ -524,25 +1018,57 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 
     try {
       await _api.deleteExpensePhoto(
-        widget.businessId,
-        widget.transactionId,
+        businessId,
+        transactionId,
         attachmentId,
         bucket: attachment['bucket']?.toString() ?? 'briskers-private',
         key: attachment['key']?.toString() ?? '',
       );
-      await _load();
+      widget.onChanged?.call();
+      if (_isCurrent(actionGeneration)) await _load();
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (_isCurrent(actionGeneration)) {
+        setState(() => _error = error.toString());
+      }
     } finally {
-      if (mounted) setState(() => _deletingAttachmentId = null);
+      if (mounted && recordGeneration == _recordGeneration) {
+        setState(() => _deletingAttachmentId = null);
+      }
+    }
+  }
+
+  Future<void> _loadPayrollAccountPermission(int generation) async {
+    if (!widget.canDeleteTransaction ||
+        (!LocalFinancialCache.requiresOwnerAccountEdit(_detail) &&
+         !LocalFinancialCache.requiresOwnerAccountEdit(widget.cachedDetail))) {
+      return;
+    }
+    try {
+      final source = await _localFinancial.loadTransactionForEdit(
+        widget.businessId, widget.transactionId,
+      );
+      if (!LocalFinancialCache.requiresOwnerAccountEdit(source)) return;
+      final allowed = await DeviceOwnerAuthorization.instance
+          .canViewSavedOwnerPayroll(widget.businessId);
+      if (_isCurrent(generation)) {
+        setState(() => _canEditPayrollAccount = allowed);
+      }
+    } catch (_) {
+      // The original and local permission must both be available to edit.
     }
   }
 
   Future<void> _edit() async {
     final detail = _detail;
-    if (detail == null || _busy) return;
+    if (detail == null || _busy ||
+        (detail['editable'] != true && !_canEditPayrollAccount)) {
+      return;
+    }
+    var generation = _loadGeneration;
 
-    if (BriskersConnectionModeController.instance.forceOffline) {
+    if (BriskersConnectionModeController.instance.forceOffline ||
+        _canEditPayrollAccount ||
+        LocalFinancialCache.requiresOwnerAccountEdit(detail)) {
       final changed = await Navigator.push<bool>(
         context,
         MaterialPageRoute(
@@ -553,15 +1079,17 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
           ),
         ),
       );
-      if (changed == true && mounted) {
+      if (changed == true && _isCurrent(generation)) {
+        widget.onChanged?.call();
+        generation = ++_loadGeneration;
         final saved = await _localFinancial.loadTransactionDetail(
           widget.businessId,
           widget.transactionId,
         );
-        if (saved != null) {
+        if (saved != null && _isCurrent(generation)) {
           setState(() {
             _detail = Map<String, dynamic>.from(saved)
-              ..['editable'] = true
+              ..['editable'] = detail['editable'] == true
               ..['deletable'] = false;
             _error = null;
           });
@@ -571,18 +1099,17 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     }
 
     final options = await _api.transactionOptions(widget.businessId);
-    if (!mounted) return;
+    if (!mounted || !_isCurrent(generation)) return;
 
-    final accounts = List<dynamic>.from(options['accounts'] ?? const [])
-        .map((raw) => Map<String, dynamic>.from(raw as Map))
-        .toList();
-    final categories = List<dynamic>.from(options['categories'] ?? const [])
-        .map((raw) => Map<String, dynamic>.from(raw as Map))
-        .toList();
-    final counterparties =
-        List<dynamic>.from(options['counterparties'] ?? const [])
-            .map((raw) => Map<String, dynamic>.from(raw as Map))
-            .toList();
+    final accounts = List<dynamic>.from(
+      options['accounts'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+    final categories = List<dynamic>.from(
+      options['categories'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+    final counterparties = List<dynamic>.from(
+      options['counterparties'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
 
     final amount = TextEditingController(
       text: detail['amount']?.toString() ?? '',
@@ -591,13 +1118,14 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       text: detail['remarks']?.toString() ?? '',
     );
 
-    var direction =
-        detail['direction']?.toString() == 'income' ? 'income' : 'expense';
+    var direction = detail['direction']?.toString() == 'income'
+        ? 'income'
+        : 'expense';
     String? accountId = detail['account_id']?.toString();
     String? categoryId = detail['category_id']?.toString();
     String? counterpartyId = detail['counterparty_id']?.toString();
-    var date = DateTime.tryParse(detail['date']?.toString() ?? '') ??
-        DateTime.now();
+    var date =
+        DateTime.tryParse(detail['date']?.toString() ?? '') ?? DateTime.now();
 
     final saved = await showModalBottomSheet<bool>(
       context: context,
@@ -606,11 +1134,18 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       showDragHandle: true,
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) {
-          final keyboard = MediaQuery.viewInsetsOf(sheetContext).bottom;
+          final bottomInset = expenseEditSheetBottomInset(
+            keyboardInset: MediaQuery.viewInsetsOf(sheetContext).bottom,
+            systemNavigationInset: MediaQuery.viewPaddingOf(sheetContext).bottom,
+          );
+          final height = expenseEditSheetHeight(
+            screenHeight: MediaQuery.sizeOf(sheetContext).height,
+            bottomInset: bottomInset,
+          );
           return Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, keyboard + 16),
+            padding: EdgeInsets.fromLTRB(16, 0, 16, bottomInset),
             child: SizedBox(
-              height: MediaQuery.sizeOf(sheetContext).height * 0.82,
+              height: height,
               child: Column(
                 children: [
                   Row(
@@ -652,19 +1187,16 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                               ),
                             ],
                             selected: {direction},
-                            onSelectionChanged: (value) => setSheetState(
-                              () => direction = value.first,
-                            ),
+                            onSelectionChanged: (value) =>
+                                setSheetState(() => direction = value.first),
                           ),
                           const SizedBox(height: 12),
                           TextField(
                             controller: amount,
-                            keyboardType:
-                                const TextInputType.numberWithOptions(
+                            keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
-                            scrollPadding:
-                                const EdgeInsets.only(bottom: 160),
+                            scrollPadding: const EdgeInsets.only(bottom: 160),
                             decoration: const InputDecoration(
                               labelText: 'Amount',
                               prefixText: r'$',
@@ -676,8 +1208,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                             initialValue: counterpartyId,
                             isExpanded: true,
                             decoration: InputDecoration(
-                              labelText:
-                                  direction == 'income' ? 'Payer' : 'Payee',
+                              labelText: direction == 'income'
+                                  ? 'Payer'
+                                  : 'Payee',
                               border: const OutlineInputBorder(),
                             ),
                             items: [
@@ -747,8 +1280,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                           const SizedBox(height: 8),
                           ListTile(
                             contentPadding: EdgeInsets.zero,
-                            leading:
-                                const Icon(Icons.calendar_today_outlined),
+                            leading: const Icon(Icons.calendar_today_outlined),
                             title: const Text('Transaction date'),
                             subtitle: Text(
                               '${date.month}/${date.day}/${date.year}',
@@ -771,8 +1303,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                             controller: remarks,
                             minLines: 2,
                             maxLines: 5,
-                            scrollPadding:
-                                const EdgeInsets.only(bottom: 160),
+                            scrollPadding: const EdgeInsets.only(bottom: 160),
                             decoration: const InputDecoration(
                               labelText: 'Description / notes',
                               border: OutlineInputBorder(),
@@ -786,9 +1317,15 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: BriskersColors.expenses,
+                        foregroundColor: Colors.white,
+                      ),
                       onPressed: () async {
-                        final parsed =
-                            num.tryParse(amount.text.trim().replaceAll(',', ''));
+                        if (!_isCurrent(generation) || _busy) return;
+                        final parsed = num.tryParse(
+                          amount.text.trim().replaceAll(',', ''),
+                        );
                         if (parsed == null ||
                             parsed <= 0 ||
                             accountId == null ||
@@ -811,6 +1348,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                           }
                         }
 
+                        generation = ++_loadGeneration;
                         await _api.updateManualTransaction(
                           widget.businessId,
                           widget.transactionId,
@@ -822,8 +1360,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                           jobId: detail['job_id']?.toString(),
                           documentId: detail['document_id']?.toString(),
                           counterpartyId: counterpartyId,
-                          counterpartyName:
-                              selectedCounterparty?['name']?.toString(),
+                          counterpartyName: selectedCounterparty?['name']
+                              ?.toString(),
                           remarks: remarks.text.trim(),
                         );
 
@@ -845,11 +1383,15 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 
     amount.dispose();
     remarks.dispose();
-    if (saved == true) await _load();
+    if (saved == true && _isCurrent(generation)) {
+      widget.onChanged?.call();
+      await _load();
+    }
   }
 
   Future<void> _copy() async {
-    await Navigator.push<bool>(
+    if (_detail?['editable'] != true || _busy) return;
+    final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => ExpenseEntryScreen(
@@ -859,11 +1401,21 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         ),
       ),
     );
+    if (changed == true) {
+      widget.onChanged?.call();
+    }
   }
 
   Future<void> _delete() async {
     final detail = _detail;
-    if (detail == null || _busy) return;
+    if (detail == null ||
+        _busy ||
+        !widget.canDeleteTransaction ||
+        detail['deletable'] != true ||
+        !_canDeleteRecords) {
+      return;
+    }
+    final generation = _loadGeneration;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -887,20 +1439,24 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         ],
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed != true ||
+        !_isCurrent(generation) ||
+        !_canDeleteRecords ||
+        !widget.canDeleteTransaction) {
+      return;
+    }
+    final actionGeneration = ++_loadGeneration;
 
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      await _api.voidManualTransaction(
-        widget.businessId,
-        widget.transactionId,
-      );
-      if (mounted) Navigator.pop(context);
+      await _api.voidManualTransaction(widget.businessId, widget.transactionId);
+      widget.onChanged?.call();
+      if (mounted && _isCurrent(actionGeneration)) Navigator.pop(context);
     } catch (error) {
-      if (mounted) {
+      if (_isCurrent(actionGeneration)) {
         setState(() {
           _busy = false;
           _error = error.toString();
@@ -914,9 +1470,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       return 'Not recurring';
     }
     final frequency = rule['frequency']?.toString() ?? '';
-    final interval = int.tryParse(
-      rule['interval_count']?.toString() ?? '',
-    ) ?? 1;
+    final interval =
+        int.tryParse(rule['interval_count']?.toString() ?? '') ?? 1;
     final label = switch (frequency) {
       'daily' => 'Daily',
       'weekly' when interval == 2 => 'Every 2 weeks',
@@ -924,13 +1479,22 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       'yearly' => 'Yearly',
       _ => 'Monthly',
     };
-    final next = rule['next_date']?.toString() ?? '';
-    return next.isEmpty ? label : '$label · next $next';
+    final status = recurringScheduleStatus(
+      rule,
+      today: DateTime.now(),
+      cached: BriskersConnectionModeController.instance.forceOffline,
+    );
+    return '$label · $status';
   }
 
   Future<void> _manageRecurring() async {
     final detail = _detail;
-    if (detail == null || _busy || !widget.allowRecurring) return;
+    if (detail == null ||
+        detail['editable'] != true ||
+        _busy ||
+        !widget.allowRecurring) {
+      return;
+    }
     if (BriskersConnectionModeController.instance.forceOffline) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -942,6 +1506,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       );
       return;
     }
+    final generation = _loadGeneration;
     final changed = await showDialog<bool>(
       context: context,
       builder: (_) => TransactionRecurringDialog(
@@ -950,7 +1515,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         transaction: detail,
       ),
     );
-    if (changed == true && mounted) {
+    if (changed == true && _isCurrent(generation)) {
+      widget.onChanged?.call();
       await _load();
     }
   }
@@ -962,24 +1528,35 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   }
 
   Widget _receiptThumbnail(Map<String, dynamic> attachment) {
+    final uri = _originalPhotoUriFor(attachment);
+    if (uri == null) return _storedReceiptThumbnail(attachment);
+    return FutureBuilder<Uint8List>(
+      key: ValueKey('original-receipt-${widget.businessId}-${widget.transactionId}-$uri'),
+      future: _readLocalPhoto(uri),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const SizedBox(width: 52, height: 52,
+            child: Icon(Icons.image_outlined));
+        }
+        final bytes = snapshot.connectionState == ConnectionState.done
+            ? snapshot.data : null;
+        if (bytes == null || bytes.isEmpty) return _storedReceiptThumbnail(attachment);
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.memory(bytes, width: 52, height: 52, fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => _storedReceiptThumbnail(attachment)),
+        );
+      },
+    );
+  }
+
+  Widget _storedReceiptThumbnail(Map<String, dynamic> attachment) {
     const size = 52.0;
     final localPath = attachment['local_file_path']?.toString() ?? '';
-    if (localPath.isNotEmpty && File(localPath).existsSync()) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.file(
-          File(localPath),
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-        ),
-      );
-    }
-
     final bucket = attachment['bucket']?.toString() ?? 'briskers-private';
     final key = attachment['key']?.toString() ?? '';
 
-    if (key.isEmpty) {
+    if (key.isEmpty && localPath.isEmpty) {
       return Container(
         width: size,
         height: size,
@@ -993,7 +1570,10 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     }
 
     return FutureBuilder<File?>(
-      future: _attachmentCache.existing(bucket, key),
+      key: ValueKey(
+        '${widget.businessId}|${widget.transactionId}|$bucket|$key|$localPath',
+      ),
+      future: _localAttachment(attachment),
       builder: (context, localSnapshot) {
         final local = localSnapshot.data;
         if (local != null) {
@@ -1008,6 +1588,21 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
           );
         }
 
+        // In Auto, wait for the local-file check to finish before considering
+        // a signed cloud URL. Starting both at once made cached thumbnails
+        // flicker for about a second on every record refresh.
+        if (localSnapshot.connectionState != ConnectionState.done) {
+          return Container(
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: BriskersColors.expenses.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.image_outlined),
+          );
+        }
         if (BriskersConnectionModeController.instance.forceOffline) {
           return Container(
             width: size,
@@ -1081,25 +1676,37 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       );
     }
 
+    NavigationContentTiming.contentVisible(
+      'expense_detail',
+        context: context,
+      source: _detailSource,
+    );
+    final recordGeneration = _recordGeneration;
     final income = detail['direction']?.toString() == 'income';
     final editable = detail['editable'] == true;
-    final deletable = widget.canDeleteTransaction && detail['deletable'] == true;
-    final attachments = List<dynamic>.from(detail['attachments'] ?? const [])
-        .map((raw) => Map<String, dynamic>.from(raw as Map))
-        .toList();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _preloadAttachments(attachments);
-    });
-    final counterparty = detail['counterparty']?.toString() ??
-        (income ? 'Income' : 'Expense');
+    final deletable =
+        widget.canDeleteTransaction &&
+        _canDeleteRecords &&
+        detail['deletable'] == true;
+    final attachments = List<dynamic>.from(
+      detail['attachments'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+    // The Invoice/Expense list may know that a receipt exists even when the
+    // exact image metadata has not been cached. This is a visibility warning,
+    // never an instruction to add or recreate a missing financial receipt.
+    final receiptReferenceCount = int.tryParse(
+      (detail['receipt_count'] ??
+          widget.cachedDetail?['receipt_count'])?.toString() ?? '',
+    ) ?? 0;
+    final counterparty =
+        detail['counterparty']?.toString() ?? (income ? 'Income' : 'Expense');
     final category = detail['category']?.toString() ?? '';
     final account = detail['account']?.toString() ?? '';
     final date = detail['date']?.toString() ?? '';
     final remarks = detail['remarks']?.toString() ?? '';
     final jobNumber = detail['job_number']?.toString().trim() ?? '';
     final jobTitle = detail['job_title']?.toString().trim() ?? '';
-    final customerName =
-        detail['job_customer_name']?.toString().trim() ?? '';
+    final customerName = detail['job_customer_name']?.toString().trim() ?? '';
     final documentNumber = detail['document_number']?.toString().trim() ?? '';
     final contextLine = <String>[
       if (customerName.isNotEmpty) customerName,
@@ -1114,21 +1721,25 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     final recurringRule = recurring is Map
         ? Map<String, dynamic>.from(recurring)
         : null;
-    final mayManageRecurring = widget.allowRecurring &&
+    final mayManageRecurring =
+        widget.allowRecurring &&
         editable &&
         (detail['job_id']?.toString() ?? '').isEmpty &&
         (detail['document_id']?.toString() ?? '').isEmpty;
-    final color =
-        income ? const Color(0xFF169B62) : BriskersColors.expenses;
+    final color = income ? const Color(0xFF169B62) : BriskersColors.expenses;
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: color.withValues(alpha: 0.10),
         title: Text(income ? 'Income' : 'Expense'),
         actions: [
-          if (editable)
+          if (editable || _canEditPayrollAccount)
             PopupMenuButton<String>(
-              onSelected: _handleMenu,
+              onSelected: (value) {
+                if (mounted && recordGeneration == _recordGeneration) {
+                  unawaited(_handleMenu(value));
+                }
+              },
               itemBuilder: (_) => [
                 const PopupMenuItem(
                   value: 'edit',
@@ -1138,8 +1749,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                     title: Text('Edit transaction'),
                   ),
                 ),
-                const PopupMenuItem(
-                  value: 'copy',
+                if (editable && !LocalFinancialCache.requiresOwnerAccountEdit(detail))
+                  const PopupMenuItem(
+                    value: 'copy',
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.copy_outlined),
@@ -1186,7 +1798,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                     ),
                   ),
                   Text(
-                    '${income ? '+' : '-'}${_money(detail['amount'])}',
+                    '${income ? '+' : '-'}${_money(WarrantyReceiptReporting.amount(detail))}',
                     style: TextStyle(
                       color: color,
                       fontSize: 20,
@@ -1227,11 +1839,32 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
             ),
             const SizedBox(height: 12),
           ],
+          if (income &&
+              detail['reporting_status'] == 'verified' &&
+              detail['reporting_amount'] != null) ...[
+            _DetailRow(
+              label: 'Gross received / invoice credit',
+              value: _money(detail['amount']),
+            ),
+            _DetailRow(
+              label: 'Processor fee (not shop income)',
+              value: _money(detail['reporting_processor_fee']),
+            ),
+            _DetailRow(
+              label: 'Retained receipts',
+              value: _money(detail['reporting_amount']),
+            ),
+          ],
+          if (income && detail['reporting_status'] != 'verified')
+            const Text(
+              'Gross receipt shown. Processor fee could not be verified; sync invoice details and refresh before relying on net receipts.',
+            ),
           _DetailRow(label: 'Category', value: category),
           _DetailRow(label: 'Account', value: account),
           _DetailRow(label: 'Date', value: date),
-          if (jobNumber.isNotEmpty)
-            _DetailRow(label: 'Job', value: jobNumber),
+          if (detail['payment_method'] case final String method when method.isNotEmpty)
+            _DetailRow(label: 'Payment method', value: method),
+          if (jobNumber.isNotEmpty) _DetailRow(label: 'Job', value: jobNumber),
           if (documentNumber.isNotEmpty)
             _DetailRow(label: 'Invoice', value: documentNumber),
           if (mayManageRecurring)
@@ -1243,27 +1876,24 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                 subtitle: Text(_repeatLabel(recurringRule)),
                 trailing: TextButton(
                   onPressed: _manageRecurring,
-                  child: Text(recurringRule?['is_repeating'] == true
-                      ? 'Change' : 'Make recurring'),
+                  child: Text(
+                    recurringRule?['is_repeating'] == true
+                        ? 'Change'
+                        : 'Make recurring',
+                  ),
                 ),
                 onTap: _manageRecurring,
               ),
             )
           else if (widget.allowRecurring && recurringRule != null)
-            _DetailRow(
-              label: 'Repeating',
-              value: _repeatLabel(recurringRule),
-            ),
+            _DetailRow(label: 'Repeating', value: _repeatLabel(recurringRule)),
           const SizedBox(height: 16),
           Row(
             children: [
               const Expanded(
                 child: Text(
                   'Receipts',
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
                 ),
               ),
               if (editable)
@@ -1274,15 +1904,36 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                 ),
             ],
           ),
+          if (Platform.isAndroid && _localExpenseIqPhoto != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _reconnectingPhoto
+                    ? null
+                    : _reconnectOriginalPhotoFolder,
+                icon: const Icon(Icons.folder_open_outlined),
+                label: Text(_reconnectingPhoto
+                    ? 'Reconnecting original folder...'
+                    : 'Reconnect original photo folder'),
+              ),
+            ),
+          // Keep the local original visible after upload. A cloud row
+          // replaces this card only when it can show the same local file.
           if (_localExpenseIqPhoto != null &&
-              (attachments.isEmpty ||
-                  _localExpenseIqPhoto!['state'] != 'uploaded'))
+              !attachments.any((row) => _originalPhotoUriFor(row) != null))
             _localExpenseIqReceiptCard(),
           if (attachments.isEmpty && _localExpenseIqPhoto == null)
-            const Card(
+            Card(
               child: Padding(
-                padding: EdgeInsets.all(18),
-                child: Text('No receipt photos attached.'),
+                padding: const EdgeInsets.all(18),
+                child: receiptReferenceCount > 0
+                    ? Text(
+                        '$receiptReferenceCount receipt photo reference(s) '
+                        'exist, but the images are not available in this '
+                        'device’s saved expense detail. This does not prove '
+                        'the original pictures were deleted.',
+                      )
+                    : const Text('No receipt photos attached.'),
               ),
             )
           else
@@ -1312,15 +1963,16 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                               : () => _replaceReceipt(attachment),
                           icon: const Icon(Icons.edit_outlined),
                         ),
-                      if (editable)
+                      if (editable && _canDeleteRecords)
                         IconButton(
                           tooltip: 'Delete receipt photo',
                           onPressed:
                               _deletingAttachmentId ==
-                                      attachment['attachment_id']?.toString()
-                                  ? null
-                                  : () => _deleteAttachment(attachment),
-                          icon: _deletingAttachmentId ==
+                                  attachment['attachment_id']?.toString()
+                              ? null
+                              : () => _deleteAttachment(attachment),
+                          icon:
+                              _deletingAttachmentId ==
                                   attachment['attachment_id']?.toString()
                               ? const SizedBox.square(
                                   dimension: 18,
@@ -1349,10 +2001,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 }
 
 class _DetailRow extends StatelessWidget {
-  const _DetailRow({
-    required this.label,
-    required this.value,
-  });
+  const _DetailRow({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -1389,3 +2038,4 @@ class _DetailRow extends StatelessWidget {
     );
   }
 }
+

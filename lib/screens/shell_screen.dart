@@ -1,16 +1,22 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/supabase_config.dart';
 import '../core/connection_mode.dart';
 import '../core/briskers_i18n.dart';
 import '../core/employee_role_style.dart';
+import '../core/navigation_content_timing.dart';
 import '../services/customer_vehicle_sync_service.dart';
+import '../services/expenseiq_background_scheduler.dart';
+import '../services/customer_notification_service.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/job_sync_service.dart';
+import '../services/owner_job_retirement_service.dart';
 import '../services/local_appointment_repository.dart';
 import '../services/local_customer_repository.dart';
 import '../services/local_document_repository.dart';
@@ -20,8 +26,13 @@ import '../services/local_standard_notes_service.dart';
 import '../services/local_job_repository.dart';
 import '../widgets/briskers_page_header.dart';
 import '../widgets/connection_header_toggle.dart';
+import '../widgets/briskers_module_dock.dart';
+import '../widgets/stale_keyboard_inset_guard.dart';
+import '../widgets/retained_module_stack.dart';
+import 'expenses_screen.dart';
 import 'appointments_screen.dart';
 import 'customers/customers_screen.dart';
+import 'customers/new_customers_screen.dart';
 import 'home_screen.dart';
 import 'jobs_screen.dart';
 import 'more_screen.dart';
@@ -45,21 +56,35 @@ class ShellScreen extends StatefulWidget {
   State<ShellScreen> createState() => _ShellScreenState();
 }
 
-class _ShellScreenState extends State<ShellScreen> {
+class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   static const _api = BriskersApi();
   bool _preparingOfflineChoices = false;
+  bool _retirementSyncing = false;
+  bool _foreground = true;
+  Timer? _retirementRetry;
+  StreamSubscription<String>? _retirementChanges;
   static const _sectionColors = [
     BriskersColors.today,
     BriskersColors.customers,
-    BriskersColors.schedule,
     BriskersColors.jobs,
+    BriskersColors.estimates,
     BriskersColors.invoices,
+    BriskersColors.schedule,
+    BriskersColors.expenses,
     BriskersColors.more,
   ];
 
   int _index = 0;
   int _customersRefreshToken = 0;
+  int _customerNavigationRequest = 0;
+  List<String>? _focusedCustomerIds;
+  CustomerNotificationService? _customerNotifications;
+  StreamSubscription<String>? _customerReviewsSubscription;
   int _jobsRefreshToken = 0;
+  int _estimatesDockReset = 0;
+  int _invoicesDockReset = 0;
+  int _scheduleDockReset = 0;
+  int _expensesDockReset = 0;
   int _homeAttentionRefreshToken = 0;
   Map<String, dynamic> _navCounts = const {
     'customers': 0,
@@ -91,8 +116,36 @@ class _ShellScreenState extends State<ShellScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Schedule after the first frame: registration must never hold startup,
+    // list navigation, database edits, or initial record paint.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(ExpenseIqBackgroundScheduler
+          .scheduleOfflineMediaMirror(widget.businessId)
+          .catchError((Object _) {}));
+    });
+    _retirementRetry = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (_foreground) unawaited(_syncRetirements());
+    });
+    _retirementChanges = OwnerJobRetirementService.statusEvents.listen((businessId) {
+      if (mounted && businessId == widget.businessId) {
+        _refreshHomeJobsCount();
+        _refreshHomeEstimatesCount();
+        _refreshHomeInvoicesCount();
+      }
+    });
+    unawaited(_syncRetirements());
+    final userId = supabase.auth.currentUser?.id;
+    if (userId != null) {
+      _customerNotifications = CustomerNotificationService(
+        businessId: widget.businessId, userId: userId);
+    }
+    _customerReviewsSubscription = CustomerNotificationService.changes.listen((businessId) {
+      if (businessId == widget.businessId) _refreshHomeCustomersCount();
+    });
     _businessName = widget.businessName;
-    _index = widget.initialIndex.clamp(0, 5);
+    _index = widget.initialIndex.clamp(0, 7);
     BriskersConnectionModeController.instance.addListener(_connectionChanged);
     unawaited(_prepareOfflineChoices());
     _refreshHomeJobsCount();
@@ -147,14 +200,53 @@ class _ShellScreenState extends State<ShellScreen> {
     });
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    if (_foreground) {
+      _refreshHomeCustomersCount();
+      unawaited(_syncRetirements());
+    }
+  }
+
   void _connectionChanged() {
     if (!mounted) return;
     unawaited(_prepareOfflineChoices());
+    unawaited(_syncRetirements());
+    _refreshHomeCustomersCount();
     setState(() {
       _lazyPages.clear();
       _customersRefreshToken++;
       _jobsRefreshToken++;
     });
+  }
+
+  Future<void> _syncRetirements() async {
+    if (!OwnerJobRetirementService.isTombstoneReaderRole(widget.roleCode) ||
+        !mounted || !_foreground || _retirementSyncing ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
+    final businessId = widget.businessId;
+    final actorId = supabase.auth.currentUser?.id;
+    if (actorId == null) return;
+    _retirementSyncing = true;
+    try {
+      final service = OwnerJobRetirementService();
+      await service.pullTombstones(businessId);
+      if (!mounted || !_foreground || widget.businessId != businessId ||
+          BriskersConnectionModeController.instance.forceOffline ||
+          supabase.auth.currentUser?.id != actorId) {
+        return;
+      }
+      await service.flush(businessId,
+        actorId: actorId, isOwner: widget.roleCode == 'owner');
+    } catch (_) {
+      // The persisted sync diagnostics explain any block; uncertainty never
+      // clears a fence. Foreground retries and app restart resume the request.
+    } finally {
+      _retirementSyncing = false;
+    }
   }
 
   /// Preload the shop's actual payment method IDs for future offline use.
@@ -176,6 +268,20 @@ class _ShellScreenState extends State<ShellScreen> {
       }
     } catch (_) {
       // An unavailable network must not prevent local app use.
+    }
+    try {
+      // Warranty company choice should be available in the same form offline.
+      // IDs come from actual shop configuration, never fabricated defaults.
+      final companies = await _api.warrantyCompanies(widget.businessId);
+      if (companies.isNotEmpty) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(
+          'briskers_warranty_companies_${widget.businessId}',
+          jsonEncode(companies),
+        );
+      }
+    } catch (_) {
+      // Retain the last known shop-scoped warranty company list.
     }
     try {
       await LocalStandardNotesService().available(
@@ -240,13 +346,8 @@ class _ShellScreenState extends State<ShellScreen> {
 
   Future<void> _refreshHomeCustomersCount() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final rawSince = prefs.getString(_customersViewedKey);
-      final since = rawSince == null ? null : DateTime.tryParse(rawSince);
-      final count = await _localCustomers.newCustomerCount(
-        widget.businessId,
-        since: since,
-      );
+      final ids = await _customerNotifications?.unreadCustomerIds() ?? const <String>[];
+      final count = ids.length;
       _applyHomeCustomersCount(count);
     } catch (_) {}
   }
@@ -277,6 +378,10 @@ class _ShellScreenState extends State<ShellScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _retirementRetry?.cancel();
+    _retirementChanges?.cancel();
+    _customerReviewsSubscription?.cancel();
     BriskersConnectionModeController.instance.removeListener(_connectionChanged);
     _homeJobsCountSubscription?.cancel();
     _homeJobsSyncSubscription?.cancel();
@@ -290,78 +395,132 @@ class _ShellScreenState extends State<ShellScreen> {
     super.dispose();
   }
 
-  String get _customersViewedKey =>
-      'briskers_customers_viewed_${widget.businessId}';
+  Future<void> _openCustomers(int request) async {
+    List<String> ids;
+    try {
+      ids = await _customerNotifications?.unreadCustomerIds() ?? const <String>[];
+    } catch (_) {
+      // A read failure must not consume the inbox or pretend the badge is zero.
+      if (!mounted || request != _customerNavigationRequest) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr('newCustomersLoadError'))));
+      return;
+    }
+    if (!mounted || request != _customerNavigationRequest) return;
+    setState(() {
+      _focusedCustomerIds = ids.isEmpty ? null : List.unmodifiable(ids);
+      _index = 1;
+      _customersRefreshToken++;
+    });
+    _applyHomeCustomersCount(ids.length);
+  }
 
-  Future<void> _markCustomersViewed() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _customersViewedKey,
-      DateTime.now().toUtc().toIso8601String(),
-    );
-    _applyHomeCustomersCount(0);
+  Future<void> _reviewCustomer(String id) async {
+    try {
+      await _customerNotifications?.markReviewed([id]);
+    } catch (_) {
+      // Retain the badge on storage failure; never optimistically clear it.
+    }
+  }
+
+  void _viewAllCustomers() {
+    _customerNavigationRequest++;
+    setState(() {
+      _focusedCustomerIds = null;
+      _index = 1;
+      _customersRefreshToken++;
+    });
+  }
+
+  void _selectCustomersFromDock() {
+    // The Customers badge represents unread customer arrivals, not the
+    // total customer count. A normal-sized tab tap must show those people,
+    // not require a precision tap on the tiny badge label.
+    // Do not consume events here; only explicit review marks them read.
+    if (_homeCustomersNewCount > 0 && _customerNotifications != null) {
+      // Navigate immediately, even when SQLite notification reads are busy
+      // with a large customer bootstrap. Replace with the review queue when
+      // its exact IDs are available; never consume unread events on tap.
+      _goTo(1);
+      final request = ++_customerNavigationRequest;
+      unawaited(_openCustomers(request));
+      return;
+    }
+    _goTo(1);
   }
 
   void _goTo(int index) {
     FocusManager.instance.primaryFocus?.unfocus();
+    final timedModule = switch (index) {
+      3 => 'estimates',
+      4 => 'invoices',
+      5 => 'appointments',
+      _ => null,
+    };
+    if (timedModule != null) {
+      NavigationContentTiming.start(timedModule);
+    } else {
+      NavigationContentTiming.cancel();
+    }
+    // General navigation (Home shortcuts and View all) stays unfiltered;
+    // the dock Customers destination routes through _selectCustomersFromDock.
+    ++_customerNavigationRequest;
     setState(() {
       _index = index;
-      if (index == 1) _customersRefreshToken++;
-      if (index == 3) _jobsRefreshToken++;
+      if (index == 1) {
+        _focusedCustomerIds = null;
+        _customersRefreshToken++;
+      }
+      if (index == 2) _jobsRefreshToken++;
+      if (index == 3) _estimatesDockReset++;
+      if (index == 4) _invoicesDockReset++;
+      if (index == 5) _scheduleDockReset++;
+      if (index == 6) _expensesDockReset++;
       if (index == 0) _homeAttentionRefreshToken++;
     });
-    if (index == 1) {
-      _markCustomersViewed();
-    }
+    if (index == 4) _refreshHomeInvoicesCount();
   }
 
   String get _roleLabel => roleLabel(widget.roleCode);
 
-  Widget _navIcon(
-    IconData icon,
-    String countKey,
-  ) {
-    final count = int.tryParse(_navCounts[countKey]?.toString() ?? '') ?? 0;
-    if (count <= 0) return Icon(icon);
-    return Badge(
-      label: Text('$count'),
-      smallSize: 16,
-      largeSize: 18,
-      child: Icon(icon),
-    );
-  }
-
-  Widget _shellNavigationBar() {
-    final activeColor = _sectionColors[_index];
-    return Theme(
-      data: Theme.of(context).copyWith(
-        navigationBarTheme: NavigationBarThemeData(
-          height: 70,
-          backgroundColor: Colors.white,
-          elevation: 4,
-          indicatorColor: activeColor.withValues(alpha: 0.16),
-        ),
-      ),
-      child: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (index) {
-          if (Navigator.of(context).canPop()) {
-            Navigator.of(context).pop();
-          }
-          _goTo(index);
-        },
-        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-        destinations: [
-          const NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Home'),
-          NavigationDestination(icon: _navIcon(Icons.people_outline, 'customers'), selectedIcon: _navIcon(Icons.people, 'customers'), label: tr('customers')),
-          NavigationDestination(icon: _navIcon(Icons.calendar_month_outlined, 'appointments'), selectedIcon: _navIcon(Icons.calendar_month, 'appointments'), label: tr('schedule')),
-          NavigationDestination(icon: _navIcon(Icons.build_outlined, 'jobs'), selectedIcon: _navIcon(Icons.build, 'jobs'), label: tr('jobs')),
-          NavigationDestination(icon: _navIcon(Icons.receipt_long_outlined, 'invoices'), selectedIcon: _navIcon(Icons.receipt_long, 'invoices'), label: tr('invoices')),
-          const NavigationDestination(icon: Icon(Icons.more_horiz), selectedIcon: Icon(Icons.more_horiz), label: 'More'),
-        ],
-      ),
-    );
-  }
+  Widget _shellNavigationBar({bool nested = false}) => BriskersModuleDock(
+    selectedIndex: _index,
+    destinations: [
+      const BriskersDockDestination(label: 'Home', icon: Icons.home_outlined, color: BriskersColors.today),
+      BriskersDockDestination(label: 'Customers', icon: Icons.people_outline, color: BriskersColors.customers, count: _homeCustomersNewCount),
+      BriskersDockDestination(label: 'Jobs', icon: Icons.build_outlined, color: BriskersColors.jobs, count: _homeJobsCount),
+      BriskersDockDestination(label: 'Estimates', icon: Icons.description_outlined, color: BriskersColors.estimates, count: _homeEstimatesOpenCount),
+      BriskersDockDestination(label: 'Invoices', icon: Icons.receipt_long_outlined, color: BriskersColors.invoices, count: _homeInvoicesOpenCount),
+      BriskersDockDestination(label: 'Schedule', icon: Icons.calendar_month_outlined, color: BriskersColors.schedule, count: _homeAppointmentsCount),
+      const BriskersDockDestination(label: 'Expenses', icon: Icons.account_balance_wallet_outlined, color: BriskersColors.expenses),
+      const BriskersDockDestination(label: 'More', icon: Icons.more_horiz, color: BriskersColors.more),
+    ],
+    onBadgeSelected: (index) {
+      if (index != 1) {
+        _goTo(index);
+        return;
+      }
+      if (nested) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+      // A badge tap also changes screens immediately while IDs load.
+      _goTo(1);
+      final request = ++_customerNavigationRequest;
+      unawaited(_openCustomers(request));
+    },
+    onSelected: (index) {
+      if (nested) {
+        // A shared dock may be inside a sheet over a detail page.
+        // Explicit module navigation dismisses the nested routes first.
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+      if (index == 1) {
+        _selectCustomersFromDock();
+      } else {
+        _goTo(index);
+      }
+    },
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -372,11 +531,11 @@ class _ShellScreenState extends State<ShellScreen> {
       if (index == 0) {
         return HomeScreen(
           onCustomersTap: () => _goTo(1),
-          onAppointmentsTap: () => _goTo(2),
-          onJobsTap: () => _goTo(3),
+          onAppointmentsTap: () => _goTo(5),
+          onJobsTap: () => _goTo(2),
           onInvoicesTap: () => _goTo(4),
-          onMoreTap: () => _goTo(5),
-          estimatesNavigationBar: _shellNavigationBar(),
+          onMoreTap: () => _goTo(7),
+          estimatesNavigationBar: _shellNavigationBar(nested: true),
           businessId: widget.businessId,
           roleCode: widget.roleCode,
           jobsCount: _homeJobsCount,
@@ -387,33 +546,97 @@ class _ShellScreenState extends State<ShellScreen> {
           attentionRefreshToken: _homeAttentionRefreshToken,
         );
       }
+      if (index == 1) {
+        final focused = _focusedCustomerIds;
+        if (focused != null && _customerNotifications != null) {
+          return NewCustomersScreen(
+            key: ValueKey('customer-review-$_customersRefreshToken'),
+            businessId: widget.businessId,
+            roleCode: widget.roleCode,
+            customerIds: focused,
+            notifications: _customerNotifications!,
+            onViewAll: _viewAllCustomers,
+          );
+        }
+        return CustomersScreen(
+          businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          refreshToken: _customersRefreshToken,
+          onCustomerReviewed: (id) => unawaited(_reviewCustomer(id)),
+          detailBottomNavigationBar: _shellNavigationBar(nested: true),
+        );
+      }
+      if (index == 2) {
+        // Deliver a fresh refreshToken even when Jobs is already selected.
+        // Reusing the cached Widget bypasses JobsScreen.didUpdateWidget.
+        return JobsScreen(
+          businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          refreshToken: _jobsRefreshToken,
+          defaultToOpen: true,
+          onJobsChanged: _refreshHomeJobsCount,
+          jobDetailBottomNavigationBar: _shellNavigationBar(nested: true),
+        );
+      }
+      if (index == 3 || index == 4) {
+        return DocumentsScreen(
+          roleCode: widget.roleCode,
+          businessId: widget.businessId,
+          kind: index == 3 ? 'estimate' : 'invoice',
+          isOwner: widget.roleCode == 'owner',
+          canManageExpenses: index == 4 &&
+              <String>{'owner', 'manager', 'office'}.contains(widget.roleCode),
+          showAppBar: false,
+          sharedBottomNavigationBar:
+              index == 3 ? _shellNavigationBar(nested: true) : null,
+          // The Shell owns the list dock. Detail routes are pushed above
+          // this Shell and need their own navigation dock to leave invoices.
+          detailBottomNavigationBar: _shellNavigationBar(nested: true),
+          dockDefaultsToOpen: true,
+          dockResetToken: index == 3 ? _estimatesDockReset : _invoicesDockReset,
+        );
+      }
+      if (index == 5) {
+        return AppointmentsScreen(
+          businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          dockResetToken: _scheduleDockReset,
+        );
+      }
+      if (index == 6) {
+        return ExpensesScreen(
+          businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          showAppBar: false,
+          dockResetToken: _expensesDockReset,
+        );
+      }
       return _lazyPages.putIfAbsent(index, () {
         switch (index) {
-          case 1:
-            return CustomersScreen(
-              businessId: widget.businessId,
-              roleCode: widget.roleCode,
-              refreshToken: _customersRefreshToken,
-            );
-          case 2:
+          case 5:
             return AppointmentsScreen(
               businessId: widget.businessId,
               roleCode: widget.roleCode,
             );
           case 3:
-            return JobsScreen(
-              businessId: widget.businessId,
+            return DocumentsScreen(
               roleCode: widget.roleCode,
-              refreshToken: _jobsRefreshToken,
-              onJobsChanged: _refreshHomeJobsCount,
-              jobDetailBottomNavigationBar: _shellNavigationBar(),
+              businessId: widget.businessId,
+              kind: 'estimate',
+              isOwner: widget.roleCode == 'owner',
+              canManageExpenses: false,
+              showAppBar: false,
+              sharedBottomNavigationBar: _shellNavigationBar(nested: true),
             );
+          case 6:
+            return ExpensesScreen(businessId: widget.businessId, roleCode: widget.roleCode, showAppBar: false);
           case 4:
             return DocumentsScreen(
               roleCode: widget.roleCode,
               businessId: widget.businessId,
               kind: 'invoice',
               isOwner: widget.roleCode == 'owner',
+              canManageExpenses: <String>{'owner', 'manager', 'office'}.contains(widget.roleCode),
               showAppBar: false,
             );
           default:
@@ -428,9 +651,8 @@ class _ShellScreenState extends State<ShellScreen> {
       });
     }
 
-    final currentPage = buildPage(_index);
-
-    return Scaffold(
+    return StaleKeyboardInsetGuard(
+      child: Scaffold(
       appBar: isHome ? null : AppBar(
         backgroundColor: activeColor.withValues(alpha: 0.08),
         titleSpacing: 10,
@@ -469,77 +691,15 @@ class _ShellScreenState extends State<ShellScreen> {
             ),
         ],
       ),
-      body: currentPage,
-      bottomNavigationBar: Theme(
-        data: Theme.of(context).copyWith(
-          navigationBarTheme: NavigationBarThemeData(
-            height: 70,
-            backgroundColor: Colors.white,
-            elevation: 4,
-            indicatorColor: activeColor.withValues(alpha: 0.16),
-            iconTheme: WidgetStateProperty.resolveWith((states) {
-              final selected = states.contains(WidgetState.selected);
-              return IconThemeData(
-                color: selected ? activeColor : const Color(0xFF667085),
-                size: selected ? 27 : 25,
-              );
-            }),
-            labelTextStyle: WidgetStateProperty.resolveWith((states) {
-              final selected = states.contains(WidgetState.selected);
-              return TextStyle(
-                color: selected ? activeColor : const Color(0xFF667085),
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                fontSize: 12,
-              );
-            }),
-          ),
-        ),
-        child: NavigationBar(
-          selectedIndex: _index,
-          onDestinationSelected: _goTo,
-          labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-          destinations: [
-            const NavigationDestination(
-              icon: Icon(Icons.dashboard_outlined),
-              selectedIcon: Icon(Icons.dashboard),
-              label: 'Home',
-            ),
-            NavigationDestination(
-              icon: _navIcon(Icons.people_outline, 'customers'),
-              selectedIcon: _navIcon(
-                Icons.people,
-                'customers',
-              ),
-              label: tr('customers'),
-            ),
-            NavigationDestination(
-              icon: _navIcon(Icons.calendar_month_outlined, 'appointments'),
-              selectedIcon: _navIcon(
-                Icons.calendar_month,
-                'appointments',
-              ),
-              label: tr('schedule'),
-            ),
-            NavigationDestination(
-              icon: _navIcon(Icons.build_outlined, 'jobs'),
-              selectedIcon: _navIcon(
-                Icons.build,
-                'jobs',
-              ),
-              label: tr('jobs'),
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.receipt_long_outlined),
-              selectedIcon: const Icon(Icons.receipt_long),
-              label: tr('invoices'),
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.more_horiz),
-              label: tr('more'),
-            ),
-          ],
-        ),
+      body: RetainedModuleStack(
+        key: ValueKey('${widget.businessId}:${widget.roleCode}'),
+        index: _index,
+        itemCount: _sectionColors.length,
+        itemBuilder: (_, index) => buildPage(index),
+      ),
+      bottomNavigationBar: _shellNavigationBar(),
       ),
     );
   }
 }
+

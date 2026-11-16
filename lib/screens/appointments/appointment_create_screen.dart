@@ -3,6 +3,10 @@ import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
+import '../../services/offline_job_admin_service.dart';
+import '../../services/employee_nickname_store.dart';
+import '../../core/employee_role_style.dart';
+import '../../core/connection_mode.dart';
 
 class AppointmentCreateScreen extends StatefulWidget {
   const AppointmentCreateScreen({
@@ -25,6 +29,7 @@ class AppointmentCreateScreen extends StatefulWidget {
 
 class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
   static const _api = BriskersApi();
+  final _offlineEmployees = OfflineJobAdminService();
 
   final _title = TextEditingController(text: 'Service appointment');
   final _description = TextEditingController();
@@ -61,16 +66,19 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
   }
 
   Future<void> _loadEmployees() async {
+    // Cached staff are enough to offer a mechanic selector offline.
+    final cached = await _offlineEmployees.cachedEmployees(widget.businessId);
+    if (!mounted) return;
+    setState(() {
+      _employees = cached;
+      _loadingEmployees = false;
+    });
+    if (BriskersConnectionModeController.instance.forceOffline) return;
     try {
-      final rows = await _api.assignableEmployees(widget.businessId);
-      if (!mounted) return;
-      setState(() {
-        _employees = rows;
-        _loadingEmployees = false;
-      });
+      final refreshed = await _offlineEmployees.refreshEmployees(widget.businessId);
+      if (mounted) setState(() => _employees = refreshed);
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _loadingEmployees = false);
+      // Keep the saved employee choices if refresh fails.
     }
   }
 
@@ -82,12 +90,19 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
     ].where((part) => part.isNotEmpty).join(' ');
   }
 
-  Future<void> _pickDate() async {
+  // Both calendar taps and typed entry must commit the SAME appointment date.
+  // Normalize to calendar-only values, leaving the appointment time unchanged.
+  Future<void> _pickDate({
+    DatePickerEntryMode entryMode = DatePickerEntryMode.calendar,
+  }) async {
+    final today = DateUtils.dateOnly(DateTime.now());
     final date = await showDatePicker(
       context: context,
-      initialDate: _startsAt,
-      firstDate: DateTime.now().subtract(const Duration(days: 1)),
-      lastDate: DateTime.now().add(const Duration(days: 730)),
+      initialDate: DateUtils.dateOnly(_startsAt),
+      firstDate: DateUtils.dateOnly(today.subtract(const Duration(days: 1))),
+      lastDate: DateUtils.dateOnly(today.add(const Duration(days: 730))),
+      initialEntryMode: entryMode,
+      helpText: 'Select appointment date',
     );
     if (date == null || !mounted) return;
     setState(() {
@@ -235,7 +250,7 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: _pickDate,
+                  onPressed: () => _pickDate(),
                   icon: const Icon(
                     Icons.event_outlined,
                     color: BriskersColors.appointments,
@@ -243,7 +258,13 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
                   label: Text(DateFormat('EEE, MMM d').format(_startsAt)),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 4),
+              TextButton(
+                key: const ValueKey('appointment-date-type'),
+                onPressed: () => _pickDate(entryMode: DatePickerEntryMode.input),
+                child: const Text('Type date'),
+              ),
+              const SizedBox(width: 4),
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: _pickTime,
@@ -273,17 +294,27 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
                   value: null,
                   child: Text('Unassigned'),
                 ),
-                ..._employees.map(
-                  (employee) => DropdownMenuItem<String?>(
+                ..._employees.map((employee) {
+                  final position =
+                      employee['position_name']?.toString() ?? 'Employee';
+                  final style = employeeRoleStyle(position);
+                  return DropdownMenuItem<String?>(
                     value: employee['id']?.toString(),
-                    child: Text(
-                      '${employee['name'] ?? ''} — '
-                      '${employee['position_name'] ?? 'Employee'}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    child: Row(
+                      children: [
+                        Icon(style.icon, color: style.color, size: 19),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${EmployeeNicknameStore.displayName(employee)} — $position',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ),
+                  );
+                }),
               ],
               onChanged: (value) => setState(() => _employeeId = value),
             ),

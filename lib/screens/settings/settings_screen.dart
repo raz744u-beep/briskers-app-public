@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/briskers_i18n.dart';
@@ -7,6 +6,7 @@ import '../../core/connection_mode.dart';
 import '../../widgets/briskers_page_header.dart';
 import '../kiosk/kiosk_checkin_screen.dart';
 import 'catalog_settings_screen.dart';
+import 'email_templates_settings_screen.dart';
 import 'diagnostics_screen.dart';
 import 'document_numbering_settings_screen.dart';
 import 'employees_settings_screen.dart';
@@ -19,6 +19,7 @@ import 'local_sync_status_screen.dart';
 import 'item_categories_settings_screen.dart';
 import 'payment_methods_settings_screen.dart';
 import 'receipt_training_samples_screen.dart';
+import 'receipt_ai_gateway_settings_screen.dart';
 import 'shop_info_settings_screen.dart';
 import 'tax_invoicing_settings_screen.dart';
 import 'warranty_payment_calculator_screen.dart';
@@ -216,33 +217,6 @@ class SettingsScreen extends StatelessWidget {
                 MaterialPageRoute(
                   builder: (_) => const WarrantyPaymentCalculatorScreen(),
                 ),
-              );
-            },
-          ),
-          ListTile(
-            leading: const Icon(
-              Icons.info_outline,
-              color: BriskersColors.settings,
-            ),
-            title: const Text('About Briskers'),
-            subtitle: FutureBuilder<PackageInfo>(
-              future: PackageInfo.fromPlatform(),
-              builder: (context, snapshot) {
-                final info = snapshot.data;
-                return Text(info == null
-                    ? 'App version and build number'
-                    : 'Version ${info.version} • Build ${info.buildNumber}');
-              },
-            ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () async {
-              final info = await PackageInfo.fromPlatform();
-              if (!context.mounted) return;
-              showAboutDialog(
-                context: context,
-                applicationName: 'Briskers',
-                applicationVersion:
-                    'Version ${info.version} (Build ${info.buildNumber})',
               );
             },
           ),
@@ -448,6 +422,48 @@ class SettingsScreen extends StatelessWidget {
               );
             },
           ),
+          ListTile(
+            leading: const Icon(
+              Icons.email_outlined,
+              color: BriskersColors.invoices,
+            ),
+            title: const Text('Email templates'),
+            subtitle: const Text('Edit Gmail subject and message body'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => EmailTemplatesSettingsScreen(
+                    businessId: businessId,
+                  ),
+                ),
+              );
+            },
+          ),
+          if (roleCode == 'owner')
+            ListTile(
+              leading: const Icon(
+                Icons.lock_outline,
+                color: BriskersColors.expenses,
+              ),
+              title: const Text('Receipt AI connection'),
+              subtitle: const Text(
+                'Set up the secure online receipt reader on this device.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ReceiptAiGatewaySettingsScreen(
+                      businessId: businessId,
+                      isOwner: roleCode == 'owner',
+                    ),
+                  ),
+                );
+              },
+            ),
           ListTile(
             leading: const Icon(
               Icons.psychology_outlined,

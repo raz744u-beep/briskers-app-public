@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -7,6 +9,9 @@ import '../../core/connection_mode.dart';
 import '../../services/appointment_sync_service.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/briskers_api.dart';
+import '../../services/offline_job_admin_service.dart';
+import '../../services/employee_nickname_store.dart';
+import '../../core/employee_role_style.dart';
 
 class AppointmentManageScreen extends StatefulWidget {
   const AppointmentManageScreen({
@@ -14,11 +19,16 @@ class AppointmentManageScreen extends StatefulWidget {
     required this.businessId,
     this.appointment,
     this.isOwner = false,
+    this.localCustomers,
+    this.api,
   });
 
   final String businessId;
   final Map<String, dynamic>? appointment;
   final bool isOwner;
+  // Optional test seams; production always uses its local cache and API.
+  final LocalCustomerRepository? localCustomers;
+  final BriskersApi? api;
 
   @override
   State<AppointmentManageScreen> createState() =>
@@ -26,9 +36,11 @@ class AppointmentManageScreen extends StatefulWidget {
 }
 
 class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
-  static const _api = BriskersApi();
-  final AppointmentSyncService _sync = AppointmentSyncService();
-  final LocalCustomerRepository _localCustomers = LocalCustomerRepository();
+  BriskersApi get _api => widget.api ?? const BriskersApi();
+  OfflineJobAdminService get _offlineEmployees => OfflineJobAdminService(api: _api);
+  late final AppointmentSyncService _sync = AppointmentSyncService();
+  LocalCustomerRepository get _localCustomers =>
+      widget.localCustomers ?? LocalCustomerRepository();
   bool get _pendingCreate => widget.appointment?['id']
           ?.toString().startsWith('local-appointment-') == true;
   // Existing appointments are always edited locally first in Auto mode too.
@@ -36,6 +48,11 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
 
   final _title = TextEditingController(text: 'Service appointment');
   final _description = TextEditingController();
+  final _customerSearch = TextEditingController();
+  Timer? _customerDebounce;
+  int _customerSearchEpoch = 0;
+  bool _customerSearching = false;
+  bool _loadingVehicles = false;
 
   List<Map<String, dynamic>> _customers = const [];
   List<Map<String, dynamic>> _vehicles = const [];
@@ -46,7 +63,6 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   String? _employeeId;
   late DateTime _startsAt;
   int _durationMinutes = 60;
-  bool _loading = true;
   bool _saving = false;
   String? _error;
 
@@ -75,138 +91,168 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
       _employeeId = appointment['employee_id']?.toString();
       _title.text = appointment['title']?.toString() ?? 'Service appointment';
       _description.text = appointment['description']?.toString() ?? '';
+      _customerSearch.text = appointment['customer']?.toString() ??
+          appointment['customer_name']?.toString() ?? '';
     }
     _load();
   }
 
   @override
   void dispose() {
+    _customerDebounce?.cancel();
+    _customerSearchEpoch++;
+    _customerSearch.dispose();
     _title.dispose();
     _description.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    if (_offlineEditing || BriskersConnectionModeController.instance.forceOffline) {
-      final item = widget.appointment ?? const <String,dynamic>{};
-      final cachedCustomers = _pendingCreate || !_editing ||
-              widget.appointment?['job_id'] == null
-          ? await _localCustomers.customers(widget.businessId)
-          : <Map<String,dynamic>>[];
-      if ((_pendingCreate || !_editing || widget.appointment?['job_id'] == null) && _customerId != null) {
-        await _loadLocalVehicles(_customerId!);
-      }
-      setState(() {
-        _customers = _pendingCreate || !_editing || widget.appointment?['job_id'] == null ? cachedCustomers : [{'id':_customerId, 'display_name':item['customer'] ?? 'Customer'}];
-        if (!_pendingCreate && widget.appointment?['job_id'] != null) {
-          _vehicles = _vehicleId == null ? const [] : [{
-            'id': _vehicleId, 'year': item['vehicle_year'],
-            'make': item['vehicle_make'], 'model': item['vehicle_model'],
-          }];
-        }
-        _employees = _employeeId == null ? const [] : [{
-          'id':_employeeId, 'display_name':item['mechanic'] ?? 'Assigned',
-        }];
-        _loading = false;
-      });
-      return;
+  // New appointment must open immediately. Never hydrate 2,799 customers
+  // or wait for employee/network requests just to display the form.
+  void _load() {
+    final item = widget.appointment ?? const <String, dynamic>{};
+    if (_employeeId != null) {
+      _employees = [{
+        'id': _employeeId,
+        'name': item['mechanic'] ?? 'Assigned',
+        'position_name': 'Employee',
+      }];
     }
+    if (_editing && item['job_id'] != null && _vehicleId != null) {
+      _vehicles = [{
+        'id': _vehicleId, 'year': item['vehicle_year'],
+        'make': item['vehicle_make'], 'model': item['vehicle_model'],
+      }];
+    } else if (_customerId != null) {
+      unawaited(_loadVehiclesForCustomer(_customerId!));
+    }
+    // The loader reads the saved mechanic list first in every mode.
+    unawaited(_loadEmployeesInBackground());
+  }
+
+  Future<void> _loadEmployeesInBackground() async {
     try {
-      // Automatic mode is local-first: a network failure must not prevent
-      // opening the appointment editor or choosing a cached customer.
-      final localCustomers = await _localCustomers.customers(widget.businessId);
-      final customers = localCustomers.isNotEmpty
-          ? localCustomers
-          : await _api.customers(widget.businessId, limit: 100);
-      List<Map<String, dynamic>> employees;
-      try {
-        employees = await _api.assignableEmployees(widget.businessId);
-      } catch (_) {
-        employees = _employeeId == null ? <Map<String, dynamic>>[] : [{
-          'id': _employeeId,
-          'name': widget.appointment?['mechanic'] ?? 'Assigned',
-          'position_name': 'Employee',
-        }];
-      }
-
-      if (_editing &&
-          _customerId != null &&
-          !customers.any((c) => c['id']?.toString() == _customerId)) {
-        customers.add({
-          'id': _customerId,
-          'display_name':
-              widget.appointment?['customer']?.toString() ?? 'Customer',
-        });
-      }
-
-      if (_customerId != null) {
-        if (localCustomers.isNotEmpty) {
-          final detail = await _localCustomers.customerDetail(
-            widget.businessId, _customerId!,
-          );
-          _vehicles = List<Map<String,dynamic>>.from(
-            detail?['vehicles'] as List? ?? const [],
-          );
-        } else {
-          await _loadVehicles(_customerId!, updateState: false);
+      var rows = await _offlineEmployees.cachedEmployees(widget.businessId);
+      if (rows.isNotEmpty && mounted) {
+        final selected = _employeeId;
+        if (selected != null &&
+            !rows.any((row) => row['id']?.toString() == selected)) {
+          rows = [...rows, ..._employees.where(
+            (row) => row['id']?.toString() == selected,
+          )];
         }
+        setState(() => _employees = rows);
       }
-
+      if (BriskersConnectionModeController.instance.forceOffline) return;
+      rows = await _offlineEmployees.refreshEmployees(widget.businessId)
+          .timeout(const Duration(seconds: 8));
       if (!mounted) return;
-      setState(() {
-        _customers = customers;
-        _employees = employees;
-        _loading = false;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = error.toString();
-      });
+      final selected = _employeeId;
+      if (selected != null &&
+          !rows.any((row) => row['id']?.toString() == selected)) {
+        rows.addAll(_employees.where(
+          (row) => row['id']?.toString() == selected));
+      }
+      setState(() => _employees = rows);
+    } catch (_) {
+      // A failed optional mechanic refresh never blocks editing.
     }
   }
 
-  Future<void> _loadLocalVehicles(String customerId) async {
-    final detail = await _localCustomers.customerDetail(widget.businessId,customerId);
-    final vehicles = List<Map<String,dynamic>>.from(
-      detail?['vehicles'] as List? ?? const [],
-    );
-    if (!mounted) return;
+  void _onCustomerSearchChanged(String value) {
+    _customerDebounce?.cancel();
+    final generation = ++_customerSearchEpoch;
+    final query = value.trim();
     setState(() {
-      _vehicles = vehicles;
-      if (!_vehicles.any((v) => v['id']?.toString() == _vehicleId)) {
-        _vehicleId = null;
-      }
+      _customerId = null;
+      _vehicleId = null;
+      _vehicles = const [];
+      _customers = const [];
+      _customerSearching = query.isNotEmpty;
+      _error = null;
+    });
+    if (query.isEmpty) return;
+    _customerDebounce = Timer(const Duration(milliseconds: 60), () {
+      unawaited(_searchCustomers(generation, query));
     });
   }
 
-  Future<void> _loadVehicles(
-    String customerId, {
-    bool updateState = true,
-  }) async {
+  Future<void> _searchCustomers(int generation, String query) async {
+    bool current() => mounted && generation == _customerSearchEpoch &&
+        _customerSearch.text.trim() == query && _customerId == null;
     try {
-      final data = await _api.customerDetail(widget.businessId, customerId);
-      final rows = List<dynamic>.from(data['vehicles'] ?? const [])
-          .map((raw) => Map<String, dynamic>.from(raw as Map))
-          .toList();
-      if (!mounted) return;
-      if (updateState) {
-        setState(() {
-          _vehicles = rows;
-          if (!_vehicles.any((v) => v['id']?.toString() == _vehicleId)) {
-            _vehicleId = null;
-          }
-        });
-      } else {
-        _vehicles = rows;
+      // Limit results and never read the entire shop customer table.
+      final local = await _localCustomers.customers(
+        widget.businessId, search: query, limit: 40);
+      if (!current()) return;
+      setState(() {
+        _customers = local;
+        _customerSearching = false;
+      });
+      if (local.isNotEmpty ||
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
       }
+      // A missing local result is definitive only after customer bootstrap.
+      if (await _localCustomers.hasBootstrap(widget.businessId)) return;
+      if (!current()) return;
+      final remote = await _api.customers(
+        widget.businessId, search: query, limit: 40)
+          .timeout(const Duration(seconds: 8));
+      if (!current() ||
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
+      }
+      setState(() => _customers = remote);
     } catch (_) {
-      if (updateState && mounted) {
-        setState(() {
-          _vehicles = const [];
-          _vehicleId = null;
-        });
+      if (current()) setState(() => _customerSearching = false);
+    }
+  }
+
+  void _selectCustomer(Map<String, dynamic> customer) {
+    final id = customer['id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    final name = customer['display_name']?.toString() ??
+        customer['name']?.toString() ?? 'Customer';
+    _customerDebounce?.cancel();
+    _customerSearchEpoch++;
+    setState(() {
+      _customerId = id;
+      _customerSearch.text = name;
+      _customers = const [];
+      _customerSearching = false;
+      _vehicleId = null;
+      _vehicles = const [];
+    });
+    unawaited(_loadVehiclesForCustomer(id));
+  }
+
+  Future<void> _loadVehiclesForCustomer(String customerId) async {
+    if (!mounted || _customerId != customerId) return;
+    setState(() => _loadingVehicles = true);
+    try {
+      final local = await _localCustomers.customerDetail(
+        widget.businessId, customerId);
+      // Local-first: network fetch only when this customer's detail is missing.
+      final detail = local ?? (BriskersConnectionModeController.instance.forceOffline
+          ? null : await _api.customerDetail(widget.businessId, customerId)
+              .timeout(const Duration(seconds: 8)));
+      if (!mounted || _customerId != customerId) return;
+      final vehicles = List<dynamic>.from(detail?['vehicles'] ?? const [])
+          .whereType<Map>()
+          .map((raw) => Map<String, dynamic>.from(raw)).toList();
+      setState(() {
+        _vehicles = vehicles;
+        if (!vehicles.any((row) => row['id']?.toString() == _vehicleId)) {
+          _vehicleId = vehicles.length == 1
+              ? vehicles.single['id']?.toString() : null;
+        }
+      });
+    } catch (_) {
+      // Keep the form, customer selection and any saved vehicle usable.
+    } finally {
+      if (mounted && _customerId == customerId) {
+        setState(() => _loadingVehicles = false);
       }
     }
   }
@@ -219,12 +265,19 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
     ].where((part) => part.isNotEmpty).join(' ');
   }
 
-  Future<void> _pickDate() async {
+  // Both calendar taps and typed entry must commit the SAME appointment date.
+  // Normalize to calendar-only values, leaving the appointment time unchanged.
+  Future<void> _pickDate({
+    DatePickerEntryMode entryMode = DatePickerEntryMode.calendar,
+  }) async {
+    final today = DateUtils.dateOnly(DateTime.now());
     final date = await showDatePicker(
       context: context,
-      initialDate: _startsAt,
-      firstDate: DateTime.now().subtract(const Duration(days: 3650)),
-      lastDate: DateTime.now().add(const Duration(days: 3650)),
+      initialDate: DateUtils.dateOnly(_startsAt),
+      firstDate: DateUtils.dateOnly(today.subtract(const Duration(days: 3650))),
+      lastDate: DateUtils.dateOnly(today.add(const Duration(days: 3650))),
+      initialEntryMode: entryMode,
+      helpText: 'Select appointment date',
     );
     if (date == null || !mounted) return;
     setState(() {
@@ -333,12 +386,6 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
     return Scaffold(
       appBar: AppBar(
         backgroundColor: BriskersColors.appointments.withValues(alpha: 0.10),
@@ -347,44 +394,62 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          DropdownButtonFormField<String>(
-            initialValue: _customerId,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Customer',
-              prefixIcon: Icon(Icons.person_outline),
+          if (_editing && widget.appointment?['job_id'] != null)
+            ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: Text(_customerSearch.text.isEmpty
+                  ? 'Customer' : _customerSearch.text),
+              subtitle: const Text('Customer (linked to Job)'),
+            )
+          else ...[
+            TextField(
+              key: const ValueKey('appointment-customer-search'),
+              controller: _customerSearch,
+              onChanged: _onCustomerSearchChanged,
+              decoration: InputDecoration(
+                labelText: 'Customer',
+                hintText: 'Search name, phone, or email',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _customerSearch.text.isEmpty ? null : IconButton(
+                  key: const ValueKey('appointment-customer-clear'),
+                  tooltip: 'Clear customer',
+                  icon: const Icon(Icons.close),
+                  onPressed: () {
+                    _customerSearch.clear();
+                    _onCustomerSearchChanged('');
+                  },
+                ),
+                border: const OutlineInputBorder(),
+              ),
             ),
-            items: _customers
-                .map(
-                  (customer) => DropdownMenuItem<String>(
-                    value: customer['id']?.toString(),
-                    child: Text(
-                      customer['display_name']?.toString() ??
-                          customer['name']?.toString() ??
-                          'Customer',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                )
-                .toList(),
-            onChanged: _editing && widget.appointment?['job_id'] != null
-                ? null : (value) async {
-              setState(() {
-                _customerId = value;
-                _vehicleId = null;
-                _vehicles = const [];
-              });
-              if (value != null) {
-                if (_offlineEditing || BriskersConnectionModeController.instance.forceOffline ||
-                    await _localCustomers.hasBootstrap(widget.businessId)) {
-                  await _loadLocalVehicles(value);
-                }
-                else { await _loadVehicles(value); }
-              }
-            },
-          ),
+            if (_customerSearching) const LinearProgressIndicator(),
+            if (_customerId == null && _customerSearch.text.trim().isNotEmpty &&
+                !_customerSearching)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 250),
+                child: _customers.isEmpty
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Text('No matching saved customers.'),
+                      )
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _customers.length,
+                        itemBuilder: (context, index) {
+                          final customer = _customers[index];
+                          final label = customer['display_name']?.toString() ??
+                              customer['name']?.toString() ?? 'Customer';
+                          return ListTile(
+                            key: ValueKey('appointment-customer-$index'),
+                            title: Text(label),
+                            onTap: () => _selectCustomer(customer),
+                          );
+                        },
+                      ),
+              ),
+          ],
           const SizedBox(height: 12),
+          if (_loadingVehicles) const LinearProgressIndicator(),
           DropdownButtonFormField<String?>(
             key: ValueKey('vehicle-$_customerId-$_vehicleId'),
             initialValue: _vehicleId,
@@ -412,7 +477,8 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                 ),
               ),
             ],
-            onChanged: _editing && widget.appointment?['job_id'] != null
+            onChanged: _loadingVehicles ||
+                    (_editing && widget.appointment?['job_id'] != null)
                 ? null : (value) => setState(() => _vehicleId = value),
           ),
           const SizedBox(height: 12),
@@ -443,12 +509,18 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: _pickDate,
+                  onPressed: () => _pickDate(),
                   icon: const Icon(Icons.event_outlined),
                   label: Text(DateFormat('EEE, MMM d').format(_startsAt)),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 4),
+              TextButton(
+                key: const ValueKey('appointment-date-type'),
+                onPressed: () => _pickDate(entryMode: DatePickerEntryMode.input),
+                child: const Text('Type date'),
+              ),
+              const SizedBox(width: 4),
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: _pickTime,
@@ -470,17 +542,27 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                 value: null,
                 child: Text('Unassigned'),
               ),
-              ..._employees.map(
-                (employee) => DropdownMenuItem<String?>(
+              ..._employees.map((employee) {
+                final position =
+                    employee['position_name']?.toString() ?? 'Employee';
+                final style = employeeRoleStyle(position);
+                return DropdownMenuItem<String?>(
                   value: employee['id']?.toString(),
-                  child: Text(
-                    '${employee['name'] ?? ''} — '
-                    '${employee['position_name'] ?? 'Employee'}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  child: Row(
+                    children: [
+                      Icon(style.icon, color: style.color, size: 19),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${EmployeeNicknameStore.displayName(employee)} — $position',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ),
+                );
+              }),
             ],
             onChanged: (value) => setState(() => _employeeId = value),
           ),

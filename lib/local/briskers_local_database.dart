@@ -71,6 +71,8 @@ class LocalVehicles extends Table {
   TextColumn get licensePlate => text().nullable()();
   TextColumn get licenseState => text().nullable()();
   RealColumn get mileage => real().nullable()();
+  TextColumn get mileageRecordedDate => text().nullable()();
+  TextColumn get mileageSourceInvoiceId => text().nullable()();
   TextColumn get color => text().nullable()();
   TextColumn get keyPassword => text().nullable()();
   DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
@@ -441,7 +443,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 21;
+  int get schemaVersion => 22;
 
   // v18 introduced the ExpenseIQ photo queue but omitted its onUpgrade
   // migration, so user_version may be 18 while the tables are missing.
@@ -640,6 +642,29 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
             await customStatement(
               "UPDATE local_sync_states SET bootstrapped = 0 "
               "WHERE scope = 'documents'",
+            );
+          }
+          if (from < 22) {
+            // Add only optional mileage provenance. Never reset or delete
+            // existing vehicle readings, customers, jobs, or pending edits.
+            final columns = await customSelect(
+              'PRAGMA table_info(local_vehicles)',
+            ).get();
+            final names = columns.map(
+              (row) => row.read<String>('name'),
+            ).toSet();
+            if (!names.contains('mileage_recorded_date')) {
+              await migrator.addColumn(
+                localVehicles, localVehicles.mileageRecordedDate);
+            }
+            if (!names.contains('mileage_source_invoice_id')) {
+              await migrator.addColumn(
+                localVehicles, localVehicles.mileageSourceInvoiceId);
+            }
+            // Pull will enrich cached vehicle profile provenance.
+            await customStatement(
+              "UPDATE local_sync_states SET bootstrapped = 0 "
+              "WHERE scope = 'customers_vehicles'",
             );
           }
 

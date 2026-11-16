@@ -84,7 +84,7 @@ void main() {
       VALUES ('old-cache','shop-stale','invoice','3203','issued',
               1790000000,1006.19,'synced')
     """);
-    await const LocalDocumentDetailCache().save('shop-stale','old-cache',{
+    await LocalDocumentDetailCache(database: db).save('shop-stale','old-cache',{
       'id':'old-cache','kind':'invoice','total_amount':1006.19,
       'lines':<Map<String,dynamic>>[]
     });
@@ -104,7 +104,7 @@ void main() {
         (id, business_id, kind, document_number, status, closed_at, total, sync_state)
       VALUES ('d','shop-locked','invoice','6321','issued',1790000000,100,'synced')
     """);
-    await const LocalDocumentDetailCache().save('shop-locked','d',{
+    await LocalDocumentDetailCache(database: db).save('shop-locked','d',{
       'id':'d','kind':'invoice','legacy_read_only':true,
       'legacy_editable':true,'closed_at':'2026-09-01','paid_amount':100
     });
@@ -115,3 +115,4 @@ void main() {
     await db.close();
   });
 }
+

@@ -128,4 +128,82 @@ void main() {
     expect(photo?['state'], 'pending');
     await database.close();
   });
+  test('regrant changes only the verified original URI and preserves upload state',
+      () async {
+    final database = BriskersLocalDatabase(NativeDatabase.memory());
+    final service = ExpenseIqLocalPhotoSync(database: database);
+    await service.indexPhotos(
+      'shop',
+      candidates: [
+        {'transaction_id': 'worldpac', 'photo_id': 'receipt-a'},
+        {'transaction_id': 'other', 'photo_id': 'receipt-b'},
+      ],
+      files: [
+        {
+          'name': 'receipt-a.jpg',
+          'uri': 'content://android/tree/ExpenseIQ/Photos/receipt-a.jpg',
+        },
+        {'name': 'receipt-b.jpg', 'uri': 'content://test/other'},
+      ],
+    );
+    await database.customStatement(
+      "UPDATE local_expense_iq_photos SET state='uploaded' "
+      "WHERE business_id='shop' AND transaction_id='worldpac'",
+    );
+    await service.reconnectOriginalPhoto(
+      businessId: 'shop',
+      transactionId: 'worldpac',
+      expectedFilename: 'receipt-a.jpg',
+      previousUri: 'content://android/tree/ExpenseIQ/Photos/receipt-a.jpg',
+      verifiedUri: 'content://android/tree/ExpenseIQ/photos/receipt-a.jpg',
+    );
+    final recovered = await service.localForExpense('shop', 'worldpac');
+    expect(
+      recovered?['source_uri'],
+      'content://android/tree/ExpenseIQ/photos/receipt-a.jpg',
+    );
+    expect(recovered?['state'], 'uploaded');
+    final other = await service.localForExpense('shop', 'other');
+    expect(other?['source_uri'], 'content://test/other');
+    expect(other?['state'], 'pending');
+    final counts = await service.counts('shop');
+    expect(counts.uploaded, 1);
+    expect(counts.pending, 1);
+    await database.close();
+  });
+
+  test('regrant refuses stale, wrong-expense and wrong-filename references',
+      () async {
+    final database = BriskersLocalDatabase(NativeDatabase.memory());
+    final service = ExpenseIqLocalPhotoSync(database: database);
+    await service.indexPhotos(
+      'shop',
+      candidates: [
+        {'transaction_id': 'worldpac', 'photo_id': 'receipt-a'},
+      ],
+      files: [
+        {'name': 'receipt-a.jpg', 'uri': 'content://test/original'},
+      ],
+    );
+    for (final bad in [
+      {'transactionId': 'other', 'filename': 'receipt-a.jpg', 'uri': 'content://test/original'},
+      {'transactionId': 'worldpac', 'filename': 'wrong.jpg', 'uri': 'content://test/original'},
+      {'transactionId': 'worldpac', 'filename': 'receipt-a.jpg', 'uri': 'content://test/stale'},
+    ]) {
+      await expectLater(
+        service.reconnectOriginalPhoto(
+          businessId: 'shop',
+          transactionId: bad['transactionId']!,
+          expectedFilename: bad['filename']!,
+          previousUri: bad['uri']!,
+          verifiedUri: 'content://test/replacement',
+        ),
+        throwsA(isA<StateError>()),
+      );
+    }
+    final original = await service.localForExpense('shop', 'worldpac');
+    expect(original?['source_uri'], 'content://test/original');
+    await database.close();
+  });
+
 }

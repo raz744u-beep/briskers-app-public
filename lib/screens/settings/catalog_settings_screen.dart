@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/catalog_sync_service.dart';
 import '../../services/local_catalog_repository.dart';
+import '../../services/local_item_categories_cache.dart';
 
 class CatalogSettingsScreen extends StatefulWidget {
   const CatalogSettingsScreen({
@@ -22,6 +24,7 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
   static const _api = BriskersApi();
   final _localCatalog = LocalCatalogRepository();
   final _catalogSync = CatalogSyncService();
+  final _categoriesCache = const LocalItemCategoriesCache();
 
   final _search = TextEditingController();
   List<Map<String, dynamic>>? _items;
@@ -54,15 +57,27 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
         includeInactive: _includeInactive,
       );
 
-      List<Map<String, dynamic>> categories = _categories;
-      try {
-        categories = await _api.itemCategories(
-          widget.businessId,
-          includeInactive: true,
-        );
-      } catch (_) {
-        // Categories are only needed for catalog administration. Item search
-        // continues to work from the local catalog while offline.
+      List<Map<String, dynamic>> categories;
+      final cached = await _categoriesCache.load(widget.businessId);
+      final locallyUsed = LocalItemCategoriesCache.fromCatalogItems(localItems);
+      if (BriskersConnectionModeController.instance.forceOffline) {
+        // Never call a network RPC in Force Offline.
+        categories = LocalItemCategoriesCache.merge(cached, locallyUsed);
+      } else {
+        try {
+          final live = await _api.itemCategories(
+            widget.businessId,
+            includeInactive: true,
+          );
+          await _categoriesCache.save(widget.businessId, live);
+          categories = LocalItemCategoriesCache.merge(live, locallyUsed);
+        } catch (_) {
+          // Retain local choices if the network fails in Auto.
+          categories = LocalItemCategoriesCache.merge(
+            cached.isNotEmpty ? cached : _categories,
+            locallyUsed,
+          );
+        }
       }
 
       if (!mounted || generation != _searchGeneration) return;
@@ -103,7 +118,7 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
-      builder: (_) => _CatalogItemDialog(
+      builder: (_) => CatalogItemDialog(
         item: item,
         categories: _categories,
       ),
@@ -368,20 +383,31 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
   }
 }
 
-class _CatalogItemDialog extends StatefulWidget {
-  const _CatalogItemDialog({
+class CatalogItemDialog extends StatefulWidget {
+  const CatalogItemDialog({
+    super.key,
     this.item,
     required this.categories,
+    this.initialName = '',
   });
 
   final Map<String, dynamic>? item;
   final List<Map<String, dynamic>> categories;
+  final String initialName;
 
   @override
-  State<_CatalogItemDialog> createState() => _CatalogItemDialogState();
+  State<CatalogItemDialog> createState() => CatalogItemDialogState();
 }
 
-class _CatalogItemDialogState extends State<_CatalogItemDialog> {
+class CatalogItemDialogState extends State<CatalogItemDialog> {
+  static String _titleCaseNewItemName(String value) {
+    return value.trim().replaceAllMapped(
+      RegExp(r'(^|[\s\-/])([a-z])'),
+      (match) => '${match.group(1)}${match.group(2)!.toUpperCase()}',
+    );
+  }
+
+
   late final TextEditingController _name;
   late final TextEditingController _description;
   late final TextEditingController _price;
@@ -398,7 +424,10 @@ class _CatalogItemDialogState extends State<_CatalogItemDialog> {
   void initState() {
     super.initState();
     final item = widget.item;
-    _name = TextEditingController(text: item?['name']?.toString() ?? '');
+    _name = TextEditingController(
+      text: item?['name']?.toString() ??
+          _titleCaseNewItemName(widget.initialName),
+    );
     _description =
         TextEditingController(text: item?['description']?.toString() ?? '');
     _price =
@@ -683,26 +712,39 @@ class _CatalogItemDialogState extends State<_CatalogItemDialog> {
                 ),
               ),
               const Divider(height: 1),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('Cancel'),
+              // Keep actions above Android gesture/3-button navigation, and
+              // above the keyboard when the sheet shrinks for text entry.
+              SafeArea(
+                top: false,
+                minimum: const EdgeInsets.only(bottom: 8),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 10, 18, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: BriskersColors.actionBlue,
+                          ),
+                          child: const Text('Cancel'),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      flex: 2,
-                      child: FilledButton.icon(
-                        onPressed: _save,
-                        icon: const Icon(Icons.check),
-                        label: const Text('Save Item'),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: FilledButton.icon(
+                          onPressed: _save,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: BriskersColors.actionBlue,
+                            foregroundColor: Colors.white,
+                          ),
+                          icon: const Icon(Icons.check),
+                          label: const Text('Save Item'),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ],

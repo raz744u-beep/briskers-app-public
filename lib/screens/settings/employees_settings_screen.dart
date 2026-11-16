@@ -1,9 +1,21 @@
+import '../../services/local_payroll_repository.dart';
+import '../../services/device_owner_authorization.dart';
+import '../../local/local_database_provider.dart';
+import '../payroll/owner_payroll_screen.dart';
+import '../payroll/payroll_lan_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'employee_list_tile.dart';
 import '../../core/employee_role_style.dart';
+import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
+import '../../services/employee_nickname_store.dart';
+import '../../services/payroll_lan_identity.dart';
+import '../../services/offline_job_admin_service.dart';
+import '../../core/connection_mode.dart';
 import 'employee_edit_screen.dart';
+import '../payroll/owner_payroll_connection.dart';
 import 'employee_positions_screen.dart';
 
 class EmployeesSettingsScreen extends StatefulWidget {
@@ -24,9 +36,12 @@ class EmployeesSettingsScreen extends StatefulWidget {
 class _EmployeesSettingsScreenState
     extends State<EmployeesSettingsScreen> {
   static const _api = BriskersApi();
+  final _nicknameStore = EmployeeNicknameStore();
+  final _offlineEmployees = OfflineJobAdminService();
 
   List<Map<String, dynamic>>? _employees;
   String? _error;
+  bool _cachedEmployeesOnly = false;
 
   @override
   void initState() {
@@ -35,52 +50,93 @@ class _EmployeesSettingsScreenState
   }
 
   Future<void> _load() async {
+    final cached=await _offlineEmployees.cachedEmployees(widget.businessId);
+    var rows=cached;
+    var payAuthorized=false;
+    LocalPayrollRepository? ledger;
     try {
-      final rows = await _api.employeesSettings(widget.businessId);
-      if (!mounted) return;
-      setState(() {
-        _employees = rows;
-        _error = null;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _employees = const [];
-        _error = error.toString();
-      });
+    if(widget.isOwner && await DeviceOwnerAuthorization.instance.canViewSavedOwnerPayroll(widget.businessId)) {
+      final grant=await DeviceOwnerAuthorization.instance.authority.authorizeSession(widget.businessId);
+      ledger=LocalPayrollRepository(localDatabase,business:widget.businessId,owner:true,
+        assertOwnerGrant:()=>grant.assertValid(widget.businessId,grant.actorId));
+      rows=await ledger.localCompensation(cached,grant:grant);
+      payAuthorized=true;
+    }
+    } catch(error) { ledger=null; }
+    rows=await _nicknameStore.decorate(widget.businessId,rows);
+    if(!mounted)return;
+    setState((){_employees=rows;_cachedEmployeesOnly=!payAuthorized;_error=null;});
+    if(BriskersConnectionModeController.instance.forceOffline)return;
+    try {
+      final remote=await _api.employeesSettings(widget.businessId);
+      final hydrated=ledger==null?remote:await ledger.localCompensation(remote);
+      final annotated=await _nicknameStore.decorate(widget.businessId,hydrated);
+      if(mounted)setState((){_employees=annotated;_cachedEmployeesOnly=false;_error=null;});
+    }catch(error){
+      if(mounted && rows.isEmpty)setState(()=>_error='No employee records are saved on this device.');
     }
   }
 
   String _pay(Map<String, dynamic> employee) {
+    if (_cachedEmployeesOnly) return 'Owner access required for pay details';
     if (employee['compensation_enabled'] == false) {
       return 'Pay not tracked';
     }
 
     final type = employee['payment_type']?.toString();
-    final raw = type == 'fixed_weekly'
+    final raw = const {'fixed_weekly','flexible_weekly'}.contains(type)
         ? employee['weekly_rate']
         : employee['hourly_rate'];
     final rate = num.tryParse(raw?.toString() ?? '');
-    if (rate == null) return 'Pay not set';
+    if (rate == null) return 'Pay not saved on this device';
 
     final money = NumberFormat.currency(symbol: '\$').format(rate);
-    return type == 'fixed_weekly'
-        ? '$money / week'
+    return const {'fixed_weekly','flexible_weekly'}.contains(type)
+        ? '$money / week${type=='flexible_weekly'?' + additional compensation':''}'
         : '$money / hr';
   }
 
-  Future<void> _open([Map<String, dynamic>? employee]) async {
+  int? _hourlyCents(Object? raw) {
+    final rate = num.tryParse(raw?.toString() ?? '');
+    return rate != null && rate.isFinite && rate >= 0 && rate <= 100000
+        ? (rate * 100).round() : null;
+  }
+
+  Future<void> _open([Map<String, dynamic>? employee, bool detailsOnly = false]) async {
+    final employeeId = employee?['id']?.toString();
+    final name = employee?['name']?.toString();
+    final position = (employee?['position_name'] ?? employee?['position'])?.toString();
+    if (!detailsOnly && widget.isOwner && OwnerPayrollScreen.enabled &&
+        employeeId != null && employeeId.isNotEmpty) {
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(builder: (_) => OwnerPayrollScreen(
+          businessId: widget.businessId,
+          employeeId: employeeId,
+          employeeName: employee?['nickname']?.toString() ?? name,
+          employeeLegalName: name,
+          employeeRole: position,
+          employeePayType: employee?['payment_type']?.toString(),
+          employeeHourlyCents: _hourlyCents(employee?['hourly_rate']),
+          employeeActive: employee?['active'] != false,
+          openEmployeeDetails: () => _open(employee, true),
+        )),
+      );
+      return;
+    }
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => EmployeeEditScreen(
           businessId: widget.businessId,
-          employeeId: employee?['id']?.toString(),
+          employeeId: employeeId,
+          rosterName: name,
+          rosterPosition: position,
           isOwner: widget.isOwner,
         ),
       ),
     );
-    if (changed == true) await _load();
+    if (changed == true && mounted) await _load();
   }
 
   Future<void> _positions() async {
@@ -176,7 +232,9 @@ class _EmployeesSettingsScreenState
                 ),
                 ListTile(
                   leading: const CircleAvatar(
-                    child: Icon(Icons.person_add_alt_1),
+                    backgroundColor: Color(0x175E35B1),
+                    child: Icon(Icons.person_add_alt_1,
+                      color: BriskersColors.settings),
                   ),
                   title: const Text('Add employee'),
                   subtitle: const Text('Create a new employee record'),
@@ -193,9 +251,9 @@ class _EmployeesSettingsScreenState
                     children: _employees!.map((employee) {
                       final active = employee['active'] != false;
                       final position =
-                          employee['position']?.toString() ?? 'No position';
+                          (employee['position'] ?? employee['position_name'])?.toString() ?? 'No position';
                       final roleStyle = employeeRoleStyle(position);
-                      final name = employee['name']?.toString() ?? '';
+                      final name = EmployeeNicknameStore.displayName(employee);
 
                       return ListTile(
                         leading: CircleAvatar(
@@ -210,7 +268,11 @@ class _EmployeesSettingsScreenState
                           ),
                         ),
                         title: Text(name),
-                        subtitle: Text(position),
+                        subtitle: Text(
+                          employee['nickname']?.toString().isNotEmpty == true
+                              ? '${employee['name']} • $position'
+                              : position,
+                        ),
                         trailing: Wrap(
                           spacing: 0,
                           children: [
@@ -247,6 +309,49 @@ class _EmployeesSettingsScreenState
     );
   }
 
+  Future<void> _employeeActions(Map<String, dynamic> employee) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  employee['name']?.toString() ?? 'Employee',
+                  style: const TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined,
+                color: BriskersColors.settings),
+              title: const Text('Edit employee'),
+              onTap: () => Navigator.pop(sheetContext, 'edit'),
+            ),
+            if (widget.isOwner)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: const Text('Delete employee',
+                    style: TextStyle(color: Colors.red)),
+                onTap: () => Navigator.pop(sheetContext, 'delete'),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'edit') await _open(employee, true);
+    if (action == 'delete') await _deleteEmployee(employee);
+  }
+
   Future<void> _showManageMenu() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -273,7 +378,9 @@ class _EmployeesSettingsScreenState
               Card(
                 child: ListTile(
                   leading: const CircleAvatar(
-                    child: Icon(Icons.groups_2_outlined),
+                    backgroundColor: Color(0x175E35B1),
+                    child: Icon(Icons.groups_2_outlined,
+                      color: BriskersColors.settings),
                   ),
                   title: const Text(
                     'Manage employees',
@@ -290,7 +397,9 @@ class _EmployeesSettingsScreenState
               Card(
                 child: ListTile(
                   leading: const CircleAvatar(
-                    child: Icon(Icons.badge_outlined),
+                    backgroundColor: Color(0x175E35B1),
+                    child: Icon(Icons.badge_outlined,
+                      color: BriskersColors.settings),
                   ),
                   title: const Text(
                     'Manage positions',
@@ -311,14 +420,51 @@ class _EmployeesSettingsScreenState
     );
   }
 
+  Future<void> _showPayrollDeviceId() async {
+    try {
+      final identity = await PayrollLanIdentity.load();
+      if (!mounted) return;
+      await showPayrollLanCode(context, 'Public payroll device ID', identity.deviceId);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not load this phone’s payroll device ID.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Employees'),
+        actions: [
+          if (widget.isOwner && OwnerPayrollScreen.enabled)
+            IconButton(tooltip: 'Shop payroll Wi-Fi', icon: const Icon(Icons.wifi),
+              onPressed: () => showOwnerPayrollConnection(context, widget.businessId)),
+          if (widget.isOwner)
+            IconButton(
+              tooltip: 'Public payroll device ID',
+              icon: const Icon(Icons.phonelink_lock),
+              onPressed: _showPayrollDeviceId,
+            ),
+          if (OwnerPayrollScreen.enabled && widget.isOwner)
+            IconButton(
+              tooltip: 'Payroll',
+              icon: const Icon(Icons.payments_outlined),
+              onPressed: () => Navigator.push<void>(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => OwnerPayrollScreen(businessId: widget.businessId),
+                ),
+              ),
+            ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showManageMenu,
+        backgroundColor: BriskersColors.settings,
+        foregroundColor: Colors.white,
         icon: const Icon(Icons.groups_2_outlined),
         label: const Text('Manage'),
       ),
@@ -350,59 +496,10 @@ class _EmployeesSettingsScreenState
                     )
                   else
                     ..._employees!.map((employee) {
-                      final active = employee['active'] != false;
-                      final position =
-                          employee['position']?.toString() ?? 'No position';
-                      final ssnLast4 = employee['ssn_last4']?.toString();
-                      final roleStyle = employeeRoleStyle(position);
-
-                      return Card(
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: active
-                                ? roleStyle.color.withValues(alpha: 0.14)
-                                : Colors.grey.withValues(alpha: 0.14),
-                            child: Icon(
-                              active
-                                  ? roleStyle.icon
-                                  : Icons.person_off_outlined,
-                              color: active ? roleStyle.color : Colors.grey,
-                            ),
-                          ),
-                          title: Text(
-                            employee['name']?.toString() ?? '',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: active ? null : Colors.grey,
-                            ),
-                          ),
-                          subtitle: Text.rich(
-                            TextSpan(
-                              children: [
-                                TextSpan(
-                                  text: position,
-                                  style: TextStyle(
-                                    color: active
-                                        ? roleStyle.color
-                                        : Colors.grey,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                TextSpan(
-                                  text: ' • ${_pay(employee)}',
-                                ),
-                                if (ssnLast4 != null && ssnLast4.isNotEmpty)
-                                  TextSpan(
-                                    text: ' • SSN ***-**-$ssnLast4',
-                                  ),
-                                if (!active)
-                                  const TextSpan(text: ' • Inactive'),
-                              ],
-                            ),
-                          ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _open(employee),
-                        ),
+                      return EmployeeListTile(
+                        employee:employee,pay:_pay(employee),
+                        onOpen:()=>_open(employee),
+                        onLongPress:()=>_employeeActions(employee),
                       );
                     }),
                   const SizedBox(height: 90),

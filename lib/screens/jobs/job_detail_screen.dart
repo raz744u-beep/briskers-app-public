@@ -1,27 +1,63 @@
+import '../../services/local_job_core_projection.dart';
+import '../../services/offline_invoice_payment_ledger.dart';
+import '../../services/job_task_summary.dart';
+import '../payroll/mechanic_labor_screen.dart';
+import '../payroll/owner_payroll_screen.dart';
+import '../payroll/job_tasks_access.dart';
+import '../../services/owner_job_retirement_service.dart';
+import 'owner_local_delete_action.dart';
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+import '../../services/owner_invoice_auto_close_service.dart';
 import 'package:intl/intl.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/module_modal_theme.dart';
 import '../../core/connection_mode.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/employee_role_style.dart';
 import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
 import '../../services/job_sync_service.dart';
+import '../../services/local_job_quarantine.dart';
+import '../../services/local_job_retirement.dart';
+import '../../local/local_database_provider.dart';
+import 'job_quarantine_view_guard.dart';
+import '../../core/supabase_config.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
+import '../../services/local_customer_repository.dart';
+import '../../core/job_mileage_summary.dart';
+import '../../core/job_findings_edit_policy.dart';
+import '../../services/offline_invoice_mileage_service.dart';
+import '../../widgets/job_mileage_row.dart';
+import '../../widgets/local_first_attachment_image.dart';
+import '../../services/job_detail_first_frame.dart';
+import '../../services/local_job_access_history.dart';
 import '../../services/job_performance_metrics.dart';
+import '../../services/job_profitability_summary.dart';
+import '../../services/owner_job_profitability_cache.dart';
+import '../../widgets/job_profitability_summary_view.dart';
+import '../../widgets/job_financial_status_card.dart';
+import '../../widgets/work_performed_editor_sheet.dart';
+import '../../services/invoice_labor_work_summary.dart';
+import 'invoice_payment_navigation.dart';
 import '../../services/local_document_repository.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/offline_preinspection_service.dart';
 import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_job_admin_service.dart';
+import '../../services/employee_nickname_store.dart';
 import '../../services/offline_work_findings_service.dart';
+import '../../services/work_finding_merge.dart';
+import '../../services/vehicle_finding_actions_service.dart';
+import '../../services/finding_job_choice_policy.dart';
+import '../../widgets/vehicle_findings.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import '../customers/customer_detail_screen.dart';
@@ -36,6 +72,7 @@ class JobDetailScreen extends StatefulWidget {
     required this.jobId,
     required this.roleCode,
     this.initialAction,
+    this.initialJobSummary,
     this.bottomNavigationBar,
   });
 
@@ -43,13 +80,18 @@ class JobDetailScreen extends StatefulWidget {
   final String jobId;
   final String roleCode;
   final String? initialAction;
+  // Already authorized list row, shown read-only while detail verification runs.
+  final Map<String, dynamic>? initialJobSummary;
   final Widget? bottomNavigationBar;
 
   @override
   State<JobDetailScreen> createState() => _JobDetailScreenState();
 }
 
-class _JobDetailScreenState extends State<JobDetailScreen> {
+class _JobDetailScreenState extends State<JobDetailScreen>
+    with ModuleModalState<JobDetailScreen> {
+  @override
+  Color get modalAccent => BriskersColors.jobs;
   static const _api = BriskersApi();
   final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
   final OfflinePreInspectionService _offlineInspection =
@@ -57,27 +99,39 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   final OfflineWorkFindingsService _offlineWorkFindings =
       OfflineWorkFindingsService();
   final JobSyncService _jobSync = JobSyncService();
+  final VehicleFindingActionsService _findingActions = VehicleFindingActionsService();
   final LocalJobRepository _localJobs = LocalJobRepository();
   final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
   final LocalFinancialCache _linkedExpensesCache = LocalFinancialCache();
   final LocalDocumentDetailCache _documentDetailCache =
       const LocalDocumentDetailCache();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
+  final _nicknameStore = EmployeeNicknameStore();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
+  final OfflineInvoiceMileageService _invoiceMileage =
+      OfflineInvoiceMileageService();
 
+  final OwnerJobRetirementService _jobRetirement = OwnerJobRetirementService();
   Map<String, dynamic>? _job;
   Map<String, dynamic>? _profitability;
+  DateTime? _profitabilityVerifiedAt;
+  bool _profitabilityFromCache = false;
+  final OwnerJobProfitabilityCache _profitabilityCache = const OwnerJobProfitabilityCache();
   Map<String, dynamic>? _preInspection;
   List<Map<String, dynamic>> _employees = const [];
   List<Map<String, dynamic>> _statuses = const [];
   List<Map<String, dynamic>> _documents = const [];
   List<Map<String, dynamic>> _findings = const [];
   List<Map<String, dynamic>> _jobExpenses = const [];
+  num? _mileageOut;
+  String? _mileageOutVehicleId;
+  String? _mileageOutInvoiceId;
   bool _linkedExpensesCached = false;
   final ImagePicker _picker = ImagePicker();
 
   final ScrollController _scrollController = ScrollController();
+  StreamSubscription<String>? _findingChanges;
 
   bool _loading = true;
   bool _busy = false;
@@ -86,6 +140,125 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   bool _showingLocal = false;
   String? _error;
   VoidCallback? _modalRefresh;
+  int _loadEpoch = 0;
+  int? _taskEstimatedMinutes;
+  JobTaskProgress? _taskProgress;
+
+  Future<void> _readTaskProgress(int epoch) async {
+    JobTaskProgress? progress;
+    try {
+      progress = await JobTaskSummary(localDatabase).progress(widget.businessId, widget.jobId);
+    } catch (_) {
+      // Keep a failed local read distinct from an empty job.
+    }
+    if (_currentLoad(epoch)) setState(() => _taskProgress = progress);
+  }
+
+  Widget _progressRow() {
+    final progress = _taskProgress;
+    final fraction = progress == null || progress.total == 0
+        ? 0.0 : progress.done / progress.total;
+    final percent = '${(fraction * 100).round()}%';
+    // Owner-approved J-44 design: no extra tinted panel inside the white
+    // Job summary card; dark labels and teal on a cool gray progress track.
+    return InkWell(
+      onTap: _openJobLaborTasks,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(6, 12, 6, 4),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            const Expanded(child: Text('Job Progress', style: TextStyle(
+              fontWeight: FontWeight.w800, color: Color(0xFF161D2B)))),
+            Flexible(child: Text(progress == null ? 'Progress unavailable' :
+              progress.total == 0 ? 'No tasks yet' :
+              '${progress.done} of ${progress.total} tasks completed',
+              textAlign: TextAlign.end,
+              style: const TextStyle(color: Color(0xFF161D2B),
+                fontWeight: FontWeight.w800))),
+          ]),
+          const SizedBox(height: 9),
+          if (progress != null && progress.total > 0)
+            ClipRRect(borderRadius: BorderRadius.circular(20),
+              child: LayoutBuilder(builder: (context, box) => Stack(children: [
+                const LinearProgressIndicator(value: 0, minHeight: 22,
+                  backgroundColor: Color(0xFFD0D4E0),
+                  color: Color(0xFFD0D4E0)),
+                LinearProgressIndicator(value: fraction, minHeight: 22,
+                  color: const Color(0xFF008D79),
+                  backgroundColor: Colors.transparent),
+                if (fraction > 0)
+                  SizedBox(width: fraction * box.maxWidth, height: 22,
+                    child: Center(child: Text(percent, style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w800,
+                      fontSize: 14)))),
+                if (fraction == 0)
+                  const SizedBox(height: 22, child: Center(
+                    child: Text('0%', style: TextStyle(
+                      color: Color(0xFF17243B),fontWeight: FontWeight.w800)))),
+              ]))),
+          if (_canQuickAdmin && progress != null && progress.total > 0 &&
+              progress.done == progress.total &&
+              const {'open','in_progress'}.contains(_job?['status']))
+            TextButton.icon(onPressed: _busy ? null : _confirmCompletedWork,
+              icon: const Icon(Icons.task_alt), label: const Text('Complete job')),
+          TextButton(onPressed: _openJobLaborTasks,
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF006D58)),
+            child: Row(children: [
+              const Icon(Icons.checklist), const SizedBox(width: 8),
+              Expanded(child: Text(progress == null
+                ? 'View Tasks' : 'View Tasks (${progress.total})',
+                style: const TextStyle(fontWeight: FontWeight.w800,
+                  fontSize: 15.5))),
+              const Icon(Icons.chevron_right),
+            ])),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _confirmCompletedWork() async {
+    final confirmed=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
+      title:const Text('Complete this job?'),
+      content:const Text('All tasks are Done. Confirm the repair work is completed. Invoice payments and mechanic wages will not change.'),
+      actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Cancel')),
+        FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('Complete job'))]));
+    if(confirmed==true && mounted) await _changeStatus('completed');
+  }
+
+  bool _contentBlocked = false;
+
+  bool _currentLoad(int epoch) => mounted && !_contentBlocked && epoch == _loadEpoch;
+
+  void _blockJobContent() {
+    _loadEpoch++;
+    if (!mounted) return;
+    setState(() {
+      _contentBlocked = true;
+      _job = null;
+      _profitability = null;
+      _profitabilityVerifiedAt = null;
+      _profitabilityFromCache = false;
+      _profitabilityError = null;
+      _preInspection = null;
+      _employees = const [];
+      _statuses = const [];
+      _documents = const [];
+      _findings = const [];
+      _jobExpenses = const [];
+      _mileageOut = null;
+      _mileageOutVehicleId = null;
+      _mileageOutInvoiceId = null;
+      _linkedExpensesCached = false;
+      _loading = false;
+      _busy = false;
+      _onlineReady = false;
+      _showingLocal = false;
+      _modalRefresh = null;
+      _initialActionScheduled = true;
+      _error = 'Job access has changed. Saved local work is preserved for review.';
+    });
+  }
 
   bool _jobCapability(String key) {
     final raw = _job?['capabilities'];
@@ -94,9 +267,23 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   bool get _canQuickAdmin =>
-      widget.roleCode == 'owner' ||
-      widget.roleCode == 'manager' ||
-      widget.roleCode == 'office';
+      // A read-only selected row paints immediately but cannot authorize any
+      // edits until the verified on-device Job Detail graph is loaded.
+      _job?['_first_frame_only'] != true &&
+      (widget.roleCode == 'owner' ||
+       widget.roleCode == 'manager' ||
+       widget.roleCode == 'office');
+
+  // Only a verified local Job can initiate a queued vehicle change.
+  // Server-only Job actions must remain disabled while offline.
+  bool get _canEditVehicleLocally =>
+      !_onlineReady && _canQuickAdmin && !_contentBlocked &&
+      _job?['_local_snapshot'] == true;
+
+  bool get _showVehicleChevron =>
+      _canManage || _canEditVehicleLocally ||
+      (_job?['_first_frame_only'] == true &&
+       const {'owner', 'manager', 'office'}.contains(widget.roleCode));
 
   bool get _canManage {
     if (!_onlineReady) return false;
@@ -117,20 +304,56 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       _onlineReady &&
       widget.roleCode == 'mechanic' &&
       _jobCapability('request_job');
-  bool get _canEditWork => _jobCapability('edit_work');
-  bool get _canEditFindings => _jobCapability('edit_findings');
-  bool get _canEditInspection => _jobCapability('edit_inspection');
+  bool get _canEditWork =>
+      _job?['_first_frame_only'] != true && _jobCapability('edit_work');
+  bool get _canEditFindings => canEditJobFindings(
+    firstFrameOnly: _job?['_first_frame_only'] == true,
+    contentBlocked: _contentBlocked,
+    serverAllows: _jobCapability('edit_findings'),
+    onlineReady: _onlineReady,
+    isOwner: _owner,
+    verifiedLocal: _job?['_local_snapshot'] == true,
+  );
+  bool get _canEditInspection =>
+      _job?['_first_frame_only'] != true &&
+      !_contentBlocked &&
+      (_jobCapability('edit_inspection') ||
+          // Cached offline Job details may omit server capability flags.
+          // Permit the Owner to edit the locally stored check-in odometer.
+          (!_onlineReady && _owner && _job?['_local_snapshot'] == true));
   bool get _owner => widget.roleCode == 'owner';
   String? _profitabilityError;
 
   @override
   void initState() {
     super.initState();
+    // The selected row was already authorized by the Jobs list. Render its
+    // customer, vehicle, mechanic and saved financial state in the *actual*
+    // Job Detail layout before awaiting the more expensive inspection,
+    // findings, visits and network hydrations. Edits still require the
+    // separately verified Job Detail capabilities.
+    final firstFrame = JobDetailFirstFrame.fromSelectedRow(
+      widget.initialJobSummary, expectedJobId: widget.jobId,
+    );
+    if (firstFrame != null) {
+      _job = firstFrame;
+      _loading = false;
+      _showingLocal = true;
+    }
+    _findingChanges = VehicleFindingActionsService.changes.listen((businessId) {
+      if (businessId == widget.businessId && mounted && !_contentBlocked) {
+        unawaited(_refreshLocalWorkFindings());
+      }
+    });
+    unawaited(LocalJobAccessHistory().recordCurrentUserAccess(
+      widget.businessId, widget.jobId,
+    ));
     _load();
   }
 
   @override
   void dispose() {
+    _findingChanges?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -196,11 +419,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   void _scheduleInitialAction() {
+    final epoch = _loadEpoch;
     final action = widget.initialAction;
     if (action == null || _initialActionScheduled) return;
     _initialActionScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
+      if (!_currentLoad(epoch)) return;
       switch (action) {
         case 'edit':
           await _editJob();
@@ -216,13 +440,173 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           await _createEstimate();
         case 'invoice':
           await _createInvoice();
+        case 'payment':
+          await _addPayment();
         case 'expense':
           await _addJobExpense();
       }
     });
   }
 
+  // Read a v2 invoice's departure reading only from a saved, same-Job,
+  // same-vehicle invoice detail. Never reinterpret an old ambiguous invoice
+  // odometer as Mileage Out. The row height is reserved on first paint, so
+  // a later cache lookup cannot move the tiles below the vehicle card.
+  Future<void> _hydrateMileageOut(
+    int epoch,
+    List<Map<String, dynamic>> documents,
+  ) async {
+    if (!_canSeeFinancial || !_currentLoad(epoch)) return;
+    final jobId = widget.jobId;
+    final vehicleId = _job?['vehicle_id']?.toString() ?? '';
+    if (vehicleId.isEmpty) return;
+    num? departure;
+    String? departureInvoiceId;
+    try {
+      for (final invoice in documents) {
+        if (invoice['kind']?.toString() != 'invoice') continue;
+        final invoiceId = invoice['id']?.toString() ?? '';
+        if (invoiceId.isEmpty) continue;
+        final cached = await _documentDetailCache.load(
+          widget.businessId, invoiceId,
+        );
+        if (!_currentLoad(epoch)) return;
+        if (cached == null || cached['id']?.toString() != invoiceId ||
+            (cached['business_id'] != null &&
+             cached['business_id']?.toString() != widget.businessId)) {
+          continue;
+        }
+        final projected = await _invoiceMileage.project(
+          widget.businessId, invoiceId, cached,
+        );
+        if (!_currentLoad(epoch)) return;
+        departure = JobMileageSummary.mileageOutFromInvoice(
+          projected, jobId: jobId, vehicleId: vehicleId,
+        );
+        if (departure != null) {
+          departureInvoiceId = invoiceId;
+          break;
+        }
+      }
+    } catch (_) {
+      // A missing cache or pending-outbox read must not fabricate a reading.
+      return;
+    }
+    if (!_currentLoad(epoch) ||
+        _job?['vehicle_id']?.toString() != vehicleId) {
+      return;
+    }
+    setState(() {
+      _mileageOut = departure;
+      _mileageOutVehicleId = vehicleId;
+      _mileageOutInvoiceId = departureInvoiceId;
+    });
+  }
+
+  Future<void> _openMileageOutInvoice() async {
+    if (_busy || !_canSeeFinancial) return;
+    final invoices = _documents.where(
+      (row) => row['kind']?.toString() == 'invoice',
+    ).toList();
+    if (invoices.isEmpty) {
+      await _openSectionModal('documents');
+      return;
+    }
+    // Open the invoice that supplied the displayed departure reading.
+    // A Job may have multiple invoices; the first is not always the source.
+    final id = _mileageOutInvoiceId ??
+        (invoices.first['id']?.toString() ?? '');
+    if (id.isNotEmpty) await _openDocument(id);
+  }
+
+  // Reuse last verified invoice details saved on this device when the
+  // Job's payment-state index is missing. Do not classify bare index rows as
+  // paid: they contain no confirmed payment receipts.
+  Future<void> _hydrateCachedFinancialStatus(
+    int epoch,
+    List<Map<String, dynamic>> documents,
+  ) async {
+    if (!_currentLoad(epoch) || !_canSeeFinancial) {
+      return;
+    }
+    final verified = <Map<String, dynamic>>[];
+    for (final document in documents) {
+      if (document['kind']?.toString() != 'invoice') {
+        continue;
+      }
+      final id = document['id']?.toString() ?? '';
+      if (id.isEmpty) {
+        continue;
+      }
+      final cached = await _documentDetailCache.load(
+        widget.businessId, id,
+      );
+      if (!_currentLoad(epoch)) {
+        return;
+      }
+      if (cached == null || cached['kind'] != 'invoice' ||
+          cached['job_id']?.toString() != widget.jobId) {
+        return;
+      }
+      final queued = await OfflineInvoicePaymentLedger().pendingForInvoice(
+        widget.businessId, id,
+      );
+      if (!_currentLoad(epoch)) return;
+      verified.add(OfflineInvoicePaymentLedger.projectPendingPayments(cached, queued));
+    }
+    final state = cachedVerifiedJobPaymentState(verified);
+    if (state == null || !_currentLoad(epoch)) {
+      return;
+    }
+    try {
+      await _localJobs.saveVerifiedPaymentState(
+        widget.businessId, widget.jobId, state,
+      );
+      if (!_currentLoad(epoch)) {
+        return;
+      }
+      setState(() {
+        _job = <String, dynamic>{..._job!, 'payment_state': state};
+      });
+    } catch (_) {
+      // Offline documents remain usable even if this summary cache fails.
+    }
+  }
+
+  Future<void> _hydrateAssignedEmployeeNickname(int epoch) async {
+    final snapshot = _job;
+    if (snapshot == null) return;
+    final assignments = List<dynamic>.from(
+      snapshot['assignments'] ?? const [],
+    );
+    final first = assignments.isNotEmpty && assignments.first is Map
+        ? Map<String, dynamic>.from(assignments.first as Map)
+        : const <String, dynamic>{};
+    final employeeId = (snapshot['assigned_employee_id'] ??
+            first['employee_id'])?.toString() ?? '';
+    if (employeeId.isEmpty) return;
+    final nickname = await _nicknameStore.get(widget.businessId, employeeId);
+    if (nickname == null || !_currentLoad(epoch)) return;
+    final current = _job;
+    if (current == null) return;
+    final currentAssignments = List<dynamic>.from(
+      current['assignments'] ?? const [],
+    );
+    final currentFirst = currentAssignments.isNotEmpty &&
+            currentAssignments.first is Map
+        ? Map<String, dynamic>.from(currentAssignments.first as Map)
+        : const <String, dynamic>{};
+    final currentId = (current['assigned_employee_id'] ??
+        currentFirst['employee_id'])?.toString() ?? '';
+    if (employeeId != currentId) return;
+    setState(() => _job = {
+      ...current,
+      'assigned_employee_nickname': nickname,
+    });
+  }
+
   Future<void> _hydrateLocalLinkedExpenses() async {
+    final epoch = _loadEpoch;
     try {
       final linked = await _linkedExpensesCache.loadLinkedExpenses(
         widget.businessId,
@@ -230,7 +614,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       );
       // An online refresh can complete while the disk read is in flight.
       // Never overwrite newer server data with an older local snapshot.
-      if (!mounted || !_showingLocal || _onlineReady) return;
+      if (!_currentLoad(epoch) || !_showingLocal || _onlineReady) return;
       setState(() {
         _jobExpenses = linked ?? const [];
         _linkedExpensesCached = linked != null;
@@ -241,12 +625,77 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
+  // Detail navigation must show the verified local Job before querying
+  // separately cached invoice/estimate links. This read can be slow on shops
+  // with thousands of historical documents and should never gate the header.
+  Future<void> _hydrateLocalJobDocuments(int epoch) async {
+    try {
+      final documents = await _localDocumentsForJob();
+      if (!_currentLoad(epoch) || !_showingLocal || _onlineReady ||
+          !_canSeeFinancial) {
+        return;
+      }
+      setState(() => _documents = documents);
+      unawaited(_hydrateMileageOut(epoch, documents));
+      unawaited(_hydrateCachedFinancialStatus(epoch, documents));
+      _modalRefresh?.call();
+    } catch (_) {
+      // Leave the locally rendered Job usable if links cannot be read.
+    }
+  }
+
   Future<void> _load() async {
+    final epoch = ++_loadEpoch;
+    try {
+      if (await LocalJobQuarantine.isJobBlocked(localDatabase, widget.businessId, widget.jobId) ||
+          await LocalJobRetirement.isJobBlocked(localDatabase, widget.businessId, widget.jobId)) {
+        if (mounted && epoch == _loadEpoch) _blockJobContent();
+        return;
+      }
+    } catch (_) {
+      if (mounted && epoch == _loadEpoch) _blockJobContent();
+      return;
+    }
+    if (!mounted || epoch != _loadEpoch) return;
+    _contentBlocked = false;
+    if (_owner && OwnerPayrollScreen.enabled) unawaited(_readTaskProgress(epoch));
     final loadWatch = Stopwatch()..start();
     var localShown = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
     final forceOffline =
         BriskersConnectionModeController.instance.forceOffline;
+
+    if (!forceOnline && _owner) {
+      // Read the last permission-scoped verified snapshot without blocking Job.
+      unawaited(_loadCachedProfitability(epoch));
+    }
+
+    if (!forceOnline && _job == null) {
+      // Direct Job links have no authorized selected-card preview. Paint the
+      // protected local core row before reading visits, findings, inspection,
+      // photo metadata and statuses. Permissions/actions remain disabled
+      // until the complete local detail snapshot replaces this preview.
+      try {
+        final core = await _localJobs.jobDetail(
+          widget.businessId, widget.jobId, coreOnly: true,
+        );
+        if (core != null && _currentLoad(epoch)) {
+          localShown = true;
+          setState(() {
+            _job = core.job;
+            _statuses = const [];
+            _preInspection = null;
+            _findings = const [];
+            _loading = false;
+            _onlineReady = false;
+            _showingLocal = true;
+            _error = null;
+          });
+        }
+      } catch (_) {
+        // Keep existing selected-row preview or await full authorized detail.
+      }
+    }
 
     if (!forceOnline) {
       try {
@@ -260,10 +709,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         stage:'local_job_detail',
         milliseconds:loadWatch.elapsedMilliseconds,
       ));
-      if (snapshot != null && mounted) {
-        final localDocuments = _canSeeFinancial
-            ? await _localDocumentsForJob()
-            : const <Map<String, dynamic>>[];
+      if (snapshot != null && _currentLoad(epoch)) {
+        // Paint the core saved Job immediately. Linked documents are a
+        // secondary section, hydrated independently after the first frame.
         localShown = true;
         unawaited(const JobPerformanceMetrics().record(
           widget.businessId,
@@ -275,7 +723,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           _job = snapshot.job;
           _preInspection = snapshot.preInspection;
           _statuses = snapshot.statuses;
-          _documents = localDocuments;
+          _documents = const <Map<String, dynamic>>[];
           _jobExpenses = const [];
           _linkedExpensesCached = false;
           _findings = snapshot.findings;
@@ -284,10 +732,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           _showingLocal = true;
           _error = null;
         });
+        unawaited(_hydrateAssignedEmployeeNickname(epoch));
         _modalRefresh?.call();
-        // Linked expenses are a secondary tile. Their cache lookup should
-        // never delay the first usable Job detail frame.
+        // Linked documents and expenses hydrate independently of first paint.
+        // Each is fenced by the load epoch so back/forward navigation cannot
+        // replace data from a newer Job or remote refresh.
         if (_canSeeFinancial) {
+          unawaited(_hydrateLocalJobDocuments(epoch));
           unawaited(_hydrateLocalLinkedExpenses());
         }
         unawaited(_prefetchFindingPhotos(snapshot.findings));
@@ -297,9 +748,24 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       }
     }
 
+    if (!_currentLoad(epoch)) return;
+
+    // Temporary jobs have no server-side ID until their offline create
+    // operation is synchronized. Keep their local detail usable in Auto mode.
+    if (widget.jobId.startsWith('local-') && !forceOnline) {
+      if (localShown) {
+        if (_job?['_first_frame_only'] != true) {
+          _scheduleInitialAction();
+        }
+        return;
+      }
+    }
+
     if (forceOffline) {
-      if (localShown) _scheduleInitialAction();
-      if (!localShown && mounted) {
+      if (localShown && _job?['_first_frame_only'] != true) {
+        _scheduleInitialAction();
+      }
+      if (!localShown && _currentLoad(epoch)) {
         setState(() {
           _loading = false;
           _onlineReady = false;
@@ -312,7 +778,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
 
     try {
-      final job = await _api.jobDetail(widget.businessId, widget.jobId);
+      final job = await LocalJobCoreProjection.merge(localDatabase, widget.businessId,
+        await _api.jobDetail(widget.businessId, widget.jobId));
+      if (!_currentLoad(epoch)) return;
       final statuses = await _api.jobStatuses(widget.businessId);
       final rawCapabilities = job['capabilities'];
       final capabilities = rawCapabilities is Map
@@ -324,6 +792,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
       List<Map<String, dynamic>> employees = const [];
       List<Map<String, dynamic>> documents = const [];
+      var documentsVerified = false;
       List<Map<String, dynamic>> findings = const [];
       List<Map<String, dynamic>> jobExpenses = const [];
       Map<String, dynamic>? profitability;
@@ -343,6 +812,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             widget.businessId,
             widget.jobId,
           );
+          documentsVerified = true;
         } catch (_) {
           documents = const [];
         }
@@ -363,7 +833,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             widget.businessId,
             widget.jobId,
           );
+          if (JobProfitabilitySummary.fromRpc(profitability) != null) {
+            _saveVerifiedProfitability(profitability);
+          }
         } catch (_) {
+          // Keep the last verified snapshot; never invent missing costs.
           profitability = null;
         }
       }
@@ -373,6 +847,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           widget.businessId,
           widget.jobId,
         );
+        if (!_currentLoad(epoch)) return;
         if (serverCurrentVisit != null) {
           try {
             await _offlineWorkFindings.seedCurrentVisitIfClean(
@@ -446,6 +921,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       try {
         final serverPreInspection =
             await _api.jobPreInspection(widget.businessId, widget.jobId);
+        if (!_currentLoad(epoch)) return;
         if (serverPreInspection != null) {
           try {
             await _offlineInspection.seedServerInspectionIfMissing(
@@ -504,6 +980,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             widget.businessId,
             vehicleId,
           );
+          if (!_currentLoad(epoch)) return;
           try {
             await _offlineWorkFindings.seedServerFindingsIfClean(
               widget.businessId,
@@ -523,7 +1000,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             widget.businessId,
             vehicleId,
           );
-          findings = _mergeFindingLists(
+          findings = mergeWorkFindings(
             serverFindings,
             localFindings,
           );
@@ -532,10 +1009,21 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         }
       }
 
-      if (!mounted) return;
+      if (await LocalJobQuarantine.isJobBlocked(localDatabase, widget.businessId, widget.jobId) ||
+          await LocalJobRetirement.isJobBlocked(localDatabase, widget.businessId, widget.jobId)) {
+        if (mounted && epoch == _loadEpoch) _blockJobContent();
+        return;
+      }
+      if (!_currentLoad(epoch)) return;
       setState(() {
         _job = job;
-        _profitability = profitability;
+        if (profitability != null &&
+            JobProfitabilitySummary.fromRpc(profitability) != null) {
+          _profitability = profitability;
+          _profitabilityFromCache = false;
+          _profitabilityVerifiedAt = DateTime.now();
+          _profitabilityError = null;
+        }
         _preInspection = preInspection;
         _employees = employees;
         _statuses = statuses;
@@ -548,15 +1036,25 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         _showingLocal = false;
         _error = null;
       });
+      unawaited(_hydrateAssignedEmployeeNickname(epoch));
+      // Fill a missing/stale local payment summary from an actual successful
+      // authorized server document response. No payment/ledger mutation.
+      // Do not persist a fabricated Paid state from a zero-amount invoice or
+      // a failed jobDocuments request.
+      if (canSeeFinancial && documentsVerified) {
+        unawaited(_hydrateCachedFinancialStatus(epoch,documents));
+      }
+      if (canSeeFinancial) unawaited(_hydrateMileageOut(epoch, documents));
       _modalRefresh?.call();
       _scheduleInitialAction();
       unawaited(_prefetchFindingPhotos(findings));
+      unawaited(_cacheDeletionPreview());
 
       unawaited(
         _persistOnlineJobSnapshot(statuses),
       );
     } catch (error) {
-      if (!mounted) return;
+      if (!_currentLoad(epoch)) return;
       setState(() {
         _loading = false;
         _onlineReady = false;
@@ -571,9 +1069,28 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
+  Future<void> _cacheDeletionPreview() async {
+    if (!_owner || _contentBlocked || widget.jobId.startsWith('local-')) return;
+    final actorId = supabase.auth.currentUser?.id;
+    if (actorId == null) return;
+    try {
+      // Save a server-verified graph while online so a later offline action
+      // can queue this exact graph, subject to revalidation on reconnect.
+      await _jobRetirement.preview(
+        widget.businessId,
+        widget.jobId,
+        actorId: actorId,
+        isOwner: true,
+      );
+    } catch (_) {
+      // A missing/unavailable backend must never break ordinary Job access.
+    }
+  }
+
   Future<void> _prefetchFindingPhotos(
     List<Map<String, dynamic>> findings,
   ) async {
+    final epoch = _loadEpoch;
     final pending = <Future<File?>>[];
 
     for (final finding in findings) {
@@ -594,10 +1111,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         final key = attachment['key']?.toString() ?? '';
         if (bucket.isEmpty || key.isEmpty) continue;
 
+        if (!_currentLoad(epoch)) return;
         pending.add(_attachmentCache.getOrDownload(bucket, key));
 
         if (pending.length >= 4) {
           await Future.wait(pending);
+          if (!_currentLoad(epoch)) return;
           pending.clear();
         }
       }
@@ -622,46 +1141,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
-  List<Map<String, dynamic>> _mergeFindingLists(
-    List<Map<String, dynamic>> server,
-    List<Map<String, dynamic>> local,
-  ) {
-    final serverById = <String, Map<String, dynamic>>{
-      for (final finding in server)
-        if ((finding['id']?.toString() ?? '').isNotEmpty)
-          finding['id'].toString(): finding,
-    };
-
-    final merged = <Map<String, dynamic>>[];
-    final seen = <String>{};
-
-    for (final localFinding in local) {
-      final id = localFinding['id']?.toString() ?? '';
-      if (id.isEmpty) continue;
-      final serverFinding = serverById[id];
-      merged.add(
-        serverFinding == null
-            ? Map<String, dynamic>.from(localFinding)
-            : {
-                ...serverFinding,
-                ...localFinding,
-              },
-      );
-      seen.add(id);
-    }
-
-    for (final serverFinding in server) {
-      final id = serverFinding['id']?.toString() ?? '';
-      if (id.isEmpty || seen.contains(id)) continue;
-      merged.add(Map<String, dynamic>.from(serverFinding));
-    }
-
-    return merged;
-  }
-
   Future<void> _refreshLocalWorkFindings() async {
+    final epoch = _loadEpoch;
     final job = _job;
-    if (job == null) return;
+    if (job == null || !_currentLoad(epoch)) return;
 
     try {
       final localVisit =
@@ -669,7 +1152,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         widget.businessId,
         widget.jobId,
       );
-      if (localVisit != null && mounted) {
+      if (localVisit != null && _currentLoad(epoch)) {
         final visits = List<dynamic>.from(
           job['visits'] ?? const <dynamic>[],
         ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
@@ -706,9 +1189,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           widget.businessId,
           vehicleId,
         );
-        if (mounted) {
+        if (_currentLoad(epoch)) {
           setState(() {
-            _findings = _mergeFindingLists(
+            _findings = mergeWorkFindings(
               _findings,
               localFindings,
             );
@@ -719,7 +1202,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       }
     }
 
-    _modalRefresh?.call();
+    if (_currentLoad(epoch)) _modalRefresh?.call();
   }
 
   Future<void> _flushWorkFindingsQueue() async {
@@ -737,8 +1220,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
-  void _applyLocalPreInspection(Map<String, dynamic> data) {
-    if (!mounted) return;
+  void _applyLocalPreInspection(Map<String, dynamic> data, {int? expectedEpoch}) {
+    if (!mounted || _contentBlocked || (expectedEpoch != null && expectedEpoch != _loadEpoch)) return;
     setState(() {
       _preInspection = data;
       _error = null;
@@ -747,12 +1230,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _refreshLocalPreInspection() async {
+    final epoch = _loadEpoch;
     try {
       final local = await _offlineInspection.loadLocalInspection(
         widget.businessId,
         widget.jobId,
       );
-      if (local != null) _applyLocalPreInspection(local);
+      if (local != null) _applyLocalPreInspection(local, expectedEpoch: epoch);
     } catch (_) {
       // Local refresh is best-effort; keep the current screen state.
     }
@@ -961,7 +1445,24 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Future<Map<String, dynamic>?> _pickVehicleForCustomer(
     String customerId,
   ) async {
-    final detail = await _api.customerDetail(widget.businessId, customerId);
+    Map<String, dynamic>? detail;
+    if (!BriskersConnectionModeController.instance.forceOnline) {
+      detail = await LocalCustomerRepository().customerDetail(
+        widget.businessId, customerId,
+      );
+    }
+    if (detail == null &&
+        !BriskersConnectionModeController.instance.forceOffline) {
+      detail = await _api.customerDetail(widget.businessId, customerId);
+    }
+    if (detail == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Customer vehicles are not cached on this device.'),
+        ));
+      }
+      return null;
+    }
     final vehicles = List<dynamic>.from(detail['vehicles'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
@@ -1049,18 +1550,101 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _changeVehicle() async {
-    if (!_canManage || _job == null || _busy) return;
+    if ((!_canManage && !_canEditVehicleLocally) ||
+        _job == null || _busy) {
+      return;
+    }
     final customerId = _job!['customer_id']?.toString() ?? '';
-    if (customerId.isEmpty) return;
+    if (customerId.isEmpty) {
+      return;
+    }
     final vehicle = await _pickVehicleForCustomer(customerId);
-    if (vehicle == null) return;
-
-    await _run(() => _updateCore(
+    if (vehicle == null || !mounted) {
+      return;
+    }
+    final vehicleId = vehicle['id']?.toString();
+    final label = [
+      if (vehicle['year'] != null) vehicle['year'].toString(),
+      if ((vehicle['make']?.toString() ?? '').isNotEmpty)
+        vehicle['make'].toString(),
+      if ((vehicle['model']?.toString() ?? '').isNotEmpty)
+        vehicle['model'].toString(),
+    ].join(' ');
+    if (_canEditVehicleLocally) {
+      setState(() => _busy = true);
+      try {
+        await _offlineJobAdmin.queueCore(
+          widget.businessId, widget.jobId,
           customerId: customerId,
-          vehicleId: vehicle['id']?.toString(),
-          plannedHours: num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
-          requestedWork: _job!['requested_work']?.toString() ?? '',
-        ));
+          vehicleId: vehicleId,
+          replaceVehicle: true,
+          vehicleLabel: label,
+          vehicleVin: vehicle['vin']?.toString(),
+        );
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _job = {
+            ..._job!,
+            'vehicle_id': vehicleId,
+            'vehicle': label,
+            'vehicle_vin': vehicle['vin'],
+          };
+          _mileageOut = null;
+          _mileageOutVehicleId = null;
+          _mileageOutInvoiceId = null;
+          _busy = false;
+        });
+        if (!BriskersConnectionModeController.instance.forceOffline) {
+          unawaited(_offlineJobAdmin.flush(widget.businessId)
+              .catchError((Object _) {}));
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() {
+            _busy = false;
+            _error = error.toString();
+          });
+        }
+      }
+      return;
+    }
+    await _run(() => _updateCore(
+      customerId: customerId,
+      vehicleId: vehicleId,
+      plannedHours: num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
+      requestedWork: _job!['requested_work']?.toString() ?? '',
+    ));
+  }
+
+  // Job admin writes commit locally first. A remote refresh or outbox replay
+  // is optional background work and must never hold the editor busy.
+  bool _jobAdminSyncBusy = false;
+  bool _jobAdminSyncAgain = false;
+
+  void _scheduleJobAdminSync() {
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    _jobAdminSyncAgain = true;
+    if (_jobAdminSyncBusy) return;
+    _jobAdminSyncBusy = true;
+    unawaited(() async {
+      try {
+        while (_jobAdminSyncAgain &&
+            !BriskersConnectionModeController.instance.forceOffline) {
+          _jobAdminSyncAgain = false;
+          try {
+            await _offlineJobAdmin.flush(widget.businessId);
+          } catch (_) {
+            // Failed replay remains in the durable outbox. Do not undo a
+            // locally accepted mechanic/hours choice on network failure.
+            return;
+          }
+        }
+      } finally {
+        _jobAdminSyncBusy = false;
+      }
+    }());
   }
 
   Future<void> _changePlannedHours() async {
@@ -1135,6 +1719,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     controller.dispose();
     if (value == null || _job == null) return;
 
+    // Cancel stale in-flight Job Detail responses before changing local data.
+    ++_loadEpoch;
     setState(() {
       _busy = true;
       _error = null;
@@ -1145,12 +1731,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         widget.jobId,
         value,
       );
-      if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {}
-      }
-      if (mounted) await _load();
+      if (!mounted || _contentBlocked) return;
+      setState(() {
+        _job = <String, dynamic>{..._job!, 'planned_hours': value};
+        _busy = false;
+      });
+      _modalRefresh?.call();
+      _scheduleJobAdminSync();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -1271,30 +1858,66 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
     if (selectedStatus == null) return;
 
+    final original = Map<String, dynamic>.from(_job!);
+    final nextName = selectedStatus['name']?.toString() ?? code;
+    final nextColor = selectedStatus['color_hex']?.toString();
+    final nextIcon = selectedStatus['icon_key']?.toString();
+
+    // Discard any older in-flight remote response that could repaint the
+    // just-changed status from a stale server Job graph.
+    ++_loadEpoch;
+    // The Job header reflects the owner's selection immediately, while
+    // SQLite/outbox durability is established before background replay.
     setState(() {
       _busy = true;
       _error = null;
+      _job = <String, dynamic>{
+        ..._job!,
+        'status': code,
+        'status_name': nextName,
+        'status_color': nextColor,
+        'status_icon': nextIcon,
+      };
     });
     try {
       await _offlineJobAdmin.queueStatus(
         widget.businessId,
         widget.jobId,
         code: code,
-        name: selectedStatus['name']?.toString() ?? code,
-        colorHex: selectedStatus['color_hex']?.toString(),
-        iconKey: selectedStatus['icon_key']?.toString(),
+        name: nextName,
+        colorHex: nextColor,
+        iconKey: nextIcon,
         note: note,
       );
+      if (!mounted) return;
+      setState(() => _busy = false);
+      // Do not await HTTP, invoice closing or a full Job Detail graph to
+      // repaint the completed badge and remove this Job from Open.
       if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {}
+        unawaited(() async {
+          try {
+            await _offlineJobAdmin.flush(widget.businessId);
+            if (code == 'completed' && widget.roleCode == 'owner') {
+              await OwnerInvoiceAutoCloseService().closeEligible(
+                businessId: widget.businessId,
+                jobId: widget.jobId,
+                isOwner: true,
+              );
+            }
+            if (mounted && !_contentBlocked) unawaited(_load());
+          } catch (_) {
+            // The durable local status + outbox still own the UI.
+          }
+        }());
       }
-      if (mounted) await _load();
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _job = original;
+          _error = error.toString();
+          _busy = false;
+        });
+      }
     }
   }
 
@@ -1330,13 +1953,17 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     List<Map<String, dynamic>> employees;
     if (_onlineReady && _employees.isNotEmpty) {
       employees = _employees;
-      try {
-        await _offlineJobAdmin.refreshEmployees(widget.businessId);
-      } catch (_) {}
+      // Cached authorized employee options already exist. Refresh for next
+      // visit without holding this picker on HTTP.
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        unawaited(_offlineJobAdmin.refreshEmployees(widget.businessId)
+            .catchError((Object _) => <Map<String, dynamic>>[]));
+      }
     } else {
       employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
     }
 
+    employees = await _nicknameStore.decorate(widget.businessId, employees);
     if (!mounted) return;
     if (employees.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1394,8 +2021,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                           roleStyle.color.withValues(alpha: 0.14),
                       child: Icon(roleStyle.icon, color: roleStyle.color),
                     ),
-                    title: Text(employee['name']?.toString() ?? ''),
-                    subtitle: Text(position),
+                    title: Text(EmployeeNicknameStore.displayName(employee)),
+                    subtitle: Text(
+                      employee['nickname']?.toString().isNotEmpty == true
+                          ? '${employee['name']} • $position'
+                          : position,
+                    ),
                     trailing: id == currentId
                         ? const Icon(Icons.check, color: BriskersColors.jobs)
                         : null,
@@ -1421,6 +2052,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       }
     }
 
+    // Older remote reads cannot repaint this Job with an assignment that
+    // predates the new local SQLite/outbox commit.
+    ++_loadEpoch;
     setState(() {
       _busy = true;
       _error = null;
@@ -1433,12 +2067,32 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         employeeName: employee?['name']?.toString(),
         position: employee?['position_name']?.toString(),
       );
-      if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {}
-      }
-      if (mounted) await _load();
+      if (!mounted || _contentBlocked) return;
+      final assigned = selected.isNotEmpty;
+      setState(() {
+        _job = <String, dynamic>{
+          ..._job!,
+          'assigned_employee_id': assigned ? selected : null,
+          'assigned_employee_name': employee?['name'],
+          'assigned_employee_nickname': employee?['nickname'],
+          'assigned_position': employee?['position_name'],
+          'is_unassigned': !assigned,
+          'assignments': assigned
+              ? <Map<String, dynamic>>[
+                  {
+                    'employee_id': selected,
+                    'employee_name': employee?['name'],
+                    'position': employee?['position_name'],
+                    'source': 'offline_admin',
+                    'active': true,
+                  },
+                ]
+              : <Map<String, dynamic>>[],
+        };
+        _busy = false;
+      });
+      _modalRefresh?.call();
+      _scheduleJobAdminSync();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -1493,6 +2147,85 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     return translated.first.trim();
   }
 
+  /// Mileage In is shown beside Customer Complaint but stored in the same
+  /// existing pre-inspection odometer, so staff do not enter it twice.
+  Future<void> _editMileageIn() async {
+    if (_job == null || _busy || !_canEditInspection) return;
+    final businessId = widget.businessId;
+    final jobId = widget.jobId;
+    final vehicleId = _job?['vehicle_id']?.toString();
+    final initial = JobMileageSummary.mileageIn(_job, _preInspection);
+    final controller = TextEditingController(
+      text: initial?.toString() ?? '',
+    );
+    ModalRoute<dynamic>? mileageInDialogRoute;
+    final save = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        mileageInDialogRoute ??= ModalRoute.of(dialogContext);
+        return AlertDialog(
+          title: const Text('Miles In'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Odometer when vehicle arrived',
+              suffixText: 'mi',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+    final raw = controller.text.replaceAll(',', '').trim();
+    await mileageInDialogRoute?.completed;
+    controller.dispose();
+    if (save != true || !mounted || _contentBlocked || !_canEditInspection ||
+        _job == null || widget.businessId != businessId || widget.jobId != jobId ||
+        _job?['vehicle_id']?.toString() != vehicleId) {
+      return;
+    }
+    final parsed = num.tryParse(raw);
+    if (parsed == null || parsed < 0 || !parsed.isFinite ||
+        parsed > 9999999 || parsed != parsed.roundToDouble()) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Enter a valid whole-number Miles In.'),
+      ));
+      return;
+    }
+    final existingNotes = _preInspection?['notes']?.toString();
+    final epoch = _loadEpoch;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final local = await _offlineInspection.saveLocalInspection(
+        businessId,
+        jobId,
+        vehicleId: vehicleId,
+        notes: existingNotes,
+        odometer: parsed,
+      );
+      _applyLocalPreInspection(local, expectedEpoch: epoch);
+      unawaited(_flushPreInspectionQueue());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _editComplaint() async {
     if (!_canQuickAdmin || _job == null || _busy) return;
     final value = await _editTextSheet(
@@ -1502,6 +2235,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
     if (value == null || _job == null) return;
 
+    // Keep previous server Job reads from restoring an outdated complaint.
+    ++_loadEpoch;
     setState(() {
       _busy = true;
       _error = null;
@@ -1514,12 +2249,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         requestedWork: translated.isEmpty ? null : translated,
         replaceRequestedWork: true,
       );
-      if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {}
-      }
-      if (mounted) await _load();
+      if (!mounted || _contentBlocked) return;
+      setState(() {
+        _job = <String, dynamic>{
+          ..._job!,
+          'requested_work': translated,
+        };
+        _busy = false;
+      });
+      _modalRefresh?.call();
+      _scheduleJobAdminSync();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -1527,18 +2266,26 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
-  Future<void> _editWorkSummary() async {
+  Future<void> _editWorkSummary({bool fillFromInvoice = false}) async {
     if (!_canEditWork) return;
     final visits = List<dynamic>.from(_job?['visits'] ?? const []);
     if (visits.isEmpty || _busy) return;
     final current = Map<String, dynamic>.from(visits.first as Map);
 
-    final value = await _editTextSheet(
-      title: tr('workPerformed'),
-      initialValue: current['work_summary']?.toString() ?? '',
-      hint: tr('workPerformedHint'),
+    if (current['sync_state'] == 'conflict') return;
+    final value = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (editorContext) => WorkPerformedEditorSheet(
+        initialValue: current['work_summary']?.toString() ?? '',
+        loadInvoiceLabor: _canSeeFinancial
+            ? () => _loadInvoiceLabor(editorContext) : null,
+        fillOnOpen: fillFromInvoice,
+      ),
     );
-    if (value == null) return;
+    if (!mounted || value == null || _contentBlocked || !_canEditWork) return;
 
     setState(() {
       _busy = true;
@@ -1570,6 +2317,60 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
+  Future<String?> _loadInvoiceLabor(BuildContext editorContext) async {
+    bool editorActive() => mounted && editorContext.mounted &&
+        ModalRoute.of(editorContext)?.isCurrent == true && !_contentBlocked;
+    if (!_canSeeFinancial || _contentBlocked) return null;
+    final mode = BriskersConnectionModeController.instance;
+    final documents = await readInvoiceLaborSource(
+      onlineRead: () => _api.jobDocuments(widget.businessId, widget.jobId),
+      cachedRead: _localDocumentsForJob,
+      forceOffline: mode.forceOffline,
+      forceOnline: mode.forceOnline,
+    );
+    if (!mounted || !editorContext.mounted || !editorActive()) return null;
+    final invoices = documents
+        .where(
+          (row) =>
+              row['kind'] == 'invoice' &&
+              !const {
+                'void',
+                'voided',
+                'cancelled',
+                'canceled',
+              }.contains(row['status']?.toString().toLowerCase()),
+        )
+        .toList();
+    if (invoices.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No invoice is linked to this Job.')),
+      );
+      return null;
+    }
+    final invoice = await chooseJobInvoice(
+      editorContext,
+      invoices: invoices,
+      title: 'Choose invoice labor',
+    );
+    if (invoice == null || !mounted || !editorContext.mounted || !editorActive()) return null;
+    final id = invoice['id']?.toString() ?? '';
+    final detail = await readInvoiceLaborSource<Map<String, dynamic>?>(
+      onlineRead: () => _api.documentDetail(widget.businessId, id),
+      cachedRead: () => _documentDetailCache.load(widget.businessId, id),
+      forceOffline: mode.forceOffline || id.startsWith('local-invoice-'),
+      forceOnline: mode.forceOnline,
+    );
+    if (!mounted || !editorContext.mounted || !editorActive()) return null;
+    if (detail == null || detail['job_id']?.toString() != widget.jobId ||
+        detail['kind'] != 'invoice' ||
+        const {'void', 'voided', 'cancelled', 'canceled'}.contains(detail['status']?.toString().toLowerCase())) {
+      throw StateError(
+        'Connect and open this invoice before copying its labor.',
+      );
+    }
+    return invoiceLaborWorkSummary(detail);
+  }
+
   String _imageMime(String name) {
     final lower = name.toLowerCase();
     if (lower.endsWith('.png')) return 'image/png';
@@ -1578,6 +2379,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _editPreInspectionDetails() async {
+    final epoch = _loadEpoch;
     if (_job == null || _busy || !_canEditInspection) return;
 
     final mileage = TextEditingController(
@@ -1621,7 +2423,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
                 decoration:
-                    const InputDecoration(labelText: 'Arrival mileage'),
+                    const InputDecoration(labelText: 'Miles In at check-in'),
               ),
               const SizedBox(height: 6),
               TextField(
@@ -1667,7 +2469,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         notes: noteValue,
         odometer: odometerValue,
       );
-      _applyLocalPreInspection(local);
+      _applyLocalPreInspection(local, expectedEpoch: epoch);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1687,6 +2489,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _addPreInspectionPhotos() async {
+    final epoch = _loadEpoch;
     if (_busy || !_canEditInspection) return;
 
     final source = await showModalBottomSheet<String>(
@@ -1697,12 +2500,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
+              leading: const Icon(Icons.photo_camera_outlined, color: Color(0xFF167F43)),
               title: const Text('Take photo'),
               onTap: () => Navigator.pop(sheetContext, 'camera'),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
               title: const Text('Choose from gallery'),
               onTap: () => Navigator.pop(sheetContext, 'gallery'),
             ),
@@ -1757,7 +2560,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         );
       }
 
-      if (local != null) _applyLocalPreInspection(local);
+      if (local != null) _applyLocalPreInspection(local, expectedEpoch: epoch);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1783,6 +2586,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Future<void> _editPreInspectionPhotoNote(
     Map<String, dynamic> photo,
   ) async {
+    final epoch = _loadEpoch;
     final controller = TextEditingController(
       text: photo['note']?.toString() ?? '',
     );
@@ -1825,7 +2629,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           photo['id'].toString(),
           note,
         );
-        _applyLocalPreInspection(local);
+        _applyLocalPreInspection(local, expectedEpoch: epoch);
         unawaited(_flushPreInspectionQueue());
       } catch (error) {
         if (mounted) setState(() => _error = error.toString());
@@ -1862,22 +2666,25 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final controller = TextEditingController();
     var includeOnInvoice = false;
     final photos = <XFile>[];
+    String? findingInputError;
 
     final save = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
+      useSafeArea: true,
       isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            16,
-            0,
-            16,
-            MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
-          ),
-          child: SafeArea(
-            top: false,
+        builder: (context, setSheetState) => SafeArea(
+          top: false,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: MediaQuery.sizeOf(sheetContext).height * 0.48,
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.84,
+            ),
             child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(20, 12, 20,
+                MediaQuery.viewInsetsOf(sheetContext).bottom + 28),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1894,12 +2701,18 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   const SizedBox(height: 6),
                   TextField(
                     controller: controller,
-                    autofocus: true,
+                    autofocus: false,
                     minLines: 3,
                     maxLines: 7,
+                    onChanged: (_) {
+                      if (findingInputError != null) {
+                        setSheetState(() => findingInputError = null);
+                      }
+                    },
                     decoration: InputDecoration(
                       labelText: tr('finding'),
                       hintText: tr('findingExample'),
+                      errorText: findingInputError,
                     ),
                   ),
                   if (_canSeeFinancial)
@@ -1941,7 +2754,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                             }
                           },
                           icon:
-                              const Icon(Icons.photo_library_outlined),
+                              const Icon(Icons.photo_library_outlined, color: Colors.teal),
                           label: const Text('Gallery'),
                         ),
                       ),
@@ -1960,7 +2773,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                             }
                           },
                           icon:
-                              const Icon(Icons.photo_camera_outlined),
+                              const Icon(Icons.photo_camera_outlined, color: Colors.teal),
                           label: const Text('Camera'),
                         ),
                       ),
@@ -1971,11 +2784,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     width: double.infinity,
                     child: FilledButton.icon(
                       style: FilledButton.styleFrom(
-                        backgroundColor: Colors.deepOrange,
+                        backgroundColor: Colors.teal.shade700,
                         foregroundColor: Colors.white,
                       ),
                       onPressed: () {
-                        if (controller.text.trim().isEmpty) return;
+                        if (controller.text.trim().isEmpty) {
+                          setSheetState(() => findingInputError =
+                              'Describe the finding before saving.');
+                          return;
+                        }
                         Navigator.pop(sheetContext, true);
                       },
                       icon: const Icon(Icons.add),
@@ -2134,13 +2951,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
+              leading: const Icon(Icons.photo_camera_outlined, color: Color(0xFF167F43)),
               title: const Text('Take photo'),
               onTap: () =>
                   Navigator.pop(sheetContext, 'camera'),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
               title: const Text('Choose from gallery'),
               onTap: () =>
                   Navigator.pop(sheetContext, 'gallery'),
@@ -2267,12 +3084,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
+              leading: const Icon(Icons.photo_camera_outlined, color: Color(0xFF167F43)),
               title: const Text('Take replacement photo'),
               onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
               title: const Text('Choose replacement from gallery'),
               onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
             ),
@@ -2315,31 +3132,236 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     });
   }
 
+  Future<void> _changeFindingLocally(
+    Future<Map<String, dynamic>> Function() action,
+  ) async {
+    if (_busy || _contentBlocked) return;
+    setState(() { _busy = true; _error = null; });
+    _modalRefresh?.call();
+    try {
+      await action();
+      await _refreshLocalWorkFindings();
+      unawaited(_flushWorkFindingsQueue());
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = error.toString());
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    } finally {
+      if (mounted) { setState(() => _busy = false); _modalRefresh?.call(); }
+    }
+  }
+
   Future<void> _addFindingToJob(Map<String, dynamic> finding) async {
-    await _run(() => _api.addVehicleFindingToJob(
-          widget.businessId,
-          finding['id'].toString(),
-          widget.jobId,
-        ));
+    if (!_canQuickAdmin && !_canManage) return;
+    await _changeFindingLocally(() => _findingActions.addToJob(
+      widget.businessId, finding, widget.jobId));
   }
 
   Future<void> _removeFindingFromJob(Map<String, dynamic> finding) async {
-    await _run(() => _api.removeVehicleFindingFromJob(
-          widget.businessId,
-          finding['id'].toString(),
-          widget.jobId,
-        ));
+    if (!_canQuickAdmin && !_canManage) return;
+    await _changeFindingLocally(() => _findingActions.removeFromJob(
+      widget.businessId, finding, widget.jobId));
+  }
+
+  // Resolve is a historical repair record, not an implicit assignment to
+  // whichever Job happened to be open when the button was tapped.
+  Future<String?> _chooseFindingResolutionJob(
+    Map<String, dynamic> finding,
+  ) async {
+    final job = _job;
+    if (job == null || !mounted) {
+      return null;
+    }
+    final vehicleId = job['vehicle_id']?.toString() ?? '';
+    final customerId = job['customer_id']?.toString() ?? '';
+    if (vehicleId.isEmpty || customerId.isEmpty) {
+      return null;
+    }
+
+    final foundVehicleId =
+        (finding['vehicle_id'] ?? finding['_vehicle_id'])?.toString() ?? '';
+    if (foundVehicleId.isNotEmpty && foundVehicleId != vehicleId) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('This finding belongs to a different vehicle.'),
+      ));
+      return null;
+    }
+
+    final rows = await localDatabase.customSelect(
+      'SELECT id,job_number,title,status,vehicle_id FROM local_jobs '
+      'WHERE business_id=? AND customer_id=? AND vehicle_id=?',
+      variables: [
+        Variable<String>(widget.businessId),
+        Variable<String>(customerId),
+        Variable<String>(vehicleId),
+      ],
+    ).get();
+    final eligible = <String, Map<String, dynamic>>{
+      for (final row in rows)
+        if ((row.data['id']?.toString() ?? '').isNotEmpty)
+          row.data['id'].toString(): Map<String, dynamic>.from(row.data),
+    };
+    // Keep the currently viewed Job usable if the local list hasn't hydrated.
+    eligible[widget.jobId] = {
+      ...job, 'id': widget.jobId,
+      'vehicle_id': vehicleId, 'customer_id': customerId,
+    };
+    if (!BriskersConnectionModeController.instance.forceOffline) {
+      try {
+        final remote = await _api.customerServiceHistory(
+          widget.businessId, customerId);
+        for (final row in remote) {
+          final id = row['id']?.toString() ?? '';
+          if (id.isNotEmpty && row['vehicle_id']?.toString() == vehicleId) {
+            eligible[id] = row;
+          }
+        }
+      } catch (_) {
+        // Existing local Jobs remain available if the network is down.
+      }
+    }
+    final active = <Map<String, dynamic>>[];
+    final historical = <Map<String, dynamic>>[];
+    for (final candidate in eligible.values) {
+      final id = candidate['id']?.toString() ?? '';
+      if (id.isEmpty ||
+          await LocalJobQuarantine.isJobBlocked(
+            localDatabase, widget.businessId, id,
+          ) ||
+          await LocalJobRetirement.isJobBlocked(
+            localDatabase, widget.businessId, id,
+          )) {
+        continue;
+      }
+      switch (findingJobChoice(candidate['status'], resolving: true)) {
+        case FindingJobChoice.active:
+          active.add(candidate);
+        case FindingJobChoice.completedHistory:
+          historical.add(candidate);
+        case FindingJobChoice.unavailable:
+          break;
+      }
+    }
+    if (!mounted) {
+      return null;
+    }
+    if (active.isEmpty && historical.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('No eligible repair Jobs found for this vehicle.'),
+      ));
+      return null;
+    }
+    Widget jobOption(
+      BuildContext sheetContext,
+      Map<String, dynamic> candidate,
+      bool isCompleted,
+    ) {
+      final id = candidate['id'].toString();
+      final number = candidate['job_number']?.toString() ?? '';
+      final label = number.isEmpty ? 'Job' : 'Job $number';
+      return ListTile(
+        leading: Icon(isCompleted ? Icons.history : Icons.work_outline),
+        title: Text(label),
+        subtitle: Text(isCompleted
+            ? 'Completed · Historical repair'
+            : 'Active repair'),
+        onTap: () async {
+          final confirmed = await showDialog<bool>(
+            context: sheetContext,
+            builder: (dialogContext) => AlertDialog(
+              title: const Text('Confirm resolving repair'),
+              content: Text(
+                'Did the work on $label actually repair this finding? '
+                'This records the repair history without reopening that '
+                'Job or changing any invoice, payment, or payroll.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: const Text('Confirm repair'),
+                ),
+              ],
+            ),
+          );
+          if (confirmed == true && sheetContext.mounted) {
+            Navigator.pop(sheetContext, id);
+          }
+        },
+      );
+    }
+
+    return showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: FractionallySizedBox(
+          heightFactor: 0.64,
+          child: ListView(children: [
+            const ListTile(
+              title: Text('Which Job repaired this finding?',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+              subtitle: Text(
+                'Choose the actual repair, including completed Jobs. '
+                'This does not modify a historical invoice.',
+              ),
+            ),
+            if (active.isNotEmpty) ...[
+              const ListTile(title: Text('Active Jobs')),
+              for (final candidate in active)
+                jobOption(sheetContext, candidate, false),
+            ],
+            if (historical.isNotEmpty) ...[
+              const Divider(),
+              const ListTile(title: Text('Completed Jobs — repair history')),
+              for (final candidate in historical)
+                jobOption(sheetContext, candidate, true),
+            ],
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _resolveFinding(Map<String, dynamic> finding) async {
+    if (!_canQuickAdmin && !_canManage) return;
+    if ((finding['_finding_action_error']?.toString() ?? '').isNotEmpty ||
+        finding['sync_state'] == 'conflict') {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('A prior finding change needs sync verification. '
+          'Review Settings > Local database & sync; no duplicate action was sent.'),
+      ));
+      return;
+    }
+    final repairJobId = await _chooseFindingResolutionJob(finding);
+    if (repairJobId == null || !mounted) {
+      return;
+    }
+    await _changeFindingLocally(() => _findingActions.resolve(
+      widget.businessId, finding, repairJobId));
   }
 
   Future<void> _reopenFinding(Map<String, dynamic> finding) async {
-    await _run(() => _api.reopenVehicleFinding(
-          widget.businessId,
-          finding['id'].toString(),
-        ));
+    if (!_canQuickAdmin && !_canManage) return;
+    await _changeFindingLocally(() => _findingActions.reopen(widget.businessId, finding));
+  }
+
+  Future<void> _setFindingInvoiceFlag(Map<String, dynamic> finding, bool include) async {
+    if (!_canSeeFinancial) return;
+    await _changeFindingLocally(() => _findingActions.setInvoiceFlag(widget.businessId, finding, include));
   }
 
   Future<void> _deleteFinding(Map<String, dynamic> finding) async {
-    if (!_owner) return;
+    if (!_owner || !_onlineReady || _busy ||
+        finding['id'].toString().startsWith('local-finding-') ||
+        finding['row_version'] == null || finding['sync_state'] == 'conflict') {
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -2407,22 +3429,70 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _createInvoice() async {
-    if (!_canSeeFinancial) return;
-    String? id;
-    await _run(() async {
-      id = await _api.createInvoice(widget.businessId, widget.jobId);
+    if (!_canSeeFinancial || _busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
     });
-    if (!mounted || id == null) return;
-    await _openDocument(id!);
+    String? id;
+    try {
+      id = BriskersConnectionModeController.instance.forceOffline
+          ? await _offlineDocumentDraft.createQuickInvoice(widget.businessId,
+              existingJobId:widget.jobId,
+              customerId:_job?['customer_id']?.toString() ?? '',
+              customerName:_job?['customer_name']?.toString() ?? 'Customer',
+              vehicleId:_job?['vehicle_id']?.toString(),
+              vehicleLabel:(_job?['vehicle_label'] ?? _job?['vehicle'])?.toString())
+          : await _api.createInvoice(widget.businessId, widget.jobId);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (!mounted) return;
+    // Do not wait for a full Job refresh before showing a saved new invoice.
+    await _openDocument(id, freshlyCreated: true);
   }
 
-  Future<void> _openDocument(String documentId) async {
+  Future<void> _addPayment() async {
+    if (_busy || _contentBlocked || !canOpenJobInvoicePayment(widget.roleCode)) {
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final opened = await openJobInvoicePayment(
+        context,
+        businessId: widget.businessId,
+        jobId: widget.jobId,
+        roleCode: widget.roleCode,
+        documents: _onlineReady ? _documents : null,
+      );
+      if (opened && mounted && !_contentBlocked) await _load();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _openDocument(String documentId, {
+    bool freshlyCreated = false,
+  }) async {
+    Map<String, dynamic>? selected;
+    for (final row in _documents) {
+      if (row['id']?.toString() == documentId) {
+        selected = Map<String, dynamic>.from(row);
+        break;
+      }
+    }
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: documentId,
+          initialDocumentSummary: selected,
+          freshlyCreated: freshlyCreated,
           isOwner: _owner,
           canManageExpenses: <String>{
             'owner',
@@ -2436,10 +3506,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
 
-  List<Map<String, dynamic>> _availableStatuses() => _statuses;
+  List<Map<String, dynamic>> _availableStatuses() => ownerJobStatuses(_statuses);
 
   Widget _statusControl() {
-    final color = colorFromHex(_job?['status_color']?.toString());
+    final color = operationalJobStatusColor(
+      _job?['status']?.toString(),
+      _job?['status_color']?.toString(),
+    );
     final icon = jobStatusIcon(_job?['status_icon']?.toString());
     final name = jobStatusLabel(
       _job?['status']?.toString(),
@@ -2519,41 +3592,27 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           num.tryParse(invoice['pending_payment']?.toString() ?? '') ?? 0;
     }
 
-    if (total <= 0 || paid >= total - 0.005) return 'Paid';
+    // No payment proof on a zero-total or malformed invoice.
+    if (total <= 0) return null;
+    if (paid >= total - 0.005) return 'Paid';
     if (pending > 0 && paid + pending >= total - 0.005) {
-      return 'Awaiting payment clearance';
+      return 'Recorded payment · Pending finalization';
     }
     return 'Awaiting payment';
   }
 
   Widget _completedPaymentBanner() {
-    final label = _completedPaymentLabel();
-    if (label == null) return const SizedBox.shrink();
-
-    final paid = label == 'Paid';
-    final invoiceNeeded = label == 'Invoice needed';
-    final color = paid
-        ? const Color(0xFF169B62)
-        : invoiceNeeded
-            ? const Color(0xFFC62828)
-            : const Color(0xFFE58A00);
-    final icon = paid
-        ? Icons.check_circle_outline
-        : invoiceNeeded
-            ? Icons.receipt_long_outlined
-            : Icons.hourglass_bottom_outlined;
-
-    return Card(
-      margin: EdgeInsets.zero,
-      color: color.withValues(alpha: 0.08),
-      child: ListTile(
-        leading: Icon(icon, color: color),
-        title: const Text(
-          'Financial status',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-        subtitle: Text(label),
-      ),
+    // Use the already synchronized Jobs-list payment state during local-first
+    // paint, so "Paid" is visible immediately for a saved paid Job (J-30).
+    // The online invoice graph can subsequently correct a genuinely changed
+    // status, but the initial render never invents one from empty documents.
+    final saved = savedJobFinancialStatus(
+      _job?['payment_state'] ?? widget.initialJobSummary?['payment_state'],
+    );
+    final status = saved ?? (_onlineReady ? _completedPaymentLabel() : null);
+    return JobFinancialStatusCard(
+      status: status,
+      offline: BriskersConnectionModeController.instance.forceOffline,
     );
   }
 
@@ -2580,17 +3639,24 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     required String jobTitle,
     required Map<String, dynamic>? assignment,
   }) {
-    final employeeName = assignment == null
-        ? 'Unassigned'
-        : assignment['employee_name']?.toString() ?? 'Assigned';
+    final preferredNickname =
+        _job?['assigned_employee_nickname']?.toString().trim() ?? '';
+    final employeeName = preferredNickname.isNotEmpty
+        ? preferredNickname
+        : (assignment == null
+            ? 'Unassigned'
+            : assignment['employee_name']?.toString() ?? 'Assigned');
     final employeePosition =
         assignment?['position']?.toString() ?? 'Mechanic';
     final roleStyle = employeeRoleStyle(employeePosition);
-    final statusColor = colorFromHex(_job?['status_color']?.toString());
-    final cardTint = Color.alphaBlend(
-      statusColor.withValues(alpha: 0.12),
-      const Color(0xFFFCFCFB),
+    final statusColor = operationalJobStatusColor(
+      _job?['status']?.toString(),
+      _job?['status_color']?.toString(),
     );
+    final cardTint = _owner && OwnerPayrollScreen.enabled
+        ? const Color(0xFFFAFBFE)
+        : Color.alphaBlend(statusColor.withValues(alpha: 0.12),
+            const Color(0xFFFCFCFB));
 
     Widget infoRow({
       required IconData icon,
@@ -2599,6 +3665,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       required String value,
       String? subtitle,
       bool problemFlag = false,
+      bool showChevron = false,
       VoidCallback? onTap,
     }) {
       final enabled = onTap != null && !_busy;
@@ -2653,7 +3720,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 const SizedBox(width: 5),
                 const Icon(Icons.flag, color: Colors.red, size: 19),
               ],
-              if (enabled) const Icon(Icons.chevron_right, size: 22),
+              if (enabled || showChevron)
+                const Icon(Icons.chevron_right, size: 22),
             ],
           ),
         ),
@@ -2707,11 +3775,33 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       );
     }
 
+    final linkedInvoices = _documents.where(
+      (row) => row['kind'] == 'invoice' && row['id'] is String,
+    ).toList();
+
+    Widget invoiceChip(Map<String, dynamic> invoice) => ActionChip(
+      backgroundColor: const Color(0xFFE6F4F1),
+      labelStyle: const TextStyle(
+        color: Color(0xFF07594D), fontWeight: FontWeight.w800),
+      avatar: const Icon(Icons.receipt_long_outlined,
+        size: 17, color: Color(0xFF07594D)),
+      label: Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(child: Text(invoice['document_number'] == null
+            ? 'Open invoice' : 'Invoice #${invoice['document_number']}',
+          softWrap: true,
+          style: const TextStyle(fontSize: 17,
+            fontWeight: FontWeight.w900, color: Color(0xFF07594D)))),
+      ]),
+      onPressed: _busy ? null : () => _openDocument(invoice['id'] as String),
+    );
+
     return Container(
       decoration: BoxDecoration(
         color: cardTint,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: statusColor.withValues(alpha: 0.24)),
+        border: Border.all(color: _owner && OwnerPayrollScreen.enabled
+            ? const Color(0xFFC7CDDA)
+            : statusColor.withValues(alpha: 0.24)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.06),
@@ -2766,37 +3856,52 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   value: vehicle.isEmpty ? 'No vehicle' : vehicle,
                   subtitle:
                       vin.isEmpty ? 'VIN: Not entered' : 'VIN: $vin',
-                  onTap: _canManage ? _changeVehicle : null,
+                  onTap: _canManage || _canEditVehicleLocally
+                      ? _changeVehicle : null,
+                  showChevron: _showVehicleChevron,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(52, 0, 8, 5),
+                  child: JobMileageRow(
+                    mileageIn: JobMileageSummary.mileageIn(_job, _preInspection),
+                    mileageOut: _mileageOutVehicleId ==
+                            _job?['vehicle_id']?.toString()
+                        ? _mileageOut : null,
+                    onEditIn: _canEditInspection && !_busy
+                        ? _editMileageIn : null,
+                    onOpenOut: _canSeeFinancial && !_busy &&
+                            _job?['_first_frame_only'] != true
+                        ? _openMileageOutInvoice : null,
+                  ),
                 ),
                 Divider(
                   height: 1,
                   color: statusColor.withValues(alpha: 0.20),
                 ),
-                InkWell(
-                  onTap: _canManage && !_busy ? _changeJobTitle : null,
-                  borderRadius: BorderRadius.circular(10),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(6, 8, 4, 3),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            jobTitle.isEmpty ? 'Job' : jobTitle,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              height: 1.08,
-                            ),
-                          ),
-                        ),
-                        if (_canManage)
-                          const Icon(Icons.chevron_right, size: 20),
-                      ],
-                    ),
-                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal:6, vertical:6),
+                  child: LayoutBuilder(builder:(context,constraints) {
+                    final invoice=_canSeeFinancial && linkedInvoices.isNotEmpty
+                      ? Align(alignment:Alignment.centerLeft,child:invoiceChip(linkedInvoices.first))
+                      : InkWell(onTap:_canManage && !_busy?_changeJobTitle:null,child:Text(jobTitle.isEmpty?'No linked invoice saved':jobTitle));
+                    if(!(OwnerPayrollScreen.enabled && _owner))return invoice;
+                    final mechanic=JobTasksAccess(business:widget.businessId,job:widget.jobId,selectorOnly:true,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);});
+                    if(constraints.maxWidth*.6<180*MediaQuery.textScalerOf(context).scale(1)) {
+                      return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[invoice,const SizedBox(height:6),mechanic]);
+                    }
+                    return Row(children:[Expanded(flex:3,child:invoice),const SizedBox(width:8),Expanded(flex:2,child:mechanic)]);
+                  }),
                 ),
+                if (_canSeeFinancial)
+                  for (final extra in linkedInvoices.skip(1))
+                    Align(alignment: Alignment.centerLeft, child: invoiceChip(extra)),
+                if (_owner && OwnerPayrollScreen.enabled) _progressRow(),
+                // In restored Owner Tasks/Payroll, one job can have several
+                // mechanics and independently assigned labor hours. Repeating
+                // the single Main Mechanic in the green Job summary falsely
+                // suggests it is the whole allocation. Keep the lead selector
+                // and per-mechanic work below in the dedicated Tasks section.
+                if (!(OwnerPayrollScreen.enabled && _owner)) ...[
                 const SizedBox(height: 2),
                 Row(
                   children: [
@@ -2806,7 +3911,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         color: roleStyle.color,
                         label: 'Mechanic',
                         value: employeeName,
-                        onTap: _canQuickAdmin ? _changeAssignment : null,
+                        onTap: _canQuickAdmin && !OwnerPayrollScreen.enabled ? _changeAssignment : null,
                       ),
                     ),
                     Container(
@@ -2819,13 +3924,14 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       child: bottomCell(
                         icon: Icons.timer_outlined,
                         color: statusColor,
-                        label: 'Planned time',
-                        value: '${_hours(_job!['planned_hours'])} hr',
-                        onTap: _canQuickAdmin ? _changePlannedHours : null,
+                        label: OwnerPayrollScreen.enabled?'Estimated labor':'Planned time',
+                        value: OwnerPayrollScreen.enabled?(_taskEstimatedMinutes==null?'—':'${_hours(_taskEstimatedMinutes!/60)} hr'):'${_hours(_job!['planned_hours'])} hr',
+                        onTap: _canQuickAdmin && !OwnerPayrollScreen.enabled ? _changePlannedHours : null,
                       ),
                     ),
                   ],
                 ),
+                ],
               ],
             ),
           ),
@@ -3028,259 +4134,46 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       );
     }
 
-    return FutureBuilder<File?>(
-      future: _attachmentCache.getOrDownload(bucket, key),
-      builder: (context, snapshot) {
-        final cached = snapshot.data;
-        if (cached == null) {
-          return controls(
-            Center(
-              child: snapshot.connectionState == ConnectionState.waiting
-                  ? const CircularProgressIndicator(strokeWidth: 2)
-                  : const Icon(
-                      Icons.broken_image_outlined,
-                      color: Colors.deepOrange,
-                    ),
-            ),
-          );
-        }
-
-        return controls(
-          ClipRRect(
-            borderRadius: BorderRadius.circular(9),
-            child: Image.file(
-              cached,
-              width: 82,
-              height: 82,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => const Center(
-                child: Icon(
-                  Icons.broken_image_outlined,
-                  color: Colors.deepOrange,
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _findingsDrawer() {
-    final open = _findings
-        .where((finding) => finding['status']?.toString() == 'open')
-        .toList();
-    final inJob = _findings
-        .where((finding) => finding['status']?.toString() == 'in_job')
-        .toList();
-    final resolved = _findings
-        .where((finding) => finding['status']?.toString() == 'resolved')
-        .toList();
-
-    Widget findingRow(Map<String, dynamic> finding) {
-      final status = finding['status']?.toString() ?? 'open';
-      final repairJobId = finding['repair_job_id']?.toString() ?? '';
-      final repairJob = finding['repair_job_number']?.toString() ?? '';
-      final inThisJob = status == 'in_job' && repairJobId == widget.jobId;
-      final attachments =
-          List<dynamic>.from(finding['attachments'] ?? const []);
-      final syncState =
-          finding['sync_state']?.toString() ?? 'synced';
-      final conflict = syncState == 'conflict';
-      final pendingPhotos = attachments.any(
-        (raw) =>
-            raw is Map &&
-            (raw['upload_state']?.toString() ?? 'synced') !=
-                'synced',
-      );
-      final waiting = syncState == 'pending' || pendingPhotos;
-      final findingId = finding['id']?.toString() ?? '';
-      final serverReady = !findingId.startsWith('local-finding-') &&
-          finding['row_version'] != null &&
-          !conflict;
-
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  status == 'resolved'
-                      ? Icons.check_circle_outline
-                      : status == 'in_job'
-                          ? Icons.handyman_outlined
-                          : Icons.warning_amber_rounded,
-                  color: status == 'resolved'
-                      ? Colors.green
-                      : status == 'in_job'
-                          ? BriskersColors.jobs
-                          : Colors.deepOrange,
-                  size: 21,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    finding['body']?.toString() ?? '',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-                if ((_canEditFindings && !conflict) ||
-                    (finding['can_edit'] == true && !conflict) ||
-                    (_owner && _onlineReady && serverReady))
-                  PopupMenuButton<String>(
-                    tooltip: 'Finding actions',
-                    onSelected: (value) {
-                      if (value == 'edit') _editFinding(finding);
-                      if (value == 'photo') _addPhotosToFinding(finding);
-                      if (value == 'delete') _deleteFinding(finding);
-                    },
-                    itemBuilder: (_) => [
-                      if (finding['can_edit'] == true && !conflict)
-                        const PopupMenuItem(
-                          value: 'edit',
-                          child: Text('Edit finding'),
-                        ),
-                      if (_canEditFindings && !conflict)
-                        const PopupMenuItem(
-                          value: 'photo',
-                          child: Text('Add photos'),
-                        ),
-                      if (_owner && _onlineReady && serverReady)
-                        const PopupMenuItem(
-                          value: 'delete',
-                          child: Text('Delete finding'),
-                        ),
-                    ],
-                  ),
-              ],
-            ),
-            if (conflict)
-              const Padding(
-                padding: EdgeInsets.only(top: 5),
-                child: Text(
-                  'Sync conflict • local Finding is preserved',
-                  style: TextStyle(
-                    color: Colors.orange,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                  ),
-                ),
-              )
-            else if (waiting)
-              const Padding(
-                padding: EdgeInsets.only(top: 5),
-                child: Text(
-                  'Saved locally • waiting to sync',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            if (attachments.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 7,
-                runSpacing: 7,
-                children: attachments
-                    .map(
-                      (raw) => _findingPhotoThumbnail(
-                        finding,
-                        Map<String, dynamic>.from(raw as Map),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ],
-            if (status == 'open' && _canManage && serverReady)
-              CheckboxListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                title: const Text('Repair on this job'),
-                subtitle: const Text(
-                  'Completing the job will mark it resolved.',
-                ),
-                value: false,
-                onChanged: _busy
-                    ? null
-                    : (value) {
-                        if (value == true) _addFindingToJob(finding);
-                      },
-              )
-            else if (inThisJob && _canManage && serverReady)
-              CheckboxListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                title: const Text('Repair on this job'),
-                subtitle: const Text(
-                  'Assigned to this job • resolves when the job is completed.',
-                ),
-                value: true,
-                onChanged: _busy
-                    ? null
-                    : (value) {
-                        if (value == false) _removeFindingFromJob(finding);
-                      },
-              )
-            else if (status == 'in_job')
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  repairJob.isEmpty ? 'In another job' : 'In $repairJob',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-              )
-            else if (status == 'resolved' &&
-                _canManage &&
-                serverReady)
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: _busy ? null : () => _reopenFinding(finding),
-                  icon: const Icon(Icons.replay_outlined),
-                  label: const Text('Reopen'),
-                ),
-              ),
-            const Divider(height: 1),
-          ],
+    // Keep the resolved image Future in a StatefulWidget instead of
+    // recreating it each time Job status, finding counts, or a checkbox
+    // rebuilds this drawer. The original file / persistent photo cache is
+    // always checked first, with server fetch only when online and missing.
+    // A stable identity also prevents wrong photo state if attachments reorder.
+    return controls(
+      ClipRRect(
+        borderRadius: BorderRadius.circular(9),
+        child: LocalFirstAttachmentImage(
+          key: ValueKey('${widget.businessId}::$bucket::$key'),
+          attachment: attachment,
+          width: 82,
+          height: 82,
+          fit: BoxFit.cover,
         ),
-      );
-    }
-
-    final active = [...open, ...inJob];
-    return _JobDrawerSurface(
-      color: Colors.deepOrange,
-      child: Column(
-        children: [
-          if (active.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('No unresolved findings for this vehicle.'),
-              ),
-            )
-          else
-            ...active.map(findingRow),
-          if (resolved.isNotEmpty)
-            ExpansionTile(
-              title: Text(
-                resolved.length == 1
-                    ? '1 resolved finding'
-                    : '${resolved.length} resolved findings',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              children: resolved.map(findingRow).toList(),
-            ),
-        ],
       ),
     );
   }
+
+  Widget _findingsDrawer() => _JobDrawerSurface(
+    color: Colors.deepOrange,
+    child: VehicleFindings(
+      findings: _findings,
+      jobId: widget.jobId,
+      busy: _busy,
+      canEdit: _canEditFindings,
+      canManage: _canQuickAdmin || _canManage,
+      canIncludeOnInvoice: _canSeeFinancial,
+      onEdit: _editFinding,
+      onAddPhotos: _addPhotosToFinding,
+      onDelete: _owner && _onlineReady ? _deleteFinding : null,
+      photoBuilder: _findingPhotoThumbnail,
+      onAddToJob: _addFindingToJob,
+      onRemoveFromJob: _removeFindingFromJob,
+      onNotApplicable:(finding,note)=>_changeFindingLocally(()=>_findingActions.notApplicable(widget.businessId,finding,note:note)),
+      onReopen: _reopenFinding,
+      onResolve: _resolveFinding,
+      onInvoiceChanged: _setFindingInvoiceFlag,
+    ),
+  );
 
   Future<void> _scanJobExpense() async {
     final job = _job;
@@ -3399,54 +4292,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _deleteUnusedJob() async {
-    if (!_owner || !_onlineReady || _busy ||
-        BriskersConnectionModeController.instance.forceOffline) {
-      return;
-    }
+    if (!_owner || _busy) return;
+    setState(() { _busy=true; _error=null; });
     try {
-      final plan = await _api.jobDeletionPlan(widget.businessId,widget.jobId);
-      if (!mounted) return;
-      final number=plan['job_number']?.toString() ?? '';
-      final permitted=plan['can_delete'] == true;
-      final invoices=(plan['invoices'] as List?) ?? const [];
-      final estimates=(plan['estimates_preserved'] as List?) ?? const [];
-      final confirmed=await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Delete Job?'),
-          content: Text(permitted
-              ? 'Delete Job $number and ${invoices.length} unpaid invoice'
-                '${invoices.length == 1 ? '' : 's'}? '
-                '${estimates.length} estimate'
-                '${estimates.length == 1 ? ' will' : 's will'} be kept.'
-              : 'Job $number cannot be deleted: '
-                '${plan['reason'] ?? 'Protected related records'}.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext,false),
-              child: const Text('Cancel'),
-            ),
-            if (permitted)
-              FilledButton(
-                onPressed: () => Navigator.pop(dialogContext,true),
-                child: const Text('Delete Job'),
-              ),
-          ],
-        ),
-      );
-      if (confirmed != true || !mounted) return;
-      setState(() => _busy=true);
-      try {
-        await _api.deleteJobWithUnpaidInvoices(
-          widget.businessId,widget.jobId,
-        );
-        if (mounted) Navigator.pop(context,true);
-      } finally {
-        if (mounted) setState(() => _busy=false);
-      }
-    } catch (error) {
-      if (mounted) setState(() => _error=error.toString());
-    }
+      final deleted=await deleteOwnerLocalJob(context,businessId:widget.businessId,
+        jobId:widget.jobId,label:_job?['job_number']?.toString() ?? 'Job');
+      if(deleted && mounted) Navigator.pop(context,true);
+    } catch(error) {
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Unable to delete Job: $error')));
+    } finally { if(mounted) setState(()=>_busy=false); }
   }
 
   Future<void> _showNewMenu() async {
@@ -3519,8 +4373,20 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               title: Text('New invoice'),
             ),
           ),
-        if (_canSeeFinancial && _canManage)
-          const PopupMenuDivider(),
+        if (canOpenJobInvoicePayment(widget.roleCode))
+          const PopupMenuItem(
+            value: 'payment',
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.payments_outlined,
+                color: BriskersColors.invoices,
+              ),
+              title: Text('Add Payment'),
+            ),
+          ),
+        if (_canSeeFinancial && _canManage) const PopupMenuDivider(),
         if (_canManage)
           const PopupMenuItem(
             value: 'expense',
@@ -3540,32 +4406,44 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             child: ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                Icons.bolt,
-                color: BriskersColors.expenses,
-              ),
+              leading: Icon(Icons.bolt, color: BriskersColors.expenses),
               title: Text('Quick expense'),
             ),
           ),
       ],
     );
 
-    if (choice == 'inspection') { if (_preInspection == null) await _editPreInspectionDetails(); if (mounted) await _openSectionModal('inspection'); }
+    if (choice == 'inspection') {
+      if (_preInspection == null) await _editPreInspectionDetails();
+      if (mounted) await _openSectionModal('inspection');
+    }
     if (choice == 'finding') await _addFinding();
     if (choice == 'estimate') await _createEstimate();
     if (choice == 'identifix') await _importIdentifixEstimate();
     if (choice == 'invoice') await _createInvoice();
+    if (choice == 'payment') await _addPayment();
     if (choice == 'expense') await _addJobExpense();
     if (choice == 'quick_expense') await _addQuickJobExpense();
   }
 
   Future<void> _openExpense(String transactionId) async {
+    // Job Expenses already displays its cached row while offline.
+    // Pass that row to the same expense-detail fallback as the main list.
+    Map<String, dynamic>? cached;
+    for (final expense in _jobExpenses) {
+      if (expense['id']?.toString() == transactionId) {
+        cached = Map<String, dynamic>.from(expense);
+        break;
+      }
+    }
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => ExpenseDetailScreen(
           businessId: widget.businessId,
           transactionId: transactionId,
+          // Safe as read-only preview in both Auto and Force Offline.
+          cachedDetail: cached,
           allowRecurring:
               widget.roleCode == 'owner' || widget.roleCode == 'manager',
           canDeleteTransaction: widget.roleCode == 'owner',
@@ -3831,82 +4709,35 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              _profitabilityError == null
-                  ? 'Profitability could not be loaded.'
-                  : 'Profitability could not be loaded.\n\n$_profitabilityError',
+              BriskersConnectionModeController.instance.forceOffline
+                  ? 'No previously verified profitability is saved for this job on this device. Connect once to load accurate totals.'
+                  : (_profitabilityError == null
+                      ? 'Profitability is not available yet.'
+                      : 'Profitability could not be loaded.\n\n$_profitabilityError'),
             ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _reloadProfitability,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Try again'),
-            ),
+            if (!BriskersConnectionModeController.instance.forceOffline) ...[
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _reloadProfitability,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try again'),
+              ),
+            ],
           ],
         ),
       );
     }
 
-    num value(String key) =>
-        num.tryParse(data[key]?.toString() ?? '') ?? 0;
-
-    final revenue = value('revenue');
-    final salesTax = value('sales_tax');
-    final directCost = value('direct_cost');
-    final mechanicCost = value('mechanic_cost');
-    final profit = value('profit');
-    final margin =
-        num.tryParse(data['margin_percent']?.toString() ?? '') ?? 0;
+    final summary = JobProfitabilitySummary.fromRpc(data);
+    if (summary == null) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(tr('profitabilityIncomplete')),
+      );
+    }
     final expenses = List<dynamic>.from(data['expenses'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
-
-    Widget amountRow(
-      String label,
-      num amount, {
-      bool emphasized = false,
-    }) {
-      final emphasizedColor =
-          amount < 0 ? Colors.red.shade700 : Colors.green.shade700;
-
-      return Container(
-        margin: EdgeInsets.only(bottom: emphasized ? 12 : 2),
-        padding: EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: emphasized ? 16 : 11,
-        ),
-        decoration: emphasized
-            ? BoxDecoration(
-                color: emphasizedColor.withValues(alpha: 0.11),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: emphasizedColor.withValues(alpha: 0.28),
-                ),
-              )
-            : null,
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: emphasized ? 18 : 16,
-                  fontWeight:
-                      emphasized ? FontWeight.w800 : FontWeight.w500,
-                ),
-              ),
-            ),
-            Text(
-              _money(amount),
-              style: TextStyle(
-                fontSize: emphasized ? 22 : 17,
-                fontWeight: FontWeight.w900,
-                color: emphasized ? emphasizedColor : null,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
 
     return Card(
       margin: EdgeInsets.zero,
@@ -3918,50 +4749,22 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Job financial summary',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w700,
-                    ),
+            if (_profitabilityFromCache && _profitabilityVerifiedAt != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Last verified ${DateFormat('MMM d, yyyy h:mm a').format(_profitabilityVerifiedAt!)} — saved snapshot, not live. Detailed expenses require online access.',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.deepOrange,
                   ),
                 ),
-                Builder(
-                  builder: (context) {
-                    final marginColor = profit < 0
-                        ? Colors.red.shade700
-                        : Colors.green.shade700;
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: marginColor.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        '${margin.toStringAsFixed(1)}%',
-                        style: TextStyle(
-                          color: marginColor,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ],
+              ),
+            JobProfitabilitySummaryView(
+              summary: summary,
+              formatMoney: _money,
             ),
-            const SizedBox(height: 8),
-            amountRow('Revenue before sales tax', revenue),
-            amountRow('Parts / direct expenses', directCost),
-            amountRow('Mechanic labor', mechanicCost),
-            const Divider(height: 18),
-            amountRow('Gross profit', profit, emphasized: true),
-            amountRow('Sales tax collected', salesTax),
             if (expenses.isNotEmpty) ...[
               const SizedBox(height: 8),
               const Text(
@@ -4029,6 +4832,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Widget _complaintDrawer(String complaint) {
+    final mileageIn = _preInspection?['odometer'] ?? _job?['odometer_in'];
     return _JobDrawerSurface(
       color: BriskersColors.customers,
       child: Padding(
@@ -4040,6 +4844,26 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               complaint.isEmpty
                   ? 'No customer complaint entered.'
                   : complaint,
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(Icons.speed_outlined, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    mileageIn == null
+                        ? 'Miles In: Not entered'
+                        : 'Miles In: ${mileageIn.toString()} mi',
+                  ),
+                ),
+                if (_canEditInspection)
+                  IconButton(
+                    tooltip: 'Edit Miles In',
+                    onPressed: _busy ? null : _editMileageIn,
+                    icon: const Icon(Icons.edit_outlined, size: 19),
+                  ),
+              ],
             ),
             if (_canQuickAdmin) ...[
               const SizedBox(height: 8),
@@ -4133,26 +4957,28 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   ],
                 ),
               ),
-            Text(
-              workSummary.isEmpty
-                  ? 'No work performed entered yet.'
-                  : workSummary,
-            ),
+            const Text('Additional / historical work notes',style:TextStyle(fontWeight:FontWeight.w700)),
+            const SizedBox(height:8),
+            Text(workSummary.isEmpty?'Optional notes. Completed work is recorded automatically from tasks.':workSummary,
+              style:const TextStyle(fontSize:19,height:1.45,fontWeight:FontWeight.w500)),
             if (currentVisit != null && _canEditWork) ...[
               const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed:
-                      _busy || conflict ? null : _editWorkSummary,
-                  icon: Icon(
-                    workSummary.isEmpty
-                        ? Icons.add_circle_outline
-                        : Icons.edit_outlined,
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                children: [
+                  if (_canSeeFinancial)
+                    TextButton.icon(
+                      onPressed: _busy || conflict ? null : () => _editWorkSummary(fillFromInvoice: true),
+                      icon: const Icon(Icons.receipt_long_outlined),
+                      label: const Text('Copy billed labor to notes'),
+                    ),
+                  TextButton.icon(
+                    onPressed: _busy || conflict ? null : _editWorkSummary,
+                    icon: Icon(workSummary.isEmpty ? Icons.add_circle_outline : Icons.edit_outlined),
+                    label: Text(workSummary.isEmpty ? 'Add' : 'Edit'),
                   ),
-                  label:
-                      Text(workSummary.isEmpty ? 'Add' : 'Edit'),
-                ),
+                ],
               ),
             ],
           ],
@@ -4498,7 +5324,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 child: Text(
                   <String>[
                     if (date.isNotEmpty) date,
-                    if (odometer.isNotEmpty) 'Mileage $odometer',
+                    if (odometer.isNotEmpty) 'Miles $odometer',
                   ].join(' • '),
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
@@ -4588,7 +5414,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       case 'findings':
         return tr('vehicleFindings');
       case 'work':
-        return tr('workPerformed');
+        return 'Work Notes';
       case 'history':
         return tr('jobHistory');
       case 'documents':
@@ -4634,7 +5460,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       case 'history':
         return const Color(0xFF2585D8);
       case 'documents':
-        return const Color(0xFFE5A400);
+        return BriskersColors.invoices;
       case 'expenses':
         return const Color(0xFFC62828);
       default:
@@ -4642,23 +5468,66 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
+  void _saveVerifiedProfitability(Map<String, dynamic> data) {
+    if (!_owner || JobProfitabilitySummary.fromRpc(data) == null) return;
+    final userId = LocalJobAccessHistory.currentUserId;
+    if (userId == null) return;
+    unawaited(_profitabilityCache.save(
+      widget.businessId, userId, widget.jobId, data,
+    ));
+  }
+
+  Future<void> _loadCachedProfitability(int epoch) async {
+    if (!_owner) return;
+    final userId = LocalJobAccessHistory.currentUserId;
+    if (userId == null) return;
+    try {
+      final saved = await _profitabilityCache.load(
+        widget.businessId, userId, widget.jobId,
+      );
+      if (!_currentLoad(epoch) || saved == null || _profitability != null) {
+        return;
+      }
+      setState(() {
+        _profitability = saved.data;
+        _profitabilityFromCache = true;
+        _profitabilityVerifiedAt = saved.at;
+        _profitabilityError = null;
+      });
+      _modalRefresh?.call();
+    } catch (_) {
+      // No verified snapshot must not block the Job screen.
+    }
+  }
+
   Future<void> _reloadProfitability() async {
     if (!_owner) return;
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      // A blocked network request is not a useful Retry in Force Offline.
+      await _loadCachedProfitability(_loadEpoch);
+      return;
+    }
     try {
       final data = await _api.jobProfitability(
         widget.businessId,
         widget.jobId,
       );
       if (!mounted) return;
+      final valid = JobProfitabilitySummary.fromRpc(data) != null;
       setState(() {
-        _profitability = data;
-        _profitabilityError = null;
+        if (valid) {
+          _profitability = data;
+          _profitabilityFromCache = false;
+          _profitabilityVerifiedAt = DateTime.now();
+        }
+        _profitabilityError = valid ? null : 'Accounting totals are incomplete.';
       });
+      if (valid) _saveVerifiedProfitability(data);
       _modalRefresh?.call();
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _profitabilityError = error.toString();
+        if (_profitability == null) _profitabilityError = error.toString();
       });
       _modalRefresh?.call();
     }
@@ -4666,26 +5535,44 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   Future<void> _openSectionModal(String key) async {
     if (_job == null) return;
+    if (key == 'work') {
+      // Work completion comes from the task ledger, not customer billing.
+    }
 
     // The online response already contains the authoritative Job document list.
     // Never overwrite it with a potentially lagging local index when the
     // documents tile is reopened. Local recovery is for offline display only.
     if (key == 'documents' && _canSeeFinancial && !_onlineReady) {
-      try {
-        final localDocuments = await _localDocumentsForJob(
-          recoverLegacy: true,
-        );
-        if (mounted) {
+      // Never block opening the sheet on legacy local-document recovery.
+      // The existing snapshot renders immediately; new results refresh in place.
+      unawaited(() async {
+        try {
+          final localDocuments = await _localDocumentsForJob(
+            recoverLegacy: true,
+          );
+          if (!mounted) return;
           setState(() => _documents = localDocuments);
+          _modalRefresh?.call();
+        } catch (_) {
+          // Keep the previous local snapshot if recovery fails.
         }
-      } catch (_) {
-        // Keep the last visible document list if local recovery fails.
-      }
+      }());
     }
 
     if (key == 'profit' && _owner) {
       await _reloadProfitability();
       if (!mounted) return;
+      if (BriskersConnectionModeController.instance.forceOffline && _profitability == null) {
+        await showModalBottomSheet<void>(context: context, useSafeArea: true,
+          builder: (_) => SafeArea(child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
+              children: [Text(tr('jobProfitabilityTile'), style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 8),
+                const Text('No verified profitability is saved on this device for this job. Go online to load it.'),
+              ]))));
+        return;
+      }
     }
 
     if (!mounted) return;
@@ -4890,6 +5777,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       ),
                     ),
                   ),
+                  if (widget.bottomNavigationBar != null &&
+                      const <String>{'history', 'documents', 'expenses', 'profit'}
+                          .contains(key))
+                    widget.bottomNavigationBar!,
                 ],
               ),
             );
@@ -4902,10 +5793,56 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     if (mounted) await _load();
   }
 
+  Future<void> _openJobLaborTasks() async {
+    if (!_owner || !OwnerPayrollScreen.enabled) return;
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => OwnerPayrollScreen(businessId: widget.businessId, jobId: widget.jobId),
+    ));
+    if (mounted) await _load();
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => JobQuarantineViewGuard(
+    businessId: widget.businessId,
+    jobId: widget.jobId,
+    onBlocked: _blockJobContent,
+    onRestored: () { unawaited(_load()); },
+    child: _buildContent(context),
+  );
+
+  Widget _buildContent(BuildContext context) {
     if (_loading) {
-      return Scaffold(appBar: AppBar(backgroundColor: BriskersColors.jobs.withValues(alpha: 0.10), title: const Text('Job')), body: const Center(child: CircularProgressIndicator()));
+      final preview = widget.initialJobSummary;
+      return Scaffold(
+        appBar: AppBar(
+          backgroundColor: BriskersColors.jobs.withValues(alpha: 0.10),
+          title: const Text('Job'),
+        ),
+        body: preview == null
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Card(child: ListTile(
+                    leading: const Icon(Icons.build_outlined,
+                        color: BriskersColors.jobs),
+                    title: Text(preview['customer_name']?.toString() ?? 'Job',
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text([
+                      preview['job_number']?.toString() ?? '',
+                      preview['vehicle_label']?.toString() ??
+                          preview['vehicle']?.toString() ?? '',
+                      preview['title']?.toString() ?? '',
+                    ].where((value) => value.isNotEmpty).join(' • ')),
+                  )),
+                  const ListTile(
+                    leading: SizedBox(width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2)),
+                    title: Text('Opening saved job details…'),
+                  ),
+                ],
+              ),
+      );
     }
     if (_job == null) {
       return Scaffold(appBar: AppBar(backgroundColor: BriskersColors.jobs.withValues(alpha: 0.10), title: const Text('Job')), body: Center(child: Text(_error ?? 'Job not found.')));
@@ -4924,10 +5861,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final complaint = _job!['requested_work']?.toString().trim() ?? '';
     final workSummary = currentVisit?['work_summary']?.toString().trim() ?? '';
     final unassigned = _job!['is_unassigned'] == true;
-    final statusColor = colorFromHex(_job!['status_color']?.toString());
+    final statusColor = operationalJobStatusColor(
+      _job!['status']?.toString(),
+      _job!['status_color']?.toString(),
+    );
     final activeFindings = _findings.where((finding) {
       final status = finding['status']?.toString() ?? 'open';
-      if (status == 'resolved') return false;
+      if (status == 'resolved' || status=='not_applicable') return false;
 
       final repairJobId = finding['repair_job_id']?.toString() ?? '';
       if (status == 'in_job' && repairJobId == widget.jobId) {
@@ -4950,7 +5890,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       int? count,
     ) {
       return SizedBox(
-        height: 80,
+        height: 94,
         child: _JobCategoryTile(
           label: label,
           icon: icon,
@@ -4972,6 +5912,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           PopupMenuButton<String>(
             tooltip: 'Job menu',
             onSelected: (value) async {
+              if (value == 'my_labor' && OwnerPayrollScreen.enabled &&
+                  widget.roleCode == 'mechanic' && _canEditWork) {
+                await Navigator.push<void>(
+                  context,
+                  MaterialPageRoute(builder: (_) => MechanicLaborScreen(
+                    businessId: widget.businessId, jobId: widget.jobId,
+                  )),
+                );
+              }
               if (value == 'edit') await _editJob();
               if (value == 'change_customer') await _changeCustomer();
               if (value == 'assignment') await _changeAssignment();
@@ -4979,6 +5928,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               if (value == 'delete_unused') await _deleteUnusedJob();
             },
             itemBuilder: (_) => [
+              if (OwnerPayrollScreen.enabled && widget.roleCode == 'mechanic' &&
+                  _canEditWork)
+                const PopupMenuItem(
+                  value: 'my_labor',
+                  child: Text('My labor tasks'),
+                ),
               if (_canQuickAdmin)
                 const PopupMenuItem(
                   value: 'edit',
@@ -4999,7 +5954,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     title: Text('Change customer on job'),
                   ),
                 ),
-              if (_canQuickAdmin)
+              if (_canQuickAdmin && !(_owner && OwnerPayrollScreen.enabled))
                 const PopupMenuItem(
                   value: 'assignment',
                   child: ListTile(
@@ -5012,16 +5967,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               if (_owner) ...[
                 const PopupMenuDivider(),
                 PopupMenuItem(
-                  enabled: _onlineReady && !_busy &&
-                      !BriskersConnectionModeController.instance.forceOffline,
+                  enabled: !_busy,
                   value: 'delete_unused',
                   child: ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.delete_outline, color: Colors.red),
-                    title: Text(_onlineReady
-                        ? 'Delete Job'
-                        : 'Delete Job (waiting for online verification)'),
+                    title: Text(BriskersLanguageController.instance.isSpanish
+                        ? 'Eliminar trabajo'
+                        : 'Delete Job'),
                   ),
                 ),
               ],
@@ -5039,37 +5993,30 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           ),
         ],
       ),
+      // The navigation dock is the only bottom bar. Keep the New action
+      // floating above it so the surrounding area remains transparent.
       bottomNavigationBar: widget.bottomNavigationBar,
-      floatingActionButton: (_canEditFindings || _canManage) ? FloatingActionButton.extended(
-        onPressed: _busy ? null : _showNewMenu, backgroundColor: BriskersColors.jobs, foregroundColor: Colors.white, icon: const Icon(Icons.add), label: const Text('New', style: TextStyle(fontWeight: FontWeight.w800)),
-      ) : null,
-      body: RefreshIndicator(
+      floatingActionButton: (_canEditFindings || _canManage) &&
+              MediaQuery.viewInsetsOf(context).bottom == 0
+          ? FloatingActionButton.extended(
+              heroTag: 'job-detail-new-${widget.jobId}',
+              onPressed: _busy ? null : _showNewMenu,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              backgroundColor: BriskersColors.jobs,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
+            )
+          : null,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      body: Stack(
+        children: [
+          RefreshIndicator(
         onRefresh: _load,
         child: ListView(controller: _scrollController, padding: const EdgeInsets.fromLTRB(10, 5, 10, 74), children: [
-          if (_showingLocal)
-            Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 8,
-              ),
-              decoration: BoxDecoration(
-                color: BriskersColors.jobs.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.cloud_off_outlined, size: 18),
-                  SizedBox(width: 7),
-                  Expanded(
-                    child: Text(
-                      'Showing saved job data • offline-capable work can still be edited',
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ],
-              ),
-            ),
           _summaryCard(
             customerName: customerName,
             vehicle: vehicle,
@@ -5077,8 +6024,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             jobTitle: jobTitle,
             assignment: assignment,
           ),
-          if (_onlineReady &&
-              _job?['status']?.toString() == 'completed') ...[
+          if (_canSeeFinancial) ...[
             const SizedBox(height: 8),
             _completedPaymentBanner(),
           ],
@@ -5170,7 +6116,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'work',
-                      tr('workPerformed'),
+                      'Work Notes',
                       Icons.build_outlined,
                       const Color(0xFF15988F),
                       badge(workCount),
@@ -5197,7 +6143,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       'documents',
                       tr('jobDocuments'),
                       Icons.receipt_long_outlined,
-                      const Color(0xFFE5A400),
+                      const Color(0xFF0A8F53),
                       badge(_documents.length),
                     ),
                   ),
@@ -5235,6 +6181,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ),
           ],
         ]),
+      ),
+        ],
       ),
       ),
     );
@@ -5340,8 +6288,16 @@ class _JobDrawerSurface extends StatelessWidget {
     return Card(
       margin: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
-      color: color.withValues(alpha: 0.045),
+      color: Theme.of(context).colorScheme.surface,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: color.withValues(alpha: 0.28),
+        ),
+      ),
       child: child,
     );
   }
 }
+

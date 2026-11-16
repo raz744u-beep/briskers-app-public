@@ -239,6 +239,45 @@ class ExpenseIqLocalPhotoSync {
     return rows.first.data;
   }
 
+  /// Updates only this expense's original URI after the caller has opened
+  /// the matching filename with Android's newly granted folder permission.
+  /// Never changes uploaded/pending state or queues an upload. A stale or
+  /// mismatched expense must fail closed instead of reassigning an image.
+  Future<void> reconnectOriginalPhoto({
+    required String businessId,
+    required String transactionId,
+    required String expectedFilename,
+    required String previousUri,
+    required String verifiedUri,
+  }) async {
+    if (businessId.isEmpty || transactionId.isEmpty ||
+        expectedFilename.isEmpty || previousUri.isEmpty ||
+        verifiedUri.isEmpty) {
+      throw ArgumentError('A verified original receipt reference is required.');
+    }
+    final changed = await _database.customUpdate(
+      '''
+      UPDATE $_table
+      SET source_uri = ?, updated_at = ?, last_error = NULL
+      WHERE business_id = ? AND transaction_id = ?
+        AND filename = ? AND source_uri = ?
+      ''',
+      variables: [
+        Variable<String>(verifiedUri),
+        Variable<int>(DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000),
+        Variable<String>(businessId),
+        Variable<String>(transactionId),
+        Variable<String>(expectedFilename),
+        Variable<String>(previousUri),
+      ],
+    );
+    if (changed != 1) {
+      throw StateError(
+        'This receipt was changed or could not be verified. No photo was relinked.',
+      );
+    }
+  }
+
   Future<ExpenseIqBatchResult> uploadBatch(
     String businessId, {
     int maxPhotos = 25,
