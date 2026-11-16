@@ -11,6 +11,7 @@ import 'local_job_quarantine.dart';
 import 'local_document_detail_cache.dart';
 import 'local_financial_totals_journal.dart';
 import 'local_invoice_payment_coverage_events.dart';
+import 'local_invoice_closure.dart';
 
 /// Durable *local* payment capture and idempotent replay. This class records
 /// received payments only; it never finalizes payments or posts income.
@@ -785,6 +786,9 @@ class OfflineInvoicePaymentLedger {
             }
             await cache.save(businessId, invoiceId, refreshed);
           }
+          await LocalInvoiceClosureStore(_database).acknowledgeIncomeReceipt(
+            businessId, invoiceId, operationId, paymentId,
+          );
           await _database.customStatement(
             'DELETE FROM sync_outbox WHERE id=?',
             [id],

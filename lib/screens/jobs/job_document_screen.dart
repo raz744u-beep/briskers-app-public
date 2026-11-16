@@ -1,5 +1,5 @@
 import '../../services/local_estimate_number.dart';
-import '../../services/verified_invoice_payment_events.dart';
+import '../../services/local_invoice_payment_coverage_events.dart';
 import '../../services/local_invoice_closure.dart';
 import '../../services/local_payroll_repository.dart';
 import '../payroll/owner_payroll_screen.dart';
@@ -60,7 +60,6 @@ import '../../services/local_catalog_repository.dart';
 import '../../services/local_item_categories_cache.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_document_repository.dart';
-import '../../services/verified_invoice_close_events.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
@@ -73,7 +72,6 @@ import '../../services/offline_invoice_mileage_service.dart';
 import '../../services/offline_invoice_tax_service.dart';
 import '../../services/local_tax_settings_cache.dart';
 import '../../services/offline_invoice_payment_ledger.dart';
-import '../../services/invoice_finalization_guard.dart';
 import '../../services/offline_invoice_finalization.dart';
 import '../../services/document_copy_plan.dart';
 import '../../services/pending_document_memo_projection.dart';
@@ -154,8 +152,7 @@ Widget _finalizeReceivedPaymentDialog(BuildContext context, String amount) =>
         width: MediaQuery.sizeOf(context).width * 0.92,
         child: Text(
           'Confirm that $amount was actually received. '
-          'Finalizing records the payment as income, replaces the '
-          'pending entry, and updates the invoice PDF to show it as paid. '
+          'Finalizing posts the existing payment to Income on this device. '
           'Do not finalize an authorization or unpaid promise.',
           style: Theme.of(context).textTheme.bodyLarge,
         ),
@@ -527,14 +524,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         // Unavailable offline history stays blank; never invent mileage.
       }
     }
-    final finalized = await LocalInvoiceClosureStore(localDatabase)
-        .projectFinalized(widget.businessId, withMileage);
-    final result = await _projectSavedInvoiceIdentity(finalized);
-    // Resolve the durable operation after every local overlay. It is not a
-    // cached/server payment field and must not be replaced by a stale snapshot.
-    result['_finalization_state'] = await OfflineInvoiceFinalization()
-        .stateForDetail(widget.businessId, widget.documentId, result);
-    return result;
+    final store = LocalInvoiceClosureStore(localDatabase);
+    var finalized = await store.projectFinalized(widget.businessId, withMileage);
+    final invoiceId = finalized['id']?.toString() ?? '';
+    if (widget.isOwner && finalized['kind'] == 'invoice' &&
+        invoiceId.isNotEmpty && _number(finalized['pending_payment']) > 0.005) {
+      await OfflineInvoiceFinalization().finalizeLocally(
+        widget.businessId, invoiceId, isOwner: true, resumeSavedRequest: true,
+      );
+      finalized = await store.projectFinalized(widget.businessId, withMileage);
+    }
+    return _projectSavedInvoiceIdentity(finalized);
   }
 
   /// Restore missing invoice contact/VIN/plate presentation from the exact
@@ -3270,170 +3270,39 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
-  Future<void> _offerCompletePaidJob() async {
-    final jobId = _detail?['job_id']?.toString() ?? '';
-    if (jobId.isEmpty || !mounted) return;
-    try {
-      final documents = await _api.jobDocuments(widget.businessId, jobId);
-      final invoices = documents.where((d) => d['kind']?.toString() == 'invoice').toList();
-      if (invoices.isEmpty) return;
-      // If any invoice is missing financial data, leave the job open.
-      final fullyPaid = invoices.every((invoice) {
-        final total = num.tryParse(invoice['total_amount']?.toString() ?? '');
-        final paid = num.tryParse(invoice['paid_amount']?.toString() ?? '');
-        return total != null && paid != null && paid >= total - 0.005;
-      });
-      if (!fullyPaid) return;
-      final job = await _api.jobDetail(widget.businessId, jobId);
-      final status = (job['status']?.toString() ?? '').toLowerCase();
-      if (const {'completed', 'cancelled', 'closed'}.contains(status)) return;
-      if (!mounted) return;
-      final complete = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Mark Job Completed?'),
-          content: const Text(
-            'Payment received in full. Is the repair work finished? '
-            'You can mark the job Completed now or keep it In Progress. '
-            'The invoice will remain paid either way.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Keep In Progress'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Complete Job'),
-            ),
-          ],
-        ),
-      );
-      if (complete == true) {
-        await _offlineJobAdmin.queueStatus(widget.businessId, jobId, code:'completed',name:'Completed');
-        unawaited(_offlineJobAdmin.flush(widget.businessId));
-      }
-    } catch (_) {
-      // Payment is finalized independently; never undo or repeat it because
-      // job status inspection could not be completed.
-    }
-  }
-
-  Future<void> _autoCloseOwnerInvoiceIfReady() async {
-    if (!widget.isOwner || _estimate ||
-        BriskersConnectionModeController.instance.forceOffline) {
-      return;
-    }
-    final jobId = _detail?['job_id']?.toString() ?? '';
-    if (jobId.isEmpty || widget.documentId.startsWith('local-')) {
-      return;
-    }
-    final job = await _api.jobDetail(widget.businessId, jobId);
-    final invoice = await _api.documentDetail(
-      widget.businessId, widget.documentId);
-    final status = invoice['status']?.toString().toLowerCase() ?? '';
-    final code = invoice['display_status_code']
-        ?.toString().toLowerCase() ?? '';
-    if (invoice['job_id']?.toString() != jobId ||
-        invoice['closed_at'] != null ||
-        status == 'closed' || code == 'closed' ||
-        status == 'reopened' || code == 'reopened') {
-      return;
-    }
-    num? validMoney(Object? value) {
-      final n = value is num ? value : num.tryParse(value?.toString() ?? '');
-      return n != null && n.isFinite ? n : null;
-    }
-    final total = validMoney(invoice['total_amount']);
-    final posted = validMoney(invoice['paid_amount']);
-    final pending = validMoney(invoice['pending_payment']);
-    if (total == null || posted == null || pending == null) {
-      return;
-    }
-    if (!InvoiceFinalizationGuard.canAutoClose(
-      isOwner: widget.isOwner,
-      jobCompleted: job['status']?.toString().toLowerCase() == 'completed',
-      invoiceTotal: total,
-      finalizedPayments: posted,
-      pendingPayments: pending,
-      reopenedForCorrection: status == 'reopened' || code == 'reopened',
-    )) {
-      return;
-    }
-    await InvoiceFinalizationGuard().run<void>(
-      businessId: widget.businessId,
-      invoiceIds: [widget.documentId],
-      isOwner: widget.isOwner,
-      action: () => _api.closeInvoice(
-        widget.businessId, widget.documentId),
-    );
-    // The close RPC has returned successfully. Inform the retained invoice
-    // list without waiting for its next full refresh or payment-feed query.
-    try {
-      await _localDocuments.recordServerConfirmedClosed(
-        widget.businessId, widget.documentId,
-      );
-    } catch (_) {
-      // Never turn a verified close into a failed payment simply because a
-      // local presentation-index refresh could not be written.
-    }
-    VerifiedInvoiceCloseEvents.serverConfirmed(VerifiedInvoiceClosed(
-      businessId: widget.businessId,
-      invoiceId: widget.documentId,
-    ));
-  }
-
   bool _startingFinalization = false;
   Future<void> _finalizeEnteredPayments() async {
-    if (!widget.isOwner) return;
-    if (_startingFinalization) return;
+    if (!widget.isOwner || _startingFinalization) return;
     setState(() => _startingFinalization = true);
     try {
-    await _collapseWorkspaceHeader();
-    if (_estimate || _busy || _number(_detail?['pending_payment']) <= 0.005) {
-      return;
+      await _collapseWorkspaceHeader();
+      final detail = _detail;
+      final invoiceId = detail?['id']?.toString() ?? '';
+      final amount = _number(detail?['pending_payment']);
+      if (!mounted || _estimate || _busy || detail == null ||
+          invoiceId.isEmpty || amount <= 0.005) {
+        return;
+      }
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => _finalizeReceivedPaymentDialog(context, _money(amount)),
+      );
+      if (confirmed != true || !mounted) return;
+      final saved = await _run(() => OfflineInvoiceFinalization().finalizeLocally(
+        widget.businessId, invoiceId, isOwner: widget.isOwner,
+        confirmedDetail: detail,
+      ));
+      if (!saved || !mounted) return;
+      LocalInvoicePaymentCoverageEvents.committed(LocalInvoicePaymentCoverageChanged(
+        businessId: widget.businessId, invoiceId: invoiceId,
+        coversRemainingBalance: DocumentPresentation(_detail ?? {}).fullyCovered,
+      ));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('The recorded payment was posted to Income on this device.'),
+      ));
+    } finally {
+      if (mounted) setState(() => _startingFinalization = false);
     }
-    final existing = await OfflineInvoiceFinalization().stateForDetail(
-      widget.businessId, widget.documentId, _detail!);
-    if (existing != null) { await _load(); return; }
-    final amount = _number(_detail?['pending_payment']);
-    if (!mounted) return;
-    final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) =>
-              _finalizeReceivedPaymentDialog(dialogContext, _money(amount)),
-        ) ??
-        false;
-    if (!confirmed || !mounted) return;
-    final saved = await _run(() => OfflineInvoiceFinalization().save(
-      widget.businessId, [widget.documentId], isOwner:widget.isOwner,close:false));
-    if (!saved || !mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text(
-      'Finalization saved on this device. Posting awaits synchronization; do not enter the payment again.')));
-    unawaited(() async {
-      if (OfflineInvoiceFinalization.remoteReplayEnabled) {
-        await OfflineInvoiceFinalization().flush(widget.businessId);
-      }
-      if(mounted) await _load(fastAfterMutation:true);
-      if(mounted && await OfflineInvoiceFinalization().state(widget.businessId,widget.documentId)=='confirmed') {
-        final verified=_detail;
-        if(verified!=null) {
-          final presentation=DocumentPresentation({...verified,'kind':'invoice'});
-          final identity=verified['id']?.toString();
-          if(identity == widget.documentId && presentation.paymentDetailsKnown &&
-              presentation.pendingCents==0 && presentation.fullyCovered) {
-            VerifiedInvoicePaymentEvents.confirmedFullyPaid(VerifiedInvoiceFullyPaid(
-              businessId:widget.businessId,invoiceId:widget.documentId,
-              total:presentation.totalCents! / 100,finalizedPaid:presentation.finalizedCents! / 100));
-          }
-        }
-
-        await _offerCompletePaidJob();
-        await _autoCloseOwnerInvoiceIfReady();
-        if (mounted) await _load(fastAfterMutation: true);
-      }
-    }());
-    } finally { if (mounted) setState(() => _startingFinalization = false); }
   }
 
   Future<void> _enterWarrantyPayment() async {
@@ -6423,8 +6292,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                       value: _money(finalizedPaid),
                     ),
                     _AmountRow(
-                      label: _detail?['_finalization_state'] == null
-                          ? 'Awaiting finalization' : 'Saved for finalization',
+                      label: 'Awaiting finalization',
                       value: _money(pendingPaid),
                     ),
                   ],
@@ -6519,15 +6387,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ),
             ),
           ],
-          if (_detail?['_finalization_state'] == 'pending' || _detail?['_finalization_state'] == 'inflight')
-            const Text('Finalization saved · Awaiting synchronization'),
-          if (_detail?['_finalization_state'] == 'review') ...[
-            const Text('Saved finalization needs review. Do not enter the payment again.'),
-            if(widget.isOwner)
-              TextButton(onPressed:_busy ? null : () => _run(() => OfflineInvoiceFinalization().retry(
-                widget.businessId,widget.documentId,isOwner:widget.isOwner)),
-                child:const Text('Retry saved finalization')),
-          ],
           const SizedBox(height: 18),
           Row(
             children: [
@@ -6615,11 +6474,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                             ),
                           ),
                           subtitle: (() {
-                            final paymentDate =
+                            final label =
                                 _paymentDate(payment['payment_date'] ?? payment['entered_at']);
-                            final label = payment['pending_sync'] == true
-                                ? 'Pending sync${paymentDate.isEmpty ? '' : ' · $paymentDate'}'
-                                : paymentDate;
                             if (label.isEmpty) return null;
                             return Text(
                               label,
@@ -6672,9 +6528,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      _detail?['_finalization_state'] == null
-                          ? '${_money(pendingPaid)} recorded. Finalization has not been requested.'
-                          : '${_money(pendingPaid)} recorded. The saved finalization request is retained; do not enter these payments again.',
+                      '${_money(pendingPaid)} recorded and ready to post to Income.',
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -6683,15 +6537,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     if (widget.isOwner) ...[
                     const SizedBox(height: 10),
                     FilledButton.icon(
-                      onPressed: _busy || _startingFinalization || _detail?['_local_pending_tax'] == true || _detail?['_finalization_state'] != null
+                      onPressed: _busy || _startingFinalization || _detail?['_local_pending_tax'] == true || _detail?['_payment_reconciliation_required'] == true
                           ? null : _finalizeEnteredPayments,
                       icon: const Icon(Icons.check_circle_outline),
-                      label: Text(switch (_detail?['_finalization_state']) {
-                        'pending' || 'inflight' => 'Finalization saved · pending sync',
-                        'review' => 'Saved finalization needs reconciliation',
-                        'confirmed' => 'Finalized · refreshing payment details',
-                        _ => 'Finalize Received Payment',
-                      }),
+                      label: const Text('Finalize Received Payment'),
                     ),
                     ],
                   ],

@@ -246,11 +246,9 @@ void main() {
 
   test('full payment offers job completion without auto closing work', () async {
     final invoice = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
-    expect(invoice, contains('_offerCompletePaidJob()'));
-    expect(invoice, contains("paid >= total - 0.005"));
-    expect(invoice, contains("await _api.jobDocuments(widget.businessId, jobId)"));
-    expect(invoice, contains("child: const Text('Keep In Progress')"));
-    expect(invoice, contains("title: const Text('Mark Job Completed?')"));
+    expect(invoice, contains('_offerCompleteJobAfterPaymentEntry()'));
+    expect(invoice, contains("child: const Text('Keep Job Open')"));
+    expect(invoice, contains("title: const Text('Payment entered in full')"));
     expect(invoice, contains("child: const Text('Complete Job')"));
   });
 

@@ -60,12 +60,9 @@ void main() {
     expect(docs, contains('_verifiedFullyPaidInvoiceIds.remove(event.invoiceId)'));
     final finalize=detail.split('Future<void> _finalizeEnteredPayments() async {').last
       .split('Future<void> _enterWarrantyPayment() async {').first;
-    expect(finalize, contains('presentation.paymentDetailsKnown'));
-    expect(finalize, contains('presentation.finalizedCents! / 100'));
-    expect(finalize, contains('identity == widget.documentId'));
-    expect(finalize.indexOf('VerifiedInvoicePaymentEvents.confirmedFullyPaid('),
-      lessThan(finalize.indexOf('await _offerCompletePaidJob();')));
-    expect(finalize, contains('await _autoCloseOwnerInvoiceIfReady();'));
-    expect(finalize, contains('await _load(fastAfterMutation: true)'));
+    expect(finalize, contains('LocalInvoicePaymentCoverageEvents.committed('));
+    expect(finalize, contains('coversRemainingBalance: DocumentPresentation('));
+    expect(finalize.indexOf('OfflineInvoiceFinalization().finalizeLocally('),
+      lessThan(finalize.indexOf('LocalInvoicePaymentCoverageEvents.committed(')));
   });
 }

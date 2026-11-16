@@ -7,6 +7,7 @@ import '../local/briskers_local_database.dart' hide LocalFinancialCache;
 import '../local/local_database_provider.dart';
 import 'local_financial_cache.dart';
 import 'local_document_detail_cache.dart';
+import 'local_invoice_closure.dart';
 
 /// Read-only projection of real invoice receipts into Expenses & Income.
 /// No methods in this class insert, finalize, post, or charge a payment.
@@ -22,7 +23,7 @@ class InvoicePaymentFeed {
   static String paymentLabel(Map<String, dynamic> transaction) {
     final state = transaction['_receipt_state']?.toString().toLowerCase();
     final coverage = transaction['_payment_coverage']?.toString().toLowerCase();
-    if (state != 'posted') return 'Recorded';
+    if (state != 'posted' && state != 'local_finalized') return 'Recorded';
     if (coverage == 'paid') return 'Paid';
     if (coverage == 'partial') return 'Partial';
     return 'Recorded';
@@ -32,6 +33,7 @@ class InvoicePaymentFeed {
     switch (transaction['_receipt_state']?.toString().toLowerCase()) {
       case 'posted':
         return 'Synced';
+      case 'local_finalized':
       case 'local':
         return 'Local · saved on this device';
       case 'pending':
@@ -101,7 +103,9 @@ class InvoicePaymentFeed {
         // Preserve the queue, but never invent a receipt from invalid payload.
       }
     }
-    final merged = mergeReceipts(server, local);
+    final finalized = await LocalInvoiceClosureStore(_db).finalizedIncome(businessId);
+    final merged = mergeReceipts(withLocalFinalization(server, finalized),
+        local.where((row) => !finalized.any((item) => _sameReceipt(item, row))).toList());
     final pendingCorrections = await _db.customSelect(
       """SELECT payload_json FROM sync_outbox
       WHERE business_id=? AND entity_type='invoice_pending_payment_edit'
@@ -118,6 +122,44 @@ class InvoicePaymentFeed {
       }
     }
     return overlayPendingPaymentEdits(merged,corrections);
+  }
+
+  static bool _sameReceipt(Map<String, dynamic> left, Map<String, dynamic> right) {
+    if (left['invoice_id'] != right['invoice_id']) return false;
+    Set<String> keys(Map<String, dynamic> row) => {
+      for (final key in ['receipt_id', 'operation_id', 'server_payment_id', 'transaction_id'])
+        if (row[key]?.toString().isNotEmpty == true) row[key].toString(),
+    };
+    return keys(left).intersection(keys(right)).isNotEmpty;
+  }
+
+  /// A posted allocation with an exact identity takes precedence. Legacy
+  /// posting can discard receipt IDs. Once posted allocations cover the
+  /// entire invoice, avoid adding a second representation of that income.
+  static List<Map<String, dynamic>> withLocalFinalization(
+    List<Map<String, dynamic>> authoritative,
+    List<Map<String, dynamic>> finalized,
+  ) {
+    final postedCents = <Object?, int>{};
+    for (final row in authoritative) {
+      if (row['receipt_state'] != 'posted') continue;
+      postedCents.update(row['invoice_id'],
+          (value) => value + (_amount(row['amount']) * 100).round(),
+          ifAbsent: () => (_amount(row['amount']) * 100).round());
+    }
+    final result = authoritative.toList();
+    for (final row in finalized) {
+      final total = (_amount(row['invoice_total']) * 100).round();
+      result.removeWhere((item) => item['receipt_state'] != 'posted' &&
+          _sameReceipt(item, row));
+      if ((total > 0 && (postedCents[row['invoice_id']] ?? 0) >= total) ||
+          authoritative.any((item) =>
+              item['receipt_state'] == 'posted' && _sameReceipt(item, row))) {
+        continue;
+      }
+      result.add(row);
+    }
+    return result;
   }
 
   /// Read-only view of amount/method/date corrections to server-pending
@@ -255,7 +297,9 @@ class InvoicePaymentFeed {
         await Future<void>.delayed(Duration.zero);
       }
     }
-    return mergeReceipts(pendingRows, const []);
+    final finalized = await LocalInvoiceClosureStore(_db).finalizedIncome(businessId);
+    return mergeReceipts(pendingRows.where((row) =>
+        !finalized.any((item) => _sameReceipt(item, row))).toList(), const []);
   }
 
   /// Stable identity is required to retire a local card without duplication.
@@ -275,7 +319,10 @@ class InvoicePaymentFeed {
     final local = previouslyVisible
         .where((row) => row['receipt_state']?.toString() == 'local')
         .toList();
-    return mergeReceipts([...authoritativePage, ...posted], local);
+    final finalized = previouslyVisible
+        .where((row) => row['receipt_state'] == 'local_finalized').toList();
+    return mergeReceipts(withLocalFinalization(
+        mergeReceipts([...authoritativePage, ...posted], const []), finalized), local);
   }
 
   /// Equal amounts or customer names NEVER establish receipt identity.

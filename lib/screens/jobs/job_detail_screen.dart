@@ -1,3 +1,4 @@
+import '../../services/local_invoice_closure.dart';
 import '../../services/local_job_core_projection.dart';
 import '../../services/offline_invoice_payment_ledger.dart';
 import '../../services/job_task_summary.dart';
@@ -552,7 +553,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         widget.businessId, id,
       );
       if (!_currentLoad(epoch)) return;
-      verified.add(OfflineInvoicePaymentLedger.projectPendingPayments(cached, queued));
+      verified.add(await LocalInvoiceClosureStore(localDatabase).projectFinalized(
+        widget.businessId,
+        OfflineInvoicePaymentLedger.projectPendingPayments(cached, queued),
+      ));
     }
     final state = cachedVerifiedJobPaymentState(verified);
     if (state == null || !_currentLoad(epoch)) {
@@ -3594,7 +3598,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     if (total <= 0) return null;
     if (paid >= total - 0.005) return 'Paid';
     if (pending > 0 && paid + pending >= total - 0.005) {
-      return 'Recorded payment · Pending finalization';
+      return 'Paid';
     }
     return 'Awaiting payment';
   }

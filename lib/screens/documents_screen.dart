@@ -757,8 +757,11 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       final cached=await _localDetailCache.loadReadOnly(widget.businessId,id);
       var projected=Map<String,dynamic>.from(row);
       if(cached!=null) {
-        final payment=OfflineInvoicePaymentLedger.projectPendingPayments(cached,
-          await OfflineInvoicePaymentLedger(database:_localDocuments.database).pendingForInvoice(widget.businessId,id));
+        final payment = await LocalInvoiceClosureStore(_localDocuments.database)
+            .projectFinalized(widget.businessId,
+              OfflineInvoicePaymentLedger.projectPendingPayments(cached,
+                await OfflineInvoicePaymentLedger(database: _localDocuments.database)
+                    .pendingForInvoice(widget.businessId, id)));
         // Index placeholders and stale payment feeds must not hide saved
         // receipt coverage. Preserve every amount; this is presentation only.
         if(row['_local_snapshot']==true ||

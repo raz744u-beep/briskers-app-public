@@ -80,7 +80,7 @@ void main() {
     expect(estimateListDescription({'title':'Invoice #6372'},detail:{'lines':[{'name':'Labor','description':'Replace thermostat'}]}),'Replace thermostat');
     expect(estimateListDescription({'title':'Invoice #6372'}),'');
   });
-  testWidgets('actual offline payment screen shows Paid and disables saved finalization after reopen',(tester) async {
+  testWidgets('actual offline payment screen posts the saved request and removes the action after reopen',(tester) async {
     tester.view.physicalSize=const Size(430,1100); tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
     final saved=fixture('6359',[3000,4882.11]);
@@ -92,9 +92,8 @@ void main() {
       expect(find.text('Paid'), findsWidgets);
       expect(find.textContaining('Pending Close'), findsNothing);
       expect(find.text('Finalize Received Payment'), findsNothing);
-      await tester.scrollUntilVisible(find.text('Finalization saved · pending sync'),300,scrollable:find.byType(Scrollable).last);
-      final button=tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Finalization saved · pending sync'));
-      expect(button.onPressed,isNull);
+      expect(find.text('Finalization saved · pending sync'), findsNothing);
+      expect(find.text('Awaiting finalization'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink()); await tester.pumpAndSettle();
     }
     expect((await db.customSelect('SELECT * FROM invoice_finalization_intents_v1').get()),hasLength(1));

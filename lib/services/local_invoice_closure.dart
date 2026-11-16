@@ -31,6 +31,49 @@ class LocalInvoiceClosureStore {
       expected_version INTEGER, sync_state TEXT NOT NULL)''');
   }
 
+  Future<void> prepareIncome() => db.customStatement('''
+    CREATE TABLE IF NOT EXISTS local_finalized_invoice_income (
+      business_id TEXT NOT NULL, invoice_id TEXT NOT NULL,
+      receipt_id TEXT NOT NULL, payload TEXT NOT NULL,
+      PRIMARY KEY (business_id, invoice_id, receipt_id)
+    )
+  ''');
+
+  Future<List<Map<String, dynamic>>> finalizedIncome(String business, {String? invoice}) async {
+    await prepareIncome();
+    final rows = await db.customSelect(
+      'SELECT invoice_id,payload FROM local_finalized_invoice_income WHERE business_id=?'
+      '${invoice == null ? '' : ' AND invoice_id=?'}',
+      variables: [Variable(business), if (invoice != null) Variable(invoice)],
+    ).get();
+    return [
+      for (final row in rows)
+        {
+          ...Map<String, dynamic>.from(jsonDecode(row.read<String>('payload')) as Map),
+          'invoice_id': row.read<String>('invoice_id'),
+        },
+    ];
+  }
+
+  Future<void> acknowledgeIncomeReceipt(
+    String business, String invoice, String operation, String serverPayment,
+  ) async {
+    await prepareIncome();
+    final row = await db.customSelect(
+      'SELECT payload FROM local_finalized_invoice_income '
+      'WHERE business_id=? AND invoice_id=? AND receipt_id=?',
+      variables: [Variable(business), Variable(invoice), Variable(operation)],
+    ).getSingleOrNull();
+    if (row == null) return;
+    final payload = jsonDecode(row.read<String>('payload')) as Map;
+    await db.customStatement(
+      'UPDATE local_finalized_invoice_income SET payload=? '
+      'WHERE business_id=? AND invoice_id=? AND receipt_id=?',
+      [jsonEncode({...payload, 'server_payment_id': serverPayment}),
+        business, invoice, operation],
+    );
+  }
+
   static String receiptKey(Map payment) =>
       (payment['operation_id'] ?? payment['client_operation_id'] ?? payment['id'])
           ?.toString().trim() ?? '';
@@ -70,15 +113,30 @@ class LocalInvoiceClosureStore {
     if (hasClosures == null) return detail;
     final receipts = await db.transaction(() async {
       await prepare();
+      await prepareIncome();
       final stored = await db.customSelect(
         'SELECT receipt_id,amount_cents FROM local_invoice_closed_receipts '
         'WHERE business_id=? AND invoice_id=?',
         variables: [Variable(business), Variable(invoice)],
       ).get();
       if (stored.isNotEmpty) {
-        return {
+        final aliases = await db.customSelect(
+          'SELECT receipt_id,payload FROM local_finalized_invoice_income '
+          'WHERE business_id=? AND invoice_id=?',
+          variables: [Variable(business), Variable(invoice)],
+        ).get();
+        final amounts = {
           for (final row in stored) row.read<String>('receipt_id'): row.read<int>('amount_cents'),
         };
+        for (final row in aliases) {
+          final receipt = jsonDecode(row.read<String>('payload')) as Map;
+          final receiptId = row.read<String>('receipt_id');
+          final alias = receipt['server_payment_id']?.toString() ?? '';
+          if (alias.isNotEmpty && amounts.containsKey(receiptId)) {
+            amounts.putIfAbsent(alias, () => amounts[receiptId]!);
+          }
+        }
+        return amounts;
       }
       // Upgrade a 4668 local closure only when its recorded amount still
       // agrees with a complete, unambiguous saved receipt snapshot.

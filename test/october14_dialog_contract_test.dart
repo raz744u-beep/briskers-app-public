@@ -41,24 +41,21 @@ void main() {
         'Future<void> _enterWarrantyPayment()');
     final dialog = action.indexOf('await showDialog<bool>');
     for (final guard in [
-      'if (!widget.isOwner) return;',
-      "_number(_detail?['pending_payment']) <= 0.005",
+      'if (!widget.isOwner || _startingFinalization) return;',
+      'amount <= 0.005',
     ]) {
       expect(action.indexOf(guard), inInclusiveRange(0, dialog - 1), reason: guard);
     }
     expect(action, contains('_estimate || _busy'));
-    expect(action, contains('_finalizeReceivedPaymentDialog(dialogContext, _money(amount))'));
-    final consent = action.indexOf('if (!confirmed || !mounted) return;');
-    final durableGuard = action.indexOf('stateForDetail(');
-    final mutation = action.indexOf('OfflineInvoiceFinalization().save(');
+    expect(action, contains('_finalizeReceivedPaymentDialog(context, _money(amount))'));
+    final consent = action.indexOf('if (confirmed != true || !mounted) return;');
+    final mutation = action.indexOf('OfflineInvoiceFinalization().finalizeLocally(');
     expect(consent, greaterThan(dialog));
-    expect(durableGuard, inInclusiveRange(0,dialog-1));
     expect(mutation, greaterThan(consent));
-    expect(action.indexOf('OfflineInvoiceFinalization().flush('),greaterThan(mutation));
-    expect(action,isNot(contains('finalizePendingInvoicePayment(')));
-    expect(action,contains('isOwner:widget.isOwner,close:false'));
-    expect(action, contains('await _offerCompletePaidJob();'));
-    expect(action, contains('await _autoCloseOwnerInvoiceIfReady();'));
+    expect(action, isNot(contains('.flush(')));
+    expect(action, isNot(contains('finalizePendingInvoicePayment(')));
+    expect(action, contains('isOwner: widget.isOwner'));
+    expect(action, contains('confirmedDetail: detail'));
   });
 
   test('warranty company sheet scrolls around keyboard without bypassing name', () {

@@ -1,4 +1,5 @@
 import 'local_invoice_closure.dart';
+import 'local_financial_totals_journal.dart';
 import 'dart:convert';
 import 'dart:math';
 import 'package:drift/drift.dart';
@@ -142,6 +143,160 @@ class OfflineInvoiceFinalization {
     });
   }
 
+  /// Finalize the existing local receipts without creating another payment.
+  /// The receipt markers and Income rows commit together.
+  Future<void> finalizeLocally(
+    String business, String invoice, {
+    required bool isOwner,
+    bool resumeSavedRequest = false,
+    Map<String, dynamic>? confirmedDetail,
+  }) async {
+    if (!isOwner || business.isEmpty || invoice.isEmpty) {
+      throw StateError('Owner access and a saved invoice are required.');
+    }
+    final store = LocalInvoiceClosureStore(db);
+    await prepare();
+    await store.prepare();
+    await store.prepareIncome();
+    await db.transaction(() async {
+      final saved = await LocalDocumentDetailCache(database: db)
+          .loadReadOnly(business, invoice);
+      if (saved == null || saved['id'] != invoice || saved['kind'] != 'invoice' ||
+          const {'void', 'voided', 'cancelled', 'canceled'}
+              .contains(saved['status']?.toString().toLowerCase())) {
+        if (resumeSavedRequest) return;
+        throw StateError('Open the saved invoice before finalizing its receipts.');
+      }
+      final queued = await OfflineInvoicePaymentLedger(database: db)
+          .pendingForInvoice(business, invoice);
+      final detail = OfflineInvoicePaymentLedger.projectPendingPayments(saved, queued);
+      if (resumeSavedRequest) {
+        final intent = await db.customSelect(
+          "SELECT payload FROM invoice_finalization_intents_v1 "
+          "WHERE business_id=? AND invoice_id=? AND state IN ('pending','inflight','review')",
+          variables: [Variable(business), Variable(invoice)],
+        ).getSingleOrNull();
+        if (intent == null) return;
+        try {
+          if (jsonEncode(snapshot(detail, false)) != intent.read<String>('payload')) return;
+        } on StateError {
+          return;
+        }
+      }
+
+      final edits = await db.customSelect(
+        "SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? "
+        "AND entity_type IN ('invoice_pending_payment_edit','invoice_tax_edit','document_edit')",
+        variables: [Variable(business), Variable(invoice)],
+      ).get();
+      if (edits.isNotEmpty) {
+        if (resumeSavedRequest) return;
+        throw StateError('Finish the saved invoice corrections before finalizing.');
+      }
+      if (detail['_payment_reconciliation_required'] == true) {
+        if (resumeSavedRequest) return;
+        throw StateError('The saved receipt identities require review.');
+      }
+
+      if (confirmedDetail != null) {
+        final remaining = await store.projectFinalized(business, detail);
+        if (money(remaining['pending_payment']) == 0) return;
+        if (jsonEncode(snapshot(remaining, false)) !=
+            jsonEncode(snapshot(confirmedDetail, false))) {
+          throw StateError('Payments changed. Reopen the invoice and confirm again.');
+        }
+      }
+
+      final pending = LocalInvoiceClosureStore.verifiedPendingReceipts(detail);
+      if (pending == null) {
+        if (resumeSavedRequest) return;
+        throw StateError('Saved receipt amounts need verification before finalizing.');
+      }
+      if (pending.isEmpty) return;
+
+      final indexed = await db.customSelect(
+        'SELECT d.document_number,d.job_id,j.job_number,'
+        'COALESCE(c.display_name,j.customer_name) AS customer_name '
+        'FROM local_documents d '
+        'LEFT JOIN local_customers c ON c.business_id=d.business_id AND c.id=d.customer_id '
+        'LEFT JOIN local_jobs j ON j.business_id=d.business_id AND j.id=d.job_id '
+         "WHERE d.business_id=? AND d.id=? AND d.kind='invoice'",
+        variables: [Variable(business), Variable(invoice)],
+      ).getSingleOrNull();
+      final queuedById = {for (final row in queued) row['operation_id']: row};
+      final existing = await store.finalizedIncome(business, invoice: invoice);
+      final receiptsById = <String, Map<String, dynamic>>{
+        for (final row in existing)
+          for (final key in ['receipt_id', 'server_payment_id', 'operation_id'])
+            if (row[key]?.toString().isNotEmpty == true) row[key].toString(): row,
+      };
+      final rows = <String, Map<String, dynamic>>{};
+      for (final payment in (detail['payments'] as List).whereType<Map>()) {
+        if (payment['state'] != 'pending') continue;
+        final id = LocalInvoiceClosureStore.receiptKey(payment);
+        final stored = receiptsById[id] ?? receiptsById[payment['id']?.toString()];
+        if (stored != null) {
+          if (money(stored['amount']) != pending[id] && !resumeSavedRequest) {
+            throw StateError('A locally posted receipt changed and requires review.');
+          }
+          continue;
+        }
+        final date = (payment['payment_date'] ?? payment['entered_at'])
+            ?.toString().split('T').first;
+        final parsedDate = DateTime.tryParse(date ?? '');
+        final method = payment['payment_method_name']?.toString().trim() ?? '';
+        final methodId = payment['payment_method_id']?.toString().trim() ?? '';
+        if (parsedDate == null ||
+            parsedDate.toIso8601String().split('T').first != date ||
+            method.isEmpty || methodId.isEmpty) {
+          if (resumeSavedRequest) return;
+          throw StateError('The original payment date or method is missing.');
+        }
+        final isQueued = payment['_local_pending_payment'] == true;
+        final acceptedId = queuedById[id]?['server_payment_id'];
+        rows[id] = {
+          'receipt_id': id,
+          'operation_id': payment['operation_id'] ?? payment['client_operation_id'],
+          'server_payment_id': isQueued
+              ? acceptedId : payment['id'],
+          'document_number': detail['document_number'] ?? indexed?.data['document_number'],
+          'customer_name': detail['customer_name'] ?? indexed?.data['customer_name'],
+          'job_id': detail['job_id'] ?? indexed?.data['job_id'],
+          'job_number': detail['job_number'] ?? indexed?.data['job_number'],
+          'payment_method': method,
+          'payment_method_id': methodId,
+          'amount': pending[id]! / 100,
+          'invoice_total': detail['total_amount'],
+          'transaction_date': date,
+          'received_at': payment['entered_at'],
+          'receipt_state': 'local_finalized',
+        };
+      }
+      await store.saveFinalized(business, invoice, {
+        for (final id in rows.keys) id: pending[id]!,
+      });
+      final journal = LocalFinancialTotalsJournal(database: db);
+      for (final entry in rows.entries) {
+        await db.customStatement(
+          'INSERT OR IGNORE INTO local_finalized_invoice_income '
+          '(business_id,invoice_id,receipt_id,payload) VALUES(?,?,?,?)',
+          [business, invoice, entry.key, jsonEncode(entry.value)],
+        );
+        final key = 'invoice-payment:${entry.key}';
+        await journal.record(business, key, after: {
+          'id': key,
+          'document_id': invoice,
+          'invoice_total': entry.value['invoice_total'],
+          'amount': entry.value['amount'],
+          'direction': 'income',
+          'transaction_date': entry.value['transaction_date'],
+          'locally_finalized_invoice_receipt': true,
+          'sync_state': 'pending',
+        });
+      }
+    });
+  }
+
   static String operationId() {
     final random=Random.secure();
     final bytes=List.generate(16,(_)=>random.nextInt(256));
@@ -194,8 +349,9 @@ class OfflineInvoiceFinalization {
   Future<void> remap(String business,String local,String server) async {
     await prepare();
     await LocalInvoiceClosureStore(db).prepare();
+    await LocalInvoiceClosureStore(db).prepareIncome();
     for (final table in ['local_invoice_closures', 'local_invoice_closed_receipts',
-      'local_invoice_reopen_audit']) {
+      'local_invoice_reopen_audit', 'local_finalized_invoice_income']) {
       await db.customStatement(
         'UPDATE $table SET invoice_id=? WHERE business_id=? AND invoice_id=?',
         [server,business,local],
