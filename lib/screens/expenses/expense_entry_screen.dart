@@ -294,7 +294,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
             sourceId,
           );
         }
-        if (data.isNotEmpty) {
+        // Editing or copying requires the original transaction, not just
+        // cached account/category options. Never display an empty new-entry
+        // form for an existing transaction.
+        if (data.isNotEmpty && (sourceId == null || detail != null)) {
           localShown = true;
           if (mounted) _applyLoadedOptions(data, detail);
         }
@@ -307,8 +310,11 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       if (!localShown && mounted) {
         setState(() {
           _loading = false;
-          _error =
-              'Expense setup has not been cached yet. Go online once to sync accounts and categories.';
+          _error = sourceId != null
+              ? 'The original transaction details are not available locally. '
+                  'Editing is blocked to protect the saved expense. '
+                  'Reconnect once to retrieve this transaction before editing.'
+              : 'Expense setup has not been cached yet. Go online once to sync accounts and categories.';
         });
       }
       return;
