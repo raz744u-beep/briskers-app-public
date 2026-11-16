@@ -846,7 +846,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     final query = _search.text.trim().toLowerCase();
     if (query.isNotEmpty) {
       filtered = filtered
-          .where((row) => matchesDocumentSearch(row, query))
+          .where((row) => matchesDocumentSearch(row, query, includeDate: _estimate))
           .toList();
     }
 
@@ -2085,7 +2085,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                     controller: _search,
                     focusNode: _searchFocus,
                     hintText: _estimate
-                        ? 'Search estimate #, customer, job or vehicle'
+                        ? 'Search estimate #, customer, vehicle or date'
                         : 'Search invoice #, customer, job or vehicle',
                     leading: const Icon(Icons.search),
                     trailing: [
