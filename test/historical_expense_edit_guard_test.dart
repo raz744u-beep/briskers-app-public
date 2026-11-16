@@ -39,6 +39,16 @@ void main() {
     expect(await cache.loadTransactionForEdit('shop', 'old-payment'), isNull);
   });
 
+  test('missing historical date cannot silently become today', () async {
+    await cache.saveTransactionDetail('shop', 'old-payment', {
+      'id': 'old-payment',
+      'amount': 700,
+      'account_id': 'capital-one',
+      'category_id': 'payroll',
+    });
+    expect(await cache.loadTransactionForEdit('shop', 'old-payment'), isNull);
+  });
+
   test('mismatched transaction identity cannot be edited', () async {
     await cache.saveTransactionDetail('shop', 'old-payment', {
       'id': 'another-payment',
