@@ -154,6 +154,7 @@ class LocalPayrollExpenseReview {
       };
       result.add({
         'employee': name,
+        'has_saved_employee': payment.data['employee_name'] != null,
         'payroll_reference': operation,
         'payment_date': paidOn,
         'net_cents': net,

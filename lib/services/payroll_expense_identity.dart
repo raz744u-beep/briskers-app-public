@@ -52,6 +52,9 @@ class PayrollExpenseIdentity {
     return matches.single['id'].toString();
   }
 
+  static String expenseCreateOperation(String businessId, String operationId) =>
+      'payroll-financial-${transactionId(businessId, operationId)}';
+
   /// Build a financial row only from an immutable, verified payment and
   /// already-resolved account/category identities. No cashflow is posted here.
   static Map<String, dynamic> expenseProjection({

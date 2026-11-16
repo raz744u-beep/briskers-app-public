@@ -250,7 +250,7 @@ class OfflineFinancialWriteService {
     }
     final operationId = payrollOperation == null
         ? _operationId('financial-create')
-        : 'payroll-financial-${PayrollExpenseIdentity.transactionId(businessId, payrollOperation)}';
+        : PayrollExpenseIdentity.expenseCreateOperation(businessId, payrollOperation);
     final localId = payrollOperation == null
         ? 'local-transaction-$operationId'
         : PayrollExpenseIdentity.transactionId(businessId, payrollOperation);
@@ -905,7 +905,8 @@ class OfflineFinancialWriteService {
     Map<String, dynamic> payload,
   ) async {
     final localId = payload['local_transaction_id'].toString();
-    if (payload['operation_id'].toString().startsWith('payroll-financial-')) {
+    final isPayroll = payload['operation_id'].toString().startsWith('payroll-financial-');
+    if (isPayroll) {
       // The successful acknowledgment removes the replay fence just before
       // remapping the expense. Keep a durable dispatch marker across that gap.
       final marked = await _database.customUpdate(
@@ -950,8 +951,28 @@ class OfflineFinancialWriteService {
         (item) => item['id']?.toString() == localId,
       );
       if (index >= 0) {
-        rows[index] = {...rows[index], 'id': serverId, 'sync_state': 'pending'};
-        await _cache.saveTransactions(businessId, rows);
+        final local = rows[index];
+        final canonical = isPayroll
+            ? rows.where((row) => row['id'] == serverId).firstOrNull
+            : null;
+        if (canonical != null &&
+            (canonical['direction'] != 'expense' ||
+             num.tryParse(canonical['amount']?.toString() ?? '') != local['amount'] ||
+             canonical['transaction_date'] != local['transaction_date'])) {
+          throw StateError('The synchronized payroll expense differs from its saved payment.');
+        }
+        rows[index] = {
+          ...local, ...?canonical,
+          'id': serverId, 'sync_state': 'pending',
+          if (isPayroll) ...{
+            'payroll_operation_id': local['payroll_operation_id'],
+            'payment_method': local['payment_method'],
+          },
+        };
+        await _cache.saveTransactions(businessId, [
+          for (var i = 0; i < rows.length; i++)
+            if (!isPayroll || i == index || rows[i]['id'] != serverId) rows[i],
+        ]);
       }
       await LocalFinancialTotalsJournal(database: _database).remap(
         businessId,
@@ -972,8 +993,13 @@ class OfflineFinancialWriteService {
       await PayrollExpenseLinkStore(_database).remap(businessId, localId, serverId);
       final detail = await _cache.loadTransactionDetail(businessId, localId);
       if (detail != null) {
+        final savedCanonical = isPayroll
+            ? await _cache.loadTransactionDetail(businessId, serverId)
+            : null;
         await _cache.saveTransactionDetail(businessId, serverId, {
           ...detail,
+          if ((savedCanonical?['attachments'] as List? ?? []).isNotEmpty)
+            'attachments': savedCanonical!['attachments'],
           'id': serverId,
           'sync_state': 'pending',
           if (detail['receipt_extraction'] is Map)

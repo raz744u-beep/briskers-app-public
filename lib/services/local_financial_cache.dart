@@ -255,7 +255,16 @@ class LocalFinancialCache {
               (row['id']?.toString() ?? '').isNotEmpty)
             row['id'].toString(): row,
       };
-      Map<String, dynamic> preserveOccurrence(Map<String, dynamic> server) {
+      final payroll = {
+        for (final row in saved)
+          if (row['payroll_operation_id'] != null) row['id']: row,
+      };
+      Map<String, dynamic> preserveLocalMetadata(Map<String, dynamic> server) {
+        final savedPayroll = payroll[server['id']];
+        if (savedPayroll != null) {
+          server = {...server, 'payroll_operation_id': savedPayroll['payroll_operation_id'],
+            'payment_method': savedPayroll['payment_method']};
+        }
         final cached = downloaded[server['id']?.toString()];
         if (cached == null) return {...server, 'copy_number': ?copyNumbers[server['id']]};
         return {
@@ -273,7 +282,7 @@ class LocalFinancialCache {
         ...await locallyVoidedExpenseIds(businessId),
       };
       final overlay = overlayPending(
-        serverRows.where((row) => !reversed.contains(row['id'])).map(preserveOccurrence).toList(),
+        serverRows.where((row) => !reversed.contains(row['id'])).map(preserveLocalMetadata).toList(),
         saved.where((row) => !reversed.contains(row['id'])).toList(),
       );
       // A server page is a partial inventory, not proof that previously
@@ -354,6 +363,44 @@ class LocalFinancialCache {
           if (row['id'] == id) {...row, ...snapshot, ...identity} else row,
       ]);
     });
+  }
+
+  /// Include expense detail already on this device even when its list row
+  /// has aged out of a page. Unreadable saved data cannot prove absence.
+  Future<List<Map<String, dynamic>>> payrollRecoveryInventory(String business) async {
+    final list = await _load(business, _transactionsKey);
+    final rows = <String, Map<String, dynamic>>{};
+    void include(Object? value, {String? id}) {
+      if (value is! Map) throw const FormatException('Unreadable expense history.');
+      final row = Map<String, dynamic>.from(value);
+      final key = id ?? row['id']?.toString();
+      if (key == null || key.isEmpty || !matchesTransaction(row, business, key)) {
+        throw const FormatException('Inconsistent saved expense identity.');
+      }
+      rows[key] = {
+        ...?rows[key],
+        for (final field in row.entries)
+          if (field.value != null && field.value != '') field.key: field.value,
+        'id': key,
+      };
+    }
+    if (list != null) {
+      for (final row in jsonDecode(list) as List) {
+        include(row);
+      }
+    }
+    final saved = await _database.customSelect(
+      "SELECT cache_key,payload_json FROM local_financial_cache "
+      "WHERE business_id=? AND cache_key GLOB 'transaction_detail_*'",
+      variables: [Variable(business)],
+    ).get();
+    for (final detail in saved) {
+      include(jsonDecode(detail.read<String>('payload_json')),
+        id: detail.read<String>('cache_key').substring('transaction_detail_'.length));
+    }
+    final voided = await locallyVoidedExpenseIds(business);
+    return rows.values.where((row) => !voided.contains(row['id']) &&
+        row['status'] != 'void' && row['sync_state'] != 'reversed').toList();
   }
 
   Future<List<Map<String, dynamic>>> loadTransactions(

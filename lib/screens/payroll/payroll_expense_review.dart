@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../local/briskers_local_database.dart';
 import '../../services/device_owner_authorization.dart';
 import '../../services/local_payroll_expense_review.dart';
+import '../../services/local_payroll_expense_recovery.dart';
 import 'employee_work_review.dart';
 
 Future<void> showPayrollExpenseReview(
@@ -15,6 +16,7 @@ Future<void> showPayrollExpenseReview(
   required String business,
   DateTime? week,
   String? employeeId,
+  VoidCallback? onReconciled,
 }) async {
   final authority = DeviceOwnerAuthorization.instance;
   if (!await authority.canViewSavedOwnerPayroll(business) || !context.mounted) {
@@ -47,7 +49,7 @@ Future<void> showPayrollExpenseReview(
     if (!context.mounted || !identity.matches(authority.currentIdentity())) {
       return;
     }
-    await showDialog<void>(
+    final reconcile = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(
@@ -80,8 +82,19 @@ Future<void> showPayrollExpenseReview(
             onPressed: () => Navigator.pop(dialog),
             child: const Text('Close'),
           ),
-          if (rows.isNotEmpty)
+          if (onReconciled != null &&
+              rows.any(
+                (row) =>
+                    row['status'] ==
+                        'Verified payment with no linked expense' &&
+                    (row['possible_expenses'] as List).isEmpty,
+              ))
             FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Reconcile missing expenses'),
+            ),
+          if (rows.isNotEmpty)
+            TextButton(
               onPressed: () async {
                 if (!identity.matches(authority.currentIdentity())) return;
                 await Clipboard.setData(
@@ -109,6 +122,95 @@ Future<void> showPayrollExpenseReview(
         ],
       ),
     );
+    if (reconcile != true ||
+        !context.mounted ||
+        !identity.matches(authority.currentIdentity())) {
+      return;
+    }
+    final recovery = LocalPayrollExpenseRecovery(database);
+    final preview = await recovery.preview(business, start);
+    if (!context.mounted || !identity.matches(authority.currentIdentity())) {
+      return;
+    }
+    if (preview.payouts.isEmpty ||
+        preview.accountId == null ||
+        preview.account == null ||
+        preview.categoryId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            preview.payouts.isEmpty
+                ? 'There are no verified, unmatched expenses to add on this phone.'
+                : 'Business Checking–9858 and the Payroll category must be saved on this phone.',
+          ),
+        ),
+      );
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: Text('Add ${preview.payouts.length} payroll expenses?'),
+        content: SizedBox(
+          width: 450,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              Text('${preview.account} · Payroll'),
+              for (final payout in preview.payouts)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    '${payout.employee} · ${currency.format(payout.cents / 100)}',
+                  ),
+                  subtitle: Text(
+                    '${DateFormat.yMMMd().format(DateTime.parse(payout.date))} · ${payout.method}',
+                  ),
+                ),
+              Text('Total ${currency.format(preview.totalCents / 100)}'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('Add expenses'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true ||
+        !context.mounted ||
+        !identity.matches(authority.currentIdentity())) {
+      return;
+    }
+    final grant = await authority.authority.authorizeSession(business);
+    if (!context.mounted || !identity.matches(authority.currentIdentity())) {
+      return;
+    }
+    final created = await recovery.reconcile(preview, grant);
+    if (context.mounted) {
+      onReconciled?.call();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            created == 0
+                ? 'The payroll expenses are already saved.'
+                : 'Added $created payroll ${created == 1 ? 'expense' : 'expenses'}.',
+          ),
+        ),
+      );
+    }
+  } on StateError catch (error) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message.toString())));
+    }
   } catch (_) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
