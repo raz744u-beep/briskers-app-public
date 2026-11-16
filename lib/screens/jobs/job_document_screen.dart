@@ -461,15 +461,35 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           : const <String, dynamic>{});
 
   Future<Map<String, dynamic>> _numberedEstimate(Map<String, dynamic> detail) async {
-    if (detail['kind'] != 'estimate' ||
-        LocalEstimateNumber.existing(detail['document_number']) != null) {
-      return detail;
-    }
+    if (detail['kind'] != 'estimate') return detail;
     final id = detail['id']?.toString() ?? widget.documentId;
     final saved = await LocalEstimateNumber.stored(localDatabase, widget.businessId, id);
-    return saved == null
-        ? LocalEstimateNumber.project(widget.businessId, detail)
-        : {...detail, 'document_number': saved};
+    final number = saved ?? LocalEstimateNumber.existing(detail['document_number']);
+    return {...detail, 'document_number': number};
+  }
+
+  Future<void> _confirmEstimateNumberCorrection() async {
+    if (!widget.isOwner || !_estimate || _detail == null) return;
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Correct estimate number?'),
+        content: const Text('Assign the next estimate number to this record. '
+          'Briskers will keep the original identifier in its correction history. '
+          'Use the new number on any updated copy you send.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Correct number')),
+        ],
+      ),
+    );
+    if (!mounted || accepted != true) return;
+    await _run(() async {
+      final id = _detail?['id']?.toString() ?? widget.documentId;
+      final number = await LocalEstimateNumber.repair(localDatabase, widget.businessId, id, confirmed: true);
+      if (number == null) throw StateError('The estimate is not saved on this device.');
+      if (mounted) setState(() => _detail = {..._detail!, 'document_number': number});
+    });
   }
 
   Future<Map<String, dynamic>> _withLocalPayments(
@@ -2441,6 +2461,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<Map<String, dynamic>?> _preparePdf() async {
+    if (_estimate && LocalEstimateNumber.existing(_detail?['document_number']) == null) {
+      setState(() => _error = 'Correct the estimate number before creating a PDF.');
+      return null;
+    }
     final lines = List<dynamic>.from(_detail?['lines'] ?? const []);
     if (lines.isEmpty) {
       setState(() => _error = 'Add at least one item before creating a PDF.');
@@ -2690,6 +2714,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Future<void> _convertEstimateToNewInvoice() async {
     if (!_estimate || _converted || _busy) return;
+    if (LocalEstimateNumber.existing(_detail?['document_number']) == null) {
+      setState(() => _error = 'Correct the estimate number before converting it.');
+      return;
+    }
 
     final lines = List<dynamic>.from(_detail?['lines'] ?? const []);
     if (lines.isEmpty) {
@@ -4623,6 +4651,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 businessId: widget.businessId,
                 customerId: customerId,
                 cacheScopeKey: 'finding-vehicle-$vehicleId',
+                currentJobId: _detail?['job_id']?.toString(),
                 vehicles: <Map<String, dynamic>>[
                   {'id': vehicleId},
                 ],
@@ -8124,6 +8153,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 child: Column(
                   children: [
                   _customerHeader(),
+                  if (_estimate && number.isEmpty)
+                    ListTile(
+                      title: const Text('Estimate number needs correction'),
+                      trailing: widget.isOwner
+                          ? TextButton(onPressed: _busy ? null : _confirmEstimateNumberCorrection,
+                              child: const Text('Correct number')) : null,
+                    ),
                   if (_editLockUnverified)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),

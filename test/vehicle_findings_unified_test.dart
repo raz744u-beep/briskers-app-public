@@ -222,6 +222,36 @@ void main() {
   });
   tearDown(() async => db.close());
 
+  test('water pump finding keeps its identity, note and repair job history offline', () async {
+    final original = {
+      ...finding('fixture-f1'),
+      'body': 'Bad coolant leak from the water pump.',
+    };
+    await actions.cacheCustomerFinding(business, original);
+    final assigned = await actions.addToJob(business, original, 'job-6377');
+    expect(VehicleFindings.statusLabel(assigned), 'Resolved');
+    final removed = await actions.removeFromJob(business, assigned, 'job-6377');
+    expect(VehicleFindings.statusLabel(removed), 'Unresolved');
+    final linked = await actions.addToJob(business, removed, 'job-6377');
+    final closed = await actions.notApplicable(business, linked, note: 'Water pump replaced at another shop.');
+    expect(VehicleFindings.statusLabel(closed), 'Not Applicable');
+    expect(closed['id'], original['id']);
+    expect(closed['body'], contains(original['body']));
+    expect(closed['body'], contains('Water pump replaced at another shop.'));
+    final saved = await db.customSelect(
+      "SELECT status,body FROM local_findings WHERE id='fixture-f1'",
+    ).getSingle();
+    expect(saved.data['status'], 'not_applicable');
+    expect(saved.data['body'], closed['body']);
+    await actions.removeFromJob(business, closed, 'job-6377');
+    final reopened = await actions.reopen(business, closed);
+    expect(VehicleFindings.statusLabel(reopened), 'Unresolved');
+    final history = await db.customSelect(
+      "SELECT prior_repair_job FROM local_finding_status_history WHERE action='not_applicable'",
+    ).getSingle();
+    expect(history.data['prior_repair_job'], 'job-6377');
+  });
+
   test('Not Applicable keeps identity and body, optional note once, lost reply never duplicates',()async{
     final original=finding('fixture-f1');
     final changed=await actions.notApplicable(business,original,note:'Repaired elsewhere');

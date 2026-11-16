@@ -5,6 +5,7 @@ import 'package:drift/drift.dart' show Variable;
 import 'recovery_commit_store.dart';
 import 'local_document_sql_store.dart';
 import 'local_estimate_number.dart';
+import 'local_number_allocator.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -22,18 +23,19 @@ class LocalDocumentDetailCache {
     await LocalDocumentSqlStore.ensure(db);
     sqliteWritesEnabled=true;
     final pending = await db.customSelect(
-      "SELECT id,business_id FROM local_documents WHERE kind='estimate' "
-      "AND (document_number IS NULL OR lower(trim(document_number)) IN ('','pending sync'))",
+      "SELECT id,business_id,document_number FROM local_documents WHERE kind='estimate' "
+      "ORDER BY coalesce(document_date,''),created_at,id",
     ).get();
     final cache = LocalDocumentDetailCache(database: db);
+    for (final business in pending.map((row) => row.read<String>('business_id')).toSet()) {
+      await LocalNumberAllocator(db).nextNumber(business, 'estimate');
+    }
     for (final row in pending) {
+      if (LocalEstimateNumber.existing(row.data['document_number']) != null) continue;
       final business = row.read<String>('business_id');
       final id = row.read<String>('id');
-      final detail = await cache.load(business, id);
-      await LocalEstimateNumber.fillMissing(db, business, id, detail?['document_number']);
-      if ((detail?['origin'] ?? 'native') == 'native' &&
-          detail?['document_number'] == LocalEstimateNumber.forDocument(business, id)) {
-        await LocalEstimateNumber.queueServerRepair(db, business, id);
+      if (await cache.load(business, id) == null) {
+        await LocalEstimateNumber.repair(db, business, id);
       }
     }
   }
@@ -201,10 +203,11 @@ class LocalDocumentDetailCache {
   ) async {
     if (detail['kind'] != 'estimate') return detail;
     final id = detail['id']?.toString() ?? cacheId;
-    final saved = await LocalEstimateNumber.stored(_database, businessId, id);
-    final number = LocalEstimateNumber.existing(detail['document_number']) ??
-        saved ?? LocalEstimateNumber.forDocument(businessId, id);
-    await LocalEstimateNumber.fillMissing(_database, businessId, id, number);
+    final number = await LocalEstimateNumber.repair(_database, businessId, id,
+      cachedNumber: detail['document_number']?.toString(),
+      cachedIssued: detail['issued_at'] != null || detail['sent_at'] != null ||
+          (detail['status'] != null && !LocalEstimateNumber.isDraft(detail['status'])),
+    );
     return {...detail, 'document_number': number};
   }
 

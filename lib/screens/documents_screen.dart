@@ -1,3 +1,4 @@
+import '../services/local_estimate_number.dart';
 import '../widgets/list_interaction_hint.dart';
 import '../services/offline_invoice_payment_ledger.dart';
 import '../services/local_invoice_closure.dart';
@@ -2156,15 +2157,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     final vehicle = row['vehicle']?.toString() ?? '';
     final jobNumber = row['job_number']?.toString() ?? '';
     final documentDate = _shortDate(row['document_date']);
-    final displayNumber = number.isEmpty
-        ? ''
-        : (_estimate
-              ? (number.toUpperCase().startsWith('E-')
-                    ? number
-                    : 'E-$number')
-              : (number.toUpperCase().startsWith('I-')
-                    ? number
-                    : 'I-$number'));
+    final displayNumber = _estimate
+        ? LocalEstimateNumber.existing(number) ?? ''
+        : number.isEmpty || number.toUpperCase().startsWith('I-') ? number : 'I-$number';
 
     if (!_estimate) {
       final total=num.tryParse(row['total_amount']?.toString()??'');
@@ -2280,6 +2275,10 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                       ),
                     ],
                     const SizedBox(height: 3),
+                    if (_estimate && displayNumber.isEmpty)
+                      const Text('Number correction required',
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12)),
                     if (vehicle.isNotEmpty)
                       Text(
                         vehicle,

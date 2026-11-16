@@ -131,20 +131,15 @@ class LocalDocumentRepository {
       final visible = _visibleDocumentSql('local_documents');
       await _database.customStatement(
         kind == null
-            ? "DELETE FROM local_documents WHERE business_id = ? AND sync_state = 'synced' AND $visible"
-            : "DELETE FROM local_documents WHERE business_id = ? AND kind = ? AND sync_state = 'synced' AND $visible",
+            ? "DELETE FROM local_documents WHERE business_id = ? AND sync_state = 'synced' AND kind<>'estimate' AND $visible"
+            : "DELETE FROM local_documents WHERE business_id = ? AND kind = ? AND sync_state = 'synced' AND kind<>'estimate' AND $visible",
         kind == null ? [businessId] : [businessId, kind],
       );
       for (final incoming in documents) {
         final id = incoming['id']?.toString() ?? '';
-        final number = incoming['kind'] == 'estimate' &&
-            LocalEstimateNumber.existing(incoming['document_number']) == null
+        final number = incoming['kind'] == 'estimate' && id.isNotEmpty
             ? LocalEstimateNumber.existing(known[id]) : null;
-        final document = number == null ? LocalEstimateNumber.project(businessId, incoming)
-            : {...incoming, 'document_number': number};
-        if (number == null && !identical(incoming, document) && (incoming['origin'] ?? 'native') == 'native') {
-          await LocalEstimateNumber.queueServerRepair(_database, businessId, id);
-        }
+        final document = number == null ? incoming : {...incoming, 'document_number': number};
         if (id.isEmpty || _serverDocumentBlocked(document,
           blockedDocuments: fences.documents, blockedJobs: fences.jobs)) {
           continue;
@@ -193,6 +188,13 @@ class LocalDocumentRepository {
           ],
         );
       }
+      for (final document in documents) {
+        final id = document['id']?.toString() ?? '';
+        if (document['kind'] == 'estimate' && id.isNotEmpty) {
+          await LocalEstimateNumber.repair(_database, businessId, id,
+            cachedIssued: document['issued_at'] != null || document['sent_at'] != null);
+        }
+      }
     });
   }
 
@@ -221,14 +223,9 @@ class LocalDocumentRepository {
       final fences = await _retirementFences(businessId);
       for (final incoming in documents) {
         final id = incoming['id']?.toString() ?? '';
-        final number = incoming['kind'] == 'estimate' &&
-            LocalEstimateNumber.existing(incoming['document_number']) == null
+        final number = incoming['kind'] == 'estimate' && id.isNotEmpty
             ? await LocalEstimateNumber.stored(_database, businessId, id) : null;
-        final document = number == null ? LocalEstimateNumber.project(businessId, incoming)
-            : {...incoming, 'document_number': number};
-        if (number == null && !identical(incoming, document) && (incoming['origin'] ?? 'native') == 'native') {
-          await LocalEstimateNumber.queueServerRepair(_database, businessId, id);
-        }
+        final document = number == null ? incoming : {...incoming, 'document_number': number};
         if (id.isEmpty || _serverDocumentBlocked(document,
           blockedDocuments: fences.documents, blockedJobs: fences.jobs)) {
           continue;
@@ -276,6 +273,13 @@ class LocalDocumentRepository {
             _int(document['row_version']),
           ],
         );
+      }
+      for (final document in documents) {
+        final id = document['id']?.toString() ?? '';
+        if (document['kind'] == 'estimate' && id.isNotEmpty) {
+          await LocalEstimateNumber.repair(_database, businessId, id,
+            cachedIssued: document['issued_at'] != null || document['sent_at'] != null);
+        }
       }
     });
   }

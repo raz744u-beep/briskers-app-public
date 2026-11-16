@@ -129,7 +129,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         'status': presentation.statusLabel,
         'number': presentation.isInvoice
             ? document['document_number'] ?? tr('pendingSync')
-            : LocalEstimateNumber.project(widget.businessId, document)['document_number'],
+            : LocalEstimateNumber.existing(document['document_number']),
         'total': num.tryParse(document['total_amount']?.toString() ?? ''),
         'balance_due_cents': presentation.balanceDueCents,
         'pending_cents': presentation.paymentDetailsKnown ? presentation.pendingCents : null,
@@ -725,7 +725,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 Icons.receipt_long_outlined : Icons.description_outlined,
                 color: item['type'] == 'invoice' ? BriskersColors.invoices :
                   BriskersColors.estimates),
-              title: Text('${item['type'] == 'invoice' ? 'Invoice' : 'Estimate'} #${item['number'] ?? ''}',
+              title: Text(item['type'] == 'estimate' && item['number'] == null
+                  ? 'Estimate · number correction required'
+                  : '${item['type'] == 'invoice' ? 'Invoice' : 'Estimate'} #${item['number'] ?? ''}',
                 style: const TextStyle(fontWeight: FontWeight.w700)),
               subtitle: Text([
                 item['status']?.toString() ?? '',

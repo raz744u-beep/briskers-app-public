@@ -16,12 +16,16 @@ void main() {
       findings:const [{'id':'finding','status':'open','body':'Original concern'}],
       onEdit:noop,onAddPhotos:noop,onAddToJob:noop,onResolve:noop,onReopen:noop,onInvoiceChanged:(_,_)async{},
       onNotApplicable:(_,note)async{saved=note;})))));
-    await tester.tap(find.text('Not Applicable'));await tester.pumpAndSettle();
+    await tester.tap(find.text('Change status'));await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>));await tester.pumpAndSettle();
+    await tester.tap(find.text('Not Applicable').last);await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField),'Repaired elsewhere');
     await tester.tap(find.text('Cancel'));await tester.pumpAndSettle();expect(saved,isNull);
-    await tester.tap(find.text('Not Applicable'));await tester.pumpAndSettle();
+    await tester.tap(find.text('Change status'));await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>));await tester.pumpAndSettle();
+    await tester.tap(find.text('Not Applicable').last);await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField),'Repaired elsewhere');
-    await tester.tap(find.text('Confirm'));await tester.pumpAndSettle();expect(saved,'Repaired elsewhere');expect(tester.takeException(),isNull);
+    await tester.tap(find.text('Save'));await tester.pumpAndSettle();expect(saved,'Repaired elsewhere');expect(tester.takeException(),isNull);
   });
   testWidgets(
     'two-line visit has independent neutral job and invoice links and expandable truthful bullets',

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:briskers_app/core/connection_mode.dart';
 import 'package:briskers_app/services/local_estimate_number.dart';
@@ -15,17 +16,20 @@ import 'package:briskers_app/services/local_document_repository.dart';
 class _StandaloneApi extends BriskersApi {
   final List<String> operationIds = [];
   var detailAttempts = 0;
+  late String syncedNumber;
   @override
   Future<String> syncOfflineStandaloneEstimate(
     String businessId, {
     required String customerId,
     String? vehicleId,
     required String operationId,
+    required String publicNumber,
     required String documentDate,
     required List<Map<String, dynamic>> lines,
     String? memo,
   }) async {
     operationIds.add(operationId);
+    syncedNumber = publicNumber;
     expect(customerId, 'customer-id');
     expect(lines, hasLength(1));
     expect(lines.single['name'], 'Labor');
@@ -43,10 +47,7 @@ class _StandaloneApi extends BriskersApi {
     return {
       'id': documentId,
       'kind': 'estimate',
-      'document_number': LocalEstimateNumber.forDocument(
-        businessId,
-        documentId,
-      ),
+      'document_number': syncedNumber,
       'job_id': null,
       'status': 'draft',
       'customer_id': 'customer-id',
@@ -100,7 +101,8 @@ void main() {
       customerName: 'Test Customer',
     );
     expect(localId, startsWith('local-estimate-'));
-    final number = LocalEstimateNumber.forDocument('shop', localId);
+    final number = await LocalEstimateNumber.stored(db, 'shop', localId);
+    expect(number, 'E-1');
     expect((await cache.load('shop', localId))?['document_number'], number);
     expect(
       DocumentPdfService.fileName((await cache.load('shop', localId))!),
@@ -109,7 +111,7 @@ void main() {
     expect((await cache.load('shop', localId))?['job_id'], isNull);
     final templates = await EmailDraftTemplates.load('shop');
     expect(
-      templates.render(templates.subject, estimate: true, number: number),
+      templates.render(templates.subject, estimate: true, number: number!),
       'Estimate #$number - Briskers Foreign Car Repair',
     );
     final jobs = await db
@@ -212,10 +214,142 @@ void main() {
         customerId: 'customer',
         customerName: 'Fixture',
       );
+      expect(await LocalEstimateNumber.stored(db, 'shop', first), 'E-237');
+      expect(await LocalEstimateNumber.stored(db, 'shop', second), 'E-238');
+    },
+  );
+
+  test(
+    'repair preserves both historical estimates and reserves consecutive numbers on this device',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final mode = BriskersConnectionModeController.instance;
+      await mode.setMode(BriskersConnectionMode.offline);
+      final db = BriskersLocalDatabase(NativeDatabase.memory());
+      addTearDown(() async {
+        await mode.setMode(BriskersConnectionMode.auto);
+        LocalDocumentDetailCache.sqliteWritesEnabled = false;
+        await db.close();
+      });
+      final cache = LocalDocumentDetailCache(database: db);
+      await LocalDocumentDetailCache.initialize(db);
+      final original = [
+        {
+          'id': 'jennifer-legacy',
+          'kind': 'estimate',
+          'document_number': null,
+          'status': 'draft',
+          'document_date': '2026-11-16',
+          'customer_name': 'Jennifer McCrossen',
+          'vehicle': '2023 Porsche Cayenne',
+          'total_amount': 1879.03,
+          'memo': 'Customer estimate',
+          'lines': [
+            {'id': 'labor-line', 'name': 'Labor', 'unit_price': 1879.03},
+          ],
+          'attachments': [
+            {'id': 'photo-1', 'filename': 'photo.jpg'},
+          ],
+        },
+        {
+          'id': 'october-legacy',
+          'kind': 'estimate',
+          'document_number': 'E-EST-1962E96CA13640F',
+          'status': 'draft',
+          'document_date': '2026-10-10',
+          'total_amount': 137.19,
+        },
+        {
+          'id': 'issued-legacy',
+          'kind': 'estimate',
+          'document_number': 'EST-OLD-ISSUED',
+          'status': 'issued',
+          'document_date': '2026-10-01',
+          'total_amount': 148.42,
+        },
+        {
+          'id': 'valid',
+          'kind': 'estimate',
+          'document_number': 'E-1997',
+          'status': 'issued',
+        },
+      ];
+      for (final estimate in original) {
+        final id = estimate['id'] as String;
+        await db.customStatement(
+          "INSERT INTO local_documents(id,business_id,kind,document_number,status,document_date,total) "
+          "VALUES(?,'shop','estimate',?,?,?,?)",
+          [
+            id,
+            estimate['document_number'],
+            estimate['status'],
+            estimate['document_date'],
+            estimate['total_amount'] ?? 0,
+          ],
+        );
+        // Seed snapshots written by the old APK, before opening the new cache.
+        await db.customStatement(
+          'INSERT INTO local_document_details VALUES(?,?)',
+          [LocalDocumentDetailCache.key('shop', id), jsonEncode(estimate)],
+        );
+      }
+      await LocalDocumentDetailCache.initialize(db);
+      final jennifer = await cache.load('shop', 'jennifer-legacy');
+      expect(jennifer, {...original[0], 'document_number': 'E-1999'});
+      expect(await cache.load('shop', 'october-legacy'), {
+        ...original[1],
+        'document_number': 'E-1998',
+      });
       expect(
-        LocalEstimateNumber.forDocument('shop', first),
-        isNot(LocalEstimateNumber.forDocument('shop', second)),
+        (await cache.load('shop', 'issued-legacy'))?['document_number'],
+        isNull,
       );
+      expect((await cache.load('shop', 'valid'))?['document_number'], 'E-1997');
+      expect(
+        await LocalEstimateNumber.repair(
+          db,
+          'shop',
+          'issued-legacy',
+          confirmed: true,
+        ),
+        'E-2000',
+      );
+      final audit = await db
+          .customSelect(
+            "SELECT original_number,owner_confirmed FROM local_estimate_number_audit_v2 WHERE estimate_id='issued-legacy'",
+          )
+          .getSingle();
+      expect(audit.data, {
+        'original_number': 'EST-OLD-ISSUED',
+        'owner_confirmed': 1,
+      });
+      final drafts = OfflineDocumentDraftService(database: db);
+      await expectLater(
+        db.transaction(() async {
+          await drafts.createStandaloneEstimate(
+            'shop',
+            customerId: 'customer',
+            customerName: 'Test',
+          );
+          throw StateError('Simulate failed save');
+        }),
+        throwsStateError,
+      );
+      final first = await drafts.createStandaloneEstimate(
+        'shop',
+        customerId: 'customer',
+        customerName: 'Test',
+      );
+      expect(await LocalEstimateNumber.stored(db, 'shop', first), 'E-2001');
+      await db.customStatement('DELETE FROM local_documents WHERE id=?', [
+        first,
+      ]);
+      final second = await drafts.createStandaloneEstimate(
+        'shop',
+        customerId: 'customer',
+        customerName: 'Test',
+      );
+      expect(await LocalEstimateNumber.stored(db, 'shop', second), 'E-2002');
     },
   );
 }

@@ -1,3 +1,4 @@
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 import 'offline_invoice_finalization.dart';
 import 'sync_replay_fence.dart';
 import 'dart:convert';
@@ -542,13 +543,12 @@ class OfflineDocumentDraftService {
     }
     final operationId=_offlineOperationUuid();
     final id='local-estimate-$operationId';
-    final number = LocalEstimateNumber.forDocument(businessId, id);
     final now=DateTime.now();
     final date=now.toIso8601String().split('T').first;
     final copiedLines = _prepareCopiedLines(initialLines);
     final totals = _copiedTotals(copiedLines);
     final detail=<String,dynamic>{
-      'id':id,'kind':'estimate','document_number':number,
+      'id':id,'kind':'estimate',
       'status':'draft','display_status':'Draft',
       'display_status_code':'draft',
       'job_id':null,'job_number':null,
@@ -564,6 +564,8 @@ class OfflineDocumentDraftService {
       'sync_state':'pending','_local_snapshot':true,'_local_draft':true,
     };
     await _database.transaction(() async {
+      final number = await LocalEstimateNumber.allocate(_database, businessId, id);
+      detail['document_number'] = number;
       await _database.customStatement(
         '''
         INSERT INTO local_documents(
@@ -633,12 +635,10 @@ class OfflineDocumentDraftService {
 
     final operationId = _offlineOperationUuid();
     final id = 'local-estimate-$operationId';
-    final number = LocalEstimateNumber.forDocument(businessId, id);
     final now = DateTime.now();
     final detail = <String, dynamic>{
       'id': id,
       'kind': 'estimate',
-      'document_number': number,
       'status': 'draft',
       'display_status': 'Draft',
       'display_status_code': 'draft',
@@ -668,6 +668,8 @@ class OfflineDocumentDraftService {
     };
 
     await _database.transaction(() async {
+      final number = await LocalEstimateNumber.allocate(_database, businessId, id);
+      detail['document_number'] = number;
       await _database.customStatement(
         '''
         INSERT INTO local_documents (
@@ -819,6 +821,7 @@ class OfflineDocumentDraftService {
       'display_status_code': 'open',
       'converted': false,
       'converted_from_estimate_id': estimateId,
+      'converted_from_estimate_number': estimate['document_number'],
       'job_id': effectiveJobId,
       'job_number': provisionalJobId != null ? jobNumber : estimate['job_number'],
       'job_title': estimate['job_title'] ?? estimate['title'] ?? 'Estimate repair',
@@ -1277,18 +1280,30 @@ class OfflineDocumentDraftService {
   Future<void> _flushInternal(String businessId, {bool exactTotalRecovery = false}) async {
     await LocalEstimateNumber.ensureRepairQueue(_database);
     final repairs = await _database.customSelect(
-      'SELECT estimate_id FROM local_estimate_number_repairs_v1 WHERE business_id=? LIMIT 50',
+      'SELECT * FROM local_estimate_number_sync_v2 WHERE business_id=? AND conflict IS NULL LIMIT 50',
       variables: [Variable(businessId)],
     ).get();
     for (final repair in repairs) {
       if (BriskersConnectionModeController.instance.forceOffline) return;
       final id = repair.read<String>('estimate_id');
       try {
-        await _api.syncEstimateNumber(businessId, id);
+        await _api.syncEstimateNumber(businessId, id,
+          number: repair.read<String>('public_number'),
+          ownerConfirmed: repair.read<int>('owner_confirmed') == 1,
+        );
         await _database.customStatement(
-          'DELETE FROM local_estimate_number_repairs_v1 WHERE business_id=? AND estimate_id=?',
+          'DELETE FROM local_estimate_number_sync_v2 WHERE business_id=? AND estimate_id=?',
           [businessId, id],
         );
+      } on PostgrestException catch (error) {
+        if (const {'PT409', '23505', '42501', '22023'}.contains(error.code)) {
+          await _database.customStatement(
+            'UPDATE local_estimate_number_sync_v2 SET conflict=? WHERE business_id=? AND estimate_id=?',
+            [error.message, businessId, id],
+          );
+          continue;
+        }
+        break;
       } catch (_) {
         // The local number is already usable. Leave its optional upload queued
         // for the next sync and let other draft operations proceed.
@@ -1496,6 +1511,10 @@ class OfflineDocumentDraftService {
             throw StateError('The synced invoice did not return its linked Job.');
           }
         } else {
+          final publicNumber = LocalEstimateNumber.existing(localDetail['document_number']);
+          if (publicNumber == null) {
+            throw StateError('Confirm the estimate number correction before synchronizing.');
+          }
           final jobId = payload['job_id']?.toString();
           final operationId = payload['operation_id'] as String;
           final date = localDetail['document_date']?.toString() ?? '';
@@ -1509,29 +1528,20 @@ class OfflineDocumentDraftService {
                     businessId,
                     customerId: payload['customer_id'] as String,
                     vehicleId: payload['vehicle_id']?.toString(),
-                    operationId: operationId,
+                    operationId: operationId, publicNumber: publicNumber,
                     documentDate: date,
                     lines: lines,
                     memo: memo,
                   )
                 : _api.syncOfflineJobEstimate(
-                    businessId, jobId: jobId, operationId: operationId,
+                    businessId, jobId: jobId, operationId: operationId, publicNumber: publicNumber,
                     documentDate: date, lines: lines, memo: memo,
                   ),
             outboxId: outboxId,
           );
           serverDetail = await _api.documentDetail(businessId, serverId);
-          final expectedNumber = localDetail['document_number'];
-          final savedNumber = LocalEstimateNumber.existing(serverDetail['document_number']);
-          if (savedNumber != expectedNumber && savedNumber == null && serverId == operationId) {
-            await LocalJobQuarantine.guardReplay(
-              _database, businessId,
-              () => _api.syncEstimateNumber(businessId, serverId),
-              outboxId: outboxId,
-            );
-            serverDetail = await _api.documentDetail(businessId, serverId);
-          }
-          if (serverId != operationId || serverDetail['document_number'] != expectedNumber) {
+          final expectedNumber = publicNumber;
+          if (serverId != operationId || LocalEstimateNumber.existing(serverDetail['document_number']) != expectedNumber) {
             throw StateError('The synchronized estimate number differs from the saved estimate.');
           }
         }
@@ -1582,6 +1592,10 @@ class OfflineDocumentDraftService {
           }
         }
 
+        if (payload['kind'] == 'convert_invoice' && localDetail['converted_from_estimate_number'] != null) {
+          serverDetail = {...serverDetail,
+            'converted_from_estimate_number': localDetail['converted_from_estimate_number']};
+        }
         if (payload['kind'] == 'invoice' || payload['kind'] == 'convert_invoice') {
           serverDetail = await _applyPendingInvoiceWarranty(
             businessId, serverId, localDetail, outboxId);
@@ -1668,18 +1682,21 @@ class OfflineDocumentDraftService {
           );
         });
       } catch (error) {
+        final conflict = preflight['kind'] == 'estimate' &&
+            error is PostgrestException &&
+            const {'PT409','23505','42501','22023'}.contains(error.code);
         await _database.customStatement(
           '''
           UPDATE sync_outbox
           SET attempt_count = attempt_count + 1,
-              state = 'pending',
+              state = ?,
               last_attempt_at = ?,
               last_error = ?
           WHERE id = ?
           ''',
-          [_unixNow(), error.toString(), outboxId],
+          [conflict ? 'conflict' : 'pending', _unixNow(), error.toString(), outboxId],
         );
-        break;
+        if (!conflict) break;
       }
     }
   }

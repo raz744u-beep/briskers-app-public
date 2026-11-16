@@ -30,6 +30,7 @@ class CustomerVehicleFindingsSection extends StatefulWidget {
     this.canDelete = false,
     this.initiallyExpanded = false,
     this.cacheScopeKey,
+    this.currentJobId,
   });
 
   final String businessId;
@@ -41,6 +42,7 @@ class CustomerVehicleFindingsSection extends StatefulWidget {
   // Invoice entry uses a vehicle-scoped snapshot so it cannot overwrite
   // the Customer Overview's multi-vehicle cached Findings.
   final String? cacheScopeKey;
+  final String? currentJobId;
 
   @override
   State<CustomerVehicleFindingsSection> createState() =>
@@ -1537,7 +1539,7 @@ class _CustomerVehicleFindingsSectionState
   }
 
   Future<void> _addFindingToJob(Map<String, dynamic> finding) async {
-    final jobId = await _chooseFindingJob(finding);
+    final jobId = widget.currentJobId ?? await _chooseFindingJob(finding);
     if (jobId != null && mounted) {
       await _changeFinding(
         () => _findingActions.addToJob(
@@ -1659,6 +1661,7 @@ class _CustomerVehicleFindingsSectionState
                 ),
               VehicleFindings(
                 findings: allRows,
+                jobId: widget.currentJobId,
                 busy: _busy,
                 canEdit: widget.canManage,
                 canManage: widget.canManage,

@@ -185,8 +185,9 @@ class VehicleFindingActionsService {
           }
         }
       }
-      if (action == 'not_applicable' && current['status'] != 'open' && current['status'] != 'not_applicable') {
-        throw StateError('Remove this finding from its Job before marking it Not Applicable.');
+      if (action == 'remove' && current['status'] == 'not_applicable') {
+        updated = current;
+        return;
       }
       if (action == 'not_applicable' && current['status']=='not_applicable') {
         updated=current; return;
@@ -198,6 +199,19 @@ class VehicleFindingActionsService {
       if (relevant.every((key) => current[key] == patch[key])) {
         updated = current;
         return;
+      }
+      if (action != 'invoice') {
+        await _database.customStatement(
+          'CREATE TABLE IF NOT EXISTS local_finding_status_history '
+          '(business_id TEXT NOT NULL, finding_id TEXT NOT NULL, action TEXT NOT NULL, '
+          'prior_status TEXT, prior_repair_job TEXT, prior_resolved_job TEXT, '
+          'next_job TEXT, recorded_at TEXT NOT NULL)',
+        );
+        await _database.customStatement(
+          'INSERT INTO local_finding_status_history VALUES(?,?,?,?,?,?,?,?)',
+          [businessId, id, action, current['status'], current['repair_job_id'],
+           current['resolved_job_id'], jobId, DateTime.now().toUtc().toIso8601String()],
+        );
       }
       updated = {
         ...current,

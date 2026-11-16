@@ -79,6 +79,7 @@ if [ -n "$intermediate" ]; then
     Briskers-v0.10.9-b4667.apk) intermediate_hash=7fb638bb73b98ec10c43ed1d397f2ece6acfb08737afbd3ab8b7e9ad81e9412e ;;
     Briskers-v0.10.9-b4668.apk) intermediate_hash=389dc3cb959180f4e5fbe460371d50cab9fe83297fb05066af0530df9c2fc820 ;;
     Briskers-v0.10.9-b4669.apk) intermediate_hash=644a28aea2bd66caa80ad23f01f71d96d2a7455264d7e1c9bac6e6623c72e5b8 ;;
+    Briskers-v0.10.9-b4676.apk) intermediate_hash=feae67f0aa353c6fbb46a881ff43ec84452048661be1227d97ac269e9aa5133b ;;
     Briskers-v0.10.9-b4671.apk) intermediate_hash=d708070e7d4e8c0f6418a676ade8bde57721aa6e0d139245e36d58a5bc120f44 ;;
     Briskers-v0.10.9-b4670.apk) intermediate_hash=a8010b0a7758f80eb26288b8ce8d3834649a078fe1048bc9a44465b89d034389 ;;
     Briskers-v0.10.9-b4665.apk) intermediate_hash=980fbd4e9d04a8879f52652bdd46cd8e9c878291c2b31cadec451a87a0768a77 ;;

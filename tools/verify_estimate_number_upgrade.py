@@ -7,7 +7,8 @@ import sqlite3
 BUSINESS = "estimate-upgrade-synthetic"
 DRAFT = "local-estimate-00000000-0000-4000-8000-000000000003"
 SENT = "00000000-0000-4000-8000-000000000004"
-NUMBER = "EST-00000000000040008000000000000003"
+NUMBER = "E-1999"
+MALFORMED = "00000000-0000-4000-8000-000000000005"
 
 
 def seed(db):
@@ -16,8 +17,9 @@ def seed(db):
            (id,business_id,customer_id,kind,document_number,status,total,document_date,sync_state)
            VALUES(?,?,?,'estimate',?,?,?,'2026-11-16',?)""",
         [
-            (DRAFT, BUSINESS, "fixture-customer", None, "draft", 128.50, "pending"),
-            (SENT, BUSINESS, "fixture-customer", "EST-APPROVED-42", "sent", 90, "synced"),
+            (DRAFT, BUSINESS, "fixture-customer", None, "draft", 1879.03, "pending"),
+            (MALFORMED, BUSINESS, "fixture-customer", "EST-1234567890ABCDEF", "draft", 137.19, "synced"),
+            (SENT, BUSINESS, "fixture-customer", "E-1997", "sent", 90, "synced"),
         ],
     )
 
@@ -29,10 +31,11 @@ def verify(db):
         (BUSINESS,),
     ).fetchall()
     assert rows == [
-        (DRAFT, NUMBER, "draft", 128.50),
-        (SENT, "EST-APPROVED-42", "sent", 90),
+        (DRAFT, NUMBER, "draft", 1879.03),
+        (MALFORMED, "E-1998", "draft", 137.19),
+        (SENT, "E-1997", "sent", 90),
     ], rows
-    print(json.dumps({"new_number": NUMBER, "historical_number": rows[1][1], "rows": len(rows)}))
+    print(json.dumps({"new_number": NUMBER, "historical_number": rows[2][1], "rows": len(rows)}))
 
 
 if __name__ == "__main__":

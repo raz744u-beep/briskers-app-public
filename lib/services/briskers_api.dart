@@ -3317,17 +3317,19 @@ class BriskersApi {
     required String customerId,
     String? vehicleId,
     required String operationId,
+    required String publicNumber,
     required String documentDate,
     required List<Map<String,dynamic>> lines,
     String? memo,
   }) async {
     final result=await networkSupabase.rpc(
-      'briskers_sync_offline_standalone_estimate_v1',
+      'briskers_sync_offline_standalone_estimate_v2',
       params:{
         'p_business_id':businessId,
         'p_customer_id':customerId,
         'p_vehicle_id':vehicleId,
         'p_operation_id':operationId,
+        'p_public_number':publicNumber,
         'p_document_date':documentDate,
         'p_lines':lines,
         'p_memo':memo,
@@ -3340,14 +3342,16 @@ class BriskersApi {
     String businessId, {
     required String jobId,
     required String operationId,
+    required String publicNumber,
     required String documentDate,
     required List<Map<String, dynamic>> lines,
     String? memo,
   }) async {
-    final result = await networkSupabase.rpc('briskers_sync_offline_job_estimate_v1', params: {
+    final result = await networkSupabase.rpc('briskers_sync_offline_job_estimate_v2', params: {
       'p_business_id': businessId,
       'p_job_id': jobId,
       'p_operation_id': operationId,
+      'p_public_number': publicNumber,
       'p_document_date': documentDate,
       'p_lines': lines,
       'p_memo': memo,
@@ -3355,10 +3359,12 @@ class BriskersApi {
     return result.toString();
   }
 
-  Future<void> syncEstimateNumber(String businessId, String estimateId) async {
-    await networkSupabase.rpc('briskers_sync_estimate_number_v1', params: {
+  Future<void> syncEstimateNumber(String businessId, String estimateId, {required String number, required bool ownerConfirmed}) async {
+    await networkSupabase.rpc('briskers_sync_estimate_number_v2', params: {
       'p_business_id': businessId,
       'p_estimate_id': estimateId,
+      'p_public_number': number,
+      'p_owner_confirmed': ownerConfirmed,
     });
   }
 

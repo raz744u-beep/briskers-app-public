@@ -52,17 +52,55 @@ class VehicleFindings extends StatelessWidget {
   static String statusLabel(Map<String,dynamic> finding)=>switch(finding['status']) {
     'resolved' || 'in_job'=>'Resolved', 'not_applicable'=>'Not Applicable', _=>'Unresolved'};
 
-  Future<void> _notApplicable(BuildContext context,Map<String,dynamic> finding)async{
-    var value='';
-    final note=await showDialog<String>(context:context,builder:(dialog)=>AlertDialog(
-      title:const Text('Not Applicable'),
-      content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
-        const Text('Keep this finding in vehicle history. It will no longer appear as an unresolved repair or on invoice notes.'),
-        const SizedBox(height:16),TextField(onChanged:(text)=>value=text,maxLines:3,decoration:const InputDecoration(labelText:'Optional note',hintText:'Repaired elsewhere or no action needed'))])),
-      actions:[TextButton(onPressed:()=>Navigator.pop(dialog),child:const Text('Cancel')),
-        FilledButton(onPressed:()=>Navigator.pop(dialog,value),child:const Text('Confirm'))]));
-    // The dialog route can animate after its future resolves.
-    if(note!=null)await onNotApplicable!(finding,note);
+  Future<void> _chooseStatus(BuildContext context, Map<String, dynamic> finding) async {
+    final current = statusLabel(finding);
+    var selected = current;
+    var note = '';
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => StatefulBuilder(builder: (context, update) => AlertDialog(
+        title: const Text('Finding status'),
+        content: SingleChildScrollView(child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: current,
+              decoration: const InputDecoration(labelText: 'Status'),
+              items: const ['Unresolved', 'Resolved', 'Not Applicable']
+                  .map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+              onChanged: (value) { if (value != null) update(() => selected = value); },
+            ),
+            if (selected == 'Not Applicable' && current != selected)
+              TextField(
+                onChanged: (value) => note = value,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Optional note',
+                  hintText: 'Water pump replaced at another shop',
+                ),
+              ),
+          ],
+        )),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialog), child: const Text('Cancel')),
+          FilledButton(onPressed: current == selected ? null : () => Navigator.pop(dialog, true),
+            child: const Text('Save')),
+        ],
+      )),
+    );
+    if (saved != true || !context.mounted) return;
+    switch (selected) {
+      case 'Not Applicable':
+        await onNotApplicable?.call(finding, note);
+      case 'Resolved':
+        await onAddToJob(finding);
+      case 'Unresolved':
+        if (finding['status'] == 'in_job' && onRemoveFromJob != null) {
+          await onRemoveFromJob!(finding);
+        } else {
+          await onReopen(finding);
+        }
+    }
   }
 
   @override
@@ -152,7 +190,7 @@ class VehicleFindings extends StatelessWidget {
         ? Colors.green
         : status == 'In Job'
         ? Colors.blue
-        : Colors.deepOrange;
+        : status == 'Not Applicable' ? Colors.grey : Colors.deepOrange;
     return Container(
       key: ValueKey('vehicle-finding-$id'),
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
@@ -171,7 +209,7 @@ class VehicleFindings extends StatelessWidget {
                     ? Icons.check_circle_outline
                     : status == 'In Job'
                     ? Icons.handyman_outlined
-                    : Icons.warning_amber_rounded,
+                    : status == 'Not Applicable' ? Icons.remove_circle_outline : Icons.warning_amber_rounded,
                 color: color,
                 size: 21,
               ),
@@ -248,8 +286,13 @@ class VehicleFindings extends StatelessWidget {
               onPressed: enabled ? () => onRemoveFromJob!(finding) : null,
               child: const Text('Remove from Job'),
             ),
-          if(canManage && status=='Open' && onNotApplicable!=null) TextButton(
-            onPressed:enabled?()=>_notApplicable(context,finding):null,child:const Text('Not Applicable')),
+          if (canManage && onNotApplicable != null)
+            TextButton.icon(
+              key: ValueKey('finding-status-$id'),
+              onPressed: enabled ? () => _chooseStatus(context, finding) : null,
+              icon: const Icon(Icons.tune),
+              label: const Text('Change status'),
+            ),
           if (canIncludeOnInvoice && status!='Not Applicable')
             CheckboxListTile(
               key: ValueKey('finding-invoice-$id'),
@@ -269,7 +312,7 @@ class VehicleFindings extends StatelessWidget {
                   ? (value) => onInvoiceChanged(finding, value == true)
                   : null,
             ),
-          if (canManage && status != 'In Job' && status != 'Open')
+          if (canManage && onNotApplicable == null && status != 'In Job' && status != 'Open')
             Align(
               alignment: Alignment.centerRight,
               child: TextButton.icon(
