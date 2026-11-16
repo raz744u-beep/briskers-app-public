@@ -109,8 +109,9 @@ class LocalEstimateNumber {
         final candidate = existing(other.data['document_number']);
         return candidate != null &&
             int.parse(candidate.substring(2)) == ordinal;
-      }))
+      })) {
         return null;
+      }
     }
     await db.customStatement(
       "UPDATE local_documents SET document_number=? WHERE business_id=? AND id=? AND kind='estimate'",
