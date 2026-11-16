@@ -9,6 +9,8 @@ import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_document_detail_cache.dart';
 import 'offline_invoice_payment_ledger.dart';
+import 'offline_invoice_tax_service.dart';
+import 'offline_document_edit_service.dart';
 import 'local_job_quarantine.dart';
 import 'local_job_retirement.dart';
 
@@ -163,6 +165,21 @@ class OfflineInvoiceFinalization {
     });
   }
 
+  /// Read the same durable payment and tax corrections shown on the invoice.
+  Future<Map<String, dynamic>> projectLocalFinancialDetail(
+    String business, String invoice, Map<String, dynamic> saved,
+  ) async {
+    final ledger = OfflineInvoicePaymentLedger(database: db);
+    final taxed = await OfflineInvoiceTaxService(database: db)
+        .projectPending(business, invoice, saved);
+    return OfflineInvoicePaymentLedger.projectPendingEdits(
+      OfflineInvoicePaymentLedger.projectPendingPayments(
+        taxed, await ledger.pendingForInvoice(business, invoice),
+      ),
+      await ledger.pendingEditsForInvoice(business, invoice),
+    );
+  }
+
   /// Finalize the existing local receipts without creating another payment.
   /// The receipt markers and Income rows commit together.
   Future<void> finalizeLocally(
@@ -187,9 +204,29 @@ class OfflineInvoiceFinalization {
         if (resumeSavedRequest) return;
         throw StateError('Open the saved invoice before finalizing its receipts.');
       }
-      final queued = await OfflineInvoicePaymentLedger(database: db)
-          .pendingForInvoice(business, invoice);
-      final detail = OfflineInvoicePaymentLedger.projectPendingPayments(saved, queued);
+      final ledger = OfflineInvoicePaymentLedger(database: db);
+      final queued = await ledger.pendingForInvoice(business, invoice);
+      late Map<String, dynamic> detail;
+      try {
+        await OfflineDocumentEditService(database: db)
+            .verifySavedLineCorrections(business, invoice, saved);
+        final taxed = await OfflineInvoiceTaxService(database: db)
+            .verifySavedTaxCorrection(business, invoice, saved);
+        final paymentEdits = await ledger.pendingEditsForInvoice(business, invoice);
+        final original = OfflineInvoicePaymentLedger.projectPendingPayments(taxed, queued);
+        detail = OfflineInvoicePaymentLedger.projectPendingEdits(original, paymentEdits);
+        if (detail['_payment_reconciliation_required'] == true) {
+          throw StateError(original['_payment_reconciliation_required'] == true
+              ? 'The saved receipt could overlap another payment. Review the Payments list before posting.'
+              : 'A saved payment correction does not match the original receipt. Review that payment on the Payment tab.');
+        }
+      } on StateError {
+        if (resumeSavedRequest) return;
+        rethrow;
+      } on FormatException {
+        if (resumeSavedRequest) return;
+        throw StateError('A saved correction cannot be read. Review Items and Payments before posting.');
+      }
       if (resumeSavedRequest) {
         final intent = await db.customSelect(
           "SELECT payload FROM invoice_finalization_intents_v1 "
@@ -202,21 +239,6 @@ class OfflineInvoiceFinalization {
         } on StateError {
           return;
         }
-      }
-
-      final edits = await db.customSelect(
-        "SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? "
-        "AND (entity_type IN ('invoice_pending_payment_edit','invoice_tax_edit') "
-        "OR (entity_type='document_edit' AND operation NOT IN ('memo','warranty','move_line')))",
-        variables: [Variable(business), Variable(invoice)],
-      ).get();
-      if (edits.isNotEmpty) {
-        if (resumeSavedRequest) return;
-        throw StateError('Finish the saved invoice corrections before finalizing.');
-      }
-      if (detail['_payment_reconciliation_required'] == true) {
-        if (resumeSavedRequest) return;
-        throw StateError('The saved receipt identities require review.');
       }
 
       if (confirmedDetail != null) {
@@ -234,6 +256,13 @@ class OfflineInvoiceFinalization {
         throw StateError('Saved receipt amounts need verification before finalizing.');
       }
       if (pending.isEmpty) return;
+
+      final total = money(detail['total_amount']);
+      final received = money(detail['paid_amount']) + money(detail['pending_payment']);
+      if (received > total) {
+        if (resumeSavedRequest) return;
+        throw StateError('Recorded payments exceed the saved invoice total. Review the invoice total and payment amount before posting.');
+      }
 
       final indexed = await db.customSelect(
         'SELECT d.document_number,d.job_id,j.job_number,'

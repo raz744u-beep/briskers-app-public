@@ -6357,9 +6357,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             const Padding(
               padding: EdgeInsets.only(top: 12),
               child: Text(
-                'A saved payment is awaiting server reconciliation. It is '
-                'listed below but is not counted twice in the totals. Sync '
-                'before recording or finalizing payments. Do not enter it again.',
+                'A saved payment needs review. The payment list and totals '
+                'show what Briskers can verify. Finalize Received Payment shows '
+                'which correction needs attention.',
                 style: TextStyle(color: Color(0xFF946200)),
               ),
             ),
@@ -6585,7 +6585,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     ],
                     const SizedBox(height: 10),
                     FilledButton.icon(
-                      onPressed: _busy || _startingFinalization || _detail?['_local_pending_tax'] == true || _detail?['_payment_reconciliation_required'] == true
+                      onPressed: _busy || _startingFinalization
                           ? null : _finalizeEnteredPayments,
                       icon: const Icon(Icons.check_circle_outline),
                       label: const Text('Finalize Received Payment'),

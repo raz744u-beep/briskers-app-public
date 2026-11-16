@@ -102,6 +102,27 @@ Future<BriskersLocalDatabase> _dbWithInvoice(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('posting can use a complete locally saved tax correction with its queue intact', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final cache = LocalDocumentDetailCache(database: db);
+    final original = _invoice();
+    await _dbWithInvoice(cache, db, original);
+    final service = OfflineInvoiceTaxService(database: db, cache: cache);
+    await service.saveOffline('shop', 'barbara-6349',
+      expectedVersion: 5, oldRate: 0.0925, newRate: 0.0975);
+    final corrected = await service.verifySavedTaxCorrection('shop', 'barbara-6349', original);
+    expect(corrected['total_amount'], 175.60);
+    final rows = await db.customSelect("SELECT state FROM sync_outbox WHERE entity_type='invoice_tax_edit'").get();
+    expect(rows.single.read<String>('state'), 'pending');
+    await db.customStatement("UPDATE local_documents SET total=175.61 WHERE id='barbara-6349'");
+    await expectLater(
+      service.verifySavedTaxCorrection('shop', 'barbara-6349', original),
+      throwsA(isA<StateError>().having((error) => error.message, 'message', contains('tax correction conflicts'))),
+    );
+  });
+
   test('Force Offline tax save changes local total, survives restart, '
       'does not alter existing pending payment', () async {
     SharedPreferences.setMockInitialValues({});

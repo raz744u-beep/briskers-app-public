@@ -227,6 +227,68 @@ class OfflineInvoiceTaxService {
     return _project(snapshot, payload, row.read<int>('id'), row.read<String>('state'));
   }
 
+  /// An unsynchronized correction can still be committed locally. Require
+  /// the original line identity, recalculated totals and the durable index.
+  Future<Map<String, dynamic>> verifySavedTaxCorrection(
+    String businessId, String invoiceId, Map<String, dynamic> saved,
+  ) async {
+    final rows = await _queued(businessId, invoiceId);
+    if (rows.isEmpty) return saved;
+    const message = 'The saved tax correction conflicts with this invoice. '
+        'Review Sales Tax and the Items total before posting.';
+    if (rows.length != 1 ||
+        !const {'pending', 'inflight'}.contains(rows.single.read<String>('state'))) {
+      throw StateError(message);
+    }
+    final payload = jsonDecode(rows.single.read<String>('payload_json'));
+    if (payload is! Map || payload['lines'] is! List ||
+        (payload['lines'] as List).any((line) => line is! Map)) {
+      throw StateError(message);
+    }
+
+    final projected = await projectPending(businessId, invoiceId, saved);
+    final lines = _lines(projected);
+    final expected = payload['lines'] as List;
+    final rate = _value(payload['new_rate']);
+    if (projected['_local_pending_tax'] != true ||
+        projected['_local_tax_operation_id'] != rows.single.read<int>('id') ||
+        int.tryParse(saved['row_version']?.toString() ?? '') != payload['expected_version'] ||
+        !_sameLines(lines, expected, compareRates: false) ||
+        !rate.isFinite || rate <= 0 || rate > 1) {
+      throw StateError(message);
+    }
+
+    final classified = <Map<String, dynamic>>[];
+    for (var i = 0; i < lines.length; i++) {
+      final oldRate = _value(expected[i]['tax_rate']);
+      final actualRate = _value(lines[i]['tax_rate']);
+      if (!oldRate.isFinite || oldRate < 0 ||
+          !actualRate.isFinite || actualRate != (oldRate == 0 ? 0 : rate)) {
+        throw StateError(message);
+      }
+      classified.add({...lines[i], 'tax_mode': oldRate == 0 ? 'exempt' : 'default'});
+    }
+    final computed = InvoiceTaxProposal.preview(lines: classified, rate: rate);
+    bool sameAmount(Object? a, Object? b) {
+      final first = _value(a);
+      final second = _value(b);
+      return first.isFinite && second.isFinite && _cents(first) == _cents(second);
+    }
+
+    final index = await _db.customSelect(
+      "SELECT total FROM local_documents WHERE business_id=? AND id=? AND kind='invoice'",
+      variables: [Variable(businessId), Variable(invoiceId)],
+    ).getSingleOrNull();
+    if (!sameAmount(computed['new_total'], payload['new_total']) ||
+        !sameAmount(computed['new_tax'], payload['new_tax']) ||
+        !sameAmount(computed['new_tax'], projected['tax_amount']) ||
+        !sameAmount(computed['new_total'], projected['total_amount']) ||
+        !sameAmount(computed['new_total'], index?.data['total'])) {
+      throw StateError(message);
+    }
+    return projected;
+  }
+
   /// SQLite outbox and the document index are committed together. The local
   /// detail cache is a replaceable projection, never the authority for replay.
   Future<Map<String, dynamic>> saveOffline(

@@ -1,6 +1,6 @@
+import '../../services/offline_invoice_finalization.dart';
 import '../../services/local_invoice_closure.dart';
 import '../../services/local_job_core_projection.dart';
-import '../../services/offline_invoice_payment_ledger.dart';
 import '../../services/job_task_summary.dart';
 import '../payroll/mechanic_labor_screen.dart';
 import '../payroll/owner_payroll_screen.dart';
@@ -549,14 +549,17 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           cached['job_id']?.toString() != widget.jobId) {
         return;
       }
-      final queued = await OfflineInvoicePaymentLedger().pendingForInvoice(
-        widget.businessId, id,
-      );
-      if (!_currentLoad(epoch)) return;
-      verified.add(await LocalInvoiceClosureStore(localDatabase).projectFinalized(
-        widget.businessId,
-        OfflineInvoicePaymentLedger.projectPendingPayments(cached, queued),
-      ));
+      try {
+        final detail = await OfflineInvoiceFinalization()
+            .projectLocalFinancialDetail(widget.businessId, id, cached);
+        if (!_currentLoad(epoch)) return;
+        verified.add(await LocalInvoiceClosureStore(localDatabase)
+            .projectFinalized(widget.businessId, detail));
+      } on StateError {
+        return;
+      } on FormatException {
+        return;
+      }
     }
     final state = cachedVerifiedJobPaymentState(verified);
     if (state == null || !_currentLoad(epoch)) {
