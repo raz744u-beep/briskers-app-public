@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:briskers_app/local/briskers_local_database.dart' show BriskersLocalDatabase;
 import 'package:briskers_app/services/local_financial_cache.dart';
+import 'package:briskers_app/services/offline_financial_write_service.dart';
 
 void main() {
   late BriskersLocalDatabase db;
@@ -47,6 +48,29 @@ void main() {
       'category_id': 'payroll',
     });
     expect(await cache.loadTransactionForEdit('shop', 'old-payment'), isNull);
+  });
+
+  test('offline update rejects missing original without creating sync work', () async {
+    final service = OfflineFinancialWriteService(database: db, cache: cache);
+    await expectLater(
+      service.updateLocalTransaction(
+        'shop',
+        'old-payment',
+        direction: 'expense',
+        accountId: 'business-checking',
+        accountName: 'Business Checking',
+        categoryId: 'payroll',
+        categoryName: 'Payroll',
+        amount: 700,
+        date: DateTime(2026, 10, 23),
+      ),
+      throwsStateError,
+    );
+    expect(await cache.loadTransactionDetail('shop', 'old-payment'), isNull);
+    final rows = await db.customSelect(
+      "SELECT id FROM sync_outbox WHERE business_id = 'shop' AND entity_id = 'old-payment'",
+    ).get();
+    expect(rows, isEmpty);
   });
 
   test('mismatched transaction identity cannot be edited', () async {
