@@ -247,16 +247,13 @@ class DocumentPdfService {
     }
   }
 
-  /// Unsynced documents have no server-assigned number yet. Display their
-  /// immutable local operation ID in the existing number field only.
-  /// Do not add customer-facing sync or payment status to the PDF.
+  /// Estimates carry their permanent customer-facing number even offline.
+  /// An unnumbered invoice keeps the existing draft presentation.
   static String _receiptNumber(Map<String, dynamic> detail) {
     final permanent = detail['document_number']?.toString().trim() ?? '';
     if (permanent.isNotEmpty) return permanent;
     final id = detail['id']?.toString() ?? '';
-    if (id.startsWith('local-invoice-') || id.startsWith('local-estimate-')) {
-      // A local UUID is an internal sync identity, never a customer-facing
-      // invoice/estimate number. Server numbering is assigned on reconciliation.
+    if (id.startsWith('local-invoice-')) {
       return 'Pending sync';
     }
     return '';
@@ -401,8 +398,9 @@ class DocumentPdfService {
                     else
                       pw.Text(
                         shopName,
-                        style: const pw.TextStyle(
-                          fontSize: 18,
+                        style: pw.TextStyle(
+                          fontSize: documentNumber.startsWith('EST-') &&
+                              documentNumber.length == 36 ? 9 : 18,
                           fontWeight: pw.FontWeight.bold,
                         ),
                       ),

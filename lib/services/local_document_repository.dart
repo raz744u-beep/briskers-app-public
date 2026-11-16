@@ -1,3 +1,4 @@
+import 'local_estimate_number.dart';
 import 'local_invoice_closure.dart';
 import 'package:drift/drift.dart';
 
@@ -117,6 +118,16 @@ class LocalDocumentRepository {
       final fences = await _retirementFences(businessId);
       // A pending request can be rejected later. Retain its exact prior row
       // rather than letting an unrelated full refresh erase the recovery data.
+      final known = <String, Object?>{};
+      if (kind == null || kind == 'estimate') {
+        final estimates = await _database.customSelect(
+          "SELECT id,document_number FROM local_documents WHERE business_id=? AND kind='estimate' AND document_number IS NOT NULL",
+          variables: [Variable(businessId)],
+        ).get();
+        for (final row in estimates) {
+          known[row.read<String>('id')] = row.data['document_number'];
+        }
+      }
       final visible = _visibleDocumentSql('local_documents');
       await _database.customStatement(
         kind == null
@@ -124,8 +135,16 @@ class LocalDocumentRepository {
             : "DELETE FROM local_documents WHERE business_id = ? AND kind = ? AND sync_state = 'synced' AND $visible",
         kind == null ? [businessId] : [businessId, kind],
       );
-      for (final document in documents) {
-        final id = document['id']?.toString() ?? '';
+      for (final incoming in documents) {
+        final id = incoming['id']?.toString() ?? '';
+        final number = incoming['kind'] == 'estimate' &&
+            LocalEstimateNumber.existing(incoming['document_number']) == null
+            ? LocalEstimateNumber.existing(known[id]) : null;
+        final document = number == null ? LocalEstimateNumber.project(businessId, incoming)
+            : {...incoming, 'document_number': number};
+        if (number == null && !identical(incoming, document) && (incoming['origin'] ?? 'native') == 'native') {
+          await LocalEstimateNumber.queueServerRepair(_database, businessId, id);
+        }
         if (id.isEmpty || _serverDocumentBlocked(document,
           blockedDocuments: fences.documents, blockedJobs: fences.jobs)) {
           continue;
@@ -200,8 +219,16 @@ class LocalDocumentRepository {
   ) async {
     await _database.transaction(() async {
       final fences = await _retirementFences(businessId);
-      for (final document in documents) {
-        final id = document['id']?.toString() ?? '';
+      for (final incoming in documents) {
+        final id = incoming['id']?.toString() ?? '';
+        final number = incoming['kind'] == 'estimate' &&
+            LocalEstimateNumber.existing(incoming['document_number']) == null
+            ? await LocalEstimateNumber.stored(_database, businessId, id) : null;
+        final document = number == null ? LocalEstimateNumber.project(businessId, incoming)
+            : {...incoming, 'document_number': number};
+        if (number == null && !identical(incoming, document) && (incoming['origin'] ?? 'native') == 'native') {
+          await LocalEstimateNumber.queueServerRepair(_database, businessId, id);
+        }
         if (id.isEmpty || _serverDocumentBlocked(document,
           blockedDocuments: fences.documents, blockedJobs: fences.jobs)) {
           continue;

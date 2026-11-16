@@ -352,8 +352,7 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
         }
       }
       final invoiceId = isEstimate
-          ? (BriskersConnectionModeController.instance.forceOffline
-              ? await _offlineDrafts.createStandaloneEstimate(
+          ? await _offlineDrafts.createStandaloneEstimate(
                   widget.businessId,
                   customerId: customerId,
                   customerName: widget.initialCustomerName ??
@@ -365,8 +364,6 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
                   vehicleLabel: _vehicles.where((v) =>
                       v['id']?.toString() == _vehicleId).map(_vehicleName).firstOrNull,
                 )
-              : await _api.createStandaloneEstimate(
-                  widget.businessId,customerId:customerId,vehicleId:_vehicleId))
           : BriskersConnectionModeController.instance.forceOffline
           ? await _offlineDrafts.createQuickInvoice(
               widget.businessId,

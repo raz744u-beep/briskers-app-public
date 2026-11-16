@@ -3336,6 +3336,32 @@ class BriskersApi {
     return result.toString();
   }
 
+  Future<String> syncOfflineJobEstimate(
+    String businessId, {
+    required String jobId,
+    required String operationId,
+    required String documentDate,
+    required List<Map<String, dynamic>> lines,
+    String? memo,
+  }) async {
+    final result = await networkSupabase.rpc('briskers_sync_offline_job_estimate_v1', params: {
+      'p_business_id': businessId,
+      'p_job_id': jobId,
+      'p_operation_id': operationId,
+      'p_document_date': documentDate,
+      'p_lines': lines,
+      'p_memo': memo,
+    });
+    return result.toString();
+  }
+
+  Future<void> syncEstimateNumber(String businessId, String estimateId) async {
+    await networkSupabase.rpc('briskers_sync_estimate_number_v1', params: {
+      'p_business_id': businessId,
+      'p_estimate_id': estimateId,
+    });
+  }
+
   Future<String> createEstimate(
     String businessId,
     String jobId,

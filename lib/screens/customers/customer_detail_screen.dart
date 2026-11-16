@@ -1,3 +1,5 @@
+import '../../services/local_estimate_number.dart';
+import '../../services/offline_document_draft_service.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -125,7 +127,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         'title': document['title'] ?? document['job_title'] ??
             (presentation.isInvoice ? tr('invoice') : tr('estimate')),
         'status': presentation.statusLabel,
-        'number': document['document_number'] ?? tr('pendingSync'),
+        'number': presentation.isInvoice
+            ? document['document_number'] ?? tr('pendingSync')
+            : LocalEstimateNumber.project(widget.businessId, document)['document_number'],
         'total': num.tryParse(document['total_amount']?.toString() ?? ''),
         'balance_due_cents': presentation.balanceDueCents,
         'pending_cents': presentation.paymentDetailsKnown ? presentation.pendingCents : null,
@@ -721,7 +725,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 Icons.receipt_long_outlined : Icons.description_outlined,
                 color: item['type'] == 'invoice' ? BriskersColors.invoices :
                   BriskersColors.estimates),
-              title: Text('${item['type'] == 'invoice' ? 'Invoice' : 'Estimate'} #${item['number'] ?? 'Pending sync'}',
+              title: Text('${item['type'] == 'invoice' ? 'Invoice' : 'Estimate'} #${item['number'] ?? ''}',
                 style: const TextStyle(fontWeight: FontWeight.w700)),
               subtitle: Text([
                 item['status']?.toString() ?? '',
@@ -1190,7 +1194,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         _invalidateCustomerActivity();
         return;
       }
-      final history = await _api.customerServiceHistory(
+      final history = await LocalJobRepository().forCustomer(
         widget.businessId, widget.customerId,
       );
       if (!mounted) return;
@@ -1285,7 +1289,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       if (jobId.isEmpty) {
         throw StateError('No job was selected for the estimate.');
       }
-      final documentId = await _api.createEstimate(widget.businessId, jobId);
+      final documentId = await OfflineDocumentDraftService().createEstimate(widget.businessId, jobId);
       if (!mounted) return;
       await Navigator.push<void>(
         context,

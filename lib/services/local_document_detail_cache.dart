@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:drift/drift.dart' show Variable;
 import 'recovery_commit_store.dart';
 import 'local_document_sql_store.dart';
+import 'local_estimate_number.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -20,6 +21,21 @@ class LocalDocumentDetailCache {
   static Future<void> initialize(BriskersLocalDatabase db) async {
     await LocalDocumentSqlStore.ensure(db);
     sqliteWritesEnabled=true;
+    final pending = await db.customSelect(
+      "SELECT id,business_id FROM local_documents WHERE kind='estimate' "
+      "AND (document_number IS NULL OR lower(trim(document_number)) IN ('','pending sync'))",
+    ).get();
+    final cache = LocalDocumentDetailCache(database: db);
+    for (final row in pending) {
+      final business = row.read<String>('business_id');
+      final id = row.read<String>('id');
+      final detail = await cache.load(business, id);
+      await LocalEstimateNumber.fillMissing(db, business, id, detail?['document_number']);
+      if ((detail?['origin'] ?? 'native') == 'native' &&
+          detail?['document_number'] == LocalEstimateNumber.forDocument(business, id)) {
+        await LocalEstimateNumber.queueServerRepair(db, business, id);
+      }
+    }
   }
 
   const LocalDocumentDetailCache({BriskersLocalDatabase? database})
@@ -121,13 +137,15 @@ class LocalDocumentDetailCache {
     Map<String, dynamic> detail,
   ) {
     final key = _key(businessId, documentId);
-    final encoded = jsonEncode(detail);
+
     // Always acquire SQLite before the preference queue. Callers may already
     // hold a SQLite transaction; reversing that order can deadlock a cache
     // writer against a transactional sync reader.
     return _database.transaction(
       () => _serialized(key, () async {
         if (await _blocked(businessId, documentId, detail)) return;
+        final numbered = await _estimateNumber(businessId, documentId, detail);
+        final encoded = jsonEncode(numbered);
         if (await RecoveryCommitStore.isOriginal(_database,businessId,documentId)) return;
         if (await RecoveryCommitStore.snapshot(_database,businessId,documentId) != null) {
           await _database.customStatement(
@@ -172,9 +190,22 @@ class LocalDocumentDetailCache {
         if(detail['kind']=='invoice'){
           await LocalInvoiceTaskStore(_database).reconcileCached(businessId,documentId,detail);
         }
-        return LocalInvoiceClosureStore(_database).project(businessId, await _projectRetiredConversion(businessId, detail));
+        final numbered = await _estimateNumber(businessId, documentId, detail);
+        return LocalInvoiceClosureStore(_database).project(businessId, await _projectRetiredConversion(businessId, numbered));
       }),
     );
+  }
+
+  Future<Map<String, dynamic>> _estimateNumber(
+    String businessId, String cacheId, Map<String, dynamic> detail,
+  ) async {
+    if (detail['kind'] != 'estimate') return detail;
+    final id = detail['id']?.toString() ?? cacheId;
+    final saved = await LocalEstimateNumber.stored(_database, businessId, id);
+    final number = LocalEstimateNumber.existing(detail['document_number']) ??
+        saved ?? LocalEstimateNumber.forDocument(businessId, id);
+    await LocalEstimateNumber.fillMissing(_database, businessId, id, number);
+    return {...detail, 'document_number': number};
   }
 
   /// Read a saved invoice snapshot without reconciling or creating derived

@@ -831,12 +831,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     try {
       final documentId =
-          BriskersConnectionModeController.instance.forceOffline
-              ? await _offlineDocumentDraft.createEstimate(
+          await _offlineDocumentDraft.createEstimate(
                   widget.businessId,
                   jobId,
-                )
-              : await _api.createEstimate(widget.businessId, jobId);
+                );
       if (!mounted) return;
       await _openDocument(documentId);
     } catch (error) {

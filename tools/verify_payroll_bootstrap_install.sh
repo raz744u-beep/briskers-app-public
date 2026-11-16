@@ -79,6 +79,7 @@ if [ -n "$intermediate" ]; then
     Briskers-v0.10.9-b4667.apk) intermediate_hash=7fb638bb73b98ec10c43ed1d397f2ece6acfb08737afbd3ab8b7e9ad81e9412e ;;
     Briskers-v0.10.9-b4668.apk) intermediate_hash=389dc3cb959180f4e5fbe460371d50cab9fe83297fb05066af0530df9c2fc820 ;;
     Briskers-v0.10.9-b4669.apk) intermediate_hash=644a28aea2bd66caa80ad23f01f71d96d2a7455264d7e1c9bac6e6623c72e5b8 ;;
+    Briskers-v0.10.9-b4671.apk) intermediate_hash=d708070e7d4e8c0f6418a676ade8bde57721aa6e0d139245e36d58a5bc120f44 ;;
     Briskers-v0.10.9-b4670.apk) intermediate_hash=a8010b0a7758f80eb26288b8ce8d3834649a078fe1048bc9a44465b89d034389 ;;
     Briskers-v0.10.9-b4665.apk) intermediate_hash=980fbd4e9d04a8879f52652bdd46cd8e9c878291c2b31cadec451a87a0768a77 ;;
     Briskers-v0.10.9-b4663.apk) intermediate_hash=a136f5ca3a2be0b578e7142b807d8aa2c97d8cda88f3390d6fd718190c7fea6d ;;
@@ -122,6 +123,24 @@ check_records after-launch
 launch
 adb exec-out screencap -p > "$evidence/updated-restart.png"
 check_records after-restart
+if [[ "${BRISKERS_ESTIMATE_UPGRADE_PROBE:-0}" = 1 ]]; then
+  # Exercise the installed candidate against a pre-upgrade blank estimate in
+  # the isolated offline device. The separate retention check has already
+  # compared every original fixture row and the original receipt image.
+  python3 tools/verify_estimate_number_upgrade.py seed "$tmp/after-restart.sqlite"
+  adb push "$tmp/after-restart.sqlite" "$dbpath"
+  adb shell "rm -f '$dbpath-wal' '$dbpath-shm'; chown '$uid:$uid' '$dbpath'; restorecon '$dbpath'"
+  for phase in first-launch restart; do
+    launch
+    adb shell am force-stop "$package"
+    adb pull "$dbpath" "$tmp/estimate-$phase.sqlite"
+    if adb shell "test -f '$dbpath-wal'"; then
+      adb pull "$dbpath-wal" "$tmp/estimate-$phase.sqlite-wal"
+    fi
+    python3 tools/verify_estimate_number_upgrade.py verify "$tmp/estimate-$phase.sqlite" |
+      tee "$evidence/estimate-number-$phase.json"
+  done
+fi
 adb logcat -d > "$evidence/emulator-logcat.txt"
 if grep -E 'FATAL EXCEPTION|Fatal signal [0-9]+.*briskers' "$evidence/emulator-logcat.txt"; then
   echo "Emulator app crashed" >&2; exit 1

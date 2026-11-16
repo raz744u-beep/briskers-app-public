@@ -3392,12 +3392,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     if (!_canSeeFinancial) return;
     String? id;
     await _run(() async {
-      id = BriskersConnectionModeController.instance.forceOffline
-          ? await _offlineDocumentDraft.createEstimate(
+      id = await _offlineDocumentDraft.createEstimate(
               widget.businessId,
               widget.jobId,
-            )
-          : await _api.createEstimate(widget.businessId, widget.jobId);
+            );
     });
     if (!mounted || id == null) return;
     await _openDocument(id!);

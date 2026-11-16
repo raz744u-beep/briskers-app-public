@@ -840,7 +840,7 @@ jobs:
           BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
           if [ "$GITHUB_REF_NAME" = fix/bugs33-preserve-offline-financial-history-20261108 ]; then
             BUILD_NUMBER=$((3000 + GITHUB_RUN_NUMBER))
-            test "$BUILD_NUMBER" -gt 4670
+            test "$BUILD_NUMBER" -gt 4671
           fi
           test "$BUILD_NUMBER" -gt 2545
           if [ "$PAYROLL_CANDIDATE" = true ] || [ "$GITHUB_REF_NAME" = candidate/payroll-bootstrap ]; then
@@ -894,7 +894,7 @@ jobs:
           BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
           if [ "$GITHUB_REF_NAME" = fix/bugs33-preserve-offline-financial-history-20261108 ]; then
             BUILD_NUMBER=$((3000 + GITHUB_RUN_NUMBER))
-            test "$BUILD_NUMBER" -gt 4670
+            test "$BUILD_NUMBER" -gt 4671
           fi
           test "$BUILD_NUMBER" -gt 2545
           APK="build/app/outputs/flutter-apk/Briskers-v${VERSION}-b${BUILD_NUMBER}.apk"
@@ -942,7 +942,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: briskers-android-debug
-          run-id: ${{ github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108' && '43827962366' || github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && '42414887944' || '42165351470' }}
+          run-id: ${{ github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108' && '43839096395' || github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && '42414887944' || '42165351470' }}
           github-token: ${{ github.token }}
           path: upgrade-receipt-baseline
 
@@ -961,7 +961,7 @@ jobs:
           arch: x86_64
           target: google_apis
           script: |
-            BRISKERS_UPGRADE_FIXTURE="$GITHUB_WORKSPACE/upgrade-fixture/shop.sqlite" BRISKERS_UPGRADE_INTERMEDIATE="$(find upgrade-receipt-baseline -name 'Briskers-v*.apk' -print -quit)" bash tools/verify_payroll_bootstrap_install.sh "$(find upgrade-baseline -name 'Briskers-v*.apk' -print -quit)" "$(find generated/build/app/outputs/flutter-apk -name 'Briskers-v*.apk' -print -quit)"
+            BRISKERS_ESTIMATE_UPGRADE_PROBE=${{ github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108' && '1' || '0' }} BRISKERS_UPGRADE_FIXTURE="$GITHUB_WORKSPACE/upgrade-fixture/shop.sqlite" BRISKERS_UPGRADE_INTERMEDIATE="$(find upgrade-receipt-baseline -name 'Briskers-v*.apk' -print -quit)" bash tools/verify_payroll_bootstrap_install.sh "$(find upgrade-baseline -name 'Briskers-v*.apk' -print -quit)" "$(find generated/build/app/outputs/flutter-apk -name 'Briskers-v*.apk' -print -quit)"
             bash tools/verify_android_task_reminders.sh "$(find generated/build/app/outputs/flutter-apk -name 'Briskers-v*.apk' -print -quit)" generated/build/reminder-qa/request.json generated/android generated/build/app/outputs/flutter-apk/upgrade-evidence/reminders
 
       - name: Upload install-over evidence

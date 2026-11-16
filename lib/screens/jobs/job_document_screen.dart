@@ -1,3 +1,4 @@
+import '../../services/local_estimate_number.dart';
 import '../../services/verified_invoice_payment_events.dart';
 import '../../services/local_invoice_closure.dart';
 import '../../services/local_payroll_repository.dart';
@@ -462,6 +463,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           ? detail['offline_warranty_detail'] as Map
           : const <String, dynamic>{});
 
+  Future<Map<String, dynamic>> _numberedEstimate(Map<String, dynamic> detail) async {
+    if (detail['kind'] != 'estimate' ||
+        LocalEstimateNumber.existing(detail['document_number']) != null) return detail;
+    final id = detail['id']?.toString() ?? widget.documentId;
+    final saved = await LocalEstimateNumber.stored(localDatabase, widget.businessId, id);
+    return saved == null
+        ? LocalEstimateNumber.project(widget.businessId, detail)
+        : {...detail, 'document_number': saved};
+  }
+
   Future<Map<String, dynamic>> _withLocalPayments(
     Map<String, dynamic> detail,
   ) async {
@@ -726,7 +737,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       if (!mounted || generation != _loadGeneration) return;
       final projected = await _withLocalPayments(
         await _offlineInvoiceTax.projectPending(
-            widget.businessId, widget.documentId, detail));
+            widget.businessId, widget.documentId, await _numberedEstimate(detail)));
       debugPrint('PERF-001 document detail RPC: ${openWatch.elapsedMilliseconds}ms');
       unawaited(const InvoicePerformanceMetrics().record(
         widget.businessId,
@@ -2466,7 +2477,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         else
           Future.value(<String, dynamic>{}),
       ]);
-      final serverDetail = Map<String, dynamic>.from(result[0] as Map);
+      final serverDetail = await _numberedEstimate(
+        Map<String, dynamic>.from(result[0] as Map),
+      );
       // The document editor already projects saved/queued Miles Out over the
       // exact invoice. PDF used to ignore that projection, so its Vehicle box
       // was blank even when the same invoice showed a recorded reading.
