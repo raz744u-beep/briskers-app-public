@@ -1769,11 +1769,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if(saved==true && mounted)await _load();
   }
 
-  Widget _tasksTab() {
+  Widget _tasksTab() => Builder(builder: (context) {
     final week = EmployeeWorkReview.monday(_week);
     final recorded = _verifiedWeeks?[_date(week)];
-    return Builder(
-      builder: (context) => EmployeeWorkReview(
+    return EmployeeWorkReview(
         key: PageStorageKey('${widget.employeeId}-WorkScroll'),
         week: week,
         rows: _work,
@@ -1798,9 +1797,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           ),
           onReview: () => DefaultTabController.of(context).animateTo(1),
         ),
-      ),
     );
-  }
+  });
 
   String _employeeLabel(String? employee) {
     final row = _employees.where((row) => row['id'] == employee).firstOrNull;
