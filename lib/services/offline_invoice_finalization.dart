@@ -43,8 +43,25 @@ class OfflineInvoiceFinalization {
     return (n * 100).round();
   }
 
-  static Map<String,dynamic> snapshot(Map<String,dynamic> detail, bool close) {
-    if (detail['kind'] != 'invoice' || detail['legacy_read_only'] == true ||
+  static String? _localReceiptDate(Map payment) {
+    for (final value in [payment['payment_date'], payment['entered_at']]) {
+      final source = value?.toString().trim() ?? '';
+      if (source.isEmpty) continue;
+      final match = RegExp(r'^\d{4}-\d{2}-\d{2}(?=$|[T ])').firstMatch(source);
+      final day = match?.group(0);
+      final parsed = DateTime.tryParse(day ?? '');
+      if (parsed != null && parsed.toIso8601String().split('T').first == day) {
+        return day;
+      }
+      return null;
+    }
+    return null;
+  }
+
+  static Map<String,dynamic> snapshot(
+    Map<String,dynamic> detail, bool close, {bool local = false}
+  ) {
+    if (detail['kind'] != 'invoice' || (!local && detail['legacy_read_only'] == true) ||
         detail['_payment_reconciliation_required'] == true ||
         const {'void','cancelled'}.contains(detail['status'])) {
       throw StateError('This invoice needs review before finalization.');
@@ -65,12 +82,15 @@ class OfflineInvoiceFinalization {
         'operation_id': op,
         'amount_cents': money(p['amount']),
         'method_id': p['payment_method_id'],
-        'payment_date': p['payment_date'] ?? p['entered_at']?.toString().split('T').first,
+        if (local) 'method_name': p['payment_method_name']?.toString().trim(),
+        'payment_date': local ? _localReceiptDate(p) :
+            (p['payment_date'] ?? p['entered_at']?.toString().split('T').first),
       });
     }
     receipts.sort((a,b) => '${a['operation_id'] ?? a['id']}'.compareTo('${b['operation_id'] ?? b['id']}'));
     if (receipts.fold<int>(0,(s,r)=>s+(r['amount_cents'] as int)) != pending ||
-        receipts.any((r)=>r['method_id']==null || r['payment_date']==null)) {
+        receipts.any((r) => r['payment_date'] == null ||
+            (local ? (r['method_name'] as String? ?? '').isEmpty : r['method_id'] == null))) {
       throw StateError('Saved receipt details are incomplete. Your payments are preserved.');
     }
     if (close && (total != paid + pending || total <= 0)) {
@@ -186,7 +206,8 @@ class OfflineInvoiceFinalization {
 
       final edits = await db.customSelect(
         "SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? "
-        "AND entity_type IN ('invoice_pending_payment_edit','invoice_tax_edit','document_edit')",
+        "AND (entity_type IN ('invoice_pending_payment_edit','invoice_tax_edit') "
+        "OR (entity_type='document_edit' AND operation NOT IN ('memo','warranty','move_line')))",
         variables: [Variable(business), Variable(invoice)],
       ).get();
       if (edits.isNotEmpty) {
@@ -201,8 +222,8 @@ class OfflineInvoiceFinalization {
       if (confirmedDetail != null) {
         final remaining = await store.projectFinalized(business, detail);
         if (money(remaining['pending_payment']) == 0) return;
-        if (jsonEncode(snapshot(remaining, false)) !=
-            jsonEncode(snapshot(confirmedDetail, false))) {
+        if (jsonEncode(snapshot(remaining, false, local: true)) !=
+            jsonEncode(snapshot(confirmedDetail, false, local: true))) {
           throw StateError('Payments changed. Reopen the invoice and confirm again.');
         }
       }
@@ -241,14 +262,9 @@ class OfflineInvoiceFinalization {
           }
           continue;
         }
-        final date = (payment['payment_date'] ?? payment['entered_at'])
-            ?.toString().split('T').first;
-        final parsedDate = DateTime.tryParse(date ?? '');
+        final date = _localReceiptDate(payment);
         final method = payment['payment_method_name']?.toString().trim() ?? '';
-        final methodId = payment['payment_method_id']?.toString().trim() ?? '';
-        if (parsedDate == null ||
-            parsedDate.toIso8601String().split('T').first != date ||
-            method.isEmpty || methodId.isEmpty) {
+        if (date == null || method.isEmpty) {
           if (resumeSavedRequest) return;
           throw StateError('The original payment date or method is missing.');
         }
@@ -264,7 +280,7 @@ class OfflineInvoiceFinalization {
           'job_id': detail['job_id'] ?? indexed?.data['job_id'],
           'job_number': detail['job_number'] ?? indexed?.data['job_number'],
           'payment_method': method,
-          'payment_method_id': methodId,
+          'payment_method_id': payment['payment_method_id'],
           'amount': pending[id]! / 100,
           'invoice_total': detail['total_amount'],
           'transaction_date': date,

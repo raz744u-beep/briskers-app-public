@@ -713,7 +713,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       } else {
         // Never present a cached first page as a verified COMPLETE history.
         // It is still useful as a clearly marked on-device subtotal.
-        final cached = await _localFinancial.loadTransactions(businessId);
+        final cached = await _localFinancial.loadTransactions(
+          businessId, includeCachedDetails: true,
+        );
         final effective = await journal.overlayCachedRows(businessId, cached);
         local = await LocalExpenseSubtotal.calculate(effective,
           startDate: startDate, endDate: endDate,

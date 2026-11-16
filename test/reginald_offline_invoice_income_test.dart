@@ -23,7 +23,7 @@ void main() {
         const business = 'shop';
         const invoice = 'invoice-uuid';
         const job = 'job-uuid';
-        const date = '2026-11-12';
+        const date = '2026-11-03';
         const receipt = {
           'id': 'existing-receipt',
           'state': 'pending',
@@ -85,6 +85,12 @@ void main() {
         if (!queued) expect(await feed.load(business), isEmpty);
         final service = OfflineInvoiceFinalization(database: db);
         await service.save(business, [invoice], isOwner: true, close: false);
+        await db.customStatement(
+          "INSERT INTO sync_outbox (business_id,entity_type,entity_id,operation,"
+          "payload_json,state,attempt_count,created_at) "
+          "VALUES (?,'document_edit',?,'memo','{}','pending',0,1793700000)",
+          [business, invoice],
+        );
         await Future.wait([
           service.finalizeLocally(
             business,
@@ -95,7 +101,11 @@ void main() {
           service.finalizeLocally(business, invoice, isOwner: true),
         ]);
         expect(
-          (await db.customSelect('SELECT * FROM sync_outbox').get())
+          (await db
+                  .customSelect(
+                    "SELECT * FROM sync_outbox WHERE entity_type='invoice_payment_received'",
+                  )
+                  .get())
               .map((row) => row.data)
               .toList(),
           before,

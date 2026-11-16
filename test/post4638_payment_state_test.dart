@@ -10,6 +10,7 @@ import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/local/local_database_provider.dart';
 import 'package:briskers_app/screens/jobs/job_document_screen.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
+import 'package:briskers_app/services/invoice_payment_feed.dart';
 import 'package:briskers_app/services/offline_invoice_finalization.dart';
 
 Map<String,dynamic> fixture(String id,List<num> amounts) => {
@@ -80,6 +81,50 @@ void main() {
     expect(estimateListDescription({'title':'Invoice #6372'},detail:{'lines':[{'name':'Labor','description':'Replace thermostat'}]}),'Replace thermostat');
     expect(estimateListDescription({'title':'Invoice #6372'}),'');
   });
+  testWidgets('Reginald payment tab confirms and posts original Nov 3 cash receipt offline',(tester) async {
+    tester.view.physicalSize = const Size(430, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final saved = {
+      ...fixture('6357', [1637.63]),
+      'job_number': 'J-38',
+      'customer_name': 'Reginald Willis',
+      'legacy_read_only': true,
+      'payments': [
+        {
+          'id': 'cash-6357',
+          'state': 'pending',
+          'amount': 1637.63,
+          'payment_method_name': 'Cash',
+          'entered_at': '2026-11-03 16:30:00',
+          'pending_sync': true,
+        },
+      ],
+    };
+    await LocalDocumentDetailCache(database: db).save('shop', '6357', saved);
+    await tester.pumpWidget(const MaterialApp(home: JobDocumentScreen(
+      businessId: 'shop', documentId: '6357', isOwner: true,
+      roleCode: 'owner', initialTab: 'payment',
+    )));
+    await tester.pumpAndSettle();
+    final finalize = find.text('Finalize Received Payment');
+    await tester.scrollUntilVisible(finalize, 300, scrollable: find.byType(Scrollable).last);
+    await tester.tap(finalize);
+    await tester.pumpAndSettle();
+    expect(find.text('Finalize received payment?'), findsOneWidget);
+    expect(await tester.runAsync(() => InvoicePaymentFeed(database: db).load('shop')), isEmpty);
+    await tester.tap(find.text('Finalize Payment'));
+    await tester.pumpAndSettle();
+    expect(finalize, findsNothing);
+    expect(find.text('Awaiting finalization'), findsNothing);
+    expect(find.text('Paid'), findsWidgets);
+    final receipts = (await tester.runAsync(() => InvoicePaymentFeed(database: db).load('shop')))!;
+    expect(receipts.single['receipt_id'], 'cash-6357');
+    expect(receipts.single['amount'], 1637.63);
+    expect(receipts.single['transaction_date'], '2026-11-03');
+  });
+
   testWidgets('actual offline payment screen posts the saved request and removes the action after reopen',(tester) async {
     tester.view.physicalSize=const Size(430,1100); tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);

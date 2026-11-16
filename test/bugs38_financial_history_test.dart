@@ -1,14 +1,108 @@
+import 'dart:convert';
+
 import 'package:briskers_app/local/briskers_local_database.dart'
     show BriskersLocalDatabase;
 import 'package:briskers_app/services/invoice_payment_feed.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_financial_cache.dart';
+import 'package:briskers_app/services/local_expense_subtotal.dart';
+import 'package:briskers_app/services/local_financial_totals_journal.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('Income includes a held receipt already visible on invoice #6357', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    const business = 'fixture';
+    await db.customStatement(
+      "INSERT INTO local_customers (id,business_id,display_name) "
+      "VALUES ('customer',?,'Reginald Willis')",
+      [business],
+    );
+    await db.customStatement(
+      "INSERT INTO local_documents (id,business_id,kind,customer_id,document_number,total) "
+      "VALUES ('invoice',?,'invoice','customer','6357',1637.63)",
+      [business],
+    );
+    const payload = {
+      'operation_id': 'original-payment-id',
+      'invoice_id': 'invoice',
+      'amount_cents': 163763,
+      'method_name': 'Cash',
+      'payment_date': '2026-11-03',
+    };
+    await db.customStatement(
+      "INSERT INTO sync_outbox (business_id,entity_type,entity_id,operation,"
+      "payload_json,state,attempt_count,created_at,last_error) "
+      "VALUES (?,'invoice_payment_received','invoice','record_received_payment',"
+      "?,'conflict',0,1793301845,?)",
+      [
+        business,
+        jsonEncode(payload),
+        'Owner recovery payment preserved; sync disabled',
+      ],
+    );
+    final rows = await InvoicePaymentFeed(database: db).load(business);
+    final result = InvoicePaymentFeed.combine(
+      financial: [],
+      receipts: rows,
+      direction: 'income',
+      search: '6357',
+    ).single;
+    expect(result['id'], 'original-payment-id');
+    expect(result['counterparty'], 'Reginald Willis');
+    expect(result['payment_method_name'], 'Cash');
+    expect(result['transaction_date'], '2026-11-03');
+    expect(result['amount'], 1637.63);
+    final saved = await db
+        .customSelect('SELECT state FROM sync_outbox')
+        .getSingle();
+    expect(saved.read<String>('state'), 'conflict');
+  });
+
+  test(
+    'offline subtotal counts a posted payment and its local journal entry once',
+    () async {
+      final db = BriskersLocalDatabase(NativeDatabase.memory());
+      addTearDown(db.close);
+      final journal = LocalFinancialTotalsJournal(database: db);
+      final receipt = <String, dynamic>{
+        'direction': 'income',
+        'document_id': 'invoice-6357',
+        'amount': 1637.63,
+        'transaction_date': '2026-11-03',
+      };
+      await journal.record(
+        'shop',
+        'invoice-payment:cash-6357',
+        after: {
+          ...receipt,
+          'id': 'invoice-payment:cash-6357',
+          'sync_state': 'pending',
+        },
+      );
+      final rows = await journal.overlayCachedRows('shop', [
+        {
+          ...receipt,
+          'id': 'ledger-transaction',
+          'invoice_payment_id': 'cash-6357',
+        },
+        {
+          ...receipt,
+          'id': 'unrelated-transaction',
+          'invoice_payment_id': 'other',
+        },
+      ]);
+      final totals = (await LocalExpenseSubtotal.calculate(rows))!;
+      expect(totals.income, 3275.26);
+      expect(totals.transactions, 2);
+      expect(await journal.pendingCount('shop'), 1);
+    },
+  );
 
   test(
     'Reginald #6357 cash is visible before finalization and represented once',
@@ -115,6 +209,9 @@ void main() {
         includeCachedDetails: true,
       );
       expect(all.map((r) => r['id']), ['recent', 'older-detail']);
+      final subtotal = (await LocalExpenseSubtotal.calculate(all))!;
+      expect(subtotal.income, 200);
+      expect(subtotal.expenses, 99.5);
       for (final term in [
         'worldpac',
         r'$99.50',

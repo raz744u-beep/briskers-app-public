@@ -3271,9 +3271,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   bool _startingFinalization = false;
+  String? _finalizationError;
   Future<void> _finalizeEnteredPayments() async {
     if (!widget.isOwner || _startingFinalization) return;
-    setState(() => _startingFinalization = true);
+    setState(() {
+      _startingFinalization = true;
+      _finalizationError = null;
+    });
     try {
       await _collapseWorkspaceHeader();
       final detail = _detail;
@@ -3292,7 +3296,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         widget.businessId, invoiceId, isOwner: widget.isOwner,
         confirmedDetail: detail,
       ));
-      if (!saved || !mounted) return;
+      if (!mounted) return;
+      if (!saved) {
+        setState(() => _finalizationError =
+            _error ?? 'The saved payment could not be finalized.');
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_finalizationError!),
+        ));
+        return;
+      }
       LocalInvoicePaymentCoverageEvents.committed(LocalInvoicePaymentCoverageChanged(
         businessId: widget.businessId, invoiceId: invoiceId,
         coversRemainingBalance: DocumentPresentation(_detail ?? {}).fullyCovered,
@@ -6535,6 +6547,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                       ),
                     ),
                     if (widget.isOwner) ...[
+                    if (_finalizationError != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _finalizationError!,
+                        style: TextStyle(color: Theme.of(context).colorScheme.error),
+                      ),
+                    ],
                     const SizedBox(height: 10),
                     FilledButton.icon(
                       onPressed: _busy || _startingFinalization || _detail?['_local_pending_tax'] == true || _detail?['_payment_reconciliation_required'] == true

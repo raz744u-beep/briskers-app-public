@@ -68,7 +68,9 @@ class InvoicePaymentFeed {
         ON c.business_id=o.business_id AND c.id=d.customer_id
       WHERE o.business_id=?
         AND o.entity_type='invoice_payment_received'
-        AND o.state IN ('pending','inflight')
+        AND (o.state IN ('pending','inflight') OR
+          (o.state='conflict' AND
+           o.last_error='Owner recovery payment preserved; sync disabled'))
       ORDER BY o.id
       ''',
       variables: [Variable<String>(businessId)],

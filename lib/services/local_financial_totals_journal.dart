@@ -154,10 +154,26 @@ class LocalFinancialTotalsJournal {
       final id = row['id']?.toString() ?? '';
       if (id.isNotEmpty) byId[id] = Map<String, dynamic>.from(row);
     }
-    for (final raw in entries.values) {
+    final postedPaymentIds = <(String, String)>{
+      for (final row in byId.values)
+        if (row['direction'] == 'income' && row['sync_state'] != 'pending' &&
+            row['document_id']?.toString().isNotEmpty == true &&
+            row['invoice_payment_id']?.toString().isNotEmpty == true)
+          (row['document_id'].toString(), row['invoice_payment_id'].toString()),
+    };
+    for (final entry in entries.entries) {
+      final raw = entry.value;
       if (raw is! Map) continue;
       final before = raw['before'];
       final after = raw['after'];
+      const receiptPrefix = 'invoice-payment:';
+      if (entry.key.startsWith(receiptPrefix) && after is Map &&
+          postedPaymentIds.contains((
+            after['document_id']?.toString() ?? '',
+            entry.key.substring(receiptPrefix.length),
+          ))) {
+        continue;
+      }
       final beforeId = before is Map ? before['id']?.toString() : null;
       final afterId = after is Map ? after['id']?.toString() : null;
       if (beforeId != null && beforeId.isNotEmpty) byId.remove(beforeId);
