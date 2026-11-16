@@ -173,6 +173,27 @@ class LocalFinancialCache {
     }
   }
 
+  /// An expense summary is sufficient for display, but never for editing.
+  /// Require the original financial fields before allowing an offline edit.
+  Future<Map<String, dynamic>?> loadTransactionForEdit(
+    String businessId,
+    String transactionId,
+  ) async {
+    final detail = await loadTransactionDetail(businessId, transactionId);
+    if (detail == null) return null;
+    final id = detail['id']?.toString();
+    if (id != null && id.isNotEmpty && id != transactionId) return null;
+    final amount = num.tryParse(detail['amount']?.toString() ?? '');
+    final date = detail['date'] ?? detail['transaction_date'];
+    if (amount == null ||
+        DateTime.tryParse(date?.toString() ?? '') == null ||
+        (detail['account_id']?.toString().isNotEmpty != true) ||
+        (detail['category_id']?.toString().isNotEmpty != true)) {
+      return null;
+    }
+    return detail;
+  }
+
   Future<void> saveOptions(
     String businessId,
     Map<String, dynamic> options,
