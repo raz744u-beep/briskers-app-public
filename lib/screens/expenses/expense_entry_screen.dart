@@ -289,10 +289,15 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
         final data = await _localFinancial.loadOptions(widget.businessId);
         Map<String, dynamic>? detail;
         if (sourceId != null) {
-          detail = await _localFinancial.loadTransactionDetail(
-            widget.businessId,
-            sourceId,
-          );
+          detail = _editing
+              ? await _localFinancial.loadTransactionForEdit(
+                  widget.businessId,
+                  sourceId,
+                )
+              : await _localFinancial.loadTransactionDetail(
+                  widget.businessId,
+                  sourceId,
+                );
         }
         // Editing or copying requires the original transaction, not just
         // cached account/category options. Never display an empty new-entry
