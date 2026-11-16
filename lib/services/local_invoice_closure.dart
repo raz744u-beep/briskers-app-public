@@ -16,10 +16,113 @@ import 'sync_replay_fence.dart';
 class LocalInvoiceClosureStore {
   LocalInvoiceClosureStore(this.db);
   final BriskersLocalDatabase db;
-  Future<void> prepare() => db.customStatement('''CREATE TABLE IF NOT EXISTS
-    local_invoice_closures(business_id TEXT NOT NULL,invoice_id TEXT NOT NULL,
-    closed_at TEXT NOT NULL,operation_id TEXT NOT NULL,payload TEXT NOT NULL,sync_state TEXT NOT NULL DEFAULT 'pending',error TEXT,retry_after INTEGER NOT NULL DEFAULT 0,reopened_at TEXT,
-    PRIMARY KEY(business_id,invoice_id))''');
+  Future<void> prepare() async {
+    await db.customStatement('''CREATE TABLE IF NOT EXISTS
+      local_invoice_closures(business_id TEXT NOT NULL,invoice_id TEXT NOT NULL,
+      closed_at TEXT NOT NULL,operation_id TEXT NOT NULL,payload TEXT NOT NULL,sync_state TEXT NOT NULL DEFAULT 'pending',error TEXT,retry_after INTEGER NOT NULL DEFAULT 0,reopened_at TEXT,
+      PRIMARY KEY(business_id,invoice_id))''');
+    await db.customStatement('''CREATE TABLE IF NOT EXISTS
+      local_invoice_closed_receipts(business_id TEXT NOT NULL, invoice_id TEXT NOT NULL,
+      receipt_id TEXT NOT NULL, amount_cents INTEGER NOT NULL,
+      PRIMARY KEY(business_id,invoice_id,receipt_id))''');
+    await db.customStatement('''CREATE TABLE IF NOT EXISTS
+      local_invoice_reopen_audit(operation_id TEXT PRIMARY KEY, business_id TEXT NOT NULL,
+      invoice_id TEXT NOT NULL, reason TEXT NOT NULL, reopened_at TEXT NOT NULL,
+      expected_version INTEGER, sync_state TEXT NOT NULL)''');
+  }
+
+  static String receiptKey(Map payment) =>
+      (payment['operation_id'] ?? payment['client_operation_id'] ?? payment['id'])
+          ?.toString().trim() ?? '';
+
+  static Map<String, int>? verifiedPendingReceipts(Map<String, dynamic> detail) {
+    final pending = DocumentPresentation(detail).pendingCents;
+    final receipts = <String, int>{};
+    for (final payment in (detail['payments'] as List? ?? []).whereType<Map>()) {
+      if (payment['state'] != 'pending') continue;
+      final id = receiptKey(payment);
+      final amount = num.tryParse(payment['amount']?.toString() ?? '');
+      if (id.isEmpty || receipts.containsKey(id) ||
+          amount == null || !amount.isFinite || amount <= 0 ||
+          !(amount * 100).isFinite || payment['reconciliation_required'] == true) {
+        return null;
+      }
+      receipts[id] = (amount * 100).round();
+    }
+    return receipts.values.fold<int>(0, (sum, amount) => sum + amount) == pending
+        ? receipts : null;
+  }
+
+  /// Apply this after the durable receipt queue so synchronization metadata and
+  /// the original accounting rows remain independent of local finalization.
+  Future<Map<String, dynamic>> projectFinalized(
+    String business, Map<String, dynamic> detail,
+  ) async {
+    final financial = DocumentPresentation(detail);
+    final pending = verifiedPendingReceipts(detail);
+    if (!financial.paymentDetailsKnown || pending == null || pending.isEmpty) {
+      return detail;
+    }
+    final invoice = detail['id']?.toString() ?? '';
+    final hasClosures = await db.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_invoice_closures'",
+    ).getSingleOrNull();
+    if (hasClosures == null) return detail;
+    final receipts = await db.transaction(() async {
+      await prepare();
+      final stored = await db.customSelect(
+        'SELECT receipt_id,amount_cents FROM local_invoice_closed_receipts '
+        'WHERE business_id=? AND invoice_id=?',
+        variables: [Variable(business), Variable(invoice)],
+      ).get();
+      if (stored.isNotEmpty) {
+        return {
+          for (final row in stored) row.read<String>('receipt_id'): row.read<int>('amount_cents'),
+        };
+      }
+      // Upgrade a 4668 local closure only when its recorded amount still
+      // agrees with a complete, unambiguous saved receipt snapshot.
+      final old = await db.customSelect(
+        'SELECT payload FROM local_invoice_closures '
+        'WHERE business_id=? AND invoice_id=? AND reopened_at IS NULL',
+        variables: [Variable(business), Variable(invoice)],
+      ).getSingleOrNull();
+      if (old == null) return <String, int>{};
+      final payload = jsonDecode(old.read<String>('payload')) as Map;
+      if (payload['total_cents'] != financial.totalCents ||
+          payload['paid_cents'] != financial.finalizedCents! + financial.pendingCents!) {
+        return <String, int>{};
+      }
+      await saveFinalized(business, invoice, pending);
+      return pending;
+    });
+    final finalized = pending.keys.where((id) => receipts[id] == pending[id]).toSet();
+    if (finalized.isEmpty) return detail;
+    final cents = finalized.fold<int>(0, (sum, id) => sum + receipts[id]!);
+    return {
+      ...detail,
+      'paid_amount': (financial.finalizedCents! + cents) / 100,
+      'pending_payment': (financial.pendingCents! - cents) / 100,
+      'payments': [
+        for (final payment in (detail['payments'] as List).whereType<Map>())
+          if (payment['state'] == 'pending' && finalized.contains(receiptKey(payment)))
+            {...payment, 'state': 'posted', '_finalized_locally': true}
+          else payment,
+      ],
+    };
+  }
+
+  Future<void> saveFinalized(
+    String business, String invoice, Map<String, int> receipts,
+  ) async {
+    for (final receipt in receipts.entries) {
+      await db.customStatement(
+        'INSERT OR IGNORE INTO local_invoice_closed_receipts '
+        '(business_id,invoice_id,receipt_id,amount_cents) VALUES(?,?,?,?)',
+        [business, invoice, receipt.key, receipt.value],
+      );
+    }
+  }
 
   Future<void> serverReopened(String business,String invoice) async {
     await prepare();
@@ -30,28 +133,45 @@ class LocalInvoiceClosureStore {
   Future<List<Map<String,dynamic>>> projectRows(String business,List<Map<String,dynamic>> documents) async {
     final exists=await db.customSelect("SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_invoice_closures'").getSingleOrNull();
     if(exists==null) return documents;
-    final rows=await db.customSelect('SELECT invoice_id,closed_at FROM local_invoice_closures WHERE business_id=? AND reopened_at IS NULL',variables:[Variable(business)]).get();
-    final closed={for(final r in rows) r.read<String>('invoice_id'):r.read<String>('closed_at')};
-    return [for(final d in documents) if(closed.containsKey(d['id']))
-      {...d,'status':'closed','display_status_code':'closed','display_status':'Closed','closed_at':closed[d['id']]} else d];
+    final rows=await db.customSelect('SELECT invoice_id,closed_at,reopened_at,sync_state FROM local_invoice_closures WHERE business_id=?',variables:[Variable(business)]).get();
+    final overlays={for(final r in rows) r.read<String>('invoice_id'):r.data};
+    return [for (final document in documents) _applyLifecycle(document, overlays[document['id']])];
   }
 
   Future<Map<String,dynamic>> project(String business, Map<String,dynamic> detail) async {
     final exists=await db.customSelect("SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_invoice_closures'").getSingleOrNull();
     if(exists==null) return detail;
-    final rows = await db.customSelect('SELECT closed_at FROM local_invoice_closures WHERE business_id=? AND invoice_id=? AND reopened_at IS NULL',
+    final rows = await db.customSelect('SELECT closed_at,reopened_at,sync_state FROM local_invoice_closures WHERE business_id=? AND invoice_id=?',
       variables:[Variable(business),Variable(detail['id']?.toString() ?? '')]).get();
-    if(rows.isEmpty) return detail;
-    return {...detail,'status':'closed','display_status_code':'closed',
-      'display_status':'Closed','closed_at':rows.single.read<String>('closed_at')};
+    return _applyLifecycle(detail, rows.singleOrNull?.data);
+  }
+
+  static Map<String, dynamic> _applyLifecycle(
+    Map<String, dynamic> detail, Map<String, dynamic>? lifecycle,
+  ) {
+    if (lifecycle == null) return detail;
+    if (lifecycle['reopened_at'] == null) {
+      return {...detail, 'status': 'closed', 'display_status_code': 'closed',
+        'display_status': 'Closed', 'closed_at': lifecycle['closed_at']};
+    }
+    final state = lifecycle['sync_state'];
+    if (state != 'reopen_pending' && state != 'reopen_review') return detail;
+    final projection = {...detail, 'status': 'issued', 'closed_at': null,
+      'display_status_code': 'open', 'legacy_read_only': false};
+    final wasFullyPaid = DocumentPresentation(detail).fullyCovered;
+    final code = wasFullyPaid ? 'paid' : 'open';
+    return {...projection, 'display_status_code': code, 'display_status': wasFullyPaid ? 'Paid' : 'Open'};
   }
 }
 
 class LocalInvoiceClosure {
-  LocalInvoiceClosure({BriskersLocalDatabase? database,this.api=const BriskersApi()})
-      : db=database ?? localDatabase;
+  LocalInvoiceClosure({BriskersLocalDatabase? database, BriskersApi? api,
+    bool enableLegacyReplay = false,
+  }) : db = database ?? localDatabase, api = api ?? const BriskersApi(),
+       _enableLegacyReplay = enableLegacyReplay;
   final BriskersLocalDatabase db;
   final BriskersApi api;
+  final bool _enableLegacyReplay;
 
   Future<void> close(String business,Iterable<String> invoices,{required bool isOwner}) async {
     if(!isOwner || business.isEmpty || invoices.isEmpty) throw StateError('Owner access required.');
@@ -61,11 +181,11 @@ class LocalInvoiceClosure {
     await db.transaction(() async {
       for(final id in ids) {
         final existing=await db.customSelect('SELECT 1 FROM local_invoice_closures WHERE business_id=? AND invoice_id=? AND reopened_at IS NULL',variables:[Variable(business),Variable(id)]).get();
-        if(existing.isNotEmpty) continue;
         final saved=await LocalDocumentDetailCache(database:db).loadReadOnly(business,id);
         if(saved==null || saved['id']!=id || saved['kind']!='invoice' || const {'void','voided','cancelled','canceled'}.contains(saved['status']?.toString().toLowerCase())) {
           throw StateError('Open this invoice once to verify its saved payment details.');
         }
+        if (existing.isNotEmpty) continue;
         final edits=await db.customSelect("SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? AND entity_type IN ('invoice_pending_payment_edit','invoice_tax_edit','document_edit')",variables:[Variable(business),Variable(id)]).get();
         if(edits.isNotEmpty) throw StateError('Finish the saved invoice corrections before closing.');
         final detail=OfflineInvoicePaymentLedger.projectPendingPayments(saved,
@@ -74,6 +194,11 @@ class LocalInvoiceClosure {
         if(!financial.paymentDetailsKnown || !financial.fullyCovered || financial.isVoid) {
           throw StateError('Only invoices fully covered by saved payments can be closed. Payments are unchanged.');
         }
+        final receipts = LocalInvoiceClosureStore.verifiedPendingReceipts(detail);
+        if (receipts == null) {
+          throw StateError('Saved receipt amounts need verification before closing.');
+        }
+        await store.saveFinalized(business, id, receipts);
         final at=DateTime.now().toUtc().toIso8601String();
         await db.customStatement('INSERT OR IGNORE INTO local_invoice_closures(business_id,invoice_id,closed_at,operation_id,payload) VALUES(?,?,?,?,?) ON CONFLICT(business_id,invoice_id) DO UPDATE SET closed_at=excluded.closed_at,operation_id=excluded.operation_id,payload=excluded.payload,sync_state=excluded.sync_state,error=NULL,retry_after=0,reopened_at=NULL',[business,id,at,OfflineInvoiceFinalization.operationId(),jsonEncode({'total_cents':financial.totalCents,'paid_cents':financial.finalizedCents!+financial.pendingCents!,'receipts':<dynamic>[],'close':true})]);
         await db.customStatement("UPDATE local_documents SET status='closed',display_status_code='closed',closed_at=? WHERE business_id=? AND id=? AND kind='invoice'",[DateTime.parse(at).millisecondsSinceEpoch ~/ 1000,business,id]);
@@ -84,10 +209,46 @@ class LocalInvoiceClosure {
     }
   }
 
+  Future<void> reopen(String business, String id, {
+    required bool isOwner, required String reason,
+  }) async {
+    final note = reason.trim();
+    if (!isOwner || business.isEmpty || note.length < 10) {
+      throw StateError('An Owner and a reopening reason are required.');
+    }
+    final store = LocalInvoiceClosureStore(db);
+    await store.prepare();
+    await db.transaction(() async {
+      final saved = await LocalDocumentDetailCache(database: db).loadReadOnly(business, id);
+      if (saved == null || saved['id'] != id || saved['kind'] != 'invoice' ||
+          const {'void', 'voided', 'cancelled', 'canceled'}.contains(saved['status']) ||
+          !DocumentPresentation(saved).isClosed && saved['legacy_read_only'] != true) {
+        throw StateError('The saved invoice is unavailable or already reopened.');
+      }
+      final now = DateTime.now().toUtc().toIso8601String();
+      final version = int.tryParse(saved['row_version']?.toString() ?? '');
+      final operation = OfflineInvoiceFinalization.operationId();
+      final state = version == null ? 'reopen_review' : 'reopen_pending';
+      await db.customStatement(
+        'INSERT INTO local_invoice_reopen_audit '
+        '(operation_id,business_id,invoice_id,reason,reopened_at,expected_version,sync_state) '
+        'VALUES(?,?,?,?,?,?,?)',
+        [operation, business, id, note, now, version, state],
+      );
+      await db.customStatement(
+        'INSERT INTO local_invoice_closures '
+        '(business_id,invoice_id,closed_at,operation_id,payload,sync_state,reopened_at) '
+        "VALUES(?,?,?,?,?,?,?) ON CONFLICT(business_id,invoice_id) DO UPDATE SET "
+        'operation_id=excluded.operation_id,sync_state=excluded.sync_state,reopened_at=excluded.reopened_at',
+        [business, id, saved['closed_at']?.toString() ?? now, operation, '{}', state, now],
+      );
+    });
+  }
+
   /// An immutable close-only request is idempotent and cannot post receipts.
   /// Unposted receipts may delay server closure, but cannot undo local closure.
   Future<void> flush(String business) async {
-    if(BriskersConnectionModeController.instance.forceOffline) return;
+    if (!_enableLegacyReplay || BriskersConnectionModeController.instance.forceOffline) return;
     await LocalInvoiceClosureStore(db).prepare();
     final rows=await db.customSelect("SELECT * FROM local_invoice_closures WHERE business_id=? AND sync_state='pending' AND reopened_at IS NULL AND retry_after<=?",variables:[Variable(business),Variable(DateTime.now().millisecondsSinceEpoch)]).get();
     for(final row in rows) {

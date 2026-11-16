@@ -468,7 +468,9 @@ class _BusinessGateState extends State<BusinessGate> with WidgetsBindingObserver
 
     try {
       if (roleCode == 'owner') {
-        await OfflineInvoiceFinalization().flush(businessId);
+        if (OfflineInvoiceFinalization.remoteReplayEnabled) {
+          await OfflineInvoiceFinalization().flush(businessId);
+        }
         await LocalInvoiceClosure().flush(businessId);
       }
     } catch (_) {

@@ -251,6 +251,43 @@ class OfflineRecurringRepository {
     }, (previous?['_revision'] as int? ?? 0) + 1, 'pending');
   }, write: true);
 
+  Future<String> copyOccurrence({
+    required String originalId,
+    required String newRuleId,
+    required RecurringRow expense,
+    required RecurringRow schedule,
+  }) => _atomic(() async {
+    final due = expense['date'] as String;
+    final id = 'local-recurring-${Uri.encodeComponent(businessId)}-'
+        '${Uri.encodeComponent(newRuleId)}-$due';
+    final occurrence = {...expense, 'business_id': businessId, 'id': id,
+      'recurring_rule_id': newRuleId, 'recurring_occurrence_date': due,
+      'row_version': null};
+    final rule = <String, dynamic>{
+      ...expense, ...schedule, 'business_id': businessId, 'id': newRuleId,
+      'row_version': null,
+    };
+    _validate(occurrence, rule: false);
+    _validate(rule, rule: true);
+    // A copied schedule starts after its seed expense, on the original
+    // cadence. It must never generate an additional expense for the seed.
+    var next = rule['next_date'] as String;
+    while (next.compareTo(due) <= 0) {
+      next = nextDate(next, rule['frequency'] as String, rule['interval_count'] as int);
+    }
+    if (rule['end_date'] != null && next.compareTo(rule['end_date'] as String) > 0) {
+      throw StateError('The copied schedule ends before its first future occurrence.');
+    }
+    rule['next_date'] = next;
+    final number = await LocalFinancialCache(database: database)
+        .recordTransactionCopy(businessId, originalId, id);
+    occurrence['copy_number'] = number;
+    await saveRule(rule);
+    await _put('occurrence', occurrenceKey(newRuleId, due), occurrence, 1, 'pending');
+    await projectOccurrence(database, null, {...occurrence, '_state': 'pending'});
+    return id;
+  }, write: true);
+
   /// Import an authenticated complete snapshot, including inactive rules and
   /// posted occurrences. The adapter must fetch all pages before calling this.
   /// Absence is NEVER deletion; no network writes happen during recovery.

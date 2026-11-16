@@ -226,8 +226,8 @@ void main() {
       expect(children,hasLength(4),reason:'Calendar, assigned tasks, labor summary and payroll summary only');
       expect(children.last,isA<WorkPayrollSummary>());
       expect(find.text('Oil Change'),findsNothing,reason:'Completed labor must not be repeated below Work summary');
-      expect(find.text('Labor This Week · 2 tasks'),findsOneWidget);
-      expect(find.text('21.00 hrs'),findsOneWidget,reason:'Removing duplicate UI retains every allocation in weekly totals');
+      expect(find.text('Assigned Labor This Week · 2 tasks'),findsOneWidget);
+      expect(find.text('Total assigned: 21.00 hrs'),findsOneWidget,reason:'Removing duplicate UI retains every allocation in weekly totals');
       expect(find.text('Review & Pay').hitTestable(),findsOneWidget);
       final button=find.widgetWithText(FilledButton,'Review & Pay');
       final summary=find.byKey(const Key('work-payroll-summary'));
@@ -237,7 +237,7 @@ void main() {
       final fixedBounds=t.getRect(stripe);
       await shot(t, key, 'work-overview');
       await t.tap(find.text('Review & Pay'));await t.pumpAndSettle();
-      expect(t.widget<ColoredBox>(stripe).color,const Color(0xFF52647B));
+      expect(t.widget<ColoredBox>(stripe).color,const Color(0xFF176B38));
       expect(find.text('Oil Change'),findsOneWidget,reason:'Payroll retains individual labor selection');
       expect(find.byType(Checkbox),findsWidgets);
       await t.drag(find.byKey(const Key('employee-payroll-preparation')),const Offset(0,-400));await t.pumpAndSettle();

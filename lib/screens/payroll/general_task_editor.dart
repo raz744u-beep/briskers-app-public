@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'task_selection_dialog.dart';
+import 'approved_tasks_ui.dart';
+import '../../widgets/briskers_module_dock.dart';
 
 class GeneralTaskEditor extends StatefulWidget {
   const GeneralTaskEditor({
@@ -9,8 +11,10 @@ class GeneralTaskEditor extends StatefulWidget {
     required this.jobs,
     required this.initial,
     required this.save,
+    this.sharedBottomNavigationBar,
   });
   final List<Map<String, dynamic>> employees, jobs;
+  final Widget? sharedBottomNavigationBar;
   final Map<String, dynamic> initial;
   final Future<void> Function(Map<String, dynamic>) save;
   @override
@@ -47,7 +51,52 @@ class _GeneralTaskEditorState extends State<GeneralTaskEditor> {
     super.dispose();
   }
 
-  Future<void> _save() async {
+  bool get _dirty =>
+      _description.text != (widget.initial['description'] ?? '') ||
+      _employee != (widget.initial['employee_id'] ?? '') ||
+      _category != (widget.initial['category'] ?? 'General') ||
+      _job != widget.initial['job_id'] ||
+      _due?.millisecondsSinceEpoch != widget.initial['due_at'] ||
+      _reminder != (widget.initial['reminder_enabled'] == 1) ||
+      _minutes != (widget.initial['reminder_minutes'] ?? 0);
+
+  Future<void> _leave([VoidCallback? navigate]) async {
+    if (_saving) return;
+    if (!_dirty) {
+      if (navigate == null) {
+        Navigator.pop(context, false);
+      } else {
+        navigate();
+      }
+      return;
+    }
+    final action = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Leave this task?'),
+        content: const Text('Choose how to handle your unsaved changes.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context),
+            child: const Text('Keep editing')),
+          TextButton(onPressed: () => Navigator.pop(context, 'discard'),
+            child: const Text('Discard')),
+          FilledButton(onPressed: () => Navigator.pop(context, 'save'),
+            child: const Text('Save and leave')),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'discard') {
+      if (navigate == null) {
+        Navigator.pop(context, false);
+      } else {
+        navigate();
+      }
+    }
+    if (action == 'save') await _save(navigate);
+  }
+
+  Future<void> _save([VoidCallback? navigate]) async {
     if (_saving) return;
     if (_employee.isEmpty ||
         _description.text.trim().isEmpty ||
@@ -76,7 +125,13 @@ class _GeneralTaskEditorState extends State<GeneralTaskEditor> {
         'reminder_enabled': _reminder ? 1 : 0,
         'reminder_minutes': _minutes,
       });
-      if (mounted) Navigator.pop(context, true);
+      if (mounted) {
+        if (navigate == null) {
+          Navigator.pop(context, true);
+        } else {
+          navigate();
+        }
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -89,17 +144,23 @@ class _GeneralTaskEditorState extends State<GeneralTaskEditor> {
 
   @override
   Widget build(BuildContext context) {
+    final dock = widget.sharedBottomNavigationBar;
     final job = widget.jobs.where((j) => j['id'] == _job).firstOrNull;
     return PopScope(
-      canPop: !_saving,
+      canPop: !_saving && !_dirty,
+      onPopInvokedWithResult: (didPop, result) { if (!didPop) _leave(); },
       child: Scaffold(
         resizeToAvoidBottomInset: true,
-        appBar: AppBar(
-          title: Text(
-            widget.initial['id'] == null
-                ? 'New General Task'
-                : 'Edit General Task',
-          ),
+        backgroundColor: taskCanvas,
+        bottomNavigationBar: dock is BriskersModuleDock
+            ? BriskersModuleDock(
+                selectedIndex: dock.selectedIndex, destinations: dock.destinations,
+                onSelected: (index) => _leave(() => dock.onSelected(index)),
+                onBadgeSelected: (index) => _leave(() => (dock.onBadgeSelected ?? dock.onSelected)(index)),
+              )
+            : null,
+        appBar: ApprovedTasksHeader(
+          title: widget.initial['id'] == null ? 'New General Task' : 'Edit General Task',
         ),
         body: SafeArea(
           top: false,
@@ -109,6 +170,12 @@ class _GeneralTaskEditorState extends State<GeneralTaskEditor> {
                 child: ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
+                    const Card(child: ListTile(
+                      leading: Icon(Icons.assignment_outlined, color: taskGreen),
+                      title: Text('General Task', style: TextStyle(fontWeight: FontWeight.w800)),
+                      subtitle: Text('Create a non-labor task, reminder, or follow-up.'),
+                    )),
+                    const SizedBox(height: 8),
                     if (_error != null)
                       Text(
                         _error!,
@@ -118,6 +185,7 @@ class _GeneralTaskEditorState extends State<GeneralTaskEditor> {
                       ),
                     TextField(
                       controller: _description,
+                      onChanged: (_) => setState(() {}),
                       enabled: !_saving,
                       minLines: 2,
                       maxLines: 5,
@@ -130,10 +198,12 @@ class _GeneralTaskEditorState extends State<GeneralTaskEditor> {
                       ),
                     ),
                     const SizedBox(height: 12),
+                    LayoutBuilder(builder: (context, constraints) {
+                      final fields = [
                     DropdownButtonFormField<String>(
                       initialValue: _employee.isEmpty ? null : _employee,
                       isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Assignee'),
+                      decoration: const InputDecoration(labelText: 'Assignee', prefixIcon: Icon(Icons.person_outline), border: OutlineInputBorder()),
                       items: [
                         for (final e in widget.employees)
                           DropdownMenuItem(
@@ -150,7 +220,8 @@ class _GeneralTaskEditorState extends State<GeneralTaskEditor> {
                     ),
                     DropdownButtonFormField<String>(
                       initialValue: _category,
-                      decoration: const InputDecoration(labelText: 'Category'),
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Category', prefixIcon: Icon(Icons.sell_outlined), border: OutlineInputBorder()),
                       items: [
                         for (final c in {
                           _category,
@@ -168,8 +239,17 @@ class _GeneralTaskEditorState extends State<GeneralTaskEditor> {
                           ? null
                           : (v) => setState(() => _category = v!),
                     ),
+                      ];
+                      return constraints.maxWidth < 340
+                          ? Column(children: [fields[0], const SizedBox(height: 8), fields[1]])
+                          : Row(children: [
+                              Expanded(child: fields[0]), const SizedBox(width: 8),
+                              Expanded(child: fields[1]),
+                            ]);
+                    }),
+                    const SizedBox(height: 8),
                     ListTile(
-                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.directions_car_outlined, color: taskNavy),
                       title: const Text('Job (optional)'),
                       subtitle: Text(
                         job == null
@@ -199,7 +279,7 @@ class _GeneralTaskEditorState extends State<GeneralTaskEditor> {
                             },
                     ),
                     ListTile(
-                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.calendar_month_outlined, color: taskNavy),
                       title: const Text('Due date and time'),
                       subtitle: Text(
                         _due == null
@@ -247,8 +327,9 @@ class _GeneralTaskEditorState extends State<GeneralTaskEditor> {
                         child: const Text('Clear due date'),
                       ),
                     SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Remind me on this device'),
+                      secondary: const Icon(Icons.notifications_none, color: taskNavy),
+                      title: const Text('Phone Reminder'),
+                      activeThumbColor: taskGreen,
                       subtitle: const Text(
                         'Works offline. Android may delay reminders while the phone is idle.',
                       ),
@@ -292,15 +373,18 @@ class _GeneralTaskEditorState extends State<GeneralTaskEditor> {
                       child: OutlinedButton(
                         onPressed: _saving
                             ? null
-                            : () => Navigator.pop(context, false),
+                            : _leave,
                         child: const Text('Cancel'),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: FilledButton(
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(backgroundColor: taskGreen),
                         onPressed: _saving ? null : _save,
-                        child: Text(_saving ? 'Saving…' : 'Save General Task'),
+                        icon: const Icon(Icons.check),
+                        label: FittedBox(fit: BoxFit.scaleDown,
+                          child: Text(_saving ? 'Saving…' : 'Save General Task')),
                       ),
                     ),
                   ],

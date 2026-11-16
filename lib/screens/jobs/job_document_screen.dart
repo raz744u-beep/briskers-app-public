@@ -4,6 +4,7 @@ import '../../services/local_payroll_repository.dart';
 import '../payroll/owner_payroll_screen.dart';
 import '../payroll/job_tasks_access.dart';
 import 'owner_local_delete_action.dart';
+import '../../core/supabase_config.dart';
 import '../../services/device_owner_authorization.dart';
 import '../../services/local_invoice_number_service.dart';
 import '../../services/local_job_number_service.dart';
@@ -513,7 +514,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         // Unavailable offline history stays blank; never invent mileage.
       }
     }
-    final result = await _projectSavedInvoiceIdentity(withMileage);
+    final finalized = await LocalInvoiceClosureStore(localDatabase)
+        .projectFinalized(widget.businessId, withMileage);
+    final result = await _projectSavedInvoiceIdentity(finalized);
     // Resolve the durable operation after every local overlay. It is not a
     // cached/server payment field and must not be replaced by a stale snapshot.
     result['_finalization_state'] = await OfflineInvoiceFinalization()
@@ -957,10 +960,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Future<void> _ownerForceReopen() async {
     if (!_canForceReopen || _busy) return;
-    if (BriskersConnectionModeController.instance.forceOffline) {
-      if (mounted) setState(() => _error = tr('forceReopenRequiresOnline'));
-      return;
-    }
     final reason = TextEditingController();
     final confirmed = await showDialog<String>(
       context: context,
@@ -969,6 +968,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     );
     reason.dispose();
     if (!mounted || confirmed == null) return;
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      await _run(() async {
+        final grant = await DeviceOwnerAuthorization.instance.authority
+            .authorizeLocal(widget.businessId);
+        if (!mounted) return;
+        grant.assertValid(widget.businessId, supabase.auth.currentUser?.id ?? '');
+        await LocalInvoiceClosure().reopen(
+          widget.businessId, widget.documentId, isOwner: widget.isOwner,
+          reason: confirmed,
+        );
+      });
+      return;
+    }
     await _run(() async { await _api.ownerForceReopenInvoice(
       widget.businessId,
       widget.documentId,
@@ -3384,7 +3396,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text(
       'Finalization saved on this device. Posting awaits synchronization; do not enter the payment again.')));
     unawaited(() async {
-      await OfflineInvoiceFinalization().flush(widget.businessId);
+      if (OfflineInvoiceFinalization.remoteReplayEnabled) {
+        await OfflineInvoiceFinalization().flush(widget.businessId);
+      }
       if(mounted) await _load(fastAfterMutation:true);
       if(mounted && await OfflineInvoiceFinalization().state(widget.businessId,widget.documentId)=='confirmed') {
         final verified=_detail;
@@ -6399,9 +6413,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                       value: _money(pendingPaid),
                     ),
                   ],
-                  if (_detail?['_local_pending_payment'] == true)
+                  if (_detail?['_local_pending_payment'] == true &&
+                      pendingPaid > 0.005)
                     _AmountRow(
-                      label: 'Pending sync',
+                      label: 'Payments to sync',
                       value: _money(_detail?['_local_pending_payment_amount']),
                     ),
                   const Divider(height: 18),
@@ -6632,7 +6647,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ),
             ),
           const SizedBox(height: 16),
-          if (pendingPaid > 0.005) ...[
+          if (pendingPaid > 0.005 && !DocumentPresentation(_detail!).isClosed) ...[
             Card(
               margin: const EdgeInsets.only(bottom: 12),
               color: const Color(0xFFFFF4DE),

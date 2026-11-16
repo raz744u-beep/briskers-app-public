@@ -975,6 +975,7 @@ class _LocalEmployeeDetailsScreenState
         padding: const EdgeInsets.all(12),
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const CircleAvatar(
                 radius: 28,
@@ -993,9 +994,15 @@ class _LocalEmployeeDetailsScreenState
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    if (nickname.isNotEmpty) Text(name),
+                    if (nickname.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(name),
+                      ),
+                    const SizedBox(height: 6),
                     Wrap(
-                      spacing: 6,
+                      spacing: 10,
+                      runSpacing: 4,
                       children: [
                         Text(role),
                         if (details.containsKey('active'))

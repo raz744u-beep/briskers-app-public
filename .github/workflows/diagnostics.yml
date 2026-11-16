@@ -1,6 +1,8 @@
 name: Briskers Diagnostics
 
 on:
+  push:
+    branches: [fix/bugs38-round1-historical-edit-guard]
   workflow_dispatch:
   pull_request:
     paths:

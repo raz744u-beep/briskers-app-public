@@ -1,5 +1,7 @@
 name: Retry storm protection
 on:
+  push:
+    branches: [fix/bugs38-round1-historical-edit-guard]
   pull_request:
     paths:
       - 'lib/**'

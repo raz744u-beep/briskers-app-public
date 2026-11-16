@@ -196,12 +196,12 @@ def validate_run(run, context, filename, name, workflow_id):
     path = run.get("path")
     if not isinstance(path, str) or path.split("@", 1)[0] != f".github/workflows/{filename}":
         raise GateError(f"Wrong workflow path for {filename}")
-    # Only the isolated Gloria regression is also triggered by branch pushes.
-    # Its workflow identity, source repository, exact SHA and branch must still
-    # match. Diagnostics/iOS keep their pull_request/manual-only event policy.
+    # Bugs 38's existing pull request is merged. Its continuation branch
+    # runs the same workflow files on push with the same exact-head checks.
     allowed_events = ALLOWED_EVENTS
-    if (filename == GLORIA_RECOVERY_WORKFLOW[0]
-            and context.branch == GLORIA_RECOVERY_BRANCH):
+    if (context.verification_branch == BUGS38_SOURCE_BRANCH or
+            (filename == GLORIA_RECOVERY_WORKFLOW[0]
+             and context.branch == GLORIA_RECOVERY_BRANCH)):
         allowed_events = ALLOWED_EVENTS | {"push"}
     if (run.get("workflow_id") != workflow_id or run.get("name") != name
             or run.get("head_sha") != context.sha

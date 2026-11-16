@@ -59,7 +59,7 @@ void main() {
   ]);
   test('Force Offline close persists, removes Paid eligibility and survives stale sync without touching payments',() async {
     final before=await paymentHistory();
-    final service=LocalInvoiceClosure(database:db,api:api);
+    final service=LocalInvoiceClosure(database:db,api:api,enableLegacyReplay:true);
     await service.close('shop',['6368'],isOwner:true);
     await service.flush('shop'); expect(api.closes,0); expect(api.payments,0);
     var rows=await LocalDocumentRepository(database:db).listByKind('shop',kind:'invoice');
@@ -75,7 +75,7 @@ void main() {
   });
   test('bulk and repeated close are atomic and idempotent; later sync never invokes finalization',() async {
     final before=await paymentHistory();
-    final service=LocalInvoiceClosure(database:db,api:api);
+    final service=LocalInvoiceClosure(database:db,api:api,enableLegacyReplay:true);
     await service.close('shop',['6368','6357','6359','6368'],isOwner:true);
     await service.close('shop',['6368','6357'],isOwner:true);
     expect(await db.customSelect('SELECT * FROM local_invoice_closures').get(),hasLength(3));
@@ -89,7 +89,7 @@ void main() {
   });
   test('partial or unverified selection rolls back every closure',() async {
     await LocalDocumentDetailCache(database:db).save('shop','6357',{...detail('6357',400),'total_amount':500});
-    final service=LocalInvoiceClosure(database:db,api:api);
+    final service=LocalInvoiceClosure(database:db,api:api,enableLegacyReplay:true);
     await expectLater(service.close('shop',['6368','6357'],isOwner:true),throwsStateError);
     expect(await db.customSelect('SELECT * FROM local_invoice_closures').get(),isEmpty);
     await expectLater(service.close('shop',['6368'],isOwner:false),throwsStateError);
@@ -111,7 +111,7 @@ void main() {
     expect(await paymentHistory(),before);
   });
   test('explicit Owner reopen supersedes closure; stale refresh alone cannot reopen',() async {
-    final service=LocalInvoiceClosure(database:db,api:api);
+    final service=LocalInvoiceClosure(database:db,api:api,enableLegacyReplay:true);
     await service.close('shop',['6359'],isOwner:true);
     final original=(await db.customSelect('SELECT operation_id FROM local_invoice_closures').getSingle()).data;
     await LocalInvoiceClosureStore(db).serverReopened('shop','6359');
@@ -130,6 +130,38 @@ void main() {
     expect(DocumentPresentation(after).isClosed,isTrue);
     expect(await paymentHistory(),before);
   });
+  test('4668 closure upgrades original receipt and keeps sync and stored history intact', () async {
+    final cache = LocalDocumentDetailCache(database: db);
+    final store = LocalInvoiceClosureStore(db);
+    final service = LocalInvoiceClosure(database: db, api: api);
+    final saved = {...detail('6375',268.89), 'row_version': 3};
+    await cache.save('shop', '6375', saved);
+    await service.close('shop', ['6375'], isOwner: true);
+    await db.customStatement('DELETE FROM local_invoice_closed_receipts');
+    final cached = (await cache.loadReadOnly('shop', '6375'))!;
+    final projected = await store.projectFinalized('shop', {
+      ...cached, '_local_pending_payment': true,
+    });
+    expect(projected['paid_amount'], 268.89);
+    expect(projected['pending_payment'], 0);
+    expect(projected['_local_pending_payment'], isTrue);
+    expect(projected['payments'].single['id'], 'receipt-6375');
+    expect(projected['payments'].single['state'], 'posted');
+    expect(await store.projectFinalized('shop', projected), projected);
+    await service.flush('shop');
+    expect(api.closes, 0);
+    expect(cached['payments'], saved['payments']);
+    await expectLater(service.reopen('shop', '6375', isOwner: false,
+      reason: 'Correct invoice notes'), throwsStateError);
+    await service.reopen('shop', '6375', isOwner: true, reason: 'Correct invoice notes');
+    final reopened = (await cache.loadReadOnly('shop','6375'))!;
+    expect(DocumentPresentation(reopened).statusCode, 'paid');
+    expect(DocumentPresentation(reopened).balanceDueCents, 0);
+    expect(reopened['payments'], saved['payments']);
+    expect((await db.customSelect('SELECT reason FROM local_invoice_reopen_audit')
+      .getSingle()).read<String>('reason'), 'Correct invoice notes');
+  });
+
   test('recorded customer payment and explicit operational completion stay independent',() async {
     final cached=(await LocalDocumentDetailCache(database:db).loadReadOnly('shop','6368'))!;
     final state=cachedVerifiedJobPaymentState([cached]);

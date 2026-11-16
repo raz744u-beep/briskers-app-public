@@ -102,6 +102,16 @@ class RecurringFinancialProjection {
       ];
     }
     if (oldId != id) {
+      final copies = await database.customSelect(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_financial_copies'",
+      ).getSingleOrNull();
+      if (copies != null) {
+        await database.customStatement(
+          'UPDATE local_financial_copies SET transaction_id=? WHERE business_id=? AND transaction_id=?',
+          [id, businessId, oldId],
+        );
+      }
+
       await journal.remap(businessId, 'transaction:$oldId', 'transaction:$id',
         newTransactionId: id);
       final queued = await database.customSelect('''

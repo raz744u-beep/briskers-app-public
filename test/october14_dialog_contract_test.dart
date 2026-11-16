@@ -20,11 +20,12 @@ void main() {
     final confirmation = action.indexOf('await showDialog<String>');
     expect(action.indexOf('if (!_canForceReopen || _busy) return;'),
         inInclusiveRange(0, confirmation - 1));
-    expect(action.indexOf('forceOffline'), inInclusiveRange(0, confirmation - 1));
     expect(action, contains('_historicalInvoiceReopenDialog(dialogContext, reason)'));
     final accepted = action.indexOf('if (!mounted || confirmed == null) return;');
     final mutation = action.indexOf('_api.ownerForceReopenInvoice(');
     expect(accepted, greaterThan(confirmation));
+    expect(action.indexOf('forceOffline'), greaterThan(accepted));
+    expect(action, contains('LocalInvoiceClosure().reopen('));
     expect(mutation, greaterThan(accepted));
     expect(action, contains('expectedVersion: _version, reason: confirmed'));
     final eligibility = _section(invoice, 'bool get _canForceReopen =>',

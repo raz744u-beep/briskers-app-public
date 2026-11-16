@@ -51,15 +51,16 @@ void main(){
   testWidgets('actual work dates determine readonly weekly review, not prior completion/payroll dates',(t)async{
     size(t);var week=DateTime(2026,11,9);final rows=[labor('paid48','Water pump',450,paid:true,start:'2026-11-02',end:'2026-11-06'),labor('oil','Oil Separator',600)];
     await t.pumpWidget(MaterialApp(home:Scaffold(body:StatefulBuilder(builder:(context,set)=>EmployeeWorkReview(week:week,rows:rows,jobs:const [],onWeekChanged:(v)=>set(()=>week=v),onJob:(_){})))));await t.pumpAndSettle();
-    expect(find.text('Labor This Week · 1 tasks'),findsOneWidget);
+    expect(find.text('Assigned Labor This Week · 1 tasks'),findsOneWidget);
     expect(find.text('Completed\n10.00 hrs'),findsOneWidget);
-    expect(find.text('10.00 hrs'),findsNWidgets(2)); // Weekly total and completed unpaid.
+    expect(find.text('Total assigned: 10.00 hrs'),findsOneWidget);
+    expect(find.text('10.00 hrs'),findsOneWidget); // Weekly total and completed unpaid.
     expect(find.textContaining('Water pump'),findsNothing);
     expect(find.textContaining('Oil Separator'),findsNothing); // No duplicate Work labor list.
     await t.tap(find.byTooltip('Previous work week'));await t.pumpAndSettle();
-    expect(find.text('Labor This Week · 1 tasks'),findsOneWidget);
+    expect(find.text('Assigned Labor This Week · 1 tasks'),findsOneWidget);
     expect(find.text('Completed\n7.50 hrs'),findsOneWidget);
-    expect(find.text('7.50 hrs'),findsOneWidget);
+    expect(find.text('Total assigned: 7.50 hrs'),findsOneWidget);
     expect(find.text('0.00 hrs'),findsOneWidget); // Previously paid work is not unpaid.
     expect(rows.first['paid'],1);expect(rows.first['remaining_minutes'],0);
     expect(rows.last['paid'],0);expect(rows.last['remaining_minutes'],600);

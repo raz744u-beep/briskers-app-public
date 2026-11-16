@@ -1,3 +1,4 @@
+import 'employee_work_review.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'approved_tasks_ui.dart';
@@ -347,6 +348,11 @@ class _WorkPayrollSummaryState extends State<WorkPayrollSummary> {
             (draft!['repayment'] as int? ?? 0);
       }
     }
+    final paidInFull = state == 'Paid' && !widget.rows.any((row) =>
+        (row['remaining_minutes'] as int? ?? 0) > 0 &&
+        EmployeeWorkReview.fallsInWeek(row, widget.week) &&
+        row['state'] == 'Done' && row['archived_labor'] != 1 &&
+        row['assignment_conflict'] != 1 && row['payroll_treatment'] != 'review');
     return Card(
       key: const Key('work-payroll-summary'),
       child: Padding(
@@ -398,7 +404,7 @@ class _WorkPayrollSummaryState extends State<WorkPayrollSummary> {
               style: FilledButton.styleFrom(backgroundColor: taskGreen),
               onPressed: widget.onReview,
               icon: const Icon(Icons.check),
-              label: const Text('Review & Pay'),
+              label: Text(paidInFull ? 'View Payroll Details' : 'Review & Pay'),
             ),
           ],
         ),

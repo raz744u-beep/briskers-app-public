@@ -170,6 +170,28 @@ class LocalFinancialCache {
     return result;
   }
 
+  Future<int> recordTransactionCopy(String business, String original, String copy) async {
+    await _database.customStatement('''CREATE TABLE IF NOT EXISTS
+      local_financial_copies(business_id TEXT NOT NULL, transaction_id TEXT NOT NULL,
+      source_id TEXT NOT NULL, copy_number INTEGER NOT NULL,
+      PRIMARY KEY(business_id, transaction_id), UNIQUE(business_id, source_id, copy_number))''');
+    final root = await _database.customSelect(
+      'SELECT source_id FROM local_financial_copies WHERE business_id=? AND transaction_id=?',
+      variables: [Variable(business), Variable(original)],
+    ).getSingleOrNull();
+    final source = root?.read<String>('source_id') ?? original;
+    final sequence = await _database.customSelect(
+      'SELECT COALESCE(MAX(copy_number),0) + 1 AS next FROM local_financial_copies '
+      'WHERE business_id=? AND source_id=?',
+      variables: [Variable(business), Variable(source)],
+    ).getSingle();
+    final number = sequence.read<int>('next');
+    await _database.customStatement(
+      'INSERT INTO local_financial_copies VALUES(?,?,?,?)', [business, copy, source, number],
+    );
+    return number;
+  }
+
   Future<void> saveTransactions(
     String businessId,
     List<Map<String, dynamic>> rows,
@@ -204,6 +226,10 @@ class LocalFinancialCache {
   ) async {
     await _database.transaction(() async {
       final saved = await loadTransactions(businessId);
+      final copyNumbers = <String, Object>{
+        for (final row in saved)
+          if (row['copy_number'] case final int number) row['id'].toString(): number,
+      };
       final downloaded = <String, Map<String, dynamic>>{
         for (final row in saved)
           if (row['recurring_verified_download'] == true &&
@@ -212,7 +238,7 @@ class LocalFinancialCache {
       };
       Map<String, dynamic> preserveOccurrence(Map<String, dynamic> server) {
         final cached = downloaded[server['id']?.toString()];
-        if (cached == null) return server;
+        if (cached == null) return {...server, 'copy_number': ?copyNumbers[server['id']]};
         return {
           ...server,
           'recurring_verified_download': true,
@@ -449,6 +475,7 @@ class LocalFinancialCache {
       businessId,
       'transaction_detail_$transactionId',
       jsonEncode({
+        'copy_number': ?existing?['copy_number'],
         ...detail,
         if (existing?['payroll_operation_id'] != null) ...{
           'payroll_operation_id': existing!['payroll_operation_id'],

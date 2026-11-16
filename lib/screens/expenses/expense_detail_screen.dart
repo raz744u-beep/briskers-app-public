@@ -23,6 +23,7 @@ import '../../services/device_owner_authorization.dart';
 import '../../services/expenseiq_local_photo_sync.dart';
 import 'expense_entry_screen.dart';
 import 'transaction_recurring_dialog.dart';
+import '../settings/offline_recurring_screen.dart';
 import '../../core/recurring_schedule_status.dart';
 
 /// True for Android SAF folder grants that can be restored by user selection.
@@ -260,8 +261,17 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         });
         return;
       }
-      final detail = _normalizedDetail(rawDetail)
-        ..['editable'] = saved != null
+      final ownerSource = saved == null && widget.canDeleteTransaction
+          ? LocalFinancialCache.validatedEditSource(
+              (await _localFinancial.loadTransactions(businessId))
+                  .where((row) => row['id'] == transactionId).firstOrNull,
+              businessId, transactionId,
+            )
+          : null;
+      if (!_isCurrent(generation)) return;
+      final detail = _normalizedDetail(ownerSource ?? rawDetail)
+        ..['editable'] = saved != null ||
+            (ownerSource != null && !LocalFinancialCache.requiresOwnerAccountEdit(ownerSource))
         ..['deletable'] = false;
       setState(() {
         _detail = detail;
@@ -495,7 +505,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     final photo = _localExpenseIqPhoto;
     final filename = photo?['filename']?.toString() ?? '';
     final previousUri = photo?['source_uri']?.toString() ?? '';
-    if (filename.isEmpty || previousUri.isEmpty) {
+    if (filename.isEmpty) {
       _showOriginalPhotoError(StateError('Original receipt reference missing.'));
       return;
     }
@@ -524,6 +534,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         expectedFilename: filename,
         previousUri: previousUri,
         verifiedUri: verifiedUri,
+        verifiedBytes: bytes,
       );
       if (!mounted || !_isCurrent(generation)) return;
       _localPhotoBytes.remove(previousUri);
@@ -534,7 +545,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
           });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text(
-          'Original receipt access restored on this phone.',
+          'Original receipt saved on this phone.',
         )),
       );
     } catch (error) {
@@ -579,9 +590,16 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     }
   }
 
-  Future<Uint8List> _readLocalPhoto(String uri) =>
-      _localPhotoBytes.putIfAbsent(uri,
-        () => (widget.localPhotoReader ?? Saf().readFileBytes)(uri));
+  Future<Uint8List> _readLocalPhoto(String uri) {
+    final filename = _localExpenseIqPhoto?['filename']?.toString() ?? '';
+    return _localPhotoBytes.putIfAbsent(uri, () async {
+      final recovered = await _localExpenseIq.recoveredOriginal(
+        widget.businessId, widget.transactionId, filename,
+      );
+      if (recovered != null) return recovered;
+      return (widget.localPhotoReader ?? Saf().readFileBytes)(uri);
+    });
+  }
 
   // The original is looked up by this exact business + expense. A filename
   // alone must never connect images from separate expenses or ambiguous rows.
@@ -1495,15 +1513,18 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         !widget.allowRecurring) {
       return;
     }
-    if (BriskersConnectionModeController.instance.forceOffline) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Connect to change the recurring schedule. '
-            'The original transaction remains available offline.',
-          ),
-        ),
+    if (widget.canDeleteTransaction ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(builder: (_) => OfflineRecurringScreen(
+          businessId: widget.businessId, transactionId: widget.transactionId,
+        )),
       );
+      if (mounted) {
+        widget.onChanged?.call();
+        await _load();
+      }
       return;
     }
     final generation = _loadGeneration;
@@ -1698,8 +1719,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       (detail['receipt_count'] ??
           widget.cachedDetail?['receipt_count'])?.toString() ?? '',
     ) ?? 0;
-    final counterparty =
-        detail['counterparty']?.toString() ?? (income ? 'Income' : 'Expense');
+    final payee = detail['counterparty']?.toString() ?? (income ? 'Income' : 'Expense');
+    final copyNumber = detail['copy_number'];
+    final counterparty = copyNumber == null ? payee : '$payee (Copy $copyNumber)';
     final category = detail['category']?.toString() ?? '';
     final account = detail['account']?.toString() ?? '';
     final date = detail['date']?.toString() ?? '';

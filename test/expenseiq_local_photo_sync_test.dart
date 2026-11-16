@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -156,7 +157,12 @@ void main() {
       expectedFilename: 'receipt-a.jpg',
       previousUri: 'content://android/tree/ExpenseIQ/Photos/receipt-a.jpg',
       verifiedUri: 'content://android/tree/ExpenseIQ/photos/receipt-a.jpg',
+      verifiedBytes: Uint8List.fromList([0xff, 0xd8, 0xff, 0xd9]),
     );
+    final savedOriginal = await ExpenseIqLocalPhotoSync(database: database)
+        .recoveredOriginal('shop', 'worldpac', 'receipt-a.jpg');
+    expect(savedOriginal, [0xff, 0xd8, 0xff, 0xd9]);
+    expect(await service.recoveredOriginal('shop', 'other', 'receipt-a.jpg'), isNull);
     final recovered = await service.localForExpense('shop', 'worldpac');
     expect(
       recovered?['source_uri'],

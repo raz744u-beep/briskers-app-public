@@ -17,6 +17,7 @@ class EmployeeWorkReview extends StatelessWidget {
     this.payrollSummary,
     this.employeeName,
     this.employeeId,
+    this.paidMinutesThisWeek,
   });
   final DateTime week;
   final List<Map<String, dynamic>> rows, jobs;
@@ -25,6 +26,7 @@ class EmployeeWorkReview extends StatelessWidget {
   final ValueChanged<Map<String, dynamic>>? onTask;
   final Widget? payrollSummary;
   final String? employeeName, employeeId;
+  final int? paidMinutesThisWeek;
   static DateTime monday(DateTime d) =>
       DateTime(d.year, d.month, d.day).subtract(Duration(days: d.weekday - 1));
   static DateTime? date(Map<String, dynamic> r) {
@@ -63,10 +65,8 @@ class EmployeeWorkReview extends StatelessWidget {
     'In Progress' => WorkStatusColors.progress,
     _ => WorkStatusColors.open,
   };
-  @override
-  Widget build(BuildContext context) {
-    final start = monday(week), end = monday(week).add(const Duration(days: 5));
-    final visible = rows.where((r) {
+  static bool fallsInWeek(Map<String, dynamic> r, DateTime week) {
+    final start = monday(week), end = start.add(const Duration(days: 5));
       if (LocalTaskSchedule.parse(r['work_start_date']) != null &&
           LocalTaskSchedule.parse(r['work_end_date']) != null) {
         return LocalTaskSchedule.inWeek(r, start) && r['source_active'] != 0;
@@ -76,7 +76,14 @@ class EmployeeWorkReview extends StatelessWidget {
           !d.isBefore(start) &&
           d.isBefore(end) &&
           r['source_active'] != 0;
-    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final start = monday(week), end = start.add(const Duration(days: 5));
+    final visible = rows.where((row) => fallsInWeek(row, week)).toList();
+    final inProgressPaid = visible.where((row) => row['state'] == 'In Progress')
+        .fold<int>(0, (sum, row) => sum + (row['paid_minutes'] as int? ?? 0));
     int sum(Iterable<Map<String, dynamic>> rs) =>
         rs.fold(0, (n, r) => n + minutes(r));
     String hrs(int n) => (n / 60).toStringAsFixed(2);
@@ -186,7 +193,8 @@ class EmployeeWorkReview extends StatelessWidget {
                         ),
                       ),
                     ),
-                    child: Material(color:Colors.transparent,child:ListTile(
+                    child: Column(children: [
+                      Material(color:Colors.transparent,child:ListTile(
                       isThreeLine:true,
                       key: ValueKey('assigned-task-${r['id']}'),
                       onTap: onTask == null ? null : () => onTask!(r),
@@ -212,6 +220,25 @@ class EmployeeWorkReview extends StatelessWidget {
                         ],
                       ))),
                     )),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                        child: Row(
+                          children: [
+                            for (final (label, minutes, tint) in [
+                              ('Assigned', r['estimated_minutes'] as int? ?? 0, taskNavy),
+                              ('Paid', r['paid_minutes'] as int? ?? 0, taskGreen),
+                              ('Remaining', ((r['estimated_minutes'] as int? ?? 0) -
+                                  (r['paid_minutes'] as int? ?? 0)).clamp(0, 0x7fffffff), taskNavy),
+                            ])
+                              Expanded(child: Column(children: [
+                                Text(label, style: const TextStyle(fontSize: 11)),
+                                Text('${hrs(minutes)} hrs', style: TextStyle(
+                                  color: tint, fontWeight: FontWeight.w800)),
+                              ])),
+                          ],
+                        ),
+                      ),
+                    ]),
                   ),
                 if (!rows.any(
                   (r) =>
@@ -236,7 +263,7 @@ class EmployeeWorkReview extends StatelessWidget {
                       const SizedBox(width: 7),
                       Expanded(
                         child: Text(
-                          'Labor This Week · ${visible.length} tasks',
+                          'Assigned Labor This Week · ${visible.length} tasks',
                           style: const TextStyle(
                             fontWeight: FontWeight.w800,
                             fontSize: 16,
@@ -244,9 +271,9 @@ class EmployeeWorkReview extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        '${hrs(sum(visible))} hrs',
+                        'Total assigned: ${hrs(visible.fold<int>(0, (n, row) => n + (row['estimated_minutes'] as int? ?? 0)))} hrs',
                         style: const TextStyle(
-                          fontSize: 18,
+                          fontSize: 12,
                           fontWeight: FontWeight.w800,
                           color: Color(0xFF075C18),
                         ),
@@ -300,6 +327,9 @@ class EmployeeWorkReview extends StatelessWidget {
                                           color: color(state),
                                         ),
                                       ),
+                                      if (state == 'In Progress' && inProgressPaid > 0)
+                                        Text('(includes ${hrs(inProgressPaid)} hrs paid)',
+                                          style: const TextStyle(fontSize: 11)),
                                     ],
                                   ),
                                 ),
@@ -310,6 +340,14 @@ class EmployeeWorkReview extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (paidMinutesThisWeek != null) ...[
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      const Expanded(child: Text('Total Paid This Week')),
+                      Text('${hrs(paidMinutesThisWeek!)} hrs',
+                        style: const TextStyle(color: taskGreen, fontWeight: FontWeight.w800)),
+                    ]),
+                  ],
                   const SizedBox(height: 10),
                   Row(
                     children: [

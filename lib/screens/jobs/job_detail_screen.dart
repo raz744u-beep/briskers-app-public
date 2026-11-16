@@ -5796,7 +5796,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   Future<void> _openJobLaborTasks() async {
     if (!_owner || !OwnerPayrollScreen.enabled) return;
     await Navigator.of(context).push<void>(MaterialPageRoute(
-      builder: (_) => OwnerPayrollScreen(businessId: widget.businessId, jobId: widget.jobId),
+      builder: (_) => OwnerPayrollScreen(businessId: widget.businessId, jobId: widget.jobId,
+        sharedBottomNavigationBar: widget.bottomNavigationBar),
     ));
     if (mounted) await _load();
   }

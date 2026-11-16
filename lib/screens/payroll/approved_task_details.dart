@@ -9,6 +9,7 @@ import 'employee_work_review.dart';
 class ApprovedTaskDetails extends StatefulWidget {
   const ApprovedTaskDetails({
     super.key,
+    this.sharedBottomNavigationBar,
     required this.initialTask,
     required this.allocations,
     required this.general,
@@ -22,6 +23,7 @@ class ApprovedTaskDetails extends StatefulWidget {
     this.onInvoice,
     this.onActions,
   });
+  final Widget? sharedBottomNavigationBar;
   final Map<String, dynamic> initialTask;
   final List<Map<String, dynamic>> allocations;
   final bool general;
@@ -174,6 +176,7 @@ class _ApprovedTaskDetailsState extends State<ApprovedTaskDetails> {
         ? DateFormat('MMM d, yyyy').format(start)
         : '${DateFormat('MMM d').format(start)} – ${end == null ? 'Not recorded' : DateFormat('MMM d, yyyy').format(end)}';
     return Scaffold(
+      bottomNavigationBar: widget.sharedBottomNavigationBar,
       backgroundColor: taskCanvas,
       appBar: ApprovedTasksHeader(
         title: task['job_id'] == null

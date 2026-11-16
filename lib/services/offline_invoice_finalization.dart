@@ -17,6 +17,10 @@ class OfflineInvoiceFinalization {
   OfflineInvoiceFinalization({BriskersLocalDatabase? database,
     this.api = const BriskersApi()})
       : db = database ?? localDatabase;
+  // The former RPC is paused. Existing durable intents remain available for
+  // reconciliation and must only be replayed by a verified replacement.
+  static const remoteReplayEnabled = false;
+
   final BriskersLocalDatabase db;
   final BriskersApi api;
 
@@ -190,7 +194,13 @@ class OfflineInvoiceFinalization {
   Future<void> remap(String business,String local,String server) async {
     await prepare();
     await LocalInvoiceClosureStore(db).prepare();
-    await db.customStatement('UPDATE local_invoice_closures SET invoice_id=? WHERE business_id=? AND invoice_id=?',[server,business,local]);
+    for (final table in ['local_invoice_closures', 'local_invoice_closed_receipts',
+      'local_invoice_reopen_audit']) {
+      await db.customStatement(
+        'UPDATE $table SET invoice_id=? WHERE business_id=? AND invoice_id=?',
+        [server,business,local],
+      );
+    }
     await db.customStatement('UPDATE invoice_finalization_intents_v1 SET invoice_id=? WHERE business_id=? AND invoice_id=?',[server,business,local]);
     await db.customStatement('UPDATE invoice_finalization_close_followups_v1 SET invoice_id=? WHERE business_id=? AND invoice_id=?',[server,business,local]);
   }

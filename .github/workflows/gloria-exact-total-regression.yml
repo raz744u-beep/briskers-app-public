@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - fix/gloria-rounding-preflight-20261030
+      - fix/bugs38-round1-historical-edit-guard
     paths:
       - "tools/recovery/offline_invoice_exact_total_v2_DRAFT.sql"
       - "tools/tests/test_offline_invoice_exact_total_draft.py"

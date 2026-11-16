@@ -29,6 +29,7 @@ import 'expenses/expense_detail_screen.dart';
 import 'jobs/job_document_screen.dart';
 import 'expenses/expense_entry_screen.dart';
 import 'settings/expense_settings_screen.dart';
+import 'settings/offline_recurring_screen.dart';
 
 class ExpensesScreen extends StatefulWidget {
   const ExpensesScreen({
@@ -225,7 +226,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
     final count = InvoicePaymentFeed.combine(
       financial: _transactions, receipts: _invoiceReceipts,
-      startDate: _rangeStartDate, endDate: _rangeEndDate,
+      startDate: _selectedRangeStart, endDate: _selectedRangeEnd,
       search: _searchController.text,
       direction: _filter == 'all' ? null : _filter,
       filteredAccount: _accountFilterId != null ||
@@ -254,8 +255,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         today.day <= lastDay ? today.day : lastDay);
   }
 
+  bool get _searching => _searchController.text.trim().isNotEmpty;
+  DateTime? get _selectedRangeStart => _searching ? null : _rangeStartDate;
+  DateTime? get _selectedRangeEnd => _searching ? null : _rangeEndDate;
+
   DateTime? get _rangeStartDate {
-    if (_searchController.text.trim().isNotEmpty) return null;
     final today = _dateOnly(DateTime.now());
     switch (_dateRange) {
       case '30d':
@@ -285,7 +289,6 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
   DateTime? get _rangeEndDate {
-    if (_searchController.text.trim().isNotEmpty) return null;
     if (_dateRange == 'all') return null;
     if (_dateRange == 'custom') return _customEndDate;
     if (_dateRange == 'lastMonth') {
@@ -324,7 +327,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         return 'Custom';
       case 'all':
       default:
-        return 'All history';
+        return 'All Time';
     }
   }
 
@@ -336,8 +339,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       widget.businessId,
       limit: _pageSize,
       offset: offset,
-      startDate: _rangeStartDate,
-      endDate: _rangeEndDate,
+      startDate: _selectedRangeStart,
+      endDate: _selectedRangeEnd,
       search: _searchController.text.trim().isEmpty
           ? null
           : _searchController.text.trim(),
@@ -518,8 +521,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       try {
         var localRows = await _localFinancial.loadTransactions(
           widget.businessId,
-          startDate: _rangeStartDate,
-          endDate: _rangeEndDate,
+          startDate: _selectedRangeStart,
+          endDate: _selectedRangeEnd,
           search: _searchController.text.trim().isEmpty
               ? null
               : _searchController.text.trim(),
@@ -662,7 +665,6 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         BriskersConnectionModeController.instance.forceOffline;
     final startDate = _rangeStartDate;
     final endDate = _rangeEndDate;
-    final search = _searchController.text.trim();
     final direction = _filter == 'all' ? null : _filter;
     final accountId = _accountFilterId;
     final categoryId = _categoryFilterId;
@@ -672,7 +674,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       widget.roleCode,
       startDate?.toIso8601String() ?? '',
       endDate?.toIso8601String() ?? '',
-      search,
+      '',
       direction ?? '',
       accountId ?? '',
       categoryId ?? '',
@@ -720,7 +722,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         local = await journal.apply(
           businessId, baseline,
           startDate: startDate, endDate: endDate,
-          search: search.isEmpty ? null : search, direction: direction,
+          direction: direction,
           accountId: accountId, categoryId: categoryId,
           counterpartyId: counterpartyId,
         );
@@ -731,7 +733,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         final effective = await journal.overlayCachedRows(businessId, cached);
         local = await LocalExpenseSubtotal.calculate(effective,
           startDate: startDate, endDate: endDate,
-          search: search.isEmpty ? null : search, direction: direction,
+          direction: direction,
           accountId: accountId, categoryId: categoryId,
           counterpartyId: counterpartyId);
         usingPartialLocalSubtotal = local != null;
@@ -809,7 +811,6 @@ class _ExpensesScreenState extends State<ExpensesScreen>
             businessId,
             offset: offset, limit: limit,
             startDate: startDate, endDate: endDate,
-            search: search.isEmpty ? null : search,
             direction: direction,
             accountId: accountId,
             categoryId: categoryId,
@@ -833,7 +834,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       final projected = await journal.apply(
         businessId, totals,
         startDate: startDate, endDate: endDate,
-        search: search.isEmpty ? null : search, direction: direction,
+        direction: direction,
         accountId: accountId, categoryId: categoryId,
         counterpartyId: counterpartyId,
       );
@@ -1057,8 +1058,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       if (local) {
         final cached = await _localFinancial.loadTransactions(
           businessId,
-          startDate: _rangeStartDate,
-          endDate: _rangeEndDate,
+          startDate: _selectedRangeStart,
+          endDate: _selectedRangeEnd,
           search: _searchController.text.trim().isEmpty
               ? null : _searchController.text.trim(),
           direction: _filter == 'all' ? null : _filter,
@@ -1175,6 +1176,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
   Future<void> _chooseDirection() async {
+    FocusManager.instance.primaryFocus?.unfocus();
     final selected = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -1203,6 +1205,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
   Future<void> _chooseDateRange() async {
+    FocusManager.instance.primaryFocus?.unfocus();
     final selected = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -1227,7 +1230,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
               ('ytd', 'Year to Date'),
               ('1y', 'Last 1 year'),
               ('custom', 'Custom date range'),
-              ('all', 'All history'),
+              ('all', 'All Time'),
             ])
               ListTile(
                 title: Text(option.$2),
@@ -1270,6 +1273,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
   Future<void> _showAdvancedFilters() async {
+    FocusManager.instance.primaryFocus?.unfocus();
     var accountId = _accountFilterId;
     var categoryId = _categoryFilterId;
     var counterpartyId = _counterpartyFilterId;
@@ -1912,8 +1916,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final allVisible = InvoicePaymentFeed.combine(
       financial: _transactions,
       receipts: _invoiceReceipts,
-      startDate: _rangeStartDate,
-      endDate: _rangeEndDate,
+      startDate: _selectedRangeStart,
+      endDate: _selectedRangeEnd,
       search: _searchController.text,
       direction: _filter == 'all' ? null : _filter,
       filteredAccount: _accountFilterId != null ||
@@ -2060,9 +2064,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                 ? _periodTotals == null
                                     ? 'Calculating complete posted totals…'
                                     : 'Refreshing previously verified totals…'
-                                : _searchController.text.trim().isNotEmpty
-                                    ? 'Search totals include all dates.'
-                                    : _lastPeriodAt == null
+                                : _lastPeriodAt == null
                                         ? 'Saved totals may be incomplete until posted history is downloaded and verified'
                                         : 'Posted totals for $_rangeLabel · verified ${DateFormat('h:mm a').format(_lastPeriodAt!)} · pending offline entries excluded'),
                         maxLines: 3,
@@ -2130,12 +2132,17 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                             color: Color(0xFF526171))),
                       ),
                   ],
-                  if (_searchController.text.trim().isNotEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 5, left: 4),
-                      child: Text('Search checks all saved local transactions. Older history may require download.',
-                        style: TextStyle(fontSize: 12,
-                          color: Color(0xFF667085))),
+                  if (_searching)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 5, left: 4),
+                      child: Text(
+                        _showFinancialSummary
+                          ? 'Search subtotal across saved results · ${allVisible.length} matches · '
+                            '${_money(allVisible.fold<num>(0, (total, row) => total + ((num.tryParse(row['amount']?.toString() ?? '') ?? 0) *
+                                (row['direction'] == 'expense' ? -1 : 1))))} net'
+                          : 'Search checks all saved local transactions.',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF667085)),
+                      ),
                     ),
                   if (_allowRecurring) ...[
                     const SizedBox(height: 10),
@@ -2173,9 +2180,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                 await Navigator.push<void>(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (_) => RecurringTransactionsScreen(
-                                      businessId: widget.businessId,
-                                    ),
+                                    builder: (_) => _owner
+                                        ? OfflineRecurringScreen(businessId: widget.businessId)
+                                        : RecurringTransactionsScreen(businessId: widget.businessId),
                                   ),
                                 );
                                 await _load();
@@ -2394,9 +2401,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                     ...visible.map((transaction) {
                       final incomeRow =
                           transaction['direction']?.toString() == 'income';
-                      final counterparty =
+                      final payee =
                           transaction['counterparty']?.toString() ??
                           (incomeRow ? 'Income' : 'Expense');
+                      final copyNumber = transaction['copy_number'];
+                      final counterparty = copyNumber == null ? payee : '$payee (Copy $copyNumber)';
                       final category =
                           transaction['category']?.toString() ?? '';
                       final date =

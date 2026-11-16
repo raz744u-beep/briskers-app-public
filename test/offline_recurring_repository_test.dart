@@ -71,6 +71,36 @@ void main() {
     await directory.delete(recursive: true);
   });
 
+  test('recurring copies receive separate identities and keep the original seed intact', () async {
+    final original = posted();
+    await repo.importSnapshot(rules: [rule()], occurrences: [original]);
+    final fields = {
+      for (final key in ['direction', 'account_id', 'category_id', 'vendor_id', 'amount_minor', 'date'])
+        key: original[key],
+    };
+    final schedule = {
+      'frequency': 'weekly', 'interval_count': 1, 'next_date': '2026-11-04',
+      'is_repeating': true,
+    };
+    final first = await repo.copyOccurrence(
+      originalId: original['id'] as String, newRuleId: 'copy-rule-1',
+      expense: fields, schedule: schedule,
+    );
+    final second = await repo.copyOccurrence(
+      originalId: first, newRuleId: 'copy-rule-2', expense: fields, schedule: schedule,
+    );
+    final rows = {for (final row in await repo.occurrences()) row['id']: row};
+    expect(rows[original['id']]?['copy_number'], isNull);
+    expect(rows[first]?['copy_number'], 1);
+    expect(rows[second]?['copy_number'], 2);
+    expect(rows[second]?['amount_minor'], 10529);
+    expect(rows[second]?['date'], '2026-11-04');
+    expect((await repo.rules()).where((row) => row['id'] != 'weekly')
+      .map((row) => row['next_date']), everyElement('2026-11-11'));
+    expect(await repo.generateThrough('2026-11-04'), 0);
+    expect(await db.customSelect('SELECT * FROM sync_outbox').get(), isEmpty);
+  });
+
   test('recovery, restart, catch-up and repeated reconnect keep one occurrence',
       () async {
     await repo.importSnapshot(rules: [rule()], occurrences: [posted()]);

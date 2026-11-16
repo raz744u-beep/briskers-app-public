@@ -468,9 +468,9 @@ class ApprovedProfileTabs extends StatelessWidget {
     final controller = DefaultTabController.of(context);
     const entries = [
       ('Work', Color(0xFF52647B)),
-      ('Payroll', Color(0xFF52647B)),
-      ('Reports', Color(0xFF52647B)),
-      ('Taxes', Color(0xFF52647B)),
+      ('Payroll', Color(0xFF176B38)),
+      ('Reports', Color(0xFF245993)),
+      ('Taxes', Color(0xFF725690)),
     ];
     return AnimatedBuilder(
       animation: controller,

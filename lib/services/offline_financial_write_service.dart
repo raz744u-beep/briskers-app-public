@@ -236,8 +236,12 @@ class OfflineFinancialWriteService {
     required List<Map<String, dynamic>> receipts,
     Map<String, dynamic>? receiptExtraction,
     String? verifiedPayrollOperationId,
+    String? copySourceId,
   }) async {
     final payrollOperation = verifiedPayrollOperationId?.trim();
+    if (copySourceId != null && verifiedPayrollOperationId != null) {
+      throw ArgumentError('A payroll expense cannot be copied.');
+    }
     if (verifiedPayrollOperationId != null &&
         (payrollOperation == null || payrollOperation.isEmpty ||
          direction != 'expense' || amount <= 0 || receipts.isNotEmpty ||
@@ -321,6 +325,8 @@ class OfflineFinancialWriteService {
         }
       }
 
+      final copyNumber = copySourceId == null
+          ? null : await _cache.recordTransactionCopy(businessId, copySourceId, localId);
       final summary = <String, dynamic>{
         'id': localId,
         'direction': direction,
@@ -328,6 +334,7 @@ class OfflineFinancialWriteService {
         'signed_amount': direction == 'expense' ? -amount : amount,
         'transaction_date': dateText,
         'counterparty': cleanCounterparty,
+        'copy_number': ?copyNumber,
         'counterparty_id': counterpartyId,
         'category': categoryName,
         'category_id': categoryId,
@@ -898,6 +905,15 @@ class OfflineFinancialWriteService {
         newTransactionId: serverId,
       );
 
+      final copies = await _database.customSelect(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_financial_copies'",
+      ).getSingleOrNull();
+      if (copies != null) {
+        await _database.customStatement(
+          'UPDATE local_financial_copies SET transaction_id=? WHERE business_id=? AND transaction_id=?',
+          [serverId, businessId, localId],
+        );
+      }
       await PayrollExpenseLinkStore(_database).remap(businessId, localId, serverId);
       final detail = await _cache.loadTransactionDetail(businessId, localId);
       if (detail != null) {

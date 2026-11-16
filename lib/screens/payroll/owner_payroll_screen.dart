@@ -80,11 +80,13 @@ class OwnerPayrollScreen extends StatefulWidget {
     this.database,
     this.unlockOwner,
     this.ownerConnection,
+    this.sharedBottomNavigationBar,
   });
 
   static const enabled = bool.fromEnvironment('BRISKERS_ENABLE_OWNER_PAYROLL');
 
   final bool reportsOnly;
+  final Widget? sharedBottomNavigationBar;
   final String? employeeId;
   final String? employeeName;
   final String? employeeLegalName;
@@ -1744,7 +1746,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final operation=_operationId();
     if (!mounted || !_canView) return;
     final saved = await Navigator.push<bool>(
-      context,MaterialPageRoute(builder:(_)=>GeneralTaskEditor(employees:staff.values.toList(),jobs:jobs,initial:source??{'employee_id':widget.employeeId,'job_id':widget.jobId},save:(v)async{if(!_canView)throw StateError('Owner account changed.');
+      context,MaterialPageRoute(builder:(_)=>GeneralTaskEditor(
+      sharedBottomNavigationBar: widget.sharedBottomNavigationBar, employees:staff.values.toList(),jobs:jobs,initial:source??{'employee_id':widget.employeeId,'job_id':widget.jobId},save:(v)async{if(!_canView)throw StateError('Owner account changed.');
     if (v['reminder_enabled'] ==1 && !await LocalTaskReminders().prepare(requestPermission: true)) {
               throw StateError('Enable notifications in device settings, or turn the reminder off to save.');
             }
@@ -1763,6 +1766,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       key: PageStorageKey('${widget.employeeId}-WorkScroll'),
       week:_week,rows:_work,jobs: const [],
       employeeName: _employeeLabel(widget.employeeId),
+    paidMinutesThisWeek: _history.where((row) => row['reversed_at'] == null &&
+        row['week'] == _date(EmployeeWorkReview.monday(_week)))
+      .expand((row) => (row['work'] as List? ?? []).whereType<Map>())
+      .fold<int>(0, (sum, row) => sum + (row['actual_minutes'] as int? ?? 0)),
     onWeekChanged:(week)=>setState(()=>_week=week),onJob:(id)=>_openRecordedWork(id,invoice:false),
       onTask: (task) => unawaited(
         _openTaskDetails({...task, 'line_id': task['task_id']}, false),
@@ -1895,6 +1902,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final data=await snapshot();if(!mounted)return;
     await Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>ApprovedTaskDetails(
       initialTask:data.task,allocations:data.allocations,general:general,employeeName:_employeeLabel,reload:snapshot,
+      sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
       onEdit:()async{final current=await snapshot();if(general){await _generalEditor(current.task);}else{await _serviceEditor(current.task);}},
       onEditDescription:()async{final current=await snapshot();if(general){await _generalEditor(current.task);}else{await _serviceEditor(current.task,true);}},
       onPriority:(p)async{final current=await snapshot();await _priority(current.task,general,p);},
@@ -1919,6 +1927,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final jobRow=_workspaceJob??service.where((r)=>r['job_id']==widget.jobId).firstOrNull??_generalTasks.where((r)=>r['job_id']==widget.jobId).firstOrNull;
     return Scaffold(
       backgroundColor:taskCanvas,
+      bottomNavigationBar: widget.sharedBottomNavigationBar,
       appBar: ApprovedTasksHeader(title:_jobMode?'Job ${jobRow?['job_number']??''}':'Tasks',subtitle:_jobMode ? (jobRow?['customer_name']?.toString()) : null,actions:[PopupMenuButton<String>(icon:const Icon(Icons.more_vert,color:Colors.white),onSelected:(_)=>_openInvoiceHistory(),itemBuilder:(_)=>[const PopupMenuItem(value:'history',child:Text('Invoice labor history'))])]),
       body: SafeArea(
         top: false,
@@ -2019,6 +2028,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     initialIndex: widget.initialTab,
     child: Scaffold(
       backgroundColor:taskCanvas,
+      bottomNavigationBar: widget.sharedBottomNavigationBar,
       appBar: ApprovedTasksHeader(title:'Employee Profile',actions:[PopupMenuButton<String>(icon:const Icon(Icons.more_vert,color:Colors.white),onSelected:(v){if(v=='details'){widget.openEmployeeDetails?.call();}else{unawaited(_load());}},itemBuilder:(_)=>[if(widget.openEmployeeDetails!=null)const PopupMenuItem(value:'details',child:Text('Details')),const PopupMenuItem(value:'refresh',child:Text('Refresh'))])]),
       body: Column(children: [
         Padding(padding: const EdgeInsets.fromLTRB(12, 8, 12, 10), child: _header(),),
@@ -2029,12 +2039,21 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         if (_error != null)
           ConstrainedBox(constraints:const BoxConstraints(maxHeight:96),child:SingleChildScrollView(child:ListTile(dense: true, title: Text(_error!), trailing: TextButton(
             onPressed: _loadingLocal ? null : () => unawaited(_load()), child: const Text('Retry'),),),),),
-        Expanded(child: TabBarView(children: [
-          _PayrollTabAlive(key:ValueKey('${widget.employeeId}-Tasks'),keepAlive:false,child:_safeTab(_tasksTab, 'Tasks'),),
-          _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Payroll'),child:_safeTab(_payrollTab, 'Payroll'),),
-          _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Reports'),child:_safeTab(_reportsPanel, 'Reports'),),
-          _PayrollTabAlive(key:PageStorageKey('${widget.employeeId}-Taxes'),child:_taxesTab(),),
-        ],),),
+        Expanded(child: Builder(builder: (context) {
+          final controller = DefaultTabController.of(context);
+          return AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => KeyedSubtree(
+              key: ValueKey((widget.employeeId, controller.index)),
+              child: switch (controller.index) {
+                0 => _safeTab(_tasksTab, 'Tasks'),
+                1 => _safeTab(_payrollTab, 'Payroll'),
+                2 => _safeTab(_reportsPanel, 'Reports'),
+                _ => _taxesTab(),
+              },
+            ),
+          );
+        }),),
       ],),
     ),
   );
@@ -2139,6 +2158,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         employeeLegalName: row['name']?.toString(),
         employeePayType: row['payment_type']?.toString(),
         initialWeek: week, initialTab: tab, database: widget.database,
+        sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
         unlockOwner: widget.unlockOwner, ownerConnection: widget.ownerConnection,
         openEmployeeDetails: () => Navigator.of(context).push<bool>(MaterialPageRoute(
           builder: (_) => EmployeeEditScreen(
@@ -2154,6 +2174,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
   Future<void> _openAssignments(Map<String,dynamic> row) async {
     await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => OwnerPayrollScreen(
+      sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
       businessId:widget.businessId, jobId:row['job_id'] as String, invoiceId:row['invoice_id'] as String,
       focusLineId:row['source_line_id'] as String, database:_db, unlockOwner:widget.unlockOwner,
       ownerConnection:widget.ownerConnection,),),);
@@ -2339,18 +2360,6 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           ],
         ),
       );
-}
-
-// Retain the other tabs. Work recreates its viewport and restores list scroll through PageStorage.
-class _PayrollTabAlive extends StatefulWidget {
-  const _PayrollTabAlive({super.key,required this.child,this.keepAlive=true});
-  final Widget child;
-  final bool keepAlive;
-  @override State<_PayrollTabAlive> createState()=>_PayrollTabAliveState();
-}
-class _PayrollTabAliveState extends State<_PayrollTabAlive> with AutomaticKeepAliveClientMixin {
-  @override bool get wantKeepAlive=>widget.keepAlive;
-  @override Widget build(BuildContext context){super.build(context);return widget.child;}
 }
 
 /// Retain the original fixed-footer panels at normal phone sizes. A short
