@@ -461,16 +461,22 @@ class ApprovedTaskListCard extends StatelessWidget {
   }
 }
 
+const payrollSectionHeaderGradient = LinearGradient(
+  begin: Alignment.centerLeft,
+  end: Alignment.centerRight,
+  colors: [Color(0xFF31A9D9), Color(0xFF2075BC), Color(0xFF174B92)],
+);
+
 class ApprovedProfileTabs extends StatelessWidget {
   const ApprovedProfileTabs({super.key});
   @override
   Widget build(BuildContext context) {
     final controller = DefaultTabController.of(context);
     const entries = [
-      ('Work', Color(0xFF52647B)),
-      ('Payroll', Color(0xFF176B38)),
-      ('Reports', Color(0xFF245993)),
-      ('Taxes', Color(0xFF725690)),
+      ('Work', Color(0xFF2479C6)),
+      ('Payroll', Color(0xFF176B40)),
+      ('Reports', Color(0xFF6942A2)),
+      ('Taxes', Color(0xFF697586)),
     ];
     return AnimatedBuilder(
       animation: controller,
@@ -505,8 +511,8 @@ class ApprovedProfileTabs extends StatelessWidget {
                                     begin: Alignment.topCenter,
                                     end: Alignment.bottomCenter,
                                     colors: [
-                                      Color(0xFFF3F5F9),
-                                      Color(0xFFE4E8F0),
+                                      Color(0xFFEAEDF3),
+                                      Color(0xFFDCE2EB),
                                     ],
                                   ),
                                 ),

@@ -952,7 +952,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   horizontal: 12,
                   vertical: 10,
                 ),
-                color: taskNavy,
+                decoration: const BoxDecoration(gradient: payrollSectionHeaderGradient),
                 child: const Row(
                   children: [
                     Icon(Icons.calculate_outlined, color: Colors.white),

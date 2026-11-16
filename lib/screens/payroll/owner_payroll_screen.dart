@@ -141,6 +141,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   List<Map<String, dynamic>> _taskSources = [];
   Map<String,dynamic>? _workspaceJob;
   List<Map<String, dynamic>> _history = [];
+  Map<String, VerifiedPayrollWeek>? _verifiedWeeks;
   List<Map<String, dynamic>> _overviewPayments = [];
   List<Map<String, dynamic>> _pendingPayments = [];
   bool _refreshingOwnerState = false;
@@ -227,7 +228,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       _viewIdentity=_viewAuthorized?identity:null;
       if(!_viewAuthorized){
         _grant=null;_loadGeneration++;_hasLocalData=false;_reportsLoaded=false;
-        _employees=[];_work=[];_taskSources=[];_history=[];_overviewPayments=[];
+        _employees=[];_work=[];_taskSources=[];_history=[];_verifiedWeeks=null;_overviewPayments=[];
         _pendingPayments=[];_historyUnlocked.value=false;
         _error='Sign in to the saved Owner account to view payroll.';
       }else{_error=null;_historyUnlocked.value=true;}
@@ -460,6 +461,11 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if(!mounted||generation!=_loadGeneration)return;
     if(!_canView)return;
     setState((){_hasLocalData=true;_employees=employees;_employee=employee;_work=work;_taskSources=sources;});
+    if (widget.employeeId != null && !widget.reportsOnly) {
+      final weeks = await repository.verifiedPayrollWeeks(widget.employeeId!);
+      if (!mounted || generation != _loadGeneration || !_canView) return;
+      setState(() => _verifiedWeeks = weeks);
+    }
     _loadStage = 'payment history';
     final history = employee == null || _jobMode
         ? <Map<String, dynamic>>[] : await repository.historyWithWork(employee);
@@ -1192,6 +1198,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             setState(() {
               _employee = value;
               _history = [];
+              _verifiedWeeks = null;
             });
             unawaited(_load());
           },
@@ -1427,7 +1434,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     return Card(clipBehavior:Clip.antiAlias,child:Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Material(color:Colors.transparent,child:Container(decoration:const BoxDecoration(gradient:LinearGradient(colors:[Color(0xFF2787B9),Color(0xFF123B78)])),child:ListTile(
+        Material(color:Colors.transparent,child:Container(decoration:const BoxDecoration(gradient:payrollSectionHeaderGradient),child:ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal:12),
           leading: const Icon(Icons.handshake_outlined,
             color: Colors.white,),
@@ -1762,31 +1769,38 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     if(saved==true && mounted)await _load();
   }
 
-  Widget _tasksTab() => Builder(
-    builder: (context) => EmployeeWorkReview(
-      key: PageStorageKey('${widget.employeeId}-WorkScroll'),
-      week:_week,rows:_work,jobs: const [],
-      employeeName: _employeeLabel(widget.employeeId),
-    paidMinutesThisWeek: _history.where((row) => row['reversed_at'] == null &&
-        row['week'] == _date(EmployeeWorkReview.monday(_week)))
-      .expand((row) => (row['work'] as List? ?? []).whereType<Map>())
-      .fold<int>(0, (sum, row) => sum + (row['actual_minutes'] as int? ?? 0)),
-    onWeekChanged:(week)=>setState(()=>_week=week),onJob:(id)=>_openRecordedWork(id,invoice:false),
-      onTask: (task) => unawaited(
-        _openTaskDetails({...task, 'line_id': task['task_id']}, false),
-      ),
-      payrollSummary: WorkPayrollSummary(
-        week: EmployeeWorkReview.monday(_week),
+  Widget _tasksTab() {
+    final week = EmployeeWorkReview.monday(_week);
+    final recorded = _verifiedWeeks?[_date(week)];
+    return Builder(
+      builder: (context) => EmployeeWorkReview(
+        key: PageStorageKey('${widget.employeeId}-WorkScroll'),
+        week: week,
         rows: _work,
-        payments: _history.where((row) => row['reversed_at'] == null).toList(),
-        revision: _draftRevision,
-        loadDraft: (week) => _viewRepository.payrollDraftDetails(
-          widget.employeeId!,
-          _date(week),
+        jobs: const [],
+        employeeName: _employeeLabel(widget.employeeId),
+        paidMinutesThisWeek: _verifiedWeeks == null ? null : recorded?.minutes ?? 0,
+        onWeekChanged: (week) => setState(() => _week = week),
+        onJob: (id) => _openRecordedWork(id, invoice: false),
+        onTask: (task) => unawaited(
+          _openTaskDetails({...task, 'line_id': task['task_id']}, false),
         ),
-        onReview: () => DefaultTabController.of(context).animateTo(1),
+        payrollSummary: WorkPayrollSummary(
+          week: week,
+          rows: _work,
+          recorded: recorded,
+          historyLoaded: _verifiedWeeks != null,
+          historyLoading: _loadingLocal,
+          revision: _draftRevision,
+          loadDraft: (week) => _viewRepository.payrollDraftDetails(
+            widget.employeeId!,
+            _date(week),
+          ),
+          onReview: () => DefaultTabController.of(context).animateTo(1),
+        ),
       ),
-    ),);
+    );
+  }
 
   String _employeeLabel(String? employee) {
     final row = _employees.where((row) => row['id'] == employee).firstOrNull;
@@ -2345,6 +2359,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                       _employee = value;
                       _work = [];
                       _history = [];
+                      _verifiedWeeks = null;
                                 });
                     if (_canView) unawaited(_load());
                   },

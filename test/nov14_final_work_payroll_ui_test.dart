@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/app.dart';
+import 'package:briskers_app/services/local_payroll_repository.dart' show VerifiedPayrollWeek;
 import 'package:briskers_app/screens/payroll/approved_tasks_ui.dart';
 import 'package:briskers_app/screens/payroll/approved_task_details.dart';
 import 'package:briskers_app/screens/payroll/employee_work_review.dart';
@@ -86,18 +87,18 @@ void main() {
       Map<String, dynamic>? draft;
       var revision = 0;
       var reviewed = 0;
-      Widget summary(DateTime w, List<Map<String, dynamic>> payments) =>
+      Widget summary(DateTime w, Map<DateTime, VerifiedPayrollWeek> payments) =>
           Scaffold(
             body: WorkPayrollSummary(
               week: w,
               rows: [row()],
-              payments: payments,
+              recorded: payments[w],
               loadDraft: (_) async => draft,
               onReview: () => reviewed++,
               revision: revision,
             ),
           );
-      await t.pumpWidget(app(summary(week, [])));
+      await t.pumpWidget(app(summary(week, {})));
       await t.pumpAndSettle();
       expect(find.text('Not calculated'), findsOneWidget);
       expect(find.text(r'$800.00'), findsNothing);
@@ -107,7 +108,7 @@ void main() {
         'repayment': 0,
       };
       revision++;
-      await t.pumpWidget(app(summary(week, [])));
+      await t.pumpWidget(app(summary(week, {})));
       await t.pumpAndSettle();
       expect(find.text('Draft'), findsOneWidget);
       expect(find.text(r'$320.00'), findsOneWidget);
@@ -117,36 +118,23 @@ void main() {
       revision++;
       await t.pumpWidget(
         app(
-          summary(DateTime(2026, 11, 2), [
-            {
-              'week': '2026-11-02',
-              'net': 32000,
-              'work': [
-                {'actual_minutes': 480},
-              ],
-            },
-          ]),
+          summary(week, {week: (minutes: 1260, netCents: 87000)}),
         ),
       );
       await t.pumpAndSettle();
       expect(find.text('Paid'), findsOneWidget);
-      expect(find.text('Recorded hours: 8.00'), findsOneWidget);
+      expect(find.text('Recorded hours: 21.00'), findsOneWidget);
+      expect(find.text(r'$870.00'), findsOneWidget);
+      expect(find.text('Nov 9 – Nov 13, 2026'), findsOneWidget);
       await t.pumpWidget(
         app(
-          summary(DateTime(2026, 11, 16), [
-            {
-              'week': '2026-11-02',
-              'net': 32000,
-              'work': [
-                {'actual_minutes': 480},
-              ],
-            },
-          ]),
+          summary(DateTime(2026, 11, 16), {week: (minutes: 1260, netCents: 87000)}),
         ),
       );
       await t.pumpAndSettle();
       expect(find.text('Not calculated'), findsOneWidget);
-      expect(find.text(r'$320.00'), findsNothing);
+      expect(find.text(r'$870.00'), findsNothing);
+      expect(find.text('Nov 16 – Nov 20, 2026'), findsOneWidget);
     },
   );
   testWidgets(
@@ -190,7 +178,6 @@ void main() {
                       payrollSummary: WorkPayrollSummary(
                         week: week,
                         rows: rows,
-                        payments: const [],
                         loadDraft: (_) async => null,
                         onReview: () => DefaultTabController.of(context).animateTo(1),
                         revision: 0,
@@ -226,7 +213,7 @@ void main() {
       expect(children,hasLength(4),reason:'Calendar, assigned tasks, labor summary and payroll summary only');
       expect(children.last,isA<WorkPayrollSummary>());
       expect(find.text('Oil Change'),findsNothing,reason:'Completed labor must not be repeated below Work summary');
-      expect(find.text('Assigned Labor This Week · 2 tasks'),findsOneWidget);
+      expect(find.text('Weekly Labor'),findsOneWidget);
       expect(find.text('Total assigned: 21.00 hrs'),findsOneWidget,reason:'Removing duplicate UI retains every allocation in weekly totals');
       expect(find.text('Review & Pay').hitTestable(),findsOneWidget);
       final button=find.widgetWithText(FilledButton,'Review & Pay');
@@ -237,13 +224,13 @@ void main() {
       final fixedBounds=t.getRect(stripe);
       await shot(t, key, 'work-overview');
       await t.tap(find.text('Review & Pay'));await t.pumpAndSettle();
-      expect(t.widget<ColoredBox>(stripe).color,const Color(0xFF176B38));
+      expect(t.widget<ColoredBox>(stripe).color,const Color(0xFF176B40));
       expect(find.text('Oil Change'),findsOneWidget,reason:'Payroll retains individual labor selection');
       expect(find.byType(Checkbox),findsWidgets);
       await t.drag(find.byKey(const Key('employee-payroll-preparation')),const Offset(0,-400));await t.pumpAndSettle();
       expect(t.getRect(stripe),fixedBounds,reason:'Stripe stays pinned while Payroll scrolls');
       await t.tap(find.text('Work'));await t.pumpAndSettle();
-      expect(t.widget<ColoredBox>(stripe).color,const Color(0xFF52647B));
+      expect(t.widget<ColoredBox>(stripe).color,const Color(0xFF2479C6));
       // A smaller viewport must scroll to the same end without moving the tab row.
       t.view.physicalSize=const Size(360,640);await t.pumpAndSettle();
       final smallStripe=t.getRect(stripe);
@@ -252,6 +239,13 @@ void main() {
       expect(t.getRect(stripe),smallStripe);
       expect(find.text('Oil Change'),findsNothing);
       expect(rows,hasLength(2));expect(rows.last['remaining_minutes'],60);
+      expect(t.takeException(), isNull);
+      t.view.physicalSize = const Size(844, 390);
+      await t.pumpAndSettle();
+      await t.ensureVisible(find.text('Weekly Labor'));
+      await t.pumpAndSettle();
+      expect(find.text('Weekly Labor').hitTestable(), findsOneWidget);
+      expect(t.widget<Text>(find.text('Weekly Labor')).maxLines, 1);
       expect(t.takeException(), isNull);
       // Capture Payroll from a fresh route to avoid cached headless header layers.
       await t.pumpWidget(const SizedBox.shrink());await t.pumpAndSettle();

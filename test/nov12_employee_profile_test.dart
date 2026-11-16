@@ -84,7 +84,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Assigned Labor This Week · 5 tasks'), findsOneWidget);
+      expect(find.text('Weekly Labor'), findsOneWidget);
       expect(find.text('Total assigned: 11.00 hrs'), findsOneWidget);
       expect(find.text('Completed\n8.50 hrs'), findsOneWidget);
       expect(find.text('In Progress\n1.00 hrs'), findsOneWidget);
@@ -93,7 +93,7 @@ void main() {
       await capture(tester, key, 'nov12-work-review');
       await tester.tap(find.byTooltip('Previous work week'));
       await tester.pumpAndSettle();
-      expect(find.text('Assigned Labor This Week · 0 tasks'), findsOneWidget);
+      expect(find.text('Weekly Labor'), findsOneWidget);
       expect(find.text('Currently Assigned Tasks (2)'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },

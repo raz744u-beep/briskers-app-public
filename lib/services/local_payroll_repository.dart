@@ -21,6 +21,8 @@ import 'verified_paid_labor.dart';
 import 'secure_employee_details_cache.dart';
 import 'local_owner_authorization.dart';
 
+typedef VerifiedPayrollWeek = ({int minutes, int netCents});
+
 /// Business-scoped local payroll ledger. Payment recording never sends money
 /// or connects to the general financial sync queue.
 class LocalPayrollRepository {
@@ -2226,6 +2228,30 @@ class LocalPayrollRepository {
       'ORDER BY p.verified_date DESC,p.operation_id DESC',
       [business, employee],
     );
+  }
+
+  /// Read-only reporting by the payroll week saved on the disbursement.
+  /// Coverage minutes are authoritative even for older snapshots missing
+  /// display fields. Sum each settlement once, including weekend payouts.
+  Future<Map<String, VerifiedPayrollWeek>> verifiedPayrollWeeks(String employee) async {
+    _authorize();
+    await prepare();
+    final rows = await _read(
+      'SELECT p.week, SUM(p.net) AS net_cents, '
+      'SUM(COALESCE((SELECT SUM(c.minutes) FROM regular_payroll_work_coverage c '
+      'WHERE c.business_id=p.business_id AND c.operation_id=p.operation_id),0)) AS minutes '
+      'FROM regular_payroll_payments p '
+      'WHERE p.business_id=? AND p.employee_id=? AND NOT EXISTS ('
+      'SELECT 1 FROM regular_payroll_reversals_v1 r '
+      'WHERE r.business_id=p.business_id AND r.operation_id=p.operation_id) '
+      'GROUP BY p.week',
+      [business, employee],
+    );
+    _authorize();
+    return {
+      for (final row in rows)
+        row['week'] as String: (minutes: row['minutes'] as int, netCents: row['net_cents'] as int),
+    };
   }
 
   /// Read the settlement and its frozen allocations together. Grouping by

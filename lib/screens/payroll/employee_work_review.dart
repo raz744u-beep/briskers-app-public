@@ -29,6 +29,12 @@ class EmployeeWorkReview extends StatelessWidget {
   final int? paidMinutesThisWeek;
   static DateTime monday(DateTime d) =>
       DateTime(d.year, d.month, d.day).subtract(Duration(days: d.weekday - 1));
+  static String weekLabel(DateTime week) {
+    final start = monday(week);
+    final friday = start.add(const Duration(days: 4));
+    return '${DateFormat('MMM d').format(start)} – ${DateFormat('MMM d, yyyy').format(friday)}';
+  }
+
   static DateTime? date(Map<String, dynamic> r) {
     for (final key in [
       'work_start_date',
@@ -80,7 +86,7 @@ class EmployeeWorkReview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final start = monday(week), end = start.add(const Duration(days: 5));
+    final start = monday(week);
     final visible = rows.where((row) => fallsInWeek(row, week)).toList();
     final inProgressPaid = visible.where((row) => row['state'] == 'In Progress')
         .fold<int>(0, (sum, row) => sum + (row['paid_minutes'] as int? ?? 0));
@@ -144,7 +150,7 @@ class EmployeeWorkReview extends StatelessWidget {
                           const SizedBox(width: 8),
                           Flexible(
                             child: Text(
-                              '${DateFormat('MMM d').format(start)} – ${DateFormat('MMM d, yyyy').format(end.subtract(const Duration(days: 1)))}',
+                              weekLabel(week),
                               textAlign: TextAlign.center,
                               style: const TextStyle(
                                 fontWeight: FontWeight.w800,
@@ -261,25 +267,34 @@ class EmployeeWorkReview extends StatelessWidget {
                     children: [
                       const Icon(Icons.assignment_outlined, color: taskGreen),
                       const SizedBox(width: 7),
-                      Expanded(
-                        child: Text(
-                          'Assigned Labor This Week · ${visible.length} tasks',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 16,
+                      const Expanded(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text('Weekly Labor', maxLines: 1,
+                              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
                           ),
                         ),
                       ),
-                      Text(
-                        'Total assigned: ${hrs(visible.fold<int>(0, (n, row) => n + (row['estimated_minutes'] as int? ?? 0)))} hrs',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF075C18),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              'Total assigned: ${hrs(visible.fold<int>(0, (n, row) => n + (row['estimated_minutes'] as int? ?? 0)))} hrs',
+                              maxLines: 1,
+                              style: const TextStyle(fontSize: 12,
+                                fontWeight: FontWeight.w800, color: Color(0xFF075C18)),
+                            ),
+                          ),
                         ),
                       ),
                     ],
                   ),
+                  Text(weekLabel(week), style: Theme.of(context).textTheme.bodySmall),
                   const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.symmetric(vertical: 9),
@@ -328,7 +343,7 @@ class EmployeeWorkReview extends StatelessWidget {
                                         ),
                                       ),
                                       if (state == 'In Progress' && inProgressPaid > 0)
-                                        Text('(includes ${hrs(inProgressPaid)} hrs paid)',
+                                        Text('(includes ${hrs(inProgressPaid)} hrs paid on these tasks)',
                                           style: const TextStyle(fontSize: 11)),
                                     ],
                                   ),

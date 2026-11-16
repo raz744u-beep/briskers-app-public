@@ -1,3 +1,4 @@
+import '../../services/local_payroll_repository.dart' show VerifiedPayrollWeek;
 import 'employee_work_review.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -262,13 +263,17 @@ class WorkPayrollSummary extends StatefulWidget {
     super.key,
     required this.week,
     required this.rows,
-    required this.payments,
+    this.recorded,
+    this.historyLoaded = true,
+    this.historyLoading = false,
     required this.loadDraft,
     required this.onReview,
     required this.revision,
   });
   final DateTime week;
-  final List<Map<String, dynamic>> rows, payments;
+  final List<Map<String, dynamic>> rows;
+  final VerifiedPayrollWeek? recorded;
+  final bool historyLoaded, historyLoading;
   final Future<Map<String, dynamic>?> Function(DateTime) loadDraft;
   final VoidCallback onReview;
   final int revision;
@@ -304,20 +309,17 @@ class _WorkPayrollSummaryState extends State<WorkPayrollSummary> {
 
   @override
   Widget build(BuildContext context) {
-    final week = DateFormat('yyyy-MM-dd').format(widget.week);
-    final payments = widget.payments.where((p) => p['week'] == week).toList();
-    String state = 'Not calculated';
+    final recorded = widget.recorded;
+    String state = widget.historyLoaded
+        ? 'Not calculated'
+        : widget.historyLoading ? 'Loading history' : 'History unavailable';
     double? hours;
     int? amount;
-    if (payments.isNotEmpty) {
+    if (recorded != null) {
       state = 'Paid';
-      hours =
-          payments
-              .expand((p) => (p['work'] as List? ?? []).whereType<Map>())
-              .fold<int>(0, (n, w) => n + (w['actual_minutes'] as int? ?? 0)) /
-          60;
-      amount = payments.fold<int>(0, (n, p) => n + (p['net'] as int? ?? 0));
-    } else if (draft != null) {
+      hours = recorded.minutes / 60;
+      amount = recorded.netCents;
+    } else if (draft != null && widget.historyLoaded) {
       final saved = draft!['hours'] as Map? ?? {};
       final byId = {for (final r in widget.rows) r['id']: r};
       final valid = saved.entries.every((e) {
@@ -379,9 +381,15 @@ class _WorkPayrollSummaryState extends State<WorkPayrollSummary> {
                 ),
               ],
             ),
+            Text(EmployeeWorkReview.weekLabel(widget.week),
+              style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 10),
             if (hours == null)
-              const Text('No saved payroll calculation for this week.')
+              Text(widget.historyLoaded
+                ? 'No verified payments or saved calculation for this week.'
+                : widget.historyLoading
+                  ? 'Checking saved payroll for the selected week.'
+                  : 'Saved payroll history could not be loaded.')
             else
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,

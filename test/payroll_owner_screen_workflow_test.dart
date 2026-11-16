@@ -105,10 +105,26 @@ void main() {
         // Owner bookkeeping must not require the employee to own a paired phone.
         await tester.tap(find.text('Payroll'));
         await tester.pumpAndSettle();
+        LinearGradient headerGradient(String title) => tester
+            .widgetList<Container>(find.ancestor(of: find.text(title),
+              matching: find.byType(Container)))
+            .map((container) => container.decoration)
+            .whereType<BoxDecoration>()
+            .map((decoration) => decoration.gradient)
+            .whereType<LinearGradient>()
+            .first;
+        await tester.scrollUntilVisible(find.text('Weekly Payment Summary'), 160,
+          scrollable: find.byType(Scrollable).last);
+        await tester.pumpAndSettle();
+        final weeklyGradient = headerGradient('Weekly Payment Summary');
+        expect(weeklyGradient.colors, const [
+          Color(0xFF31A9D9), Color(0xFF2075BC), Color(0xFF174B92),
+        ]);
         await tester.scrollUntilVisible(find.text('Advances & Repayments'), 220,
           scrollable: find.byType(Scrollable).last);
         await tester.ensureVisible(find.text('Advances & Repayments'));
         await tester.pumpAndSettle();
+        expect(headerGradient('Advances & Repayments'), weeklyGradient);
         await tester.tap(find.text('Advances & Repayments'));
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.byTooltip('Edit opening balance'));

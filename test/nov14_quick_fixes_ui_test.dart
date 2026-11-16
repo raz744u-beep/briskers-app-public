@@ -57,13 +57,13 @@ void main(){
     size(t);
     final boundary=GlobalKey();
     const labels=['Work','Payroll','Reports','Taxes'];
-    const colors=[Color(0xFF52647B),Color(0xFF176B38),Color(0xFF245993),Color(0xFF725690)];
+    const colors=[Color(0xFF2479C6),Color(0xFF176B40),Color(0xFF6942A2),Color(0xFF697586)];
     await t.pumpWidget(MaterialApp(home:DefaultTabController(length:4,child:Scaffold(body:Column(children:[
       RepaintBoundary(key:boundary,child:const ApprovedProfileTabs()),
       Expanded(child:TabBarView(children:[for(final n in labels)Text('$n body')])),
     ])))));
-    for(final width in [412.0,360.0]){
-      t.view.physicalSize=Size(width,915);await t.pumpAndSettle();
+    for(final (width,height) in [(412.0,915.0),(360.0,915.0),(844.0,390.0)]){
+      t.view.physicalSize=Size(width,height);await t.pumpAndSettle();
       for(final (index,selected) in labels.indexed){
         await t.tap(find.text(selected));await t.pump(const Duration(milliseconds:50));
         // One stripe spans every tab, including during selection transitions.
