@@ -324,12 +324,11 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     }
   }
 
-  Future<void> _loadLocalPreview(int generation) async {
+  Future<void> _loadLocalPreview(
+    int generation, Future<Map<String, dynamic>?> savedDetail,
+  ) async {
     try {
-      final saved = await _localFinancial.loadTransactionDetail(
-        widget.businessId,
-        widget.transactionId,
-      );
+      final saved = await savedDetail;
       if (!_isCurrent(generation) || _hasAuthoritativeDetail || saved == null) {
         return;
       }
@@ -375,8 +374,15 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     });
   }
 
+  bool _hasPendingPayrollChange(Map<String, dynamic>? expense) =>
+      expense?['payroll_amount_pending'] == true ||
+      expense?['sync_state'] == 'reversed' ||
+      (expense?['payroll_operation_id'] != null && expense?['sync_state'] == 'pending');
+
   Future<void> _load({bool hydrateLocal = true}) async {
-    if (widget.cachedDetail?['recurring_engine_owned'] == true ||
+    if (_hasPendingPayrollChange(_detail) ||
+        _hasPendingPayrollChange(widget.cachedDetail) ||
+        widget.cachedDetail?['recurring_engine_owned'] == true ||
         _detail?['recurring_engine_owned'] == true ||
         widget.transactionId.startsWith('local-recurring-')) {
       await _loadOffline();
@@ -392,16 +398,10 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     final api = _api;
     setState(() => _canDeleteRecords = false);
     unawaited(_loadLocalExpenseIqPhoto(generation));
-    if (hydrateLocal) unawaited(_loadLocalPreview(generation));
+    final localPreview = hydrateLocal
+        ? _localFinancial.loadTransactionDetail(businessId, transactionId) : null;
+    if (localPreview != null) unawaited(_loadLocalPreview(generation, localPreview));
     try {
-      final saved = await _localFinancial.loadTransactionDetail(businessId, transactionId);
-      if (!_isCurrent(generation)) return;
-      if (saved?['payroll_amount_pending'] == true ||
-          saved?['sync_state'] == 'reversed' ||
-          (saved?['payroll_operation_id'] != null && saved?['sync_state'] == 'pending')) {
-        await _loadOffline();
-        return;
-      }
       final rawDetail = Map<String, dynamic>.from(
         await _boundedRead(api.transactionDetail(businessId, transactionId)),
       );
@@ -410,6 +410,16 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         return;
       }
       if (_detail?['recurring_engine_owned'] == true) return;
+      if (LocalFinancialCache.requiresOwnerAccountEdit(rawDetail)) {
+        final saved = await (localPreview ??
+            _localFinancial.loadTransactionDetail(businessId, transactionId))
+            .catchError((Object _) => null);
+        if (!_isCurrent(generation) || BriskersConnectionModeController.instance.forceOffline) return;
+        if (_hasPendingPayrollChange(saved)) {
+          await _loadOffline();
+          return;
+        }
+      }
       final detail = _normalizedDetail(rawDetail);
       setState(() {
         _detail = detail;
