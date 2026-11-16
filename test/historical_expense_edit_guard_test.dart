@@ -73,6 +73,48 @@ void main() {
     expect(rows, isEmpty);
   });
 
+  test('account-only offline correction preserves expense and receipt identity', () async {
+    await cache.saveTransactionDetail('shop', 'old-payment', {
+      'id': 'old-payment',
+      'direction': 'expense',
+      'amount': 700,
+      'date': '2026-10-23',
+      'account_id': 'capital-one',
+      'account': 'Capital One',
+      'category_id': 'payroll',
+      'category': 'Payroll',
+      'counterparty': 'Chris',
+      'remarks': 'Historical payroll',
+      'attachments': [{'id': 'receipt-1'}],
+      'payroll_payment_id': 'payroll-123',
+    });
+    final service = OfflineFinancialWriteService(database: db, cache: cache);
+    final updated = await service.updateLocalTransaction(
+      'shop',
+      'old-payment',
+      direction: 'expense',
+      accountId: 'business-checking',
+      accountName: 'Business Checking',
+      categoryId: 'payroll',
+      categoryName: 'Payroll',
+      amount: 700,
+      date: DateTime(2026, 10, 23),
+      counterpartyName: 'Chris',
+      remarks: 'Historical payroll',
+    );
+    expect(updated['id'], 'old-payment');
+    expect(updated['account_id'], 'business-checking');
+    expect(updated['amount'], 700);
+    expect(updated['date'], '2026-10-23');
+    expect(updated['attachments'], hasLength(1));
+    expect(updated['payroll_payment_id'], 'payroll-123');
+    final queued = await db.customSelect(
+      "SELECT entity_type, entity_id FROM sync_outbox WHERE business_id = 'shop' AND entity_id = 'old-payment'",
+    ).get();
+    expect(queued, hasLength(1));
+    expect(queued.single.read<String>('entity_type'), 'financial_update');
+  });
+
   test('mismatched transaction identity cannot be edited', () async {
     await cache.saveTransactionDetail('shop', 'old-payment', {
       'id': 'another-payment',
