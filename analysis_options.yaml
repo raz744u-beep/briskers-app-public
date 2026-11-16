@@ -4,3 +4,9 @@ linter:
   rules:
     avoid_print: true
     prefer_const_constructors: true
+
+# Flutter stable currently emits framework-wide migration notices for
+# material.dart imports. Keep all real analyzer errors enabled.
+analyzer:
+  errors:
+    deprecated_member_use: ignore
