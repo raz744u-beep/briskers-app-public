@@ -330,6 +330,20 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       Map<String, dynamic>? detail;
       if (sourceId != null) {
         detail = await _api.transactionDetail(widget.businessId, sourceId);
+        if (_editing) {
+          final amount = num.tryParse(detail['amount']?.toString() ?? '');
+          final date = detail['date'] ?? detail['transaction_date'];
+          final id = detail['id']?.toString();
+          if ((id != null && id.isNotEmpty && id != sourceId) ||
+              amount == null ||
+              DateTime.tryParse(date?.toString() ?? '') == null ||
+              (detail['account_id']?.toString().isNotEmpty != true) ||
+              (detail['category_id']?.toString().isNotEmpty != true)) {
+            throw StateError(
+              'Original transaction fields are incomplete; edit cancelled.',
+            );
+          }
+        }
         await _localFinancial.saveTransactionDetail(
           widget.businessId,
           sourceId,
