@@ -269,9 +269,15 @@ class OfflineFinancialWriteService {
             ? (direction == 'income' ? 'Income' : 'Expense')
             : counterpartyName!.trim();
 
+    // Never synthesize a replacement expense from an incomplete historical
+    // cache entry. An update must retain the identity and original fields.
     final existing =
-        await _cache.loadTransactionDetail(businessId, transactionId) ??
-            <String, dynamic>{};
+        await _cache.loadTransactionForEdit(businessId, transactionId);
+    if (existing == null) {
+      throw StateError(
+        'Original transaction is unavailable; no expense changes were saved.',
+      );
+    }
 
     final summary = <String, dynamic>{
       'id': transactionId,
