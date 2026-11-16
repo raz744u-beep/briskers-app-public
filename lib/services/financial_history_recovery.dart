@@ -81,11 +81,14 @@ class FinancialHistoryRecovery {
       // preserve previously saved pages and the user's pending outbox.
       batch.addAll(rows);
       if (batch.length >= 1000 || rows.length < pageSize) {
-        await _cache.mergeServerTransactions(businessId, batch);
+        await _cache.mergeServerTransactions(businessId, batch, onlyMissing: true);
         batch.clear();
       }
       onPage(ids.length);
-      if (rows.length < pageSize) return ids.length;
+      if (rows.length < pageSize) {
+        await _cache.savePostedHistoryCoverage(businessId, start, end);
+        return ids.length;
+      }
     }
     throw StateError('History download reached the safety limit. Saved pages remain available.');
   }

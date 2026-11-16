@@ -90,7 +90,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   int _indexProcessed = 0;
   int _indexExpected = 0;
   String _filter = 'all';
-  String _dateRange = '30d';
+  String _dateRange = 'all';
+  ({DateTime? start, DateTime end})? _postedHistoryCoverage;
   DateTime? _customStartDate;
   DateTime? _customEndDate;
   String? _accountFilterId;
@@ -182,18 +183,23 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       _previousServerTransactionProofs = {};
       _transactionRefreshFailed = false;
       _serverConfirmedBusinessId = null;
-    }
-    if (oldWidget.dockResetToken != widget.dockResetToken) {
+      _postedHistoryCoverage = null;
       _searchDebounce?.cancel();
       _filter = 'all';
-      _dateRange = '30d';
+      _dateRange = 'all';
       _customStartDate = null;
       _customEndDate = null;
       _accountFilterId = null;
       _categoryFilterId = null;
       _counterpartyFilterId = null;
       _searchController.clear();
+      _transactions = const [];
+      _invoiceReceipts = const [];
       _visibleCount = _pageSize;
+      unawaited(_load());
+      return;
+    }
+    if (oldWidget.dockResetToken != widget.dockResetToken) {
       unawaited(_load());
       if (_owner && Platform.isAndroid) {
         unawaited(_refreshPhotoCounts());
@@ -258,8 +264,17 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
   bool get _searching => _searchController.text.trim().isNotEmpty;
-  DateTime? get _selectedRangeStart => _searching ? null : _rangeStartDate;
-  DateTime? get _selectedRangeEnd => _searching ? null : _rangeEndDate;
+  DateTime? get _selectedRangeStart => _rangeStartDate;
+  DateTime? get _selectedRangeEnd => _rangeEndDate;
+
+  bool get _postedRangeVerified {
+    final scope = _postedHistoryCoverage;
+    if (scope == null) return false;
+    final from = _selectedRangeStart;
+    return (scope.start == null || (from != null && !from.isBefore(scope.start!))) &&
+        !(_selectedRangeEnd ?? _dateOnly(DateTime.now())).isAfter(scope.end);
+  }
+
 
   DateTime? get _rangeStartDate {
     final today = _dateOnly(DateTime.now());
@@ -392,43 +407,6 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
   }
 
-  Future<void> _prefetchReceiptDetails(
-    List<Map<String, dynamic>> snapshot,
-  ) async {
-    // A large imported history may have thousands of receipts. Do not start
-    // hundreds of photo downloads every time the user opens Expenses.
-    // Download a small number of missing detail *metadata* in foreground;
-    // charging/Wi-Fi WorkManager separately mirrors their photo files.
-    final rows = snapshot.where((row) {
-      final count = int.tryParse(row['receipt_count']?.toString() ?? '') ?? 0;
-      return count > 0 &&
-          (row['id']?.toString() ?? '').isNotEmpty &&
-          !row['id'].toString().startsWith('local-') &&
-          row['sync_state'] != 'pending' &&
-          row['sync_state'] != 'conflict';
-    }).take(8).toList();
-
-    for (final row in rows) {
-      final id = row['id'].toString();
-      try {
-        if (await _localFinancial.loadTransactionDetail(
-            widget.businessId, id) != null) {
-          continue;
-        }
-        final detail = await _api.transactionDetail(widget.businessId, id);
-        if (detail['id']?.toString() != id) continue;
-        // Recheck before writing so a locally edited expense detail cannot be
-        // replaced by the outcome of an older in-flight download.
-        if (await _localFinancial.loadTransactionDetail(
-            widget.businessId, id) == null) {
-          await _localFinancial.saveTransactionDetail(
-              widget.businessId, id, detail);
-        }
-      } catch (_) {
-        // Saved transactions stay usable if metadata prefetch fails.
-      }
-    }
-  }
 
   Future<void> _load({
     bool showLoading = true,
@@ -479,8 +457,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       final proofs = await _localFinancial.loadServerConfirmedTransactions(
         businessId,
       );
+      final coverage = await _localFinancial.postedHistoryCoverage(businessId);
       if (_isCurrentLoad(epoch, businessId)) {
-        setState(() => _previousServerTransactionProofs = proofs);
+        setState(() {
+          _previousServerTransactionProofs = proofs;
+          _postedHistoryCoverage = coverage;
+        });
       }
     } catch (_) {
       // A missing/corrupt verification cache must not block the list.
@@ -532,6 +514,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           accountId: _accountFilterId,
           categoryId: _categoryFilterId,
           counterpartyId: _counterpartyFilterId,
+          includeCachedDetails: true,
         );
         // The first offline frame displays at most 50 transactions.
         // Enrich only those rows. Enriching the entire ~1,000-row snapshot
@@ -634,14 +617,13 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       });
       unawaited(_enrichVisiblePage(epoch, businessId, rows));
       // Only the successful authenticated server response can add durable
-      // proof. Saving this first page makes a later app restart stable even
-      // if the optional 1,000-row history download does not finish.
+      // proof. A viewing request does not import the remote history.
       unawaited(_localFinancial.saveServerConfirmedTransactions(
         businessId, rows,
       ).catchError((Object _) {}));
       // Options and the complete offline cache are not prerequisites for
       // showing a transaction or an invoice payment in Expenses & Income.
-      unawaited(_hydrateFinancialHistory(epoch, businessId, rows));
+      unawaited(_loadFinancialOptions(epoch, businessId));
     } catch (error) {
       if (!_isCurrentLoad(epoch, businessId)) return;
       final forceOffline =
@@ -873,54 +855,28 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
   }
 
-  Future<void> _hydrateFinancialHistory(
-    int epoch,
-    String businessId,
-    List<Map<String, dynamic>> firstPage,
+  Future<void> _loadFinancialOptions(
+    int epoch, String businessId,
   ) async {
     try {
-      final results = await Future.wait<dynamic>([
-        _api.transactionOptions(businessId),
-        _api.transactions(businessId, limit: 1000),
-      ]);
+      final options = await _api.transactionOptions(businessId);
       if (!_isCurrentLoad(epoch, businessId) ||
           BriskersConnectionModeController.instance.forceOffline) {
         return;
       }
-      final options = Map<String, dynamic>.from(results[0] as Map);
-      final verified = {for (final row in firstPage)
-        row['id']?.toString(): row};
-      final snapshot = List<Map<String, dynamic>>.from(results[1] as List)
-          .map((row) => verified[row['id']?.toString()] ?? row)
-          .toList();
       setState(() {
-        _serverConfirmedTransactionIds.addAll(
-          snapshot.map((row) => row['id']?.toString() ?? '')
-              .where((id) => id.isNotEmpty),
-        );
-        _quickTemplates = List<dynamic>.from(
-          options['quick_templates'] ?? const [],
-        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-        _accounts = List<dynamic>.from(options['accounts'] ?? const [])
-            .map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-        _categories = List<dynamic>.from(options['categories'] ?? const [])
-            .map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-        _counterparties = List<dynamic>.from(
-          options['counterparties'] ?? const [],
-        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+        _quickTemplates = (options['quick_templates'] as List? ?? const [])
+            .whereType<Map>().map(Map<String, dynamic>.from).toList();
+        _accounts = (options['accounts'] as List? ?? const [])
+            .whereType<Map>().map(Map<String, dynamic>.from).toList();
+        _categories = (options['categories'] as List? ?? const [])
+            .whereType<Map>().map(Map<String, dynamic>.from).toList();
+        _counterparties = (options['counterparties'] as List? ?? const [])
+            .whereType<Map>().map(Map<String, dynamic>.from).toList();
       });
-      // The offline cache remains durable, but does not block first paint.
-      await _localFinancial.mergeServerTransactions(businessId, snapshot);
-      await _localFinancial.saveServerConfirmedTransactions(
-        businessId, snapshot,
-      );
-      if (!_isCurrentLoad(epoch, businessId)) return;
       await _localFinancial.saveOptions(businessId, options);
-      if (_isCurrentLoad(epoch, businessId)) {
-        unawaited(_prefetchReceiptDetails(snapshot));
-      }
     } catch (_) {
-      // Keep already visible authoritative rows, receipts and cached options.
+      // Keep the locally available options and already visible records.
     }
   }
 
@@ -928,11 +884,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     if (_recoveringCachedReceipts) return;
     _recoveringCachedReceipts = true;
     try {
-      final rows =
-          await _invoiceFeed.pendingFromCachedInvoices(widget.businessId);
-      if (!mounted || rows.isEmpty) return;
+      final businessId = widget.businessId;
+      final rows = await _invoiceFeed.pendingFromCachedInvoices(businessId);
+      if (!mounted || widget.businessId != businessId || rows.isEmpty) return;
       setState(() => _invoiceReceipts = InvoicePaymentFeed.mergeReceipts(
-        rows, _invoiceReceipts,
+        _invoiceReceipts, rows,
       ));
     } catch (_) {
       // Preserve the local outbox and posted financial snapshot unchanged.
@@ -946,46 +902,16 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     // arriving from the server. Receipt refresh has its own lifecycle.
     final epoch = ++_receiptEpoch;
     try {
-      const pageSize = 250;
-      final rows = <Map<String, dynamic>>[];
-      var exhausted = false;
-      // Never replace the saved receipt inventory with a truncated response.
-      for (var offset = 0; offset < 20000; offset += pageSize) {
-        if (!_isCurrentReceipt(epoch, businessId) ||
-            BriskersConnectionModeController.instance.forceOffline) {
-          return;
-        }
-        final page = await _api.invoiceReceipts(
-          businessId, limit: pageSize, offset: offset,
-        );
-        if (!_isCurrentReceipt(epoch, businessId)) return;
-        rows.addAll(page);
-        if (offset == 0) {
-          // Show the latest server payments after the first short page;
-          // continue filling the historical offline snapshot in background.
-          setState(() {
-            _invoiceReceipts = InvoicePaymentFeed.reconcileOnlineFirstPage(
-              page, _invoiceReceipts,
-            );
-            if (_invoiceReceipts.isNotEmpty) _loading = false;
-          });
-        }
-        if (page.length < pageSize) {
-          exhausted = true;
-          break;
-        }
-      }
-      if (!exhausted ||
-          !_isCurrentReceipt(epoch, businessId) ||
+      if (BriskersConnectionModeController.instance.forceOffline) return;
+      final page = await _api.invoiceReceipts(businessId, limit: _pageSize, offset: 0);
+      if (!_isCurrentReceipt(epoch, businessId) ||
           BriskersConnectionModeController.instance.forceOffline) {
         return;
       }
-      await _invoiceFeed.saveServerReceipts(businessId, rows);
-      if (!_isCurrentReceipt(epoch, businessId)) return;
-      final merged = await _invoiceFeed.load(businessId);
-      if (_isCurrentReceipt(epoch, businessId)) {
-        setState(() => _invoiceReceipts = merged);
-      }
+      setState(() {
+        _invoiceReceipts = InvoicePaymentFeed.reconcileOnlineFirstPage(page, _invoiceReceipts);
+        if (_invoiceReceipts.isNotEmpty) _loading = false;
+      });
     } catch (_) {
       // Keep locally recorded payments visible on old/unavailable backends.
     }
@@ -1068,6 +994,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           accountId: _accountFilterId,
           categoryId: _categoryFilterId,
           counterpartyId: _counterpartyFilterId,
+          includeCachedDetails: true,
         );
         if (!_isCurrentLoad(epoch, businessId) || !_showingLocal) return;
         final next = cached.skip(offset).take(_pageSize)
@@ -1211,9 +1138,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final selected = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: ListView(
+          shrinkWrap: true,
           children: [
             const ListTile(
               title: Text(
@@ -1222,6 +1150,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
               ),
             ),
             for (final option in const [
+              ('all', 'All Time'),
               ('30d', 'Last 30 days'),
               ('60d', 'Last 60 days'),
               ('90d', 'Last 90 days'),
@@ -1232,7 +1161,6 @@ class _ExpensesScreenState extends State<ExpensesScreen>
               ('ytd', 'Year to Date'),
               ('1y', 'Last 1 year'),
               ('custom', 'Custom date range'),
-              ('all', 'All Time'),
             ])
               ListTile(
                 title: Text(option.$2),
@@ -2141,10 +2069,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       padding: const EdgeInsets.only(top: 5, left: 4),
                       child: Text(
                         _showFinancialSummary
-                          ? 'Search subtotal across saved results · ${allVisible.length} matches · '
+                          ? 'Displayed search subtotal · ${allVisible.length} loaded matches · '
                             '${_money(allVisible.fold<num>(0, (total, row) => total + ((num.tryParse(row['amount']?.toString() ?? '') ?? 0) *
                                 (row['direction'] == 'expense' ? -1 : 1))))} net'
-                          : 'Search checks all saved local transactions.',
+                          : 'Search checks saved transactions in the selected date range.',
                         style: const TextStyle(fontSize: 12, color: Color(0xFF667085)),
                       ),
                     ),
@@ -2408,7 +2336,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                        child: Padding(
                          padding: const EdgeInsets.all(20),
                          child: Text(_showingLocal
-                             ? 'No saved transactions match this view. Older records may not have been downloaded to this device.'
+                             ? (_postedRangeVerified
+                                 ? 'No matches. Posted history was checked for this date range.'
+                                 : 'No matches in saved records. This device cannot confirm whether older records exist elsewhere.')
                              : 'No transactions in this view.'),
                        ),
                      )
@@ -2731,7 +2661,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                        child: Center(
                          child: Text(
                            _showingLocal
-                               ? 'End of saved transactions on this device. Older records may not be downloaded.'
+                               ? (_postedRangeVerified
+                                   ? 'End of verified posted history for this date range.'
+                                   : 'End of saved records. Older history has not been verified on this device.')
                                : 'No more transactions',
                            textAlign: TextAlign.center,
                            style: const TextStyle(color: Color(0xFF667085)),

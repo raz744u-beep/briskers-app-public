@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
+import 'local_transaction_search.dart';
 
 class LocalFinancialCache {
   LocalFinancialCache({BriskersLocalDatabase? database})
@@ -241,10 +242,16 @@ class LocalFinancialCache {
   /// transactions/edits that are still queued for synchronization. Both the
   /// overlay read and persisted result share a single SQLite transaction.
   Future<void> mergeServerTransactions(
-    String businessId, List<Map<String, dynamic>> serverRows,
+    String businessId, List<Map<String, dynamic>> serverRows, {bool onlyMissing = false,}
   ) async {
     await _database.transaction(() async {
       final saved = await loadTransactions(businessId);
+      final savedIds = {
+        for (final row in saved) row['id'],
+        if (onlyMissing)
+          for (final row in await loadTransactions(businessId, includeCachedDetails: true))
+            row['id'],
+      };
       final copyNumbers = <String, Object>{
         for (final row in saved)
           if (row['copy_number'] case final int number) row['id'].toString(): number,
@@ -282,7 +289,8 @@ class LocalFinancialCache {
         ...await locallyVoidedExpenseIds(businessId),
       };
       final overlay = overlayPending(
-        serverRows.where((row) => !reversed.contains(row['id'])).map(preserveLocalMetadata).toList(),
+        serverRows.where((row) => !reversed.contains(row['id']) &&
+            (!onlyMissing || !savedIds.contains(row['id']))).map(preserveLocalMetadata).toList(),
         saved.where((row) => !reversed.contains(row['id'])).toList(),
       );
       // A server page is a partial inventory, not proof that previously
@@ -412,24 +420,57 @@ class LocalFinancialCache {
     String? accountId,
     String? categoryId,
     String? counterpartyId,
+    bool includeCachedDetails = false,
   }) async {
     final raw = await _load(businessId, _transactionsKey);
-    if (raw == null || raw.isEmpty) return const [];
-
-    List<Map<String, dynamic>> rows;
+    var rows = <Map<String, dynamic>>[];
     try {
-      rows = List<dynamic>.from(jsonDecode(raw) as List)
-          .whereType<Map>()
-          .map((row) => Map<String, dynamic>.from(row))
-          .toList();
+      if (raw != null && raw.isNotEmpty) {
+        rows = (jsonDecode(raw) as List).whereType<Map>()
+            .map(Map<String, dynamic>.from).toList();
+      }
     } catch (_) {
-      return const [];
+      // Valid individual details can still be browsed.
+    }
+    if (includeCachedDetails) {
+      final byId = {for (final row in rows) row['id']?.toString(): row};
+      final details = await _database.customSelect(
+        "SELECT cache_key,payload_json FROM local_financial_cache "
+        "WHERE business_id=? AND cache_key GLOB 'transaction_detail_*'",
+        variables: [Variable(businessId)],
+      ).get();
+      for (final saved in details) {
+        final id = saved.read<String>('cache_key').substring('transaction_detail_'.length);
+        try {
+          final detail = Map<String, dynamic>.from(
+            jsonDecode(saved.read<String>('payload_json')) as Map,
+          );
+          if (!matchesTransaction(detail, businessId, id)) continue;
+          if (const ['void','voided','deleted'].contains(detail['status']) ||
+              detail['sync_state'] == 'reversed') {
+            continue;
+          }
+          final summary = byId[id];
+          byId[id] = {...detail, ...?summary, 'id': id,
+            'transaction_date': summary?['transaction_date'] ?? detail['transaction_date'] ?? detail['date'],
+          };
+        } catch (_) {
+          // A corrupt cache item is left intact for later recovery.
+        }
+      }
+      rows = byId.values.toList()..sort((a,b) {
+        final date = (b['transaction_date']?.toString() ?? '')
+            .compareTo(a['transaction_date']?.toString() ?? '');
+        return date != 0 ? date : (a['id']?.toString() ?? '').compareTo(b['id']?.toString() ?? '');
+      });
     }
 
     final voided = await locallyVoidedExpenseIds(businessId);
-    final needle = search?.trim().toLowerCase() ?? '';
     bool matches(Map<String, dynamic> row) {
-      if (voided.contains(row['id'])) return false;
+      if (voided.contains(row['id']) || const ['void','voided','deleted'].contains(row['status']) ||
+          row['sync_state'] == 'reversed') {
+        return false;
+      }
       if (direction != null &&
           row['direction']?.toString() != direction) {
         return false;
@@ -450,32 +491,47 @@ class LocalFinancialCache {
       final date = DateTime.tryParse(
         row['transaction_date']?.toString() ?? '',
       );
+      if (date == null && (startDate != null || endDate != null)) return false;
       if (date != null) {
         final day = DateTime(date.year, date.month, date.day);
         if (startDate != null && day.isBefore(startDate)) return false;
         if (endDate != null && day.isAfter(endDate)) return false;
       }
 
-      if (needle.isNotEmpty) {
-        final haystack = <Object?>[
-          row['counterparty'],
-          row['category'],
-          row['account'],
-          row['remarks'],
-          row['job_number'],
-          row['job_title'],
-          row['job_customer_name'],
-          row['document_number'],
-          row['amount'],
-          row['transaction_date'],
-        ].whereType<Object>().map((v) => v.toString().toLowerCase()).join(' ');
-        if (!haystack.contains(needle)) return false;
-      }
-
-      return true;
+      return LocalTransactionSearch.matches(row, search);
     }
 
     return rows.where(matches).toList();
+  }
+
+  static const _historyCoverageKey = 'posted_history_coverage_v1';
+
+  Future<void> savePostedHistoryCoverage(
+    String business, DateTime? start, DateTime end,
+  ) async {
+    String day(DateTime value) => value.toIso8601String().split('T').first;
+    final existing = await postedHistoryCoverage(business);
+    if (existing != null &&
+        (existing.start == null || (start != null && !existing.start!.isAfter(start))) &&
+        !existing.end.isBefore(end)) {
+      return;
+    }
+    await _save(business, _historyCoverageKey, jsonEncode({
+      'start': start == null ? null : day(start), 'end': day(end),
+    }));
+  }
+
+  Future<({DateTime? start, DateTime end})?> postedHistoryCoverage(String business) async {
+    final raw = await _load(business, _historyCoverageKey);
+    if (raw == null) return null;
+    try {
+      final map = jsonDecode(raw) as Map;
+      final end = DateTime.parse(map['end'] as String);
+      final start = map['start'] == null ? null : DateTime.parse(map['start'] as String);
+      return (start: start, end: end);
+    } catch (_) {
+      return null;
+    }
   }
 
   static const _linkedExpensesKey = 'linked_expenses_complete_v1';

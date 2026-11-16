@@ -367,6 +367,9 @@ void main() {
     expect(dockStart, greaterThan(0));
     expect(didUpdate.substring(dockStart),
         isNot(contains('_serverConfirmedTransactionIds.clear()')));
+    expect(didUpdate.substring(dockStart), isNot(contains('_searchController.clear()')));
+    expect(didUpdate.substring(dockStart), isNot(contains('_dateRange =')));
+
   });
 
   testWidgets('Customers opens instantly from Invoices without remount', (

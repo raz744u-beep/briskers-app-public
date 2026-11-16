@@ -5,17 +5,17 @@ void main() {
   test('Payment receipts are requested before slow financial history hydration', () {
     final source = File('lib/screens/expenses_screen.dart').readAsStringSync();
     final methodStart = source.indexOf('Future<void> _load({');
-    final methodEnd = source.indexOf('Future<void> _hydrateFinancialHistory(', methodStart);
+    final methodEnd = source.indexOf('Future<void> _loadFinancialOptions(', methodStart);
     expect(methodStart, greaterThanOrEqualTo(0));
     expect(methodEnd, greaterThan(methodStart));
     final load = source.substring(methodStart, methodEnd);
     expect(load, contains('unawaited(_refreshInvoiceReceipts(businessId))'));
     expect(load, contains('offset: 0, fastFirstPaint: true'));
-    expect(load, contains('unawaited(_hydrateFinancialHistory(epoch, businessId, rows));'));
+    expect(load, contains('unawaited(_loadFinancialOptions(epoch, businessId));'));
     expect(load.indexOf('unawaited(_refreshInvoiceReceipts(businessId))'),
         lessThan(load.indexOf('offset: 0, fastFirstPaint: true')));
     expect(load.indexOf('setState(() {\n        _transactions = rows;'),
-        lessThan(load.indexOf('unawaited(_hydrateFinancialHistory(')));
+        lessThan(load.indexOf('unawaited(_loadFinancialOptions(')));
     expect(load, isNot(contains('await _api.transactions(businessId, limit: 1000)')));
     expect(load, contains('_loading = _transactions.isEmpty && _invoiceReceipts.isEmpty'));
     expect(load, contains('InvoicePaymentFeed.mergeReceipts(_invoiceReceipts, receipts)'));
@@ -35,7 +35,7 @@ void main() {
     expect(refresh, contains('if (_invoiceReceipts.isNotEmpty) _loading = false'));
     // No synthetic paid receipt or income transaction may be invented.
     expect(refresh, contains('InvoicePaymentFeed.reconcileOnlineFirstPage('));
-    expect(refresh, contains('await _invoiceFeed.saveServerReceipts(businessId, rows)'));
+    expect(refresh, isNot(contains('saveServerReceipts')));
   });
 
   test('Invoice expense amounts visually match main transaction amounts', () {
