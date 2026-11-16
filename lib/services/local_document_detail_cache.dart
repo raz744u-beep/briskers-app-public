@@ -180,7 +180,7 @@ class LocalDocumentDetailCache {
   /// Read a saved invoice snapshot without reconciling or creating derived
   /// Tasks/Payroll sources. Used by historical and already-paid reviews.
   /// Retired/recovered identity fences still apply.
-  Future<Map<String,dynamic>?> loadReadOnly(String businessId,String documentId, {bool includeLegacyPreferences=true}) {
+  Future<Map<String,dynamic>?> loadReadOnly(String businessId,String documentId, {bool includeLegacyPreferences=true, bool projectLifecycle=true}) {
     final key=_key(businessId,documentId);
     return _database.transaction(() => _serialized(key,() async {
       if(await _blocked(businessId,documentId))return null;
@@ -191,7 +191,10 @@ class LocalDocumentDetailCache {
         final rows=await _database.customSelect('SELECT payload_json FROM local_document_details WHERE cache_key=?',variables:[Variable(key)]).get();
         final detail=rows.isEmpty ? null : _decode(rows.single.readNullable<String>('payload_json'));
         if(detail==null || await _blocked(businessId,documentId,detail)) return null;
-        return LocalInvoiceClosureStore(_database).project(businessId, await _projectRetiredConversion(businessId,detail));
+        final projected = await _projectRetiredConversion(businessId,detail);
+        return projectLifecycle
+            ? LocalInvoiceClosureStore(_database).project(businessId, projected)
+            : projected;
       }
       final prefs=await SharedPreferences.getInstance();
       final detail=durable==null
@@ -200,7 +203,10 @@ class LocalDocumentDetailCache {
               : prefs.getString(key))
           : _decode(durable.readNullable<String>('payload_json'));
       if(detail==null || await _blocked(businessId,documentId,detail))return null;
-      return LocalInvoiceClosureStore(_database).project(businessId, await _projectRetiredConversion(businessId,detail));
+      final projected = await _projectRetiredConversion(businessId,detail);
+      return projectLifecycle
+          ? LocalInvoiceClosureStore(_database).project(businessId, projected)
+          : projected;
     }));
   }
 

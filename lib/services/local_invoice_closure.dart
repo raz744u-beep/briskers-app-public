@@ -219,16 +219,21 @@ class LocalInvoiceClosure {
     final store = LocalInvoiceClosureStore(db);
     await store.prepare();
     await db.transaction(() async {
-      final saved = await LocalDocumentDetailCache(database: db).loadReadOnly(business, id);
-      if (saved == null || saved['id'] != id || saved['kind'] != 'invoice' ||
+      final raw = await LocalDocumentDetailCache(database: db)
+          .loadReadOnly(business, id, projectLifecycle: false);
+      final saved = raw == null ? null : await store.project(business, raw);
+      if (raw == null || saved == null || saved['id'] != id || saved['kind'] != 'invoice' ||
           const {'void', 'voided', 'cancelled', 'canceled'}.contains(saved['status']) ||
           !DocumentPresentation(saved).isClosed && saved['legacy_read_only'] != true) {
         throw StateError('The saved invoice is unavailable or already reopened.');
       }
+      final remoteNeedsReopen = DocumentPresentation(raw).isClosed ||
+          raw['legacy_read_only'] == true;
       final now = DateTime.now().toUtc().toIso8601String();
       final version = int.tryParse(saved['row_version']?.toString() ?? '');
       final operation = OfflineInvoiceFinalization.operationId();
-      final state = version == null ? 'reopen_review' : 'reopen_pending';
+      final state = !remoteNeedsReopen ? 'reopen_local'
+          : version == null || id.startsWith('local-') ? 'reopen_review' : 'reopen_pending';
       await db.customStatement(
         'INSERT INTO local_invoice_reopen_audit '
         '(operation_id,business_id,invoice_id,reason,reopened_at,expected_version,sync_state) '
@@ -242,14 +247,93 @@ class LocalInvoiceClosure {
         'operation_id=excluded.operation_id,sync_state=excluded.sync_state,reopened_at=excluded.reopened_at',
         [business, id, saved['closed_at']?.toString() ?? now, operation, '{}', state, now],
       );
+      await _clearClosedIndex(business, id);
     });
+  }
+
+  Future<void> _clearClosedIndex(String business, String id) async {
+    await db.customStatement(
+      "UPDATE local_documents SET status='issued',display_status_code=NULL,closed_at=NULL "
+      "WHERE business_id=? AND id=? AND kind='invoice'",
+      [business, id],
+    );
+  }
+
+  static final _reopenFlushes = Expando<Set<String>>();
+
+  Future<void> _flushReopens(String business) async {
+    final active = _reopenFlushes[db] ??= <String>{};
+    if (!active.add(business)) return;
+    try {
+      final rows = await db.customSelect(
+        "SELECT a.* FROM local_invoice_reopen_audit a JOIN local_invoice_closures c "
+        "ON a.operation_id=c.operation_id AND a.business_id=c.business_id AND a.invoice_id=c.invoice_id "
+        "WHERE a.business_id=? AND a.sync_state='reopen_pending' AND c.sync_state='reopen_pending'",
+        variables: [Variable(business)],
+      ).get();
+      for (final row in rows) {
+        if (BriskersConnectionModeController.instance.forceOffline) return;
+        final id = row.read<String>('invoice_id');
+        final operation = row.read<String>('operation_id');
+        final version = row.read<int>('expected_version');
+        var state = 'reopen_review';
+        try {
+          final cached = await LocalDocumentDetailCache(database: db)
+              .loadReadOnly(business, id, projectLifecycle: false);
+          if (cached == null) continue;
+          final current = await api.documentDetail(business, id);
+          if (current['id'] != id || current['kind'] != 'invoice' ||
+              int.tryParse(current['row_version']?.toString() ?? '') != version ||
+              current['status'] == 'void' ||
+              !DocumentPresentation(current).isClosed && current['legacy_read_only'] != true) {
+            throw StateError('The server invoice has changed. Review the saved reopening.');
+          }
+          final stillCurrent = await db.customSelect(
+            "SELECT 1 FROM local_invoice_closures WHERE business_id=? AND invoice_id=? "
+            "AND operation_id=? AND sync_state='reopen_pending'",
+            variables: [Variable(business), Variable(id), Variable(operation)],
+          ).getSingleOrNull();
+          if (stillCurrent == null) continue;
+          if (BriskersConnectionModeController.instance.forceOffline) return;
+          await api.ownerForceReopenInvoice(
+            business, id, expectedVersion: version, reason: row.read<String>('reason'),
+          );
+          if (BriskersConnectionModeController.instance.forceOffline) return;
+          final confirmed = await api.documentDetail(business, id);
+          if (confirmed['id'] == id && confirmed['kind'] == 'invoice' &&
+              !DocumentPresentation(confirmed).isClosed && confirmed['legacy_read_only'] == false &&
+              (int.tryParse(confirmed['row_version']?.toString() ?? '') ?? 0) > version) {
+            await LocalDocumentDetailCache(database: db).save(business, id, confirmed);
+            state = 'reopened';
+          }
+        } catch (_) {
+          if (BriskersConnectionModeController.instance.forceOffline) return;
+          // A changed version, rejected unlock, or unknown response is held
+          // for review. A retry must never replay a stale Owner authorization.
+        }
+        await db.transaction(() async {
+          await db.customStatement(
+            'UPDATE local_invoice_reopen_audit SET sync_state=? WHERE operation_id=?',
+            [state, operation],
+          );
+          await db.customStatement(
+            'UPDATE local_invoice_closures SET sync_state=? WHERE business_id=? AND invoice_id=? AND operation_id=?',
+            [state, business, id, operation],
+          );
+        });
+      }
+    } finally {
+      active.remove(business);
+    }
   }
 
   /// An immutable close-only request is idempotent and cannot post receipts.
   /// Unposted receipts may delay server closure, but cannot undo local closure.
   Future<void> flush(String business) async {
-    if (!_enableLegacyReplay || BriskersConnectionModeController.instance.forceOffline) return;
+    if (BriskersConnectionModeController.instance.forceOffline) return;
     await LocalInvoiceClosureStore(db).prepare();
+    await _flushReopens(business);
+    if (!_enableLegacyReplay) return;
     final rows=await db.customSelect("SELECT * FROM local_invoice_closures WHERE business_id=? AND sync_state='pending' AND reopened_at IS NULL AND retry_after<=?",variables:[Variable(business),Variable(DateTime.now().millisecondsSinceEpoch)]).get();
     for(final row in rows) {
       if(BriskersConnectionModeController.instance.forceOffline) return;

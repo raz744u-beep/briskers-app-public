@@ -22,8 +22,22 @@ import 'package:briskers_app/services/offline_invoice_finalization.dart';
 import 'package:briskers_app/screens/documents_screen.dart';
 
 class CloseApi extends BriskersApi {
-  int closes=0, payments=0;
+  int closes=0, payments=0, reopens=0;
+  Map<String, dynamic>? remote;
   bool fail=false;
+  @override
+  Future<Map<String, dynamic>> documentDetail(String business, String id) async =>
+      {...remote!};
+  @override
+  Future<void> ownerForceReopenInvoice(String business, String id, {
+    required int expectedVersion, required String reason,
+  }) async {
+    expect(remote?['id'], id);
+    expect(remote?['row_version'], expectedVersion);
+    reopens++;
+    remote = {...remote!, 'closed_at': null, 'status': 'issued',
+      'legacy_read_only': false, 'row_version': expectedVersion + 1};
+  }
   @override Future<void> closeInvoice(String b,String i) async { throw StateError('Legacy close may post receipts'); }
   @override Future<Map<String,dynamic>> finalizeInvoiceOnce(String b,String i,String o,Map<String,dynamic> p) async { if((p['receipts'] as List).isNotEmpty) { payments++; throw StateError('Close must not post receipts'); } closes++; if(fail) throw StateError('unposted receipt'); return {'operation_id':o,'invoice_id':i,'closed':true}; }
 }
@@ -160,6 +174,31 @@ void main() {
     expect(reopened['payments'], saved['payments']);
     expect((await db.customSelect('SELECT reason FROM local_invoice_reopen_audit')
       .getSingle()).read<String>('reason'), 'Correct invoice notes');
+  });
+
+  test('offline reopen sync uses the saved invoice revision and never calls finalization', () async {
+    final cache = LocalDocumentDetailCache(database: db);
+    final service = LocalInvoiceClosure(database: db, api: api);
+    final invoice = {...detail('6375',268.89, pending: false),
+      'closed_at': '2026-11-13T12:00:00Z', 'status': 'closed', 'row_version': 3,
+      'legacy_read_only': false,
+    };
+    await cache.save('shop', '6375', invoice);
+    api.remote = invoice;
+    await service.reopen('shop', '6375', isOwner: true, reason: 'Correct invoice notes');
+    await service.flush('shop');
+    expect(api.reopens, 0);
+    await BriskersConnectionModeController.instance.setMode(BriskersConnectionMode.auto);
+    await service.flush('shop');
+    await service.flush('shop');
+    expect(api.reopens, 1);
+    expect(api.closes, 0);
+    final confirmed = (await cache.loadReadOnly('shop', '6375'))!;
+    expect(confirmed['row_version'], 4);
+    expect(DocumentPresentation(confirmed).statusCode, 'paid');
+    expect(confirmed['payments'], invoice['payments']);
+    expect((await db.customSelect('SELECT sync_state FROM local_invoice_reopen_audit')
+      .getSingle()).read<String>('sync_state'), 'reopened');
   });
 
   test('recorded customer payment and explicit operational completion stay independent',() async {

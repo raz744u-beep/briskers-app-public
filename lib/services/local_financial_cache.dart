@@ -170,6 +170,25 @@ class LocalFinancialCache {
     return result;
   }
 
+  static bool canVoidSavedExpense(Map<String, dynamic>? row) =>
+      row != null && row['direction'] == 'expense' && row['deletable'] == true &&
+      row['sync_state'] != 'pending' && row['sync_state'] != 'reversed' &&
+      row['status'] != 'void' && row['recurring_rule_id'] == null &&
+      row['recurring_engine_owned'] != true && row['transfer_group_id'] == null &&
+      row['invoice_payment_id'] == null && !requiresOwnerAccountEdit(row);
+
+  Future<Set<String>> locallyVoidedExpenseIds(String business) async {
+    final table = await _database.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_financial_voids'",
+    ).getSingleOrNull();
+    if (table == null) return {};
+    final rows = await _database.customSelect(
+      'SELECT transaction_id FROM local_financial_voids WHERE business_id=?',
+      variables: [Variable(business)],
+    ).get();
+    return rows.map((row) => row.read<String>('transaction_id')).toSet();
+  }
+
   Future<int> recordTransactionCopy(String business, String original, String copy) async {
     await _database.customStatement('''CREATE TABLE IF NOT EXISTS
       local_financial_copies(business_id TEXT NOT NULL, transaction_id TEXT NOT NULL,
@@ -249,7 +268,10 @@ class LocalFinancialCache {
         };
       }
 
-      final reversed = await reversedPayrollExpenseIds(businessId);
+      final reversed = {
+        ...await reversedPayrollExpenseIds(businessId),
+        ...await locallyVoidedExpenseIds(businessId),
+      };
       final overlay = overlayPending(
         serverRows.where((row) => !reversed.contains(row['id'])).map(preserveOccurrence).toList(),
         saved.where((row) => !reversed.contains(row['id'])).toList(),
@@ -357,8 +379,10 @@ class LocalFinancialCache {
       return const [];
     }
 
+    final voided = await locallyVoidedExpenseIds(businessId);
     final needle = search?.trim().toLowerCase() ?? '';
     bool matches(Map<String, dynamic> row) {
+      if (voided.contains(row['id'])) return false;
       if (direction != null &&
           row['direction']?.toString() != direction) {
         return false;
@@ -445,7 +469,9 @@ class LocalFinancialCache {
         (row['job_id'] != null || row['document_id'] != null)));
 
     if (raw == null && rows.isEmpty) return null;
+    final voided = await locallyVoidedExpenseIds(businessId);
     return rows.where((row) =>
+        !voided.contains(row['id']) &&
         (jobId == null || row['job_id']?.toString() == jobId) &&
         (documentId == null ||
             row['document_id']?.toString() == documentId)).toList();

@@ -212,6 +212,29 @@ void main() {
     cache = LocalFinancialCache(database: database);
   }
 
+  test('Owner void hides only verified manual expense and retains its audited receipt', () async {
+    final original = {
+      'id': _transaction, 'direction': 'expense', 'deletable': true,
+      'amount': 400, 'account_id': 'checking', 'category_id': 'supplies',
+      'date': '2026-09-17', 'transaction_date': '2026-09-17',
+      'attachments': [_existingAttachment],
+    };
+    await cache.saveTransactionDetail(_business, _transaction, original);
+    await cache.saveTransactions(_business, [original]);
+    await expectLater(service().voidSavedExpense(_business, _transaction,
+      ownerId: 'owner', assertAuthorized: () => throw StateError('No grant')), throwsStateError);
+    await service().voidSavedExpense(_business, _transaction, ownerId: 'owner', assertAuthorized: () {});
+    await restart();
+    await cache.mergeServerTransactions(_business, [original]);
+    expect(await cache.loadTransactions(_business), isEmpty);
+    expect((await cache.loadTransactionDetail(_business, _transaction))?['attachments'], [_existingAttachment]);
+    final audit = await database.customSelect('SELECT * FROM local_financial_voids').getSingle();
+    expect(audit.read<String>('owner_id'), 'owner');
+    expect(jsonDecode(audit.read<String>('original'))['amount'], 400);
+    await service().voidSavedExpense(_business, _transaction, ownerId: 'owner', assertAuthorized: () {});
+    expect(await database.customSelect('SELECT * FROM local_financial_voids').get(), hasLength(1));
+  });
+
   for (final direction in ['expense', 'income']) {
     test('$direction edit preserves existing photos through restart and re-edit',
         () async {

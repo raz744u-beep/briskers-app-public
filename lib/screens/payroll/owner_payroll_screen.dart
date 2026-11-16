@@ -2043,14 +2043,16 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           final controller = DefaultTabController.of(context);
           return AnimatedBuilder(
             animation: controller,
-            builder: (context, _) => KeyedSubtree(
-              key: ValueKey((widget.employeeId, controller.index)),
-              child: switch (controller.index) {
-                0 => _safeTab(_tasksTab, 'Tasks'),
-                1 => _safeTab(_payrollTab, 'Payroll'),
-                2 => _safeTab(_reportsPanel, 'Reports'),
-                _ => _taxesTab(),
-              },
+            builder: (context, _) => IndexedStack(
+              key: ValueKey(widget.employeeId),
+              index: controller.index,
+              sizing: StackFit.expand,
+              children: [
+                _safeTab(_tasksTab, 'Tasks'),
+                _safeTab(_payrollTab, 'Payroll'),
+                _safeTab(_reportsPanel, 'Reports'),
+                _taxesTab(),
+              ],
             ),
           );
         }),),

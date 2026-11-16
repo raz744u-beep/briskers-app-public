@@ -1,3 +1,5 @@
+import '../../services/offline_financial_write_service.dart';
+import '../../core/supabase_config.dart';
 import '../../services/local_recurring_expense_edit.dart';
 import 'dart:async';
 import 'dart:io';
@@ -272,7 +274,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       final detail = _normalizedDetail(ownerSource ?? rawDetail)
         ..['editable'] = saved != null ||
             (ownerSource != null && !LocalFinancialCache.requiresOwnerAccountEdit(ownerSource))
-        ..['deletable'] = false;
+        ..['deletable'] = LocalFinancialCache.canVoidSavedExpense(saved) &&
+            LocalFinancialCache.validatedEditSource(saved, businessId, transactionId) != null;
       setState(() {
         _detail = detail;
         _detailSource = saved == null ? 'preview' : 'local';
@@ -281,6 +284,11 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       });
       unawaited(_enrichVisibleExpense(detail, generation));
       unawaited(_loadPayrollAccountPermission(generation));
+      if (widget.canDeleteTransaction && detail['deletable'] == true &&
+          await DeviceOwnerAuthorization.instance.canViewSavedOwnerPayroll(businessId) &&
+          _isCurrent(generation)) {
+        setState(() => _canDeleteRecords = true);
+      }
     } catch (error) {
       if (!mounted || !_isCurrent(generation)) return;
       setState(() {
@@ -1470,7 +1478,19 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       _error = null;
     });
     try {
-      await _api.voidManualTransaction(widget.businessId, widget.transactionId);
+      if (BriskersConnectionModeController.instance.forceOffline) {
+        final grant = await DeviceOwnerAuthorization.instance.authority
+            .authorizeLocal(widget.businessId);
+        if (!_isCurrent(actionGeneration)) return;
+        await OfflineFinancialWriteService().voidSavedExpense(
+          widget.businessId, widget.transactionId, ownerId: grant.actorId,
+          assertAuthorized: () => grant.assertValid(
+            widget.businessId, supabase.auth.currentUser?.id ?? '',
+          ),
+        );
+      } else {
+        await _api.voidManualTransaction(widget.businessId, widget.transactionId);
+      }
       widget.onChanged?.call();
       if (mounted && _isCurrent(actionGeneration)) Navigator.pop(context);
     } catch (error) {

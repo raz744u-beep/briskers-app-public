@@ -748,6 +748,42 @@ class OfflineFinancialWriteService {
     });
   }
 
+  Future<void> voidSavedExpense(
+    String business, String transaction, {
+    required String ownerId,
+    required void Function() assertAuthorized,
+  }) async {
+    assertAuthorized();
+    await _database.transaction(() async {
+      await _database.customStatement('''CREATE TABLE IF NOT EXISTS local_financial_voids(
+        business_id TEXT NOT NULL, transaction_id TEXT NOT NULL, owner_id TEXT NOT NULL,
+        voided_at TEXT NOT NULL, original TEXT NOT NULL,
+        PRIMARY KEY(business_id,transaction_id))''');
+      if ((await _cache.locallyVoidedExpenseIds(business)).contains(transaction)) return;
+      final original = await _cache.loadTransactionDetail(business, transaction);
+      if (ownerId.isEmpty || transaction.startsWith('local-') ||
+          !LocalFinancialCache.canVoidSavedExpense(original) ||
+          LocalFinancialCache.validatedEditSource(original, business, transaction) == null) {
+        throw StateError('This expense requires a verified original and accounting review before deletion.');
+      }
+      final queued = await _database.customSelect(
+        "SELECT 1 FROM sync_outbox WHERE business_id=? AND state IN ('pending','inflight') "
+        "AND (entity_id=? OR (json_valid(payload_json) AND json_extract(payload_json,'\$.transaction_id')=?)) "
+        "LIMIT 1",
+        variables: [Variable(business), Variable(transaction), Variable(transaction)],
+      ).getSingleOrNull();
+      if (queued != null) throw StateError('Finish pending corrections to this expense first.');
+      await _database.customStatement(
+        'INSERT INTO local_financial_voids VALUES(?,?,?,?,?)',
+        [business, transaction, ownerId, DateTime.now().toUtc().toIso8601String(), jsonEncode(original)],
+      );
+      await LocalFinancialTotalsJournal(database: _database).record(
+        business, 'transaction:$transaction', before: original,
+      );
+      assertAuthorized();
+    });
+  }
+
   Future<void> flush(String businessId) async {
     if (BriskersConnectionModeController.instance.forceOffline) return;
     final rows = await _database
