@@ -42,11 +42,11 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
     if(invoice==null || line==null)return;
     try{
       final tables=await db.customSelect(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+        "SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name IN "
         "('regular_payroll_task_sources','regular_payroll_portions',"
         "'regular_payroll_employees','regular_payroll_assignment_meta',"
         "'regular_payroll_estimates','local_employee_nicknames',"
-        "'local_mechanic_work_credits_v1','regular_payroll_work_coverage')").get();
+        "'local_mechanic_work_credits_v1','regular_payroll_work_coverage','regular_payroll_active_coverage_v1')").get();
       final names=tables.map((r)=>r.read<String>('name')).toSet();
       final hasCore=names.containsAll({
         'regular_payroll_task_sources','regular_payroll_portions',
@@ -60,13 +60,15 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
         final meta=names.contains('regular_payroll_assignment_meta');
         final estimates=names.contains('regular_payroll_estimates');
         final credit=names.contains('local_mechanic_work_credits_v1');
-        final coverage=names.contains('regular_payroll_work_coverage');
+        final coverage = names.contains('regular_payroll_active_coverage_v1')
+            ? 'regular_payroll_active_coverage_v1'
+            : names.contains('regular_payroll_work_coverage') ? 'regular_payroll_work_coverage' : null;
         final rows=await db.customSelect(
           'SELECT p.task_id,p.employee_id,p.state,e.name AS legal_name,'
           '${nick?"COALESCE(NULLIF(n.nickname,''),e.name)":"e.name"} AS nickname,'
           '${estimates?"COALESCE(t.minutes,0)":"0"} AS estimated_minutes,'
           '${credit?"c.paid_operation_id":"NULL"} AS paid_operation,'
-          '${coverage?"(SELECT COALESCE(SUM(w.minutes),0) FROM regular_payroll_work_coverage w WHERE w.business_id=p.business_id AND w.credit_id=p.id)":"0"} AS paid_minutes '
+          '${coverage!=null?"(SELECT COALESCE(SUM(w.minutes),0) FROM $coverage w WHERE w.business_id=p.business_id AND w.credit_id=p.id)":"0"} AS paid_minutes '
           'FROM regular_payroll_task_sources s '
           'JOIN regular_payroll_portions p ON p.business_id=s.business_id AND p.task_id=s.task_id '
           'JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id '

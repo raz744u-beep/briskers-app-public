@@ -162,6 +162,7 @@ void main() {
         business: 'shop',
         owner: true,
         deviceId: 'owner',
+        assertOwnerGrant: () {},
       );
       expect(await pay('eight-hours', request, 32000), false);
       expect(jsonEncode(await repo.historyWithWork('chris')), original);
@@ -211,6 +212,29 @@ void main() {
         throwsStateError,
       );
       expect((await repo.taskPaymentHistory(task)), hasLength(2));
+
+      Future<bool> reverse(String operation) => repo.reversePayment(
+        operation: operation, employee: 'chris', actorId: 'owner',
+        reason: 'Duplicate recording fixture',
+      );
+      await expectLater(reverse('eight-hours'), throwsStateError);
+      final afterRestart = OfflineFinancialWriteService(database: db);
+      await afterRestart.materializePendingPayrollExpenses('shop');
+      expect(await LocalFinancialCache(database: db).loadTransactions('shop'), hasLength(2));
+      expect(await reverse('remaining'), isTrue);
+      expect(await reverse('remaining'), isFalse);
+      final reversed = (await repo.historyWithWork('chris'))
+          .singleWhere((row) => row['operation_id'] == 'remaining');
+      expect(reversed['net'], 48000);
+      expect(reversed['reversal_reason'], 'Duplicate recording fixture');
+      expect(reversed['work'], hasLength(1));
+      expect((await repo.taskPaymentHistory(task)).single['amount'], 32000);
+      expect((await repo.work(employee: 'chris')).single['paid_minutes'], 480);
+      expect((await repo.work(employee: 'chris')).single['remaining_minutes'], 720);
+      expect(await LocalFinancialCache(database: db).loadTransactions('shop'), hasLength(1));
+      await replicaLedger.mergeSnapshot(await PayrollOwnerLedger(db,'shop').export(),canonical:true);
+      expect((await LocalPayrollRepository(replica,business:'shop',owner:true).work(employee:'chris')).single['remaining_minutes'],720);
+
     },
   );
 }

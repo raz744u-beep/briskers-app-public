@@ -27,6 +27,7 @@ CANDIDATE_BRANCHES.add(PAYROLL_CANDIDATE)
 # Owner-approved consolidated Bugs 33 phone test candidate. The gate still
 # validates exact source, workflow identity and required successful checks.
 BUGS33_RELEASE_BRANCH = "fix/bugs33-preserve-offline-financial-history-20261108"
+BUGS38_SOURCE_BRANCH = "fix/bugs38-round1-historical-edit-guard"
 CANDIDATE_BRANCHES.add(BUGS33_RELEASE_BRANCH)
 BUILD_WORKFLOW = ".github/workflows/android-debug.yml"
 REQUIRED_WORKFLOWS = {
@@ -100,8 +101,10 @@ def context_from_environment(env, checkout_sha):
     except ValueError as error:
         raise GateError("Invalid GitHub repository ID") from error
     positive_integer(repository_id, "repository ID")
-    return Context(repository, repository_id, branch, sha,
-                   PAYROLL_VERIFICATION_BRANCH if branch == PAYROLL_CANDIDATE else None)
+    verification_branch = PAYROLL_VERIFICATION_BRANCH if branch == PAYROLL_CANDIDATE else None
+    if branch == BUGS33_RELEASE_BRANCH and env.get("BRISKERS_BUGS38_RELEASE") == "true":
+        verification_branch = BUGS38_SOURCE_BRANCH
+    return Context(repository, repository_id, branch, sha, verification_branch)
 
 
 class NoRedirects(HTTPRedirectHandler):

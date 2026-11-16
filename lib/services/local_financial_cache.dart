@@ -181,6 +181,21 @@ class LocalFinancialCache {
     );
   }
 
+  Future<Set<String>> reversedPayrollExpenseIds(String businessId) async {
+    final ready = await _database.customSelect(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+      "('payroll_expense_links_v1','regular_payroll_reversals_v1')",
+    ).get();
+    if (ready.length != 2) return {};
+    final rows = await _database.customSelect(
+      'SELECT l.transaction_id FROM payroll_expense_links_v1 l '
+      'JOIN regular_payroll_reversals_v1 r ON r.business_id=l.business_id '
+      'AND r.operation_id=l.payroll_operation_id WHERE l.business_id=?',
+      variables: [Variable(businessId)],
+    ).get();
+    return rows.map((r) => r.read<String>('transaction_id')).toSet();
+  }
+
   /// Refresh the server's limited list without erasing locally committed
   /// transactions/edits that are still queued for synchronization. Both the
   /// overlay read and persisted result share a single SQLite transaction.
@@ -208,7 +223,11 @@ class LocalFinancialCache {
         };
       }
 
-      final overlay = overlayPending(serverRows.map(preserveOccurrence).toList(), saved);
+      final reversed = await reversedPayrollExpenseIds(businessId);
+      final overlay = overlayPending(
+        serverRows.where((row) => !reversed.contains(row['id'])).map(preserveOccurrence).toList(),
+        saved.where((row) => !reversed.contains(row['id'])).toList(),
+      );
       // A server page is a partial inventory, not proof that previously
       // saved financial history has been deleted. Preserve every cached
       // transaction omitted by the page, including older posted expenses,
@@ -220,7 +239,7 @@ class LocalFinancialCache {
         ...overlay,
         for (final previous in saved)
           if ((previous['id']?.toString() ?? '').isNotEmpty &&
-              seen.add(previous['id'].toString()))
+              !reversed.contains(previous['id']) && seen.add(previous['id'].toString()))
             previous,
       ];
       merged.sort((a, b) =>
@@ -415,6 +434,7 @@ class LocalFinancialCache {
       throw ArgumentError('Expense detail does not match its business and transaction.');
     }
     final existing = await loadTransactionDetail(businessId, transactionId);
+    if (existing?['sync_state'] == 'reversed') return;
     if (existing?['payroll_account_pending'] == true &&
         !detail.containsKey('payroll_account_pending')) {
       return;
@@ -468,7 +488,8 @@ class LocalFinancialCache {
     String businessId,
     String transactionId,
   ) {
-    if (source == null || !matchesTransaction(source, businessId, transactionId)) {
+    if (source == null || source['sync_state'] == 'reversed' ||
+        !matchesTransaction(source, businessId, transactionId)) {
       return null;
     }
     final minor = source['amount_minor'];

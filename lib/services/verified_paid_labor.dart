@@ -11,7 +11,7 @@ class VerifiedPaidLabor {
     final tables =
         (await db
                 .customSelect(
-                  "SELECT name FROM sqlite_master WHERE type='table'",
+                  "SELECT name FROM sqlite_master WHERE type IN ('table','view')",
                 )
                 .get())
             .map((r) => r.read<String>('name'))
@@ -33,9 +33,11 @@ class VerifiedPaidLabor {
       'regular_payroll_work_coverage',
       'regular_payroll_payments',
     })) {
+      final coverage = tables.contains('regular_payroll_active_coverage_v1')
+          ? 'regular_payroll_active_coverage_v1' : 'regular_payroll_work_coverage';
       clauses.add(
-        '''c.actual_minutes>0 AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage ip WHERE ip.business_id=p.business_id AND ip.credit_id=p.id AND json_extract(ip.snapshot,'\$.in_progress_payment')=1 AND p.state!='Done') AND
-        (SELECT COALESCE(SUM(w.minutes),0) FROM regular_payroll_work_coverage w
+        '''c.actual_minutes>0 AND NOT EXISTS(SELECT 1 FROM $coverage ip WHERE ip.business_id=p.business_id AND ip.credit_id=p.id AND json_extract(ip.snapshot,'\$.in_progress_payment')=1 AND p.state!='Done') AND
+        (SELECT COALESCE(SUM(w.minutes),0) FROM $coverage w
          JOIN regular_payroll_payments paid ON paid.business_id=w.business_id
            AND paid.operation_id=w.operation_id AND paid.employee_id=p.employee_id
          WHERE w.business_id=p.business_id AND w.credit_id=p.id)=c.actual_minutes''',

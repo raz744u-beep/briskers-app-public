@@ -434,6 +434,69 @@ class OfflineFinancialWriteService {
     });
   }
 
+  /// Called inside the same SQLite transaction as the payroll reversal.
+  Future<void> reversePayrollExpense(
+    String businessId, String operation, {required int net, required String verifiedDate,}
+  ) async {
+    if (net == 0) return;
+    final links = PayrollExpenseLinkStore(_database);
+    await links.preparePending();
+    final id = await links.transactionId(businessId, operation);
+    if (id != null) {
+      final detail = await _cache.loadTransactionDetail(businessId, id);
+      final amount = num.tryParse(detail?['amount']?.toString() ?? '');
+      if (detail?['payroll_operation_id'] != operation ||
+          amount == null || (amount * 100).round() != net ||
+          (detail?['transaction_date'] ?? detail?['date']) != verifiedDate) {
+        throw StateError('The linked expense differs from the verified payroll receipt.');
+      }
+      final localId = PayrollExpenseIdentity.transactionId(businessId, operation);
+      if (id == localId) {
+        final receipt = await _database.customSelect(
+          'SELECT id,last_attempt_at,attempt_count FROM sync_outbox '
+          "WHERE business_id=? AND entity_id=? AND entity_type='financial_create' AND state='pending'",
+          variables: [Variable(businessId), Variable(id)],
+        ).getSingleOrNull();
+        if (receipt == null || receipt.data['last_attempt_at'] != null ||
+            receipt.read<int>('attempt_count') != 0) {
+          throw StateError('Verify the expense synchronization result before reversing this payroll receipt.');
+        }
+        await _database.customStatement(
+          "UPDATE sync_outbox SET state='reversed' WHERE business_id=? AND entity_id=? "
+          "AND entity_type IN ('financial_create','financial_update') AND state='pending'",
+          [businessId, id],
+        );
+      } else {
+        await _enqueue(businessId, 'financial_payroll_reversal', id, 'reverse', {
+          'transaction_id': id, 'payroll_operation': operation,
+          'amount': net / 100, 'verified_date': verifiedDate,
+        });
+      }
+      final rows = await _allTransactions(businessId);
+      await _cache.saveTransactions(businessId, rows.where((r) => r['id'] != id).toList());
+      await _cache.saveTransactionDetail(businessId, id, {
+        ...detail!, 'status': 'void', 'editable': false, 'deletable': false,
+        'sync_state': 'reversed',
+      });
+      await LocalFinancialTotalsJournal(database: _database).record(
+        businessId, 'transaction:$id', before: detail, after: null,
+      );
+    } else {
+      final pending = await _database.customSelect(
+        'SELECT operation_id FROM payroll_expense_projection_pending_v1 '
+        'WHERE business_id=? AND operation_id=?',
+        variables: [Variable(businessId), Variable(operation)],
+      ).getSingleOrNull();
+      if (pending == null) {
+        throw StateError('Verify the original historical expense before reversing this receipt.');
+      }
+    }
+    await _database.customStatement(
+      'DELETE FROM payroll_expense_projection_pending_v1 WHERE business_id=? AND operation_id=?',
+      [businessId, operation],
+    );
+  }
+
   Future<void> updatePayrollExpenseAccount(
     String businessId,
     String transactionId, {
@@ -691,7 +754,8 @@ class OfflineFinancialWriteService {
           'financial_create',
           'financial_update',
           'financial_photo',
-          'financial_receipt_extraction'
+          'financial_receipt_extraction',
+          'financial_payroll_reversal'
         )
       ORDER BY id
       ''',
@@ -735,6 +799,23 @@ class OfflineFinancialWriteService {
           await _flushCreate(businessId, outboxId, payload);
         } else if (type == 'financial_update') {
           await _flushUpdate(businessId, outboxId, payload);
+        } else if (type == 'financial_payroll_reversal') {
+          await LocalJobQuarantine.guardReplay(
+            _database,
+            businessId,
+            () => _api.syncPayrollExpenseReversal(
+              businessId,
+              operation: payload['payroll_operation'] as String,
+              transactionId: payload['transaction_id'] as String,
+              amount: payload['amount'] as num,
+              date: payload['verified_date'] as String,
+            ),
+            outboxId: outboxId,
+          );
+          await _database.customStatement(
+            "DELETE FROM sync_outbox WHERE business_id=? AND id=? AND state='pending'",
+            [businessId, outboxId],
+          );
         } else if (type == 'financial_photo') {
           await _flushPhoto(businessId, outboxId, payload);
         } else if (type == 'financial_receipt_extraction') {
@@ -762,6 +843,16 @@ class OfflineFinancialWriteService {
     Map<String, dynamic> payload,
   ) async {
     final localId = payload['local_transaction_id'].toString();
+    if (payload['operation_id'].toString().startsWith('payroll-financial-')) {
+      // The successful acknowledgment removes the replay fence just before
+      // remapping the expense. Keep a durable dispatch marker across that gap.
+      final marked = await _database.customUpdate(
+        "UPDATE sync_outbox SET last_attempt_at=? WHERE business_id=? AND id=? AND state='pending'",
+        variables: [Variable(_unixNow()), Variable(businessId), Variable(outboxId)],
+      );
+      if (marked == 0) return;
+    }
+
     final response = await LocalJobQuarantine.guardReplay(
       _database,
       businessId,

@@ -18,9 +18,11 @@ class PayrollHistoryPanel extends StatefulWidget {
     required this.unlocked,
     this.employeeName,
     this.onOpenTask,
+    this.onReversePayment,
   });
 
   final String? employeeName;
+  final Future<bool> Function(Map<String, dynamic>)? onReversePayment;
   final ValueChanged<Map<String, dynamic>>? onOpenTask;
 
   final List<Map<String, dynamic>> payments;
@@ -234,10 +236,21 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
                           child: Text('Load More · ${work.length - visibleTaskCount} remaining'),
                         ),
                       for (final payment in week.payments)
-                        if ((payment['work'] as List).isEmpty)
+                        if ((payment['work'] as List).isEmpty || payment['reversed_at'] != null || widget.onReversePayment != null)
                           ListTile(
-                            title: Text('Payment · ${_money(payment['net'] as int)}'),
-                            subtitle: Text('${payment['method']} · ${payment['verified_date']}'),
+                            title: Text('${payment['reversed_at'] == null ? 'Payment' : 'Reversed payment'} · ${_money(payment['net'] as int)}'),
+                            subtitle: Text('${payment['method']} · ${payment['verified_date']}'
+                                '${payment['reversal_reason'] == null ? '' : '\n${payment['reversal_reason']}'}'),
+                            trailing: widget.onReversePayment == null || payment['reversed_at'] != null
+                                ? null
+                                : TextButton(
+                                    onPressed: () async {
+                                      if (await widget.onReversePayment!(payment) && context.mounted) {
+                                        Navigator.of(context).pop();
+                                      }
+                                    },
+                                    child: const Text('Reverse'),
+                                  ),
                           ),
                             if (work.isEmpty && week.payments.isEmpty)
                               const ListTile(
@@ -596,11 +609,12 @@ class _RecordedWeek {
   final List<Map<String, dynamic>> payments;
   List<Map<String, dynamic>> get work => [
     for (final payment in payments)
-      ...(payment['work'] as List<Map<String, dynamic>>),
+      if (payment['reversed_at'] == null)
+        ...(payment['work'] as List<Map<String, dynamic>>),
   ];
   int get minutes => work.fold(0, (sum, row) => sum + (row['actual_minutes'] as int? ?? 0));
   int get gross => _sum('gross');
   int get repaid => _sum('repayment');
   int get net => _sum('net');
-  int _sum(String field) => payments.fold(0, (sum, row) => sum + (row[field] as int));
+  int _sum(String field) => payments.fold(0, (sum, row) => sum + (row['reversed_at'] == null ? row[field] as int : 0));
 }

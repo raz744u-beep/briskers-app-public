@@ -19,7 +19,7 @@ class PayrollOwnerLedger {
     'regular_payroll_portions', 'local_mechanic_work_credits_v1', 'regular_payroll_progress_claims', 'regular_payroll_assignment_outgoing',
     'regular_payroll_advances', 'regular_payroll_payments',
     'regular_payroll_paid_work', 'regular_payroll_paid_base',
-    'regular_payroll_work_coverage', 'regular_payroll_weekly_defaults',
+    'regular_payroll_work_coverage', 'regular_payroll_reversals_v1', 'regular_payroll_weekly_defaults',
     'regular_payroll_audit', 'regular_payroll_sync_outbox',
     'regular_payroll_owner_prior_paid_v1',
     'regular_payroll_assignment_meta', 'regular_payroll_task_policy', 'regular_payroll_actual_time', 'regular_payroll_job_lead',
@@ -27,7 +27,7 @@ class PayrollOwnerLedger {
   static const immutable = {
     'regular_payroll_owner_prior_paid_v1',
     'regular_payroll_payments', 'regular_payroll_paid_work',
-    'regular_payroll_paid_base', 'regular_payroll_work_coverage',
+    'regular_payroll_paid_base', 'regular_payroll_work_coverage', 'regular_payroll_reversals_v1',
   };
   Future<void> prepare() async {
     await LocalPayrollRepository(db, business: business, owner: true).prepare();
@@ -253,7 +253,7 @@ class PayrollOwnerLedger {
               // Unversioned edits must be reconciled explicitly, not silently won.
               continue;
             }
-            final changed = row.keys.where((key) => !primary.contains(key)).toList();
+            final changed = row.keys.where((key) => !primary.contains(key) && row[key] != prior[key]).toList();
             await db.customStatement('UPDATE $table SET ${changed.map((key) => '$key=?').join(',')} WHERE $where',
               [...changed.map((key) => row[key]), ...primary.map((key) => row[key])]);
           }
@@ -280,8 +280,8 @@ class PayrollOwnerLedger {
         'LEFT JOIN regular_payroll_payments p ON p.business_id=w.business_id AND p.operation_id=w.operation_id '
         'WHERE w.business_id=? AND (c.allocation_id IS NULL OR p.operation_id IS NULL OR c.employee_id<>p.employee_id) '
         'UNION ALL SELECT 1 FROM local_mechanic_work_credits_v1 c WHERE c.business_id=? '
-        'AND COALESCE((SELECT SUM(minutes) FROM regular_payroll_work_coverage w '
-            'WHERE w.business_id=c.business_id AND w.credit_id=c.allocation_id),0)>CASE WHEN EXISTS(SELECT 1 FROM regular_payroll_portions ip WHERE ip.business_id=c.business_id AND ip.id=c.allocation_id AND ip.state=\'In Progress\') AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage ipw WHERE ipw.business_id=c.business_id AND ipw.credit_id=c.allocation_id AND COALESCE(json_extract(ipw.snapshot,\'\$.in_progress_payment\'),0)!=1) THEN COALESCE((SELECT est.minutes FROM regular_payroll_estimates est WHERE est.business_id=c.business_id AND est.task_id=c.task_id AND est.employee_id=c.employee_id),0) ELSE c.actual_minutes END LIMIT 1',
+        'AND COALESCE((SELECT SUM(minutes) FROM regular_payroll_active_coverage_v1 w '
+            'WHERE w.business_id=c.business_id AND w.credit_id=c.allocation_id),0)>CASE WHEN EXISTS(SELECT 1 FROM regular_payroll_portions ip WHERE ip.business_id=c.business_id AND ip.id=c.allocation_id AND ip.state=\'In Progress\') AND NOT EXISTS(SELECT 1 FROM regular_payroll_active_coverage_v1 ipw WHERE ipw.business_id=c.business_id AND ipw.credit_id=c.allocation_id AND COALESCE(json_extract(ipw.snapshot,\'\$.in_progress_payment\'),0)!=1) THEN COALESCE((SELECT est.minutes FROM regular_payroll_estimates est WHERE est.business_id=c.business_id AND est.task_id=c.task_id AND est.employee_id=c.employee_id),0) ELSE c.actual_minutes END LIMIT 1',
         variables: [business, business, business].map(Variable<String>.new).toList()).get();
       if (invalid.isNotEmpty) {
         throw StateError('Payroll integrity verification failed; existing records were preserved.');

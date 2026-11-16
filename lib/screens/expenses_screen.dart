@@ -607,6 +607,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       // snapshots made newly posted invoice payments appear very late.
       final rows = await _fetchTransactions(
         offset: 0, fastFirstPaint: true);
+      final reversed = await _localFinancial.reversedPayrollExpenseIds(businessId);
       if (!_isCurrentLoad(epoch, businessId)) return;
       setState(() {
         _serverConfirmedTransactionIds.addAll(
@@ -616,7 +617,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         // Retain locally committed, not-yet-synced financial entries if
         // the authenticated server's first page has not received them.
         // Identity-scoped replacement avoids duplicate list cards.
-        _transactions = LocalFinancialCache.overlayPending(rows, _transactions);
+        _transactions = LocalFinancialCache.overlayPending(
+          rows.where((row) => !reversed.contains(row['id'])).toList(),
+          _transactions.where((row) => !reversed.contains(row['id'])).toList(),
+        );
         _hasMore = rows.length == _pageSize;
         _loading = false;
         _showingLocal = false;
@@ -1074,6 +1078,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         return;
       }
       final rows = await _fetchTransactions(offset: offset);
+      final reversed = await _localFinancial.reversedPayrollExpenseIds(businessId);
       if (!_isCurrentLoad(epoch, businessId) || _showingLocal) return;
       setState(() {
         _serverConfirmedTransactionIds.addAll(
@@ -1081,7 +1086,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
               .where((id) => id.isNotEmpty),
         );
         _transactions = LocalFinancialCache.overlayPending(
-          [..._transactions, ...rows], _transactions);
+          [..._transactions, ...rows].where((row) => !reversed.contains(row['id'])).toList(),
+          _transactions.where((row) => !reversed.contains(row['id'])).toList(),
+        );
         _hasMore = rows.length == _pageSize;
         _loadingMore = false;
       });

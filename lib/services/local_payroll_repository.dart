@@ -1,3 +1,4 @@
+import 'offline_financial_write_service.dart';
 import 'payroll_expense_link_store.dart';
 import 'local_task_metadata.dart';
 import 'local_job_work_date.dart';
@@ -91,6 +92,21 @@ class LocalPayrollRepository {
       '''CREATE TABLE IF NOT EXISTS regular_payroll_paid_work (business_id TEXT NOT NULL, credit_id TEXT NOT NULL, operation_id TEXT NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(business_id,credit_id))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_paid_base (business_id TEXT NOT NULL, employee_id TEXT NOT NULL, week TEXT NOT NULL, operation_id TEXT NOT NULL, amount INTEGER NOT NULL, PRIMARY KEY(business_id,employee_id,week))''',
       '''CREATE TABLE IF NOT EXISTS regular_payroll_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, business_id TEXT NOT NULL, operation_id TEXT NOT NULL, event TEXT NOT NULL, payload TEXT NOT NULL)''',
+      """CREATE TABLE IF NOT EXISTS regular_payroll_reversals_v1 (
+        business_id TEXT NOT NULL,operation_id TEXT NOT NULL,actor_id TEXT NOT NULL,
+        reason TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(business_id,operation_id)
+      )""",
+      """CREATE VIEW IF NOT EXISTS regular_payroll_active_coverage_v1 AS
+        SELECT w.* FROM regular_payroll_work_coverage w WHERE NOT EXISTS (
+          SELECT 1 FROM regular_payroll_reversals_v1 r
+          WHERE r.business_id=w.business_id AND r.operation_id=w.operation_id
+        )""",
+      """CREATE TRIGGER IF NOT EXISTS regular_payroll_reversal_no_update
+        BEFORE UPDATE ON regular_payroll_reversals_v1
+        BEGIN SELECT RAISE(ABORT,'Payroll reversal is immutable'); END""",
+      """CREATE TRIGGER IF NOT EXISTS regular_payroll_reversal_no_delete
+        BEFORE DELETE ON regular_payroll_reversals_v1
+        BEGIN SELECT RAISE(ABORT,'Payroll reversal is immutable'); END""",
       // Explicit historical Owner confirmation, NEVER a payroll payment.
       '''CREATE TABLE IF NOT EXISTS regular_payroll_owner_prior_paid_v1 (
         business_id TEXT NOT NULL,allocation_id TEXT NOT NULL,
@@ -1037,7 +1053,7 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     final rows = await _read(
-      'SELECT w.credit_id,w.minutes,w.amount,p.verified_date,p.week,p.method,p.operation_id,p.employee_id FROM regular_payroll_work_coverage w JOIN regular_payroll_payments p ON p.business_id=w.business_id AND p.operation_id=w.operation_id JOIN regular_payroll_portions a ON a.business_id=w.business_id AND a.id=w.credit_id AND a.employee_id=p.employee_id WHERE w.business_id=? AND a.task_id=? ORDER BY p.verified_date DESC,p.operation_id DESC',
+      'SELECT w.credit_id,w.minutes,w.amount,p.verified_date,p.week,p.method,p.operation_id,p.employee_id FROM regular_payroll_active_coverage_v1 w JOIN regular_payroll_payments p ON p.business_id=w.business_id AND p.operation_id=w.operation_id JOIN regular_payroll_portions a ON a.business_id=w.business_id AND a.id=w.credit_id AND a.employee_id=p.employee_id WHERE w.business_id=? AND a.task_id=? ORDER BY p.verified_date DESC,p.operation_id DESC',
       [business, task],
     );
     _authorize();
@@ -1800,15 +1816,15 @@ class LocalPayrollRepository {
       "s.source_kind,CASE WHEN m.active=0 THEN 1 ELSE 0 END AS assignment_conflict,CASE WHEN m.active=0 OR d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,s.invoice_id,s.line_id AS source_line_id,"
       "COALESCE(est.minutes,0) AS estimated_minutes,"
       "c.actual_minutes,c.rate_cents,COALESCE(at.minutes,c.actual_minutes) AS recorded_actual_minutes,"
-      "(SELECT x.snapshot FROM regular_payroll_work_coverage x WHERE x.business_id=c.business_id AND x.credit_id=c.allocation_id ORDER BY x.operation_id LIMIT 1) AS coverage_snapshot,"
-      "(SELECT MAX(pay.week) FROM regular_payroll_work_coverage x "
+      "(SELECT x.snapshot FROM regular_payroll_active_coverage_v1 x WHERE x.business_id=c.business_id AND x.credit_id=c.allocation_id ORDER BY x.operation_id LIMIT 1) AS coverage_snapshot,"
+      "(SELECT MAX(pay.week) FROM regular_payroll_active_coverage_v1 x "
       "JOIN regular_payroll_payments pay ON pay.business_id=x.business_id AND pay.operation_id=x.operation_id "
       "WHERE x.business_id=c.business_id AND x.credit_id=c.allocation_id "
       "AND pay.employee_id=p.employee_id AND x.minutes>0) AS last_paid_week,"
-      "COALESCE((SELECT SUM(x.minutes) FROM regular_payroll_work_coverage x "
+      "COALESCE((SELECT SUM(x.minutes) FROM regular_payroll_active_coverage_v1 x "
       "WHERE x.business_id=c.business_id AND x.credit_id=c.allocation_id),"
       "CASE WHEN c.paid_operation_id IS NOT NULL THEN c.actual_minutes ELSE 0 END) AS paid_minutes,"
-      "COALESCE((SELECT SUM(x.amount) FROM regular_payroll_work_coverage x "
+      "COALESCE((SELECT SUM(x.amount) FROM regular_payroll_active_coverage_v1 x "
       "WHERE x.business_id=c.business_id AND x.credit_id=c.allocation_id),"
       "CASE WHEN c.paid_operation_id IS NOT NULL THEN (c.actual_minutes*c.rate_cents+30)/60 ELSE 0 END) AS paid_cents "
       "FROM regular_payroll_portions p "
@@ -2202,7 +2218,9 @@ class LocalPayrollRepository {
     _authorize();
     await prepare();
     return _read(
-      'SELECT p.*, o.state AS reconciliation_state FROM regular_payroll_payments p '
+      'SELECT p.*, o.state AS reconciliation_state, r.reason AS reversal_reason, '
+      'r.recorded_at AS reversed_at FROM regular_payroll_payments p '
+      'LEFT JOIN regular_payroll_reversals_v1 r ON r.business_id=p.business_id AND r.operation_id=p.operation_id '
       'LEFT JOIN regular_payroll_sync_outbox o ON o.business_id=p.business_id '
       'AND o.operation_id=p.operation_id WHERE p.business_id=? AND p.employee_id=? '
       'ORDER BY p.verified_date DESC,p.operation_id DESC',
@@ -2405,6 +2423,102 @@ class LocalPayrollRepository {
 
   /// The selected versions, hours and rates are part of the exact replay
   /// payload. Same-ID/same-content retries return false; any conflict fails.
+  /// Corrects an erroneous local record only after validating the original
+  /// receipt and its expense projection. A reversal never sends or refunds money.
+  Future<bool> reversePayment({
+    required String operation,
+    required String employee,
+    required String actorId,
+    required String reason,
+  }) async {
+    _authorize();
+    final explanation = reason.trim();
+    if (assertOwnerGrant == null) {
+      throw StateError('An active signed-in Owner session is required to reverse a receipt.');
+    }
+    if (operation.isEmpty || employee.isEmpty || actorId.isEmpty || explanation.isEmpty) {
+      throw ArgumentError('The Owner, original payroll receipt and reason are required.');
+    }
+    await prepare();
+    return db.transaction(() async {
+      await _assertPaymentAuthority();
+      final payment = (await _read(
+        'SELECT * FROM regular_payroll_payments WHERE business_id=? AND operation_id=? AND employee_id=?',
+        [business, operation, employee],
+      )).singleOrNull;
+      if (payment == null) throw StateError('The original payroll receipt is unavailable.');
+      final prior = (await _read(
+        'SELECT actor_id,reason FROM regular_payroll_reversals_v1 WHERE business_id=? AND operation_id=?',
+        [business, operation],
+      )).singleOrNull;
+      if (prior != null) {
+        if (prior['actor_id'] == actorId && prior['reason'] == explanation) return false;
+        throw StateError('This receipt already has a recorded reversal.');
+      }
+      final legacy = await _read(
+        'SELECT credit_id FROM regular_payroll_paid_work WHERE business_id=? AND operation_id=?',
+        [business, operation],
+      );
+      final laterCoverage = await _read(
+        'SELECT 1 FROM regular_payroll_active_coverage_v1 original '
+        'JOIN regular_payroll_active_coverage_v1 other ON other.business_id=original.business_id '
+        'AND other.credit_id=original.credit_id AND other.operation_id<>original.operation_id '
+        'JOIN regular_payroll_payments p ON p.business_id=other.business_id AND p.operation_id=other.operation_id '
+        'WHERE original.business_id=? AND original.operation_id=? AND p.week>=? LIMIT 1',
+        [business, operation, payment['week'] as String],
+      );
+      if (legacy.isNotEmpty || laterCoverage.isNotEmpty) {
+        throw StateError('This receipt has legacy or subsequent paid coverage. Review the original payroll records before reversing it.');
+      }
+      final state = (await _read(
+        'SELECT state FROM regular_payroll_sync_outbox WHERE business_id=? AND operation_id=?',
+        [business, operation],
+      )).singleOrNull;
+      if (state?['state'] != 'held_local') {
+        throw StateError('This receipt requires reconciliation with its original device before reversal.');
+      }
+
+      await OfflineFinancialWriteService(database: db).reversePayrollExpense(
+        business, operation, net: payment['net'] as int,
+        verifiedDate: payment['verified_date'] as String,
+      );
+      final recordedAt = DateTime.now().toUtc().toIso8601String();
+      await db.customStatement(
+        'INSERT INTO regular_payroll_reversals_v1 VALUES(?,?,?,?,?)',
+        [business, operation, actorId, explanation, recordedAt],
+      );
+      await db.customStatement(
+        'UPDATE local_mechanic_work_credits_v1 '
+        'SET paid_operation_id=CASE WHEN paid_operation_id=? THEN NULL ELSE paid_operation_id END,revision=revision+1 '
+        'WHERE business_id=? AND employee_id=? AND allocation_id IN ('
+        'SELECT credit_id FROM regular_payroll_work_coverage WHERE business_id=? AND operation_id=?)',
+        [operation, business, employee, business, operation],
+      );
+      final repayment = payment['repayment'] as int;
+      if (repayment != 0) {
+        await db.customStatement(
+          'INSERT INTO regular_payroll_advances VALUES(?,?,?) '
+          'ON CONFLICT(business_id,employee_id) DO UPDATE SET balance=balance+excluded.balance',
+          [business, employee, repayment],
+        );
+      }
+      await db.customStatement(
+        "UPDATE regular_payroll_sync_outbox SET state='reversed' WHERE business_id=? AND operation_id=?",
+        [business, operation],
+      );
+      await db.customStatement(
+        'INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) VALUES(?,?,?,?)',
+        [business, operation, 'reverse_payment', jsonEncode({
+          'employee': employee, 'actor': actorId, 'reason': explanation,
+          'recorded_at': recordedAt, 'net': payment['net'], 'repayment_restored': repayment,
+        })],
+      );
+      await _assertPaymentAuthority();
+      _authorize();
+      return true;
+    });
+  }
+
   Future<bool> verify({
     required String operation,
     required String employee,
@@ -2478,13 +2592,15 @@ class LocalPayrollRepository {
         return false;
       }
       final weeklyPayments = await _read(
-        'SELECT operation_id FROM regular_payroll_payments '
-        'WHERE business_id=? AND employee_id=? AND week=?',
+        'SELECT p.operation_id FROM regular_payroll_payments p '
+        'WHERE p.business_id=? AND p.employee_id=? AND p.week=? AND NOT EXISTS ('
+        'SELECT 1 FROM regular_payroll_reversals_v1 r WHERE r.business_id=p.business_id AND r.operation_id=p.operation_id)',
         [business, employee, week],
       );
       final recordedBase = await _read(
-        'SELECT operation_id FROM regular_payroll_paid_base '
-        'WHERE business_id=? AND employee_id=? AND week=?',
+        'SELECT p.operation_id FROM regular_payroll_paid_base p '
+        'WHERE p.business_id=? AND p.employee_id=? AND p.week=? AND NOT EXISTS ('
+        'SELECT 1 FROM regular_payroll_reversals_v1 r WHERE r.business_id=p.business_id AND r.operation_id=p.operation_id)',
         [business, employee, week],
       );
       if (base > 0 && (recordedBase.isNotEmpty || weeklyPayments.isNotEmpty)) {
@@ -2600,7 +2716,7 @@ class LocalPayrollRepository {
           confirmedNet != gross - repayment)
         { throw StateError('Amount or repayment changed'); }
       if (base > 0)
-        { await db.customStatement('INSERT INTO regular_payroll_paid_base VALUES(?,?,?,?,?)', [
+        { await db.customStatement('INSERT OR IGNORE INTO regular_payroll_paid_base VALUES(?,?,?,?,?)', [
           business,
           employee,
           week,
@@ -2630,7 +2746,7 @@ class LocalPayrollRepository {
             snapshot['gross_cents'], snapshots[i]],
         );
         final total = await _read(
-          'SELECT SUM(minutes) AS minutes FROM regular_payroll_work_coverage '
+          'SELECT SUM(minutes) AS minutes FROM regular_payroll_active_coverage_v1 '
           'WHERE business_id=? AND credit_id=?',
           [business, picked[i]['id'] as String],
         );

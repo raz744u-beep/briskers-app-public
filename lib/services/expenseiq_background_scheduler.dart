@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/widgets.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:workmanager/workmanager.dart';
 
@@ -35,6 +36,7 @@ void expenseIqPhotoCallbackDispatcher() {
       await Supabase.initialize(
         url: supabaseUrl,
         publishableKey: supabasePublishableKey,
+        httpClient: BriskersSupabaseHttpClient(http.Client(), readPersistedMode: true),
       );
       if (Supabase.instance.client.auth.currentSession == null) {
         return false;

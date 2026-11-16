@@ -1617,14 +1617,14 @@ class BriskersApi {
     final client = supabase;
     final session = client.auth.currentSession;
     if (session == null) throw StateError('An active Briskers sign-in is required.');
-    final result = await client.rpc(
+    final result = await explicitSupabaseRead('briskers_read_recurring_expense_occurrence', () => client.rpc(
       'briskers_read_recurring_expense_occurrence',
       params: {
         'p_business_id': businessId,
         'p_rule_id': ruleId,
         'p_due_date': dueDate,
       },
-    ).timeout(const Duration(seconds: 15));
+    ).timeout(const Duration(seconds: 15)));
     if (client.auth.currentSession?.user.id != session.user.id) {
       throw StateError('The Briskers account changed during download.');
     }
@@ -1729,6 +1729,22 @@ class BriskersApi {
       },
     );
     return result.toString();
+  }
+
+  Future<void> syncPayrollExpenseReversal(
+    String businessId, {
+    required String operation,
+    required String transactionId,
+    required num amount,
+    required String date,
+  }) async {
+    await networkSupabase.rpc('briskers_sync_payroll_expense_reversal_v1', params: {
+      'p_business_id': businessId,
+      'p_payroll_operation': operation,
+      'p_transaction_id': transactionId,
+      'p_expected_amount': amount,
+      'p_verified_date': date,
+    });
   }
 
   Future<void> syncPayrollExpenseAccount(

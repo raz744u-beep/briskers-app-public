@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:http/http.dart' as http;
 
 import 'connection_mode.dart';
@@ -13,18 +15,39 @@ SupabaseClient get networkSupabase {
   return Supabase.instance.client;
 }
 
-/// The SDK refreshes its auth session on its own schedule, outside calls
-/// through networkSupabase. Preserve the saved session when the shop is offline.
+final _explicitRead = Object();
+
+/// This scope permits only the read the Owner explicitly initiated.
+Future<T> explicitSupabaseRead<T>(String rpc, Future<T> Function() read) {
+  if (!const {
+    'briskers_recurring_recovery_v1',
+    'briskers_read_recurring_expense_occurrence',
+    'briskers_owner_recovery_lookup_v1',
+  }.contains(rpc)) {
+    throw ArgumentError('This read requires an online connection.');
+  }
+  return runZoned(read, zoneValues: {_explicitRead: '/rest/v1/rpc/$rpc'});
+}
+
 class BriskersSupabaseHttpClient extends http.BaseClient {
-  BriskersSupabaseHttpClient(this._client);
+  BriskersSupabaseHttpClient(this._client, {this.readPersistedMode = false});
   final http.Client _client;
+  final bool readPersistedMode;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    if (BriskersConnectionModeController.instance.forceOffline &&
-        request.url.path == '/auth/v1/token' &&
-        request.url.queryParameters['grant_type'] == 'refresh_token') {
-      throw http.ClientException('Session refresh is paused in Force Offline.');
+    final mode = BriskersConnectionModeController.instance;
+    if (readPersistedMode
+        ? await mode.offlineForBackgroundRequest()
+        : mode.forceOffline) {
+      if (readPersistedMode ||
+          request.method != 'POST' ||
+          request.url.host != Uri.parse(supabaseUrl).host ||
+          request.url.path != Zone.current[_explicitRead]) {
+        throw http.ClientException(
+          'Supabase access is paused in Force Offline.',
+        );
+      }
     }
     return _client.send(request);
   }
