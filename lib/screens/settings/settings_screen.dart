@@ -257,6 +257,7 @@ class SettingsScreen extends StatelessWidget {
                   MaterialPageRoute(
                     builder: (_) => WarrantyWorkflowSettingsScreen(
                       businessId: businessId,
+                      sharedBottomNavigationBar: sharedBottomNavigationBar,
                     ),
                   ),
                 );

@@ -1,3 +1,4 @@
+import '../services/local_warranty_companies.dart';
 import '../services/local_invoice_closure.dart';
 import '../services/offline_invoice_finalization.dart';
 import 'dart:async';
@@ -402,6 +403,12 @@ class _BusinessGateState extends State<BusinessGate> with WidgetsBindingObserver
       await _offlineFinancial.flush(businessId);
     } catch (_) {
       // Expense and receipt changes stay queued and retry on reconnect.
+    }
+
+    try {
+      await LocalWarrantyCompanies().flush(businessId);
+    } catch (_) {
+      // Company edits remain saved for the next synchronization.
     }
 
     try {

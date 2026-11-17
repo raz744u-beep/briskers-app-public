@@ -1,3 +1,4 @@
+import 'local_warranty_companies.dart';
 import 'local_customer_vehicle_identity.dart';
 import 'invoice_tax_proposal.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
@@ -803,6 +804,11 @@ class OfflineDocumentDraftService {
     }
     final warranty = Map<String, dynamic>.from(raw);
     String? companyId = warranty['warranty_company_id']?.toString();
+    if (companyId?.startsWith('local-warranty-') == true) {
+      companyId = await LocalJobQuarantine.guardReplay(_database, businessId,
+        () => LocalWarrantyCompanies(database: _database, api: _api).serverId(businessId, companyId),
+        outboxId: outboxId);
+    }
     if (warranty['extended_warranty'] == true &&
         (companyId == null || companyId.isEmpty)) {
       final name = warranty['warranty_company_name']?.toString().trim() ?? '';

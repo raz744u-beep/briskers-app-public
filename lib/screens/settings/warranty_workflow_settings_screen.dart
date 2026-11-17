@@ -1,4 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../core/connection_mode.dart';
+import '../../services/local_warranty_companies.dart';
+import '../../services/local_standard_notes_service.dart';
+import '../../widgets/briskers_dialog.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/briskers_i18n.dart';
@@ -9,9 +17,13 @@ class WarrantyWorkflowSettingsScreen extends StatefulWidget {
   const WarrantyWorkflowSettingsScreen({
     super.key,
     required this.businessId,
+    this.companies,
+    this.sharedBottomNavigationBar,
   });
 
+  final Widget? sharedBottomNavigationBar;
   final String businessId;
+  final LocalWarrantyCompanies? companies;
 
   @override
   State<WarrantyWorkflowSettingsScreen> createState() =>
@@ -21,6 +33,7 @@ class WarrantyWorkflowSettingsScreen extends StatefulWidget {
 class _WarrantyWorkflowSettingsScreenState
     extends State<WarrantyWorkflowSettingsScreen> {
   static const _api = BriskersApi();
+  late final _companyStore = widget.companies ?? LocalWarrantyCompanies();
 
   bool _loading = true;
   String? _error;
@@ -36,45 +49,37 @@ class _WarrantyWorkflowSettingsScreenState
   }
 
   Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'briskers_warranty_settings_${widget.businessId}';
+    Map<String, dynamic> saved = {};
     try {
-      final companiesFuture = _api.warrantyCompanies(
-        widget.businessId,
-        includeInactive: true,
-      );
-      final notesFuture = _api.documentNoteTemplates(
-        widget.businessId,
-        includeInactive: true,
-      );
-      final disclaimersFuture = _api.disclaimerTemplates(
-        widget.businessId,
-        includeInactive: true,
-      );
-      final paymentSettingsFuture =
-          _api.warrantyPaymentSettings(widget.businessId);
-
-      final companies = await companiesFuture;
-      final notes = await notesFuture;
-      final disclaimers = await disclaimersFuture;
-      final paymentSettings = await paymentSettingsFuture;
-
+      saved = Map<String, dynamic>.from(jsonDecode(prefs.getString(key) ?? '{}') as Map);
+    } catch (_) { /* Keep locally saved companies available. */ }
+    final companies = await _companyStore.cached(widget.businessId, includeInactive: true);
+    final localNotes = await LocalStandardNotesService().cached(widget.businessId);
+    if (!mounted) return;
+    setState(() {
+      _companies = companies;
+      _notes = localNotes.isNotEmpty ? localNotes : List<Map<String, dynamic>>.from(saved['notes'] ?? []);
+      _disclaimers = List<Map<String, dynamic>>.from(saved['disclaimers'] ?? []);
+      _cardSurchargeRate = num.tryParse('${saved['card_surcharge_rate']}') ?? 0.03;
+      _loading = false;
+      _error = null;
+    });
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    final refreshed = await _companyStore.available(widget.businessId, includeInactive: true);
+    if (mounted) setState(() => _companies = refreshed);
+    try {
+      final notes = await _api.documentNoteTemplates(widget.businessId, includeInactive: true);
+      final disclaimers = await _api.disclaimerTemplates(widget.businessId, includeInactive: true);
+      final settings = await _api.warrantyPaymentSettings(widget.businessId);
+      final rate = num.tryParse('${settings['card_surcharge_rate']}') ?? 0.03;
+      await prefs.setString(key,jsonEncode({'notes':notes,'disclaimers':disclaimers,
+        'card_surcharge_rate':rate}));
       if (!mounted) return;
-      setState(() {
-        _companies = companies;
-        _notes = notes;
-        _disclaimers = disclaimers;
-        _cardSurchargeRate = num.tryParse(
-              paymentSettings['card_surcharge_rate']?.toString() ?? '',
-            ) ??
-            0.03;
-        _loading = false;
-        _error = null;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = error.toString();
-      });
+      setState(() { _notes=notes; _disclaimers=disclaimers; _cardSurchargeRate=rate; });
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Some settings could not synchronize. Saved information is available.');
     }
   }
 
@@ -96,116 +101,55 @@ class _WarrantyWorkflowSettingsScreenState
     );
     var active = company?['active'] != false;
 
-    final save = await showModalBottomSheet<bool>(
+    ModalRoute<dynamic>? companyRoute;
+    final save = await showDialog<bool>(
       context: context,
-      showDragHandle: true,
-      useSafeArea: true,
-      isScrollControlled: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setSheetState) => SafeArea(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              minHeight: MediaQuery.sizeOf(sheetContext).height * 0.65,
-              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.91,
-            ),
-          child: SingleChildScrollView(
-            padding: EdgeInsets.fromLTRB(
-              20,
-              12,
-              20,
-              MediaQuery.viewInsetsOf(sheetContext).bottom + 26,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  company == null
-                      ? 'Add warranty company'
-                      : 'Edit warranty company',
-                  style: const TextStyle(
-                    fontSize: 21,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: name,
-                  autofocus: company == null,
-                  decoration: const InputDecoration(
-                    labelText: 'Company name',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: phone,
-                  keyboardType: TextInputType.phone,
-                  inputFormatters: const [
-                    WarrantyPhoneTextInputFormatter(),
-                  ],
-                  decoration: const InputDecoration(
-                    labelText: 'Claims phone',
-                    hintText: '800-531-1925',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: email,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'Invoice submission email',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: portal,
-                  keyboardType: TextInputType.url,
-                  decoration: const InputDecoration(
-                    labelText: 'Portal / website (optional)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: notes,
-                  minLines: 2,
-                  maxLines: 5,
-                  decoration: const InputDecoration(
-                    labelText: 'Notes (optional)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: active,
-                  activeThumbColor: BriskersColors.invoices,
-                  title: const Text('Active'),
-                  onChanged: (value) =>
-                      setSheetState(() => active = value),
-                ),
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: BriskersColors.invoices,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () {
-                    if (name.text.trim().isNotEmpty) {
-                      Navigator.pop(sheetContext, true);
-                    }
-                  },
-                  child: const Text('Save'),
-                ),
-              ],
-            ),
-          ),
-          ),
+      builder: (dialogContext) {
+        companyRoute ??= ModalRoute.of(dialogContext);
+        return StatefulBuilder(
+        builder: (context, setSheetState) => BriskersDialog(
+          title: company == null ? 'Add warranty company' : 'Edit warranty company',
+          icon: Icons.shield_outlined,
+          content: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              TextField(controller: name, autofocus: company == null,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'Company name', border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              TextField(controller: phone, keyboardType: TextInputType.phone,
+                inputFormatters: const [WarrantyPhoneTextInputFormatter()],
+                decoration: const InputDecoration(labelText: 'Claims phone', border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              TextField(controller: email, keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(labelText: 'Invoice submission email', border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              TextField(controller: portal, keyboardType: TextInputType.url,
+                decoration: const InputDecoration(labelText: 'Portal / website (optional)', border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              TextField(controller: notes, minLines: 2, maxLines: 5,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(labelText: 'Notes (optional)', border: OutlineInputBorder())),
+              SwitchListTile(contentPadding: EdgeInsets.zero, value: active,
+                title: const Text('Active'), activeThumbColor: BriskersColors.confirm,
+                onChanged: (value) => setSheetState(() => active = value)),
+          ]),
+          actions: [
+            TextButton(style: BriskersDialog.cancelStyle,
+              onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+            ValueListenableBuilder<TextEditingValue>(valueListenable: name,
+              builder: (context, value, _) => FilledButton(
+                style: BriskersDialog.confirmStyle(),
+                onPressed: value.text.trim().isEmpty ? null : () {
+                  FocusScope.of(dialogContext).unfocus();
+                  Navigator.pop(dialogContext, true);
+                }, child: const Text('Save'))),
+          ],
         ),
-      ),
+      );
+      },
     );
 
+    await companyRoute?.completed;
     final companyName = name.text.trim();
     final claimsPhone = formatWarrantyPhone(phone.text.trim());
     final submissionEmail = email.text.trim();
@@ -220,41 +164,20 @@ class _WarrantyWorkflowSettingsScreenState
 
     if (save != true || companyName.isEmpty) return;
 
-    if (company == null) {
-      final id = await _api.createWarrantyCompany(
-        widget.businessId,
-        name: companyName,
+    try {
+      await _companyStore.save(widget.businessId,
+        id: company?['id']?.toString(), name: companyName,
         claimsPhone: claimsPhone.isEmpty ? null : claimsPhone,
         submissionEmail: submissionEmail.isEmpty ? null : submissionEmail,
-      );
-      if (portalUrl.isNotEmpty || noteText.isNotEmpty || !active) {
-        await _api.updateWarrantyCompany(
-          widget.businessId,
-          id,
-          name: companyName,
-          claimsPhone: claimsPhone.isEmpty ? null : claimsPhone,
-          submissionEmail:
-              submissionEmail.isEmpty ? null : submissionEmail,
-          portalUrl: portalUrl.isEmpty ? null : portalUrl,
-          notes: noteText.isEmpty ? null : noteText,
-          active: active,
-        );
-      }
-    } else {
-      await _api.updateWarrantyCompany(
-        widget.businessId,
-        company['id'].toString(),
-        name: companyName,
-        claimsPhone: claimsPhone.isEmpty ? null : claimsPhone,
-        submissionEmail:
-            submissionEmail.isEmpty ? null : submissionEmail,
         portalUrl: portalUrl.isEmpty ? null : portalUrl,
-        notes: noteText.isEmpty ? null : noteText,
-        active: active,
-      );
+        notes: noteText.isEmpty ? null : noteText, active: active);
+      await _load();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(error is StateError ? error.message.toString() : 'Could not save the company on this device.')));
+      }
     }
-
-    await _load();
   }
 
   Future<void> _editNote([Map<String, dynamic>? note]) async {
@@ -594,6 +517,7 @@ class _WarrantyWorkflowSettingsScreenState
       appBar: AppBar(
         title: const Text('Warranty & invoice notes'),
       ),
+      bottomNavigationBar: widget.sharedBottomNavigationBar,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -637,7 +561,7 @@ class _WarrantyWorkflowSettingsScreenState
                   ),
                   if (_companies.isEmpty)
                     const ListTile(
-                      title: Text('No warranty companies saved yet.'),
+                      title: Text('No warranty companies saved on this device.'),
                     )
                   else
                     ..._companies.map(
@@ -665,6 +589,7 @@ class _WarrantyWorkflowSettingsScreenState
                                 .isNotEmpty)
                               company['submission_email'].toString(),
                             if (company['active'] == false) 'Inactive',
+                            if (company['pending_sync'] == true) 'Saved on this device',
                           ].join(' • '),
                         ),
                         trailing: const Icon(Icons.chevron_right),

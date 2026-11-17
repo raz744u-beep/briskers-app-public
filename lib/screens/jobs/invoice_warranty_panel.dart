@@ -1,7 +1,7 @@
+import '../../widgets/briskers_dialog.dart';
+import '../../services/local_warranty_companies.dart';
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 
 import '../../core/briskers_colors.dart';
 import '../../core/warranty_payment_amounts.dart';
@@ -16,13 +16,9 @@ Widget _createWarrantyCompanyDialog(
   required TextEditingController phone,
   required TextEditingController email,
   required bool autofocusName,
-}) => AlertDialog(
-  backgroundColor: Theme.of(context).colorScheme.surface,
-  surfaceTintColor: Colors.transparent,
-  insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-  actionsPadding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-  scrollable: true,
-  title: Text(tr('addWarrantyCompany')),
+}) => BriskersDialog(
+  icon: Icons.shield_outlined,
+  title: tr('addWarrantyCompany'),
   content: SizedBox(
     width: MediaQuery.sizeOf(context).width * 0.92,
     child: Column(
@@ -67,13 +63,14 @@ Widget _createWarrantyCompanyDialog(
   actions: [
     TextButton(
       onPressed: () => Navigator.pop(context, false),
+      style: BriskersDialog.cancelStyle,
       child: Text(tr('cancel')),
     ),
     ValueListenableBuilder<TextEditingValue>(
       valueListenable: name,
       builder: (context, value, _) => FilledButton(
         style: FilledButton.styleFrom(
-          backgroundColor: BriskersColors.invoices,
+          backgroundColor: BriskersColors.confirm,
           foregroundColor: Colors.white,
           minimumSize: const Size(96, 48),
         ),
@@ -309,16 +306,17 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
     final phone = TextEditingController();
     final email = TextEditingController();
 
+    ModalRoute<dynamic>? companyRoute;
     final save = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => _createWarrantyCompanyDialog(
-        dialogContext,
-        name: name,
-        phone: phone,
-        email: email,
-        autofocusName: initialName.isEmpty,
-      ),
+      builder: (dialogContext) {
+        companyRoute ??= ModalRoute.of(dialogContext);
+        return _createWarrantyCompanyDialog(dialogContext,
+          name: name, phone: phone, email: email,
+          autofocusName: initialName.isEmpty);
+      },
     );
+    await companyRoute?.completed;
 
     final companyName = name.text.trim();
     final claimsPhone = formatWarrantyPhone(phone.text.trim());
@@ -330,20 +328,19 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
 
     if (save != true || companyName.isEmpty) return null;
 
-    final id = await _api.createWarrantyCompany(
-      widget.businessId,
-      name: companyName,
-      claimsPhone: claimsPhone.isEmpty ? null : claimsPhone,
-      submissionEmail: submissionEmail.isEmpty ? null : submissionEmail,
-    );
-
-    return {
-      'id': id,
-      'name': companyName,
-      'claims_phone': claimsPhone,
-      'submission_email': submissionEmail,
-      'active': true,
-    };
+    try {
+      final store = LocalWarrantyCompanies();
+      final id = await store.save(widget.businessId,
+        name: companyName, claimsPhone: claimsPhone, submissionEmail: submissionEmail);
+      return (await store.cached(widget.businessId))
+          .where((company) => company['id'] == id).first;
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(this.context).showSnackBar(SnackBar(
+          content: Text(error is StateError ? error.message.toString() : 'Could not save the company on this device.')));
+      }
+      return null;
+    }
   }
 
   Future<void> _saveLocalWarranty(Map<String, dynamic> values) async {
@@ -366,27 +363,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
     }
   }
 
-  String get _companiesKey => 'briskers_warranty_companies_${widget.businessId}';
-
-  Future<List<Map<String, dynamic>>> _cachedWarrantyCompanies() async {
-    final prefs = await SharedPreferences.getInstance();
-    try {
-      final decoded = jsonDecode(prefs.getString(_companiesKey) ?? '[]');
-      return (decoded as List)
-          .whereType<Map>()
-          .map((entry) => Map<String, dynamic>.from(entry))
-          .toList();
-    } catch (_) {
-      return [];
-    }
-  }
-
-  Future<void> _cacheWarrantyCompanies(
-      List<Map<String, dynamic>> companies) async {
-    if (companies.isEmpty) return;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_companiesKey, jsonEncode(companies));
-  }
+  Future<List<Map<String, dynamic>>> _cachedWarrantyCompanies() =>
+      LocalWarrantyCompanies().cached(widget.businessId);
 
   Future<void> _editLocalWarranty() async {
     final companies = await _cachedWarrantyCompanies();
@@ -459,7 +437,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
                     InkWell(
                       borderRadius: BorderRadius.circular(12),
                       onTap: () async {
-                        final picked = await _pickCompany(sheetContext, companies, allowCreate: false);
+                        final picked = await _pickCompany(sheetContext, companies, allowCreate: true);
                         if (picked != null && sheetContext.mounted) {
                           setSheetState(() => selected = picked);
                         }
@@ -487,8 +465,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
                       const SizedBox(height: 6),
                       Text(
                         <String>[
-                          if (phone.isNotEmpty) 'Claims: \$phone',
-                          if (email.isNotEmpty) 'Submit: \$email',
+                          if (phone.isNotEmpty) 'Claims: $phone',
+                          if (email.isNotEmpty) 'Submit: $email',
                         ].join('\n'),
                         style: const TextStyle(
                           fontSize: 13,
@@ -733,8 +711,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
     setState(() => _busy = true);
 
     try {
-      final companies = await _api.warrantyCompanies(widget.businessId);
-      await _cacheWarrantyCompanies(companies);
+      final companies = await LocalWarrantyCompanies().available(widget.businessId);
       if (!mounted) return;
 
       Map<String, dynamic>? selected;
@@ -829,8 +806,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
                       const SizedBox(height: 6),
                       Text(
                         <String>[
-                          if (phone.isNotEmpty) 'Claims: \$phone',
-                          if (email.isNotEmpty) 'Submit: \$email',
+                          if (phone.isNotEmpty) 'Claims: $phone',
+                          if (email.isNotEmpty) 'Submit: $email',
                         ].join('\n'),
                         style: const TextStyle(
                           fontSize: 13,
@@ -957,7 +934,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
         widget.documentId,
         expectedVersion: widget.expectedVersion,
         extendedWarranty: true,
-        warrantyCompanyId: result['company_id']?.toString(),
+        warrantyCompanyId: await LocalWarrantyCompanies().serverId(
+          widget.businessId, result['company_id']?.toString()),
         claimNumber: (result['claim']?.toString() ?? '').isEmpty
             ? null
             : result['claim']?.toString(),

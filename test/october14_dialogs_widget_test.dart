@@ -1,3 +1,4 @@
+import 'package:briskers_app/widgets/briskers_dialog.dart';
 import 'package:briskers_app/core/briskers_i18n.dart';
 import 'package:briskers_app/core/briskers_colors.dart';
 import 'package:briskers_app/screens/jobs/invoice_warranty_panel.dart';
@@ -366,7 +367,7 @@ void main() {
     await tester.enterText(_field('Company name'), '   ');
     await tester.pump();
     expect(tester.widget<FilledButton>(add).onPressed, isNull);
-    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.byType(BriskersDialog), findsOneWidget);
     await tester.enterText(_field('Company name'), 'Synthetic warranty');
     await tester.enterText(_field('Claims phone'), '8005311925');
     await tester.enterText(_field('Invoice submission email'), 'claims@example.com');
@@ -378,7 +379,7 @@ void main() {
     expect(result, isTrue);
     expect(name.text, 'Synthetic warranty');
     expect(email.text, 'claims@example.com');
-    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.byType(BriskersDialog), findsNothing);
   });
 
   testWidgets('invoice Add Company is spacious and keyboard-safe on small screens', (
@@ -400,15 +401,14 @@ void main() {
       textScale: 1.3,
       onClosed: (value) => result = value,
     );
-    final dialog = tester.widget<AlertDialog>(find.byType(AlertDialog));
-    expect(dialog.scrollable, isTrue);
-    expect(dialog.backgroundColor,
-        Theme.of(tester.element(find.byType(AlertDialog))).colorScheme.surface);
-    expect(dialog.surfaceTintColor, Colors.transparent);
-    expect((dialog.content! as SizedBox).width, closeTo(360 * 0.92, 0.01));
+    final dialog = tester.widget<BriskersDialog>(find.byType(BriskersDialog));
+    final surface = tester.widget<Dialog>(find.byType(Dialog));
+    expect(surface.backgroundColor, Colors.white);
+    expect(surface.surfaceTintColor, Colors.transparent);
+    expect((dialog.content as SizedBox).width, closeTo(360 * 0.92, 0.01));
     final add = find.widgetWithText(FilledButton, 'Add');
     expect(tester.widget<FilledButton>(add).style!.backgroundColor!.resolve({}),
-        BriskersColors.invoices);
+        BriskersColors.confirm);
     expect(tester.widget<TextField>(_field('Company name')).autofocus, isFalse);
     for (final field in tester.widgetList<TextField>(find.byType(TextField))) {
       expect(field.decoration!.border, isA<OutlineInputBorder>());
@@ -425,6 +425,6 @@ void main() {
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pumpAndSettle();
     expect(result, isFalse);
-    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.byType(BriskersDialog), findsNothing);
   });
 }

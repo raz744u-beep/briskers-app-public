@@ -1,8 +1,7 @@
+import '../services/local_warranty_companies.dart';
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/supabase_config.dart';
@@ -299,14 +298,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     try {
       // Warranty company choice should be available in the same form offline.
       // IDs come from actual shop configuration, never fabricated defaults.
-      final companies = await _api.warrantyCompanies(widget.businessId);
-      if (companies.isNotEmpty) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(
-          'briskers_warranty_companies_${widget.businessId}',
-          jsonEncode(companies),
-        );
-      }
+      await LocalWarrantyCompanies().available(widget.businessId);
     } catch (_) {
       // Retain the last known shop-scoped warranty company list.
     }
