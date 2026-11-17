@@ -66,14 +66,28 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
   int? _nextJobNumber;
   int? _reuseInvoice;
   int? _reuseJob;
+  List<int> _availableEstimates = const [];
+  int? _nextEstimateNumber;
+  int? _reuseEstimate;
 
   Future<void> _loadAvailableNumbers() async {
-    if (widget.kind != 'invoice' ||
+    if (widget.kind != 'estimate' &&
         !BriskersConnectionModeController.instance.forceOffline) {
       return;
     }
     try {
       final numbers = LocalNumberAllocator(localDatabase);
+      if (widget.kind == 'estimate') {
+        final available = await numbers.availableNumbers(widget.businessId, 'estimate');
+        final next = await numbers.nextNumber(widget.businessId, 'estimate');
+        if (!mounted) return;
+        setState(() {
+          _availableEstimates = available;
+          _nextEstimateNumber = next;
+          if (!available.contains(_reuseEstimate)) _reuseEstimate = null;
+        });
+        return;
+      }
       final invoices = await numbers.availableNumbers(widget.businessId, 'invoice');
       final jobs = await numbers.availableNumbers(widget.businessId, 'job');
       final nextInvoice = await numbers.nextNumber(widget.businessId, 'invoice');
@@ -97,8 +111,9 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
   }
 
   Widget _numberChoice(String label, List<int> numbers, int? selected,
-      ValueChanged<int?> onChanged, {bool job = false}) {
-    final next = job ? _nextJobNumber : _nextInvoiceNumber;
+      ValueChanged<int?> onChanged, {bool job = false, bool estimate = false}) {
+    final next = estimate ? _nextEstimateNumber : job ? _nextJobNumber : _nextInvoiceNumber;
+    final prefix = estimate ? 'E-' : job ? 'J-' : '#';
     return Padding(
       padding: const EdgeInsets.only(top: 12),
       child: DropdownButtonFormField<int>(
@@ -117,14 +132,12 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
             value: null,
             child: Text(next == null
                 ? 'Use next number'
-                : job ? 'Next: J-$next' : 'Next: #$next'),
+                : 'Next: $prefix$next'),
           ),
           for (final number in numbers)
             DropdownMenuItem<int>(
               value: number,
-              child: Text(job
-                  ? 'Reuse from pool: J-$number'
-                  : 'Reuse from pool: #$number'),
+              child: Text('Reuse from pool: $prefix$number'),
             ),
         ],
         onChanged: _saving ? null : onChanged,
@@ -342,20 +355,22 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
     try {
       final isEstimate=widget.kind=='estimate';
       LocalOwnerGrant? reuseGrant;
-      if (!isEstimate && (_reuseInvoice != null || _reuseJob != null)) {
-        if (!BriskersConnectionModeController.instance.forceOffline) {
+      if (isEstimate ? _reuseEstimate != null : _reuseInvoice != null || _reuseJob != null) {
+        if (!isEstimate && !BriskersConnectionModeController.instance.forceOffline) {
           throw StateError('Keep Force Offline enabled to use the local number pool.');
         }
         reuseGrant = await DeviceOwnerAuthorization.instance.authority
             .authorizeLocal(widget.businessId);
         if (!mounted) return;
-        if (!BriskersConnectionModeController.instance.forceOffline) {
+        if (!isEstimate && !BriskersConnectionModeController.instance.forceOffline) {
           throw StateError('Keep Force Offline enabled to use the local number pool.');
         }
       }
       final invoiceId = isEstimate
           ? await _offlineDrafts.createStandaloneEstimate(
                   widget.businessId,
+                  reuseEstimateNumber: _reuseEstimate,
+                  reuseGrant: reuseGrant,
                   customerId: customerId,
                   customerName: widget.initialCustomerName ??
                       _customers.where((row) => row['id']?.toString() == customerId)
@@ -524,6 +539,9 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ],
+          if (widget.kind == 'estimate' && _nextEstimateNumber != null)
+            _numberChoice('Estimate number', _availableEstimates, _reuseEstimate,
+              (value) => setState(() => _reuseEstimate = value), estimate: true),
           if (widget.kind == 'invoice' &&
               BriskersConnectionModeController.instance.forceOffline) ...[
             const SizedBox(height: 18),

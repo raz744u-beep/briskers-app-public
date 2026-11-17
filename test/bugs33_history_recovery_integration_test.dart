@@ -1,4 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
+
+import 'package:briskers_app/core/connection_mode.dart';
+import 'package:briskers_app/core/supabase_config.dart';
+import 'package:briskers_app/services/local_document_repository.dart';
+import 'package:briskers_app/services/expenses_period_totals.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:briskers_app/local/briskers_local_database.dart' show BriskersLocalDatabase;
 import 'package:briskers_app/services/financial_history_recovery.dart';
@@ -8,6 +15,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+Map<String, dynamic> _authResponse() {
+  String segment(Object data) => base64Url.encode(utf8.encode(jsonEncode(data))).replaceAll('=', '');
+  final claims = {'sub': 'test-owner', 'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600};
+  final token = "${segment({'alg': 'HS256', 'typ': 'JWT'})}.${segment(claims)}.Zml4dHVyZQ";
+  return {'access_token': token, 'refresh_token': 'test-refresh',
+    'token_type': 'bearer', 'expires_in': 3600,
+    'user': {'id': 'test-owner', 'aud': 'authenticated', 'created_at': '2026-01-01T00:00:00Z'}};
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -28,12 +44,7 @@ void main() {
     final transport = MockClient((request) async {
       Object response;
       if (request.url.path == '/auth/v1/token') {
-        String segment(Object data) => base64Url.encode(utf8.encode(jsonEncode(data))).replaceAll('=', '');
-        final claims = {'sub': 'test-owner', 'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600};
-        final token = "${segment({'alg': 'HS256', 'typ': 'JWT'})}.${segment(claims)}.Zml4dHVyZQ";
-        response = {'access_token': token, 'refresh_token': 'test-refresh',
-          'token_type': 'bearer', 'expires_in': 3600,
-          'user': {'id': 'test-owner', 'aud': 'authenticated', 'created_at': '2026-01-01T00:00:00Z'}};
+        response = _authResponse();
       } else {
         expect(request.url.path, '/rest/v1/rpc/briskers_list_transactions_recurring_v1');
         final args = jsonDecode(request.body) as Map;
@@ -69,4 +80,86 @@ void main() {
     expect(offsets, [0, 0, 0, FinancialHistoryRecovery.pageSize]);
     expect((await db.customSelect('SELECT COUNT(*) AS n FROM sync_outbox').getSingle()).data['n'], 0);
   });
+
+  test('Force Offline downloads past 1,000 rows and reports saved years after restart', () async {
+    SharedPreferences.setMockInitialValues({});
+    final mode = BriskersConnectionModeController.instance;
+    await mode.setMode(BriskersConnectionMode.auto);
+    addTearDown(() => mode.setMode(BriskersConnectionMode.auto));
+    final dir = await Directory.systemTemp.createTemp('financial-history-');
+    final file = File('${dir.path}/ledger.sqlite');
+    var db = BriskersLocalDatabase(NativeDatabase(file));
+    addTearDown(() async {
+      await db.close();
+      await dir.delete(recursive: true);
+    });
+    final posted = [
+      for (var i = 0; i < 1240; i++) {
+        'id': 'expense-$i',
+        'business_id': 'shop',
+        'transaction_date': i < 1000 ? '2026-08-15' : '2025-02-12',
+        'direction': 'expense',
+        'amount': i < 1000 ? 10 : 12.5,
+      },
+    ];
+    final invoices = [
+      for (var i = 0; i < 1100; i++) {
+        'id': 'invoice-$i',
+        'kind': 'invoice',
+        'status': 'closed',
+        'document_date': i < 1000 ? '2026-09-01' : '2025-02-12',
+        'total_amount': 100,
+      },
+    ];
+    final requested = <String>[];
+    final client = SupabaseClient(supabaseUrl, 'fixture',
+      httpClient: BriskersSupabaseHttpClient(MockClient((request) async {
+        requested.add(request.url.path);
+        final args = jsonDecode(request.body) as Map;
+        final Object result = switch (request.url.path) {
+          '/auth/v1/token' => _authResponse(),
+          '/rest/v1/rpc/briskers_list_documents_v4' => invoices,
+          '/rest/v1/rpc/briskers_list_transactions_recurring_v1' =>
+            posted.skip(args['p_offset'] as int).take(args['p_limit'] as int).toList(),
+          _ => fail('Unexpected network request ${request.url.path}'),
+        };
+        return http.Response(jsonEncode(result), 200, request: request,
+          headers: {'content-type': 'application/json'});
+      })),
+    );
+    addTearDown(client.dispose);
+    await client.auth.signInWithPassword(email: 'owner@example.invalid', password: 'fixture');
+    await mode.setMode(BriskersConnectionMode.offline);
+    final cache = LocalFinancialCache(database: db);
+    await cache.saveTransactions('shop', posted.take(1000).toList());
+    final recovery = FinancialHistoryRecovery(client: client, cache: cache,
+      documents: LocalDocumentRepository(database: db));
+    expect(await recovery.download(businessId: 'shop', start: null,
+      end: DateTime(2026, 11, 17), onPage: (_) {}), 1240);
+    expect(await recovery.downloadInvoices('shop'), 1100);
+    expect(mode.forceOffline, isTrue);
+    expect(requested.where((path) => path.contains('list_transactions')), hasLength(7));
+    final requestsAfterDownload = requested.length;
+    await db.close();
+    db = BriskersLocalDatabase(NativeDatabase(file));
+    final saved = LocalFinancialCache(database: db);
+    final coverage = await saved.postedHistoryCoverage('shop');
+    expect(coverage, (start: null, end: DateTime(2026, 11, 17)));
+    final priorYear = await saved.loadTransactions('shop', startDate: DateTime(2025),
+      endDate: DateTime(2025, 12, 31));
+    final totals = await ExpensesPeriodTotals.calculate(readPage: (offset, limit) async =>
+      priorYear.skip(offset).take(limit).toList());
+    expect(totals.transactions, 240);
+    expect(totals.expenses, 3000);
+    expect(await saved.loadTransactions('shop'), hasLength(1240));
+    final documents = LocalDocumentRepository(database: db);
+    final savedInvoices = await documents.listByKind('shop', kind: 'invoice');
+    expect(savedInvoices, hasLength(1100));
+    expect(savedInvoices.where((row) => row['document_date'] == '2025-02-12')
+      .fold<num>(0, (sum, row) => sum + (row['total_amount'] as num)), 10000);
+    expect(await documents.invoiceHistoryCheckedAt('shop'), isNotNull);
+    expect(requested, hasLength(requestsAfterDownload));
+    expect(await db.customSelect('SELECT * FROM sync_outbox').get(), isEmpty);
+  });
+
 }

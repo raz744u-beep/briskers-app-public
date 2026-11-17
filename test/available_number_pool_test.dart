@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/core/connection_mode.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_number_allocator.dart';
+import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_owner_authorization.dart';
 import 'package:briskers_app/services/offline_document_draft_service.dart';
 
@@ -53,6 +54,35 @@ void main() {
         vehicleId: 'vehicle', vehicleLabel: 'Synthetic vehicle',
         reuseInvoiceNumber: invoice, reuseJobNumber: job, reuseGrant: grant,
       );
+
+  test('deleted estimate number persists and can be reused once offline', () async {
+    final drafts = OfflineDocumentDraftService(database: db);
+    final id = await drafts.createStandaloneEstimate(
+      'shop', customerId: 'customer', customerName: 'Synthetic customer',
+    );
+    final later = await drafts.createStandaloneEstimate(
+      'shop', customerId: 'customer', customerName: 'Synthetic customer',
+    );
+    await drafts.deleteEstimate('shop', id);
+    await db.close();
+    db = BriskersLocalDatabase(NativeDatabase(File('${dir.path}/test.sqlite')));
+    final numbers = LocalNumberAllocator(db);
+    expect(await numbers.availableNumbers('shop', 'estimate'), [1]);
+    expect(await numbers.availableNumbers('other', 'estimate'), isEmpty);
+    final cache = LocalDocumentDetailCache(database: db);
+    expect(await cache.load('shop', id), isNull);
+    expect((await cache.load('shop', later))?['document_number'], 'E-2');
+    final service = OfflineDocumentDraftService(database: db);
+    Future<String> reuse() => service.createStandaloneEstimate(
+      'shop', customerId: 'customer', customerName: 'Synthetic customer',
+      reuseEstimateNumber: 1, reuseGrant: grant,
+    );
+    final replacement = await reuse();
+    expect(replacement, isNot(id));
+    expect((await cache.load('shop', replacement))?['document_number'], 'E-1');
+    expect(await numbers.availableNumbers('shop', 'estimate'), isEmpty);
+    await expectLater(reuse(), throwsStateError);
+  });
 
   test('pool contains explicit releases only, scoped by shop and kind', () async {
     final numbers = LocalNumberAllocator(db);

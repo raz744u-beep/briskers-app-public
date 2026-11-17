@@ -1,3 +1,4 @@
+import 'local_document_sql_store.dart';
 import 'local_estimate_number.dart';
 import 'local_invoice_closure.dart';
 import 'package:drift/drift.dart';
@@ -90,8 +91,10 @@ class LocalDocumentRepository {
     await LocalJobRetirement.ensureSchema(_database);
     await _ensureRecoveryAliasTable();
     return (
-      documents: await LocalJobRetirement.blockedDocumentIds(
-        _database, businessId),
+      documents: {
+        ...await LocalJobRetirement.blockedDocumentIds(_database, businessId),
+        ...await deletedEstimateIds(businessId),
+      },
       jobs: await LocalJobRetirement.blockedJobIds(_database, businessId),
     );
   }
@@ -214,6 +217,66 @@ class LocalDocumentRepository {
       [businessId, invoiceId],
     );
   }
+
+  Future<Set<String>> deletedEstimateIds(String businessId) async {
+    await LocalDocumentSqlStore.ensure(_database);
+    final prefix = LocalDocumentDetailCache.key(businessId, '');
+    final rows = await _database.customSelect(
+      'SELECT cache_key FROM local_document_detail_deleted '
+      'WHERE substr(cache_key, 1, ?) = ?',
+      variables: [Variable(prefix.length), Variable(prefix)],
+    ).get();
+    return {
+      for (final row in rows)
+        row.read<String>('cache_key').substring(prefix.length),
+    };
+  }
+
+  /// Called in the same transaction as releasing the number.
+  Future<void> recordEstimateDeleted(String businessId, String estimateId) async {
+    final key = LocalDocumentDetailCache.key(businessId, estimateId);
+    await LocalDocumentSqlStore.ensure(_database);
+    await _database.customStatement(
+      "DELETE FROM local_documents WHERE business_id=? AND id=? AND kind='estimate'",
+      [businessId, estimateId],
+    );
+    await _database.customStatement(
+      'INSERT OR IGNORE INTO local_document_detail_deleted VALUES (?)', [key],
+    );
+    await _database.customStatement(
+      'DELETE FROM local_document_details WHERE cache_key=?', [key],
+    );
+    await LocalEstimateNumber.ensureRepairQueue(_database);
+    await _database.customStatement(
+      'DELETE FROM local_estimate_number_sync_v2 WHERE business_id=? AND estimate_id=?',
+      [businessId, estimateId],
+    );
+  }
+
+  Future<void> _ensureInvoiceHistoryTable() => _database.customStatement(
+    'CREATE TABLE IF NOT EXISTS local_invoice_history '
+    '(business_id TEXT PRIMARY KEY NOT NULL, checked_at TEXT NOT NULL)',
+  );
+
+  Future<DateTime?> invoiceHistoryCheckedAt(String businessId) async {
+    await _ensureInvoiceHistoryTable();
+    final row = await _database.customSelect(
+      'SELECT checked_at FROM local_invoice_history WHERE business_id=?',
+      variables: [Variable(businessId)],
+    ).getSingleOrNull();
+    return DateTime.tryParse(row?.read<String>('checked_at') ?? '')?.toLocal();
+  }
+
+  Future<void> importInvoiceHistory(
+    String businessId, List<Map<String, dynamic>> invoices,
+  ) => _database.transaction(() async {
+    await upsertFromServer(businessId, invoices);
+    await _ensureInvoiceHistoryTable();
+    await _database.customStatement(
+      'INSERT OR REPLACE INTO local_invoice_history VALUES (?, ?)',
+      [businessId, DateTime.now().toUtc().toIso8601String()],
+    );
+  });
 
   Future<void> upsertFromServer(
     String businessId,
@@ -384,7 +447,7 @@ class LocalDocumentRepository {
         }
       }
     }
-    return Future.wait(result.map((row) => LocalInvoiceClosureStore(_database).project(businessId,row)));
+    return LocalInvoiceClosureStore(_database).projectRows(businessId, result);
   }
 
   Future<String?> createdAtForDocument(

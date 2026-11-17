@@ -922,7 +922,24 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                       : taskGreen,
                   fontFeatures: const [FontFeature.tabularFigures()],),),
             ),],),),);
-    Widget summary(String label,String value)=>Padding(padding:const EdgeInsets.symmetric(vertical:6),child:Row(crossAxisAlignment:CrossAxisAlignment.baseline,textBaseline:TextBaseline.alphabetic,children:[Expanded(child:Text(label)),Text(value,style:const TextStyle(fontWeight:FontWeight.w800)),],),);
+    Widget summary(String label, String value, {String? unit, bool total = false}) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Expanded(
+              child: Text(label, style: total
+                  ? const TextStyle(fontWeight: FontWeight.w700)
+                  : null),
+            ),
+            if (unit != null) ...[Text(unit), const SizedBox(width: 6)],
+            Text(value, style: const TextStyle(fontWeight: FontWeight.w800)),
+          ],
+        ),
+      );
+    }
     return ListView(key:const Key('employee-payroll-preparation'),padding: EdgeInsets.fromLTRB(12,
         12,
         12,
@@ -973,14 +990,13 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   ],
                 ),
               ),
-              Padding(padding:const EdgeInsets.all(12),child:Column(children:[summary('Total Selected Hours','${_totalHours.toStringAsFixed(2)} hrs',),summary('Labor Pay',money(labor)),summary('Adjustments (+/−)',money(adjustment)),summary('Gross Pay',money(gross)),summary('Advance repayment',money(_preparedRepayment)),
+              Padding(padding:const EdgeInsets.all(12),child:Column(children:[summary('Total Selected Hours', _totalHours.toStringAsFixed(2), unit: 'hrs'),summary('Labor Pay',money(labor)),summary('Adjustments (+/−)',money(adjustment)),summary('Gross Pay',money(gross)),summary('Advance repayment',money(_preparedRepayment)),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
                       decoration: BoxDecoration(
                         color: const Color(0xFFBCEFB4),
                         borderRadius: BorderRadius.circular(9),
                       ),
-                      child: summary('Payment Total',money(net)),
+                      child: summary('Payment Total', money(net), total: true),
                     ),
                     const SizedBox(height: 8),
                     OutlinedButton.icon(onPressed:_saving?null:()=>_editPreparation(labor+widget.weeklyAdjustmentCents,),

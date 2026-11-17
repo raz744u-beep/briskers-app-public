@@ -1,3 +1,4 @@
+import '../../core/briskers_colors.dart';
 import '../../widgets/briskers_curved_tabs.dart';
 import '../../services/local_task_schedule.dart';
 import 'package:flutter/material.dart';
@@ -467,10 +468,10 @@ class ApprovedProfileTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const BriskersCurvedTabs(entries: [
-    (label: 'Work', color: Color(0xFF2479C6), icon: Icons.layers_outlined),
-    (label: 'Payroll', color: Color(0xFF176B40), icon: Icons.payments_outlined),
-    (label: 'Reports', color: Color(0xFF6942A2), icon: Icons.bar_chart),
-    (label: 'Taxes', color: Color(0xFF697586), icon: Icons.description_outlined),
+    (label: 'Work', color: BriskersColors.tabBlue, icon: Icons.layers_outlined),
+    (label: 'Payroll', color: BriskersColors.tabGreen, icon: Icons.payments_outlined),
+    (label: 'Reports', color: BriskersColors.tabPurple, icon: Icons.bar_chart),
+    (label: 'Taxes', color: BriskersColors.tabGray, icon: Icons.description_outlined),
   ]);
 }
 

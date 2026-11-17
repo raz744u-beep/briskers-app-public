@@ -431,14 +431,41 @@ class OfflineDocumentDraftService {
     }
   }
 
-  /// Cancel a standalone estimate before any upload attempt. Converted or
-  /// server-backed estimates must be resolved separately.
+  Future<void> deleteEstimate(String businessId, String estimateId) async {
+    final snapshot = await _cache.load(businessId, estimateId);
+    final syncedId = snapshot?['_server_document_id']?.toString();
+    if (estimateId.startsWith('local-estimate-') && syncedId == null) {
+      await cancelNeverSyncedStandaloneEstimate(businessId, estimateId);
+      return;
+    }
+    final id = syncedId ?? estimateId;
+    final savedNumber = await LocalEstimateNumber.stored(_database, businessId, id)
+        ?? LocalEstimateNumber.existing(snapshot?['document_number']);
+    await _api.deleteEstimate(businessId, id);
+    await _database.transaction(() async {
+      // Builds before the pool change kept the reservation on the draft ID.
+      final numbers = LocalNumberAllocator(_database);
+      await numbers.ensureSchema();
+      await _database.customStatement(
+        'UPDATE local_number_reservations SET entity_id=? WHERE business_id=? '
+        "AND kind='estimate' AND entity_id=? AND active=1",
+        [id, businessId, 'local-estimate-$id'],
+      );
+      if (estimateId != id) {
+        await _documents.recordEstimateDeleted(businessId, estimateId);
+      }
+      await numbers.release(businessId, 'estimate', id, previousNumber: savedNumber);
+      await _documents.recordEstimateDeleted(businessId, id);
+    });
+  }
+
+  /// Cancel a draft before any upload attempt or conversion.
   Future<void> cancelNeverSyncedStandaloneEstimate(
     String businessId,
     String estimateId,
   ) async {
     if (!estimateId.startsWith('local-estimate-')) {
-      throw StateError('Only local standalone estimates can be canceled.');
+      throw StateError('Only local estimates can be canceled.');
     }
     final snapshot = await _cache.load(businessId, estimateId);
     if (snapshot == null ||
@@ -468,7 +495,7 @@ class OfflineDocumentDraftService {
       if (upload.read<String>('operation') != 'create_estimate') {
         throw StateError(
           'Estimate cannot be deleted safely: its creation operation is '
-          'not a standalone estimate.',
+          'not an estimate.',
         );
       }
       if (upload.read<String>('state') != 'pending') {
@@ -488,8 +515,8 @@ class OfflineDocumentDraftService {
       );
       if (payload['local_id']?.toString() != estimateId ||
           payload['kind']?.toString() != 'estimate' ||
-          snapshot['job_id']?.toString().isNotEmpty == true) {
-        throw StateError('Standalone estimate references do not match.');
+          payload['job_id']?.toString() != snapshot['job_id']?.toString()) {
+        throw StateError('Saved estimate references do not match.');
       }
       final related = await _database.customSelect(
         """SELECT COUNT(*) AS count FROM sync_outbox
@@ -507,13 +534,16 @@ class OfflineDocumentDraftService {
         'DELETE FROM sync_outbox WHERE id=?',
         [rows.single.read<int>('id')],
       );
-      await _database.customStatement(
-        'DELETE FROM local_documents WHERE business_id=? AND id=? '
-        "AND sync_state='pending' AND converted=0",
-        [businessId, estimateId],
-      );
+      final estimate = await _database.customSelect(
+        "SELECT document_number FROM local_documents WHERE business_id=? AND id=? "
+        "AND kind='estimate' AND sync_state='pending' AND converted=0",
+        variables: [Variable(businessId), Variable(estimateId)],
+      ).getSingleOrNull();
+      if (estimate == null) throw StateError('The estimate changed while deleting.');
+      await LocalNumberAllocator(_database).release(businessId, 'estimate',
+        estimateId, previousNumber: estimate.data['document_number']);
+      await _documents.recordEstimateDeleted(businessId, estimateId);
     });
-    await _cache.remove(businessId, estimateId);
   }
 
   String _lineId() {
@@ -543,6 +573,8 @@ class OfflineDocumentDraftService {
     String? vehicleLabel,
     List<Map<String, dynamic>> initialLines = const [],
     String? initialMemo,
+    int? reuseEstimateNumber,
+    LocalOwnerGrant? reuseGrant,
   }) async {
     if (customerId.isEmpty) {
       throw StateError('Select a saved customer before creating an estimate.');
@@ -575,7 +607,19 @@ class OfflineDocumentDraftService {
       vehicleId = await identities.resolve(businessId, vehicleId);
       detail['customer_id'] = customerId;
       detail['vehicle_id'] = vehicleId;
-      final number = await LocalEstimateNumber.allocate(_database, businessId, id);
+      if (reuseEstimateNumber != null) {
+        final grant = reuseGrant;
+        if (grant == null) throw StateError('Owner authorization is required.');
+        grant.assertValid(businessId, grant.actorId);
+        final available = await LocalNumberAllocator(_database)
+            .availableNumbers(businessId, 'estimate');
+        if (!available.contains(reuseEstimateNumber)) {
+          throw StateError('That estimate number is no longer available. Choose again.');
+        }
+      }
+      final number = await LocalEstimateNumber.allocate(
+        _database, businessId, id, requested: reuseEstimateNumber,
+      );
       detail['document_number'] = number;
       await _database.customStatement(
         '''
@@ -609,6 +653,7 @@ class OfflineDocumentDraftService {
       );
       // A sync worker cannot observe the queued copy before its full detail.
       await _cache.save(businessId, id, detail);
+      if (reuseEstimateNumber != null) reuseGrant!.assertValid(businessId, reuseGrant.actorId);
     });
     return id;
   }
@@ -1676,6 +1721,12 @@ class OfflineDocumentDraftService {
           }
 
           if (payload['kind'] == 'estimate') {
+            await LocalNumberAllocator(_database).ensureSchema();
+            await _database.customStatement(
+              'UPDATE local_number_reservations SET entity_id=? WHERE business_id=? '
+              "AND kind='estimate' AND entity_id=? AND active=1",
+              [serverId, businessId, localId],
+            );
             await _remapPendingEstimateMerges(
               businessId,
               localId,

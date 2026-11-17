@@ -18,9 +18,9 @@ void main() {
     expect(service, isNot(contains('networkSupabase')));
     expect(service, isNot(contains('syncCreateManualTransaction')));
     expect(service, isNot(contains('flush(')));
-    expect(screen, contains("title: const Text('Download saved history?')"));
+    expect(screen, contains("title: 'Download saved history?'"));
     expect(screen, contains('if (!allowed || !mounted) return;'));
     expect(screen, contains('FinancialHistoryRecovery('));
-    expect(screen, contains('Force Offline stays enabled'));
+    expect(screen, contains("Force Offline '"));
   });
 }

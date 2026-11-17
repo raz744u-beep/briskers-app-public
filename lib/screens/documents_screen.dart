@@ -23,6 +23,7 @@ import '../core/document_presentation.dart';
 import '../core/estimate_list_description.dart';
 import '../services/briskers_api.dart';
 import '../services/invoice_payment_feed.dart';
+import '../services/financial_history_recovery.dart';
 import '../services/job_task_summary.dart';
 import '../services/local_job_retirement.dart';
 import '../local/local_database_provider.dart';
@@ -35,6 +36,7 @@ import '../services/local_invoice_payment_coverage_events.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/local_invoice_status_styles_cache.dart';
 import '../widgets/briskers_page_header.dart';
+import '../widgets/briskers_dialog.dart';
 import '../widgets/job_list_approved_card.dart';
 import '../widgets/connection_header_toggle.dart';
 import '../widgets/stale_keyboard_inset_guard.dart';
@@ -167,7 +169,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       widget.localDocuments ?? LocalDocumentRepository();
   late final LocalDocumentDetailCache _localDetailCache = LocalDocumentDetailCache(database:_localDocuments.database);
   late final OfflineDocumentDraftService _offlineDrafts =
-      OfflineDocumentDraftService();
+      OfflineDocumentDraftService(api: _api, database: _localDocuments.database);
   final LocalInvoiceStatusStylesCache _localInvoiceStyles =
       LocalInvoiceStatusStylesCache();
   static final Map<String, List<Map<String, dynamic>>> _styleCache = {};
@@ -196,6 +198,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   final Set<String> _locallyCoveredInvoiceIds = <String>{};
   List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
+  int? _invoiceYear;
+  DateTime? _invoiceHistoryChecked;
+  bool _downloadingInvoices = false;
   Map<String, num> _receiptTotals = const {};
   Map<String, Map<String, int>> _mechanicHours = const {};
   late final InvoicePaymentFeed _paymentFeed =
@@ -496,6 +501,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       _locallyCoveredInvoiceIds.clear();
       _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
       _futureDatedOnly = false;
+      _invoiceYear = null;
+      _invoiceHistoryChecked = null;
       _search.clear();
       _invoiceStyles = const [];
       _error = null;
@@ -674,8 +681,11 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       if (!mounted || epoch != _loadEpoch) return;
       final blocked = await (widget.blockedDocumentIds?.call(businessId) ??
           LocalJobRetirement.blockedDocumentIds(localDatabase, businessId));
+      final deletedEstimates = estimate
+          ? await _localDocuments.deletedEstimateIds(businessId) : const <String>{};
       final rows = await LocalInvoiceClosureStore(_localDocuments.database).projectRows(businessId,List<Map<String, dynamic>>.from(fetched)
-          .where((row) => !blocked.contains('${row['id'] ?? ''}'))
+          .where((row) => !blocked.contains('${row['id'] ?? ''}') &&
+              !deletedEstimates.contains('${row['id'] ?? ''}'))
           .toList());
       if (!mounted || epoch != _loadEpoch) return;
       final styles = _invoiceStyles;
@@ -789,6 +799,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     final authoritativeAtStart = _serverRows;
     try {
       final local = await _localDocuments.listByKind(businessId, kind: kind);
+      final checked = estimate ? null
+          : await _localDocuments.invoiceHistoryCheckedAt(businessId);
       if (!mounted || epoch != _loadEpoch ||
           !identical(_serverRows, authoritativeAtStart)) {
         return false;
@@ -796,8 +808,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       final rows = local.map(documentListIndexPresentation).toList();
       final sameRows = _serverRows == null &&
           documentListDataEquals(_indexRows, rows);
-      if (!sameRows || _error != null) {
+      if (!sameRows || _error != null || checked != _invoiceHistoryChecked) {
         setState(() {
+          _invoiceHistoryChecked = checked;
           if (!sameRows) {
             _rows = rows;
             _descriptionEpoch++;
@@ -814,6 +827,102 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     } catch (_) {
       return false;
     }
+  }
+
+  int? _documentYear(Map<String, dynamic> row) =>
+      DateTime.tryParse(row['document_date']?.toString() ?? '')?.year;
+
+  bool _inInvoiceYear(Map<String, dynamic> row) =>
+      _estimate || _invoiceYear == null || _documentYear(row) == _invoiceYear;
+
+  Future<void> _downloadInvoices() async {
+    if (_downloadingInvoices || !widget.isOwner) return;
+    final business = widget.businessId;
+    final allowed = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => BriskersDialog(
+        title: 'Download invoice history?',
+        icon: Icons.download_for_offline_outlined,
+        content: const Text('Save the complete invoice list to this device '
+          'for offline totals. Queued changes stay on the device.'),
+        actions: [
+          OutlinedButton(style: BriskersDialog.cancelStyle,
+            onPressed: () => Navigator.pop(dialog, false),
+            child: const Text('Cancel')),
+          FilledButton(style: BriskersDialog.confirmStyle(),
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('Download')),
+        ],
+      ),
+    );
+    if (allowed != true || !mounted || widget.businessId != business) return;
+    setState(() => _downloadingInvoices = true);
+    try {
+      final count = await FinancialHistoryRecovery(documents: _localDocuments)
+          .downloadInvoices(business);
+      if (!mounted || widget.businessId != business) return;
+      final epoch = ++_loadEpoch;
+      await _loadLocalRows(epoch, business, 'invoice', estimate: false);
+      if (mounted && widget.businessId == business) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved $count invoice records.')),
+        );
+      }
+    } catch (error) {
+      if (mounted && widget.businessId == business) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Invoice download incomplete. $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _downloadingInvoices = false);
+    }
+  }
+
+  Widget _invoiceHistorySummary(List<Map<String, dynamic>> rows) {
+    final years = rows.map(_documentYear).whereType<int>().toSet().toList()
+      ..sort((a, b) => b.compareTo(a));
+    final matching = rows.where(_inInvoiceYear);
+    final cents = matching
+        .where((row) => !DocumentPresentation(row).isVoid)
+        .fold<int>(0, (sum, row) {
+          final amount = num.tryParse(row['total_amount']?.toString() ?? '');
+          return sum + (amount != null && amount.isFinite ? (amount * 100).round() : 0);
+        });
+    final checked = _invoiceHistoryChecked;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            DropdownButton<int>(
+              value: years.contains(_invoiceYear) ? _invoiceYear : null,
+              hint: const Text('All Time'),
+              items: [
+                const DropdownMenuItem(child: Text('All Time')),
+                for (final year in years)
+                  DropdownMenuItem(value: year, child: Text('$year')),
+              ],
+              onChanged: (year) => setState(() => _invoiceYear = year),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text('Billed · ${_money(cents / 100)}',
+              textAlign: TextAlign.end,
+              style: const TextStyle(fontWeight: FontWeight.w800))),
+          ]),
+          Text(checked == null
+              ? 'Saved invoices · history has not been checked on this device'
+              : 'Invoice history downloaded ${DateFormat.yMMMd().format(checked)}',
+            style: Theme.of(context).textTheme.bodySmall),
+          OutlinedButton.icon(
+            onPressed: _downloadingInvoices ? null : _downloadInvoices,
+            icon: const Icon(Icons.download_for_offline_outlined),
+            label: Text(_downloadingInvoices ? 'Saving invoices…' : 'Download invoice history'),
+          ),
+        ],
+      ),
+    );
   }
 
   bool _hasFutureDateTag(Map<String, dynamic> row) =>
@@ -833,7 +942,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       _orderedRows = orderDocumentListRows(source, estimate: _estimate);
     }
     final rows = _orderedRows.where((row) => widget.customerId == null ||
-        row['customer_id']?.toString() == widget.customerId).toList();
+        row['customer_id']?.toString() == widget.customerId).where(_inInvoiceYear).toList();
 
     var filtered = _selectedStatus == null
         ? rows
@@ -857,6 +966,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     final rows = _rows ?? const <Map<String, dynamic>>[];
     return rows.where((row) => widget.customerId == null ||
         row['customer_id']?.toString() == widget.customerId)
+        .where(_inInvoiceYear)
         .where((row) => _matchesStatus(row, status)).length;
   }
 
@@ -1048,7 +1158,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           row['id'].toString(),
         );
       } else if (isEstimate) {
-        await _api.deleteEstimate(widget.businessId, row['id'].toString());
+        await _offlineDrafts.deleteEstimate(widget.businessId, row['id'].toString());
       } else {
         await _api.deleteInvoiceManaged(
           widget.businessId,
@@ -2052,7 +2162,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                 const Spacer(),
                 if (_rows != null)
                   Text(
-                    '${tr('total')} ${scopedRows.length}',
+                    '${tr('total')} ${scopedRows.where(_inInvoiceYear).length}',
                     style: TextStyle(
                       color: accent,
                       fontWeight: FontWeight.w800,
@@ -2061,6 +2171,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               ],
             ),
             if (!_estimate && widget.isOwner) ...[
+              if (widget.customerId == null) _invoiceHistorySummary(scopedRows),
               const SizedBox(height: 10),
               Align(
                 alignment: Alignment.centerLeft,

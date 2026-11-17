@@ -109,6 +109,7 @@ class EmployeeWorkReview extends StatelessWidget {
       ),
       child: ListView(
         key: const Key('employee-work-review'),
+        primary: false,
         padding: EdgeInsets.fromLTRB(
           12,
           12,
@@ -187,64 +188,83 @@ class EmployeeWorkReview extends StatelessWidget {
                       r['source_active'] != 0 &&
                       r['assignment_conflict'] != 1,
                 ))
-                  Container(
-                    margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                    child: ClipRRect(
                       borderRadius: BorderRadius.circular(11),
-                      border: Border(
-                        left: BorderSide(
-                          color: color(r['state'] as String?),
-                          width: 5,
+                      child: ColoredBox(
+                        color: color(r['state'] as String?),
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 5),
+                          child: ColoredBox(
+                            color: Colors.white,
+                            child: Column(
+                              children: [
+                                Material(
+                                  color: Colors.transparent,
+                                  child: ListTile(
+                                    isThreeLine: true,
+                                    key: ValueKey('assigned-task-${r['id']}'),
+                                    onTap: onTask == null ? null : () => onTask!(r),
+                                    title: Text(
+                                      '${r['description'] ?? 'Labor'}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontWeight: FontWeight.w800),
+                                    ),
+                                    subtitle: Text(
+                                      "${r['job_number'] ?? 'Job'} · ${r['customer_name'] ?? ''}\n"
+                                      "${employeeName ?? r['employee_name'] ?? 'Mechanic'} · "
+                                      "${hrs(r['estimated_minutes'] as int? ?? 0)} h",
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    trailing: SizedBox(
+                                      height: 54,
+                                      child: FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            TaskPriorityPill(
+                                              priority: r['priority']?.toString() ?? 'Normal',
+                                            ),
+                                            const SizedBox(height: 4),
+                                            TaskStatusPill(r['state']),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                                  child: Row(
+                                    children: [
+                                      for (final (label, minutes, tint) in [
+                                        ('Assigned', r['estimated_minutes'] as int? ?? 0, taskNavy),
+                                        ('Paid', r['paid_minutes'] as int? ?? 0, taskGreen),
+                                        ('Remaining', ((r['estimated_minutes'] as int? ?? 0) -
+                                            (r['paid_minutes'] as int? ?? 0)).clamp(0, 0x7fffffff), taskNavy),
+                                      ])
+                                        Expanded(
+                                          child: Column(
+                                            children: [
+                                              Text(label, style: const TextStyle(fontSize: 11)),
+                                              Text('${hrs(minutes)} hrs', style: TextStyle(
+                                                color: tint, fontWeight: FontWeight.w800)),
+                                            ],
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
-                    child: Column(children: [
-                      Material(color:Colors.transparent,child:ListTile(
-                      isThreeLine:true,
-                      key: ValueKey('assigned-task-${r['id']}'),
-                      onTap: onTask == null ? null : () => onTask!(r),
-                      title: Text(
-                        '${r['description'] ?? 'Labor'}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      subtitle: Text(
-                        '${r['job_number'] ?? 'Job'} · ${r['customer_name'] ?? ''}\n${employeeName ?? r['employee_name'] ?? 'Mechanic'} · ${hrs(r['estimated_minutes'] as int? ?? 0)} h',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      trailing: SizedBox(height:54,child:FittedBox(fit:BoxFit.scaleDown,child:Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          TaskPriorityPill(
-                            priority: r['priority']?.toString() ?? 'Normal',
-                          ),
-                          const SizedBox(height: 4),
-                          TaskStatusPill(r['state']),
-                        ],
-                      ))),
-                    )),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                        child: Row(
-                          children: [
-                            for (final (label, minutes, tint) in [
-                              ('Assigned', r['estimated_minutes'] as int? ?? 0, taskNavy),
-                              ('Paid', r['paid_minutes'] as int? ?? 0, taskGreen),
-                              ('Remaining', ((r['estimated_minutes'] as int? ?? 0) -
-                                  (r['paid_minutes'] as int? ?? 0)).clamp(0, 0x7fffffff), taskNavy),
-                            ])
-                              Expanded(child: Column(children: [
-                                Text(label, style: const TextStyle(fontSize: 11)),
-                                Text('${hrs(minutes)} hrs', style: TextStyle(
-                                  color: tint, fontWeight: FontWeight.w800)),
-                              ])),
-                          ],
-                        ),
-                      ),
-                    ]),
                   ),
                 if (!rows.any(
                   (r) =>

@@ -47,12 +47,13 @@ class LocalEstimateNumber {
   static Future<String> allocate(
     BriskersLocalDatabase db,
     String business,
-    String id,
-  ) async {
+    String id, {
+    int? requested,
+  }) async {
     final allocator = LocalNumberAllocator(db);
     return allocator.display(
       'estimate',
-      await allocator.allocate(business, 'estimate', id),
+      await allocator.allocate(business, 'estimate', id, requested: requested),
     );
   }
 

@@ -1,3 +1,4 @@
+import '../widgets/briskers_dialog.dart';
 import '../local/local_database_provider.dart';
 import 'payroll/payroll_expense_review.dart';
 import 'dart:async';
@@ -284,8 +285,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         !(to ?? _dateOnly(DateTime.now())).isAfter(coverage.end);
   }
 
+  int? get _calendarYear => int.tryParse(_dateRange);
+
   DateTime? get _rangeStartDate {
     final today = _dateOnly(DateTime.now());
+    if (_calendarYear case final year?) return DateTime(year, 1, 1);
     switch (_dateRange) {
       case '30d':
         return DateTime(today.year, today.month, today.day - 29);
@@ -314,6 +318,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
   DateTime? get _rangeEndDate {
+    if (_calendarYear case final year?) return DateTime(year, 12, 31);
     if (_dateRange == 'all') return null;
     if (_dateRange == 'custom') return _customEndDate;
     if (_dateRange == 'lastMonth') {
@@ -324,6 +329,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
   String get _rangeLabel {
+    if (_calendarYear != null) return _dateRange;
     switch (_dateRange) {
       case '30d':
         return '30 days';
@@ -726,7 +732,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     try {
       final coverage = await _localFinancial.postedHistoryCoverage(businessId);
       hasCompleteLocalHistory = _coversPeriod(coverage, startDate, endDate);
-      if (baseline != null && (!offline || !hasCompleteLocalHistory)) {
+      if (baseline != null && !hasCompleteLocalHistory) {
         local = await journal.apply(
           businessId, baseline,
           startDate: startDate, endDate: endDate,
@@ -1094,32 +1100,25 @@ class _ExpensesScreenState extends State<ExpensesScreen>
 
   Future<void> _downloadSavedHistory() async {
     if (!_owner || _downloadingHistory) return;
-    // Recover complete historical transaction rows, not only the search
-    // result. A search or category chip must not reduce the download.
-    // Force Offline remains unchanged; only this expressly approved,
-    // read-only request is sent over HTTPS.
-    final end = _rangeEndDate ?? _dateOnly(DateTime.now());
-    final start = _rangeStartDate;
-    if (start != null && start.isAfter(end)) return;
-    final period = start == null
-        ? 'through ${DateFormat('MMM d, yyyy').format(end)}'
-        : 'for ${DateFormat('MMM d, yyyy').format(start)}–${DateFormat('MMM d, yyyy').format(end)}';
+    // One explicit download fills every historical period, regardless of
+    // the active period, account, direction or search filter.
+    final end = _dateOnly(DateTime.now());
     final allowed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Download saved history?'),
-        content: Text(
-          'Read posted Income & Expenses transactions from Briskers '
-          '$period. '
-          'Downloaded records are merged with existing local history. '
-          'Pending offline payments are not submitted or replaced. '
-          'Force Offline stays enabled. This uses internet for this '
-          'one read-only download only.',
+      builder: (dialogContext) => BriskersDialog(
+        title: 'Download saved history?',
+        icon: Icons.download_for_offline_outlined,
+        content: const Text(
+          'Download all posted income and expenses through today, plus the '
+          'invoice list. The records are saved to this device. Force Offline '
+          'stays enabled and queued changes stay on the device.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+          OutlinedButton(style: BriskersDialog.cancelStyle,
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+          FilledButton(style: BriskersDialog.confirmStyle(),
+            onPressed: () => Navigator.pop(dialogContext, true),
             child: const Text('Download')),
         ],
       ),
@@ -1131,20 +1130,26 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       _historyRecoveryMessage = null;
     });
     try {
-      final count = await FinancialHistoryRecovery(
-        cache: _localFinancial,
-      ).download(
-        businessId: widget.businessId,
-        start: start,
+      final business = widget.businessId;
+      final recovery = FinancialHistoryRecovery(cache: _localFinancial);
+      final count = await recovery.download(
+        businessId: business,
+        start: null,
         end: end,
         onPage: (count) {
           if (mounted) setState(() => _downloadedHistoryCount = count);
         },
       );
-      if (!mounted) return;
-      setState(() => _historyRecoveryMessage =
-        'Downloaded $count posted records to saved local history. '
-        'Pending offline transactions are preserved.');
+      if (!mounted || business != widget.businessId) return;
+      var message = 'Saved $count posted transactions.';
+      try {
+        final invoices = await recovery.downloadInvoices(business);
+        message += ' Saved $invoices invoice records.';
+      } catch (error) {
+        message += ' Invoice history could not be downloaded. $error';
+      }
+      if (!mounted || business != widget.businessId) return;
+      setState(() => _historyRecoveryMessage = message);
       await _load(showLoading: false, forceTotals: true);
     } catch (error) {
       if (!mounted) return;
@@ -1228,6 +1233,20 @@ class _ExpensesScreenState extends State<ExpensesScreen>
 
   Future<void> _chooseDateRange() async {
     FocusManager.instance.primaryFocus?.unfocus();
+    final now = DateTime.now();
+    final business = widget.businessId;
+    final years = <int>{now.year - 1};
+    try {
+      final saved = await _localFinancial.loadTransactions(business);
+      for (final row in saved) {
+        final date = DateTime.tryParse(row['transaction_date']?.toString() ?? '');
+        if (date != null && date.year < now.year) years.add(date.year);
+      }
+    } catch (_) {
+      // Custom date ranges remain available when saved history can't be read.
+    }
+    if (!mounted || widget.businessId != business) return;
+    final calendarYears = years.toList()..sort((a, b) => b.compareTo(a));
     final selected = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -1242,7 +1261,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
               ),
             ),
-            for (final option in const [
+            for (final option in [
               ('all', 'All Time'),
               ('30d', 'Last 30 days'),
               ('60d', 'Last 60 days'),
@@ -1253,6 +1272,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
               ('6m', 'Last 6 months'),
               ('ytd', 'Year to Date'),
               ('1y', 'Last 1 year'),
+              for (final year in calendarYears) ('$year', '$year calendar year'),
               ('custom', 'Custom date range'),
             ])
               ListTile(
@@ -1276,7 +1296,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       final now = DateTime.now();
       final picked = await showDateRangePicker(
         context: context,
-        firstDate: DateTime(now.year - 10),
+        firstDate: DateTime(calendarYears.last < now.year - 10
+            ? calendarYears.last : now.year - 10),
         lastDate: now,
         initialDateRange: _customStartDate != null && _customEndDate != null
             ? DateTimeRange(start: _customStartDate!, end: _customEndDate!)

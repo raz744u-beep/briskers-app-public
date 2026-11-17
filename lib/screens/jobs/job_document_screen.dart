@@ -4544,7 +4544,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         _error = null;
       });
 
-      await _api.deleteEstimate(
+      await _offlineDocumentDraft.deleteEstimate(
         widget.businessId,
         widget.documentId,
       );

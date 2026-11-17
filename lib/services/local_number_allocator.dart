@@ -141,7 +141,6 @@ class LocalNumberAllocator {
   /// Release the removed record's number, including pre-upgrade records. Only
   /// a free suffix at the current next number moves the automatic counter back.
   Future<void> release(String business,String kind,String entity,{Object? previousNumber}) async {
-    if (kind == 'estimate') return; // Issued estimate numbers are never reused.
     await ensureSchema();
     final existing=await _used(business,kind);
     var prior=_parse(previousNumber,kind);

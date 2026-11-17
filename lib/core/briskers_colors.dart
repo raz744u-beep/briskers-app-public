@@ -11,6 +11,12 @@ class BriskersColors {
   static const confirm = Color(0xFF008F83);
   static const destructive = Color(0xFFB91C1C);
 
+  // Selected curved tabs, in display order.
+  static const tabBlue = Color(0xFF2479C6);
+  static const tabGreen = Color(0xFF176B40);
+  static const tabPurple = Color(0xFF6942A2);
+  static const tabGray = Color(0xFF697586);
+
   // Main navigation.
   static const today = Color(0xFF3949AB);
   static const actionBlue = Color(0xFF3B82F6);

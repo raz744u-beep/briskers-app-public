@@ -1190,10 +1190,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 const SizedBox(height: 8),
                 BriskersControlledTabs(
                   entries: [
-                    (label: tr('today'), color: BriskersColors.appointments, icon: Icons.today_outlined),
-                    (label: tr('upcoming'), color: BriskersColors.appointments, icon: Icons.event_available_outlined),
-                    (label: tr('past'), color: BriskersColors.appointments, icon: Icons.history),
-                    (label: tr('all'), color: BriskersColors.appointments, icon: Icons.calendar_month_outlined),
+                    (label: tr('today'), color: BriskersColors.tabBlue, icon: Icons.today_outlined),
+                    (label: tr('upcoming'), color: BriskersColors.tabGreen, icon: Icons.event_available_outlined),
+                    (label: tr('past'), color: BriskersColors.tabPurple, icon: Icons.history),
+                    (label: tr('all'), color: BriskersColors.tabGray, icon: Icons.calendar_month_outlined),
                   ],
                   selected: _dateFilters.indexOf(_filter),
                   onSelected: (index) {

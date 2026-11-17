@@ -4367,13 +4367,14 @@ class BriskersApi {
     String businessId,
     String estimateId,
   ) async {
-    await networkSupabase.rpc(
+    final deleted = await networkSupabase.rpc(
       'briskers_delete_estimate',
       params: {
         'p_business_id': businessId,
         'p_estimate_id': estimateId,
       },
     );
+    if (deleted != true) throw StateError('Estimate deletion was not confirmed.');
   }
 
   Future<void> voidInvoice(

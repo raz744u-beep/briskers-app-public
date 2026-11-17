@@ -1494,10 +1494,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                     ),
                   BriskersControlledTabs(
                     entries: const [
-                      (label: 'Overview', color: BriskersColors.customers, icon: Icons.dashboard_outlined),
-                      (label: 'Info', color: BriskersColors.customerSave, icon: Icons.person_outline),
-                      (label: 'Vehicles', color: BriskersColors.vehicles, icon: Icons.directions_car_outlined),
-                      (label: 'Notes', color: BriskersColors.notes, icon: Icons.note_alt_outlined),
+                      (label: 'Overview', color: BriskersColors.tabBlue, icon: Icons.dashboard_outlined),
+                      (label: 'Info', color: BriskersColors.tabGreen, icon: Icons.person_outline),
+                      (label: 'Vehicles', color: BriskersColors.tabPurple, icon: Icons.directions_car_outlined),
+                      (label: 'Notes', color: BriskersColors.tabGray, icon: Icons.note_alt_outlined),
                     ],
                     selected: _customerTab,
                     onSelected: (index) => setState(() => _customerTab = index),

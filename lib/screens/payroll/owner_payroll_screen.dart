@@ -1794,7 +1794,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       return sum + (payment['original_net'] as int? ?? net) - net;
     });
     return EmployeeWorkReview(
-        key: PageStorageKey('${widget.employeeId}-WorkScroll'),
+        key: ValueKey('${widget.employeeId}-WorkScroll'),
         employeeId: widget.employeeId,
         week: week,
         rows: _work,
@@ -2080,14 +2080,26 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           final controller = DefaultTabController.of(context);
           return AnimatedBuilder(
             animation: controller,
-            builder: (context, _) => KeyedSubtree(
-              key: ValueKey((widget.employeeId, controller.index)),
-              child: switch (controller.index) {
-                0 => _safeTab(_tasksTab, 'Work'),
-                1 => _safeTab(_payrollTab, 'Payroll'),
-                2 => _safeTab(_reportsPanel, 'Reports'),
-                _ => _taxesTab(),
-              },
+            builder: (context, _) => IndexedStack(
+              sizing: StackFit.expand,
+              index: controller.index == 0 ? 0 : 1,
+              children: [
+                // Keep the Work scroll position and expanded cards mounted
+                // while other tabs are active.
+                KeyedSubtree(
+                  key: ValueKey(widget.employeeId),
+                  child: _safeTab(_tasksTab, 'Work'),
+                ),
+                KeyedSubtree(
+                  key: ValueKey(controller.index),
+                  child: switch (controller.index) {
+                    1 => _safeTab(_payrollTab, 'Payroll'),
+                    2 => _safeTab(_reportsPanel, 'Reports'),
+                    3 => _taxesTab(),
+                    _ => const SizedBox.shrink(),
+                  },
+                ),
+              ],
             ),
           );
         }),),

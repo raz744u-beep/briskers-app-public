@@ -23,6 +23,8 @@ Future<T> explicitSupabaseRead<T>(String rpc, Future<T> Function() read) {
     'briskers_recurring_recovery_v1',
     'briskers_read_recurring_expense_occurrence',
     'briskers_owner_recovery_lookup_v1',
+    'briskers_list_transactions_recurring_v1',
+    'briskers_list_documents_v4',
   }.contains(rpc)) {
     throw ArgumentError('This read requires an online connection.');
   }

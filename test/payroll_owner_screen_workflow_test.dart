@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/core/connection_mode.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_owner_authorization.dart';
 import 'package:briskers_app/services/local_payroll_repository.dart';
@@ -30,6 +31,9 @@ void main() {
     testWidgets('regular employee payroll records or holds payment safely, currentHolder=$currentHolder', (tester) async {
       SharedPreferences.setMockInitialValues({});
       FlutterSecureStorage.setMockInitialValues({});
+      final mode = BriskersConnectionModeController.instance;
+      mode.useSafeOfflineFallback();
+      addTearDown(() => mode.setMode(BriskersConnectionMode.auto));
       final previous = HttpOverrides.current;
       HttpOverrides.global = _NoInternet();
       final folder = (await tester.runAsync(() => Directory.systemTemp.createTemp('regular-payroll-ui')))!;
@@ -96,6 +100,15 @@ void main() {
           database: db, unlockOwner: unlock, ownerConnection: network, initialTab: tab)));
       await tester.pumpWidget(screen());
       await until(find.textContaining('Currently Assigned Tasks'));
+      for (final tab in ['Payroll', 'Taxes', 'Reports', 'Payroll']) {
+        await tester.tap(find.text(tab));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Work'));
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Previous work week').hitTestable(), findsOneWidget);
+        expect(find.textContaining('Currently Assigned Tasks'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      }
       await tester.tap(find.text('Payroll'));
       await tester.pumpAndSettle();
       expect(find.text('Work'), findsOneWidget);

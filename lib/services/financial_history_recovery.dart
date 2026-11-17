@@ -1,19 +1,59 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/supabase_config.dart';
+import 'local_document_repository.dart';
 import 'local_financial_cache.dart';
 
 /// Explicit read-only recovery of posted financial history. It does not
 /// toggle Force Offline, flush the outbox, or create/update server records.
 class FinancialHistoryRecovery {
-  FinancialHistoryRecovery({LocalFinancialCache? cache, SupabaseClient? client})
+  FinancialHistoryRecovery({
+    LocalFinancialCache? cache,
+    LocalDocumentRepository? documents,
+    SupabaseClient? client,
+  })
       : _cache = cache ?? LocalFinancialCache(),
+        _documents = documents,
         _client = client;
 
   final LocalFinancialCache _cache;
+  final LocalDocumentRepository? _documents;
   final SupabaseClient? _client;
   static const pageSize = 200;
   static const maxPages = 150;
+
+  /// The invoice index RPC returns a single JSON value containing all rows.
+  /// Import it without deleting device-only invoices or replaying the outbox.
+  Future<int> downloadInvoices(String businessId) async {
+    final client = _client ?? supabase;
+    final identity = client.auth.currentUser?.id;
+    if (businessId.trim().isEmpty || identity == null ||
+        client.auth.currentSession == null) {
+      throw StateError('Sign in to Briskers before downloading invoices.');
+    }
+    const rpc = 'briskers_list_documents_v4';
+    final raw = await explicitSupabaseRead(rpc, () => client.rpc(
+      rpc, params: {'p_business_id': businessId, 'p_kind': 'invoice'},
+    ).timeout(const Duration(seconds: 45)));
+    if (client.auth.currentUser?.id != identity ||
+        client.auth.currentSession == null) {
+      throw StateError('Account changed during download. Saved records remain intact.');
+    }
+    final rows = (raw as List<dynamic>)
+        .map((entry) => Map<String, dynamic>.from(entry as Map)).toList();
+    final ids = <String>{};
+    for (final row in rows) {
+      final id = row['id']?.toString() ?? '';
+      final amount = num.tryParse(row['total_amount']?.toString() ?? '');
+      if (row['kind'] != 'invoice' || id.isEmpty || !ids.add(id) ||
+          amount == null || !amount.isFinite) {
+        throw StateError('A downloaded invoice has invalid identity or totals.');
+      }
+    }
+    await (_documents ?? LocalDocumentRepository())
+        .importInvoiceHistory(businessId, rows);
+    return rows.length;
+  }
 
   /// [onPage] is progress only; the local cache remains usable between pages.
   /// Returns fetched server IDs, not the total local row count.
@@ -42,9 +82,9 @@ class FinancialHistoryRecovery {
       }
       // This RPC requires expenses.read. It lists posted transactions only.
       // No SyncReplayFence or outbound mutation is used here.
-      final raw = await client.rpc(
-        'briskers_list_transactions_recurring_v1',
-        params: {
+      const rpc = 'briskers_list_transactions_recurring_v1';
+      final raw = await explicitSupabaseRead(rpc, () => client.rpc(
+        rpc, params: {
           'p_business_id': businessId,
           'p_limit': pageSize,
           'p_offset': page * pageSize,
@@ -56,7 +96,7 @@ class FinancialHistoryRecovery {
           'p_category_id': null,
           'p_counterparty_id': null,
         },
-      ).timeout(const Duration(seconds: 20));
+      ).timeout(const Duration(seconds: 20)));
       if (client.auth.currentUser?.id != identity ||
           client.auth.currentSession == null) {
         throw StateError('Account changed during download. Saved records remain intact.');
@@ -81,7 +121,7 @@ class FinancialHistoryRecovery {
       // preserve previously saved pages and the user's pending outbox.
       batch.addAll(rows);
       if (batch.length >= 1000 || rows.length < pageSize) {
-        await _cache.mergeServerTransactions(businessId, batch, onlyMissing: true);
+        await _cache.mergeServerTransactions(businessId, batch);
         batch.clear();
       }
       onPage(ids.length);

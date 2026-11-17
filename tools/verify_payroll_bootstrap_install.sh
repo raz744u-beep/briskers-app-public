@@ -78,6 +78,7 @@ if [ -n "$intermediate" ]; then
   case "$(basename "$intermediate")" in
     Briskers-v0.10.9-b4681.apk) intermediate_hash=4aba46da13a17239f6291150224426cb52002955a95d6a91b311757766fc4af7 ;;
     Briskers-v0.10.9-b4683.apk) intermediate_hash=a6a7adc73f27dbcb74bd4768d9d8387771dff5d3b0bc0d495c803328bd9108d8 ;;
+    Briskers-v0.10.9-b4685.apk) intermediate_hash=c3af1583a83830c30e01d1d2a6ffbf6632aa3382f1973edacd8ad51842ec52d9 ;;
     Briskers-v0.10.9-b4667.apk) intermediate_hash=7fb638bb73b98ec10c43ed1d397f2ece6acfb08737afbd3ab8b7e9ad81e9412e ;;
     Briskers-v0.10.9-b4668.apk) intermediate_hash=389dc3cb959180f4e5fbe460371d50cab9fe83297fb05066af0530df9c2fc820 ;;
     Briskers-v0.10.9-b4669.apk) intermediate_hash=644a28aea2bd66caa80ad23f01f71d96d2a7455264d7e1c9bac6e6623c72e5b8 ;;
