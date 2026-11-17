@@ -807,8 +807,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         widget.businessId != businessId) {
       return;
     }
-    final fresh = !rolloverPending && !needsDailySeed && lastVerified != null &&
-        DateTime.now().difference(lastVerified) < const Duration(minutes: 30);
+    final savedClosedPeriod = hasCompleteLocalHistory && endDate != null &&
+        endDate.isBefore(DateTime(DateTime.now().year));
+    final fresh = savedClosedPeriod ||
+        (!rolloverPending && !needsDailySeed && lastVerified != null &&
+            DateTime.now().difference(lastVerified) < const Duration(minutes: 30));
     setState(() {
       _serverPeriodBase = baseline;
       _periodTotals = local;
@@ -831,9 +834,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       ? 'Includes $localChanges locally saved change(s) · sync pending'
                       : 'Saved local totals · verified ${DateFormat('MMM d, h:mm a').format(lastVerified!)}';
     });
-    final savedClosedPeriod = hasCompleteLocalHistory && endDate != null &&
-        endDate.isBefore(DateTime(DateTime.now().year));
-    if (offline || (!force && (fresh || savedClosedPeriod))) {
+    if (offline || (fresh && !force)) {
       _pendingPeriodScope = null;
       return;
     }

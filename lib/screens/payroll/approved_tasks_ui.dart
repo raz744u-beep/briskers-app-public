@@ -57,10 +57,7 @@ class ApprovedTasksHeader extends StatelessWidget
           padding: const EdgeInsets.only(bottom: 16),
           child: Row(
             children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white),
-                onPressed: () => Navigator.maybePop(context),
-              ),
+              const BackButton(color: Colors.white),
               SizedBox(
                 width: 112,
                 child: ColorFiltered(

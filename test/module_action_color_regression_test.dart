@@ -31,7 +31,7 @@ void main() {
     expect(job, contains('backgroundColor: BriskersColors.jobs'));
     expect(newCustomer, contains('backgroundColor: BriskersColors.customers'));
   });
-  test('Customer notes, expense edit and vehicle findings use module colors', () {
+  test('Customer notes use the approved teal action and other module colors stay consistent', () {
     final notes = File('lib/screens/customers/customer_notes_section.dart')
         .readAsStringSync();
     final expenses = File('lib/screens/expenses/expense_detail_screen.dart')
@@ -39,7 +39,7 @@ void main() {
     final findings = File('lib/screens/customers/customer_vehicle_findings_section.dart')
         .readAsStringSync();
     expect(notes, contains('backgroundColor: BriskersColors.customerSave'));
-    expect(notes, contains('backgroundColor: BriskersColors.customers'));
+    expect(notes, contains('backgroundColor: BriskersColors.confirm'));
     expect(expenses, contains('backgroundColor: BriskersColors.expenses'));
     expect(findings, contains('backgroundColor: BriskersColors.vehicles'));
     // Delete actions retain the danger/error color, not a module save style.

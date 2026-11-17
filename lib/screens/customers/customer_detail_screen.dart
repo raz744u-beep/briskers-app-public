@@ -1416,7 +1416,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
         ],
       ),
       bottomNavigationBar: widget.sharedBottomNavigationBar,
-      floatingActionButton: _data == null || !_canManageQuickActions || _customerTab == 3
+      floatingActionButton: _data == null || !_canManageQuickActions
           ? null
           : FloatingActionButton.extended(
               onPressed: _showQuickActions,
