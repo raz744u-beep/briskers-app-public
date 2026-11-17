@@ -2,12 +2,13 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('TEST global Tasks preserves white job task cards and unclipped list', () {
+  test('global Tasks uses approved flat cards and dedicated details', () {
     final source = File('lib/screens/payroll/tasks_workspace.dart').readAsStringSync();
-    expect(source, contains('color: Colors.white'));
-    expect(source, contains('widget.serviceTaskCard(task)'));
-    expect(source, contains('Expanded(child:ClipRect(child:'));
-    expect(source, contains(r'Invoice #$invoice'));
+    expect(source, contains('ApprovedTaskListCard('));
+    expect(source, contains('widget.onOpenTask?.call(task, general)'));
+    expect(source, contains('child: ClipRect('));
+    expect(source, isNot(contains('JobListApprovedCard(')));
+    expect(source, contains('widget.onPriority!(task, general, p)'));
     expect(source, contains('widget.onRecoverHistory!()'));
   });
 
@@ -62,7 +63,9 @@ void main() {
     final action = screen.substring(start, end);
     expect(action, contains("row['state'] == 'Open' ? 'In Progress' : 'Done'"));
     expect(action, contains("next == 'Done' ? assignedMinutes : previousMinutes"));
-    expect(action, contains("if (row['state'] == 'Done' || (row['paid_minutes'] as int? ?? 0) > 0) return;"));
+    expect(action, contains("if (row['state'] == 'Done') return;"));
+    expect(action,contains("if (next == 'Done' && row['state'] == 'In Progress')"));
+    expect(action,contains('_taskEditRepository.finishPaidProgress('));
   });
 
   test('direct Mark Done from Open keeps paid labor locked', () {

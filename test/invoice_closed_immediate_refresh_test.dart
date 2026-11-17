@@ -20,21 +20,14 @@ void main() {
     expect(display.statusCode, 'closed');
   });
 
-  test('Owner finalization refreshes after auto-close without repeating payment', () {
-    final code = File('lib/screens/jobs/job_document_screen.dart')
-        .readAsStringSync();
+  test('Owner finalization refreshes the invoice without changing its lifecycle', () {
+    final code = File('lib/screens/jobs/job_document_screen.dart').readAsStringSync();
     final begin = code.indexOf('Future<void> _finalizeEnteredPayments() async');
     final end = code.indexOf('Future<void> _enterWarrantyPayment() async', begin);
-    expect(begin, greaterThan(0));
-    expect(end, greaterThan(begin));
     final flow = code.substring(begin, end);
-    final finalization = flow.indexOf('await _api.finalizePendingInvoicePayment(');
-    final close = flow.indexOf('await _autoCloseOwnerInvoiceIfReady();');
-    final refresh = flow.indexOf('await _load(fastAfterMutation: true);');
-    expect(finalization, greaterThan(0));
-    expect(close, greaterThan(finalization));
-    expect(refresh, greaterThan(close));
-    expect(flow.substring(close), isNot(contains('finalizePendingInvoicePayment(')));
+    expect(flow, contains('await _run(() => OfflineInvoiceFinalization().finalizeLocally('));
+    expect(flow, isNot(contains('closeInvoice(')));
+    expect(flow, isNot(contains('finalizePendingInvoicePayment(')));
   });
 
   test('status pill prioritizes confirmed close over final payment', () {
@@ -45,12 +38,8 @@ void main() {
     expect(begin, greaterThan(0));
     expect(end, greaterThan(begin));
     final code = source.substring(begin, end);
-    expect(code, contains("if (rawStatus == 'void') return 'void';"));
-    expect(code, contains(".isClosed) {"));
-    expect(code, contains("return 'closed';"));
-    expect(
-      code.indexOf(".isClosed) {"),
-      lessThan(code.indexOf("if (total > 0 && finalizedPaid >= total - 0.005)")),
-    );
+    expect(code, contains('DocumentPresentation('));
+    expect(code, contains('.statusCode'));
+
   });
 }

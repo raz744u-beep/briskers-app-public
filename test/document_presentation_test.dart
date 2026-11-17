@@ -35,7 +35,7 @@ void main() {
     final data = invoice(total: 200, pending: 200)
       ..['document_number'] = 'TEST-INV-PENDING';
     final view = DocumentPresentation(data);
-    expect(view.statusLabel, 'Pending Close');
+    expect(view.statusLabel, 'Paid');
     expect(view.balanceDueCents, 0);
     expect(view.finalizedCents, 0);
     expect(view.pendingCents, 20000);
@@ -55,7 +55,7 @@ void main() {
       );
       expect(
         DocumentPresentation(invoice(paid: 875.25)).statusLabel,
-        'Pending Close',
+        'Paid',
       );
       expect(
         DocumentPresentation(invoice(paid: 400, pending: 475.25))
@@ -88,7 +88,7 @@ void main() {
         'status': 'draft',
         'display_status_code': 'paid',
       }).statusLabel,
-      'Pending Close',
+      'Paid',
     );
   });
 
@@ -154,7 +154,7 @@ void main() {
       expect(DocumentPresentation(invoice()).statusLabel, 'Abierta');
       expect(
         DocumentPresentation(invoice(pending: 875.25)).statusLabel,
-        'Pendiente de cierre',
+        'Pagada',
       );
       expect(
         DocumentPresentation(invoice()..['closed_at'] = 123).statusLabel,

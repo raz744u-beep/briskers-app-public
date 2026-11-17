@@ -350,6 +350,82 @@ class OfflineDocumentEditService {
     await _cache.save(businessId, documentId, updated);
   }
 
+  /// Validate the last queued change for each line against the saved invoice.
+  /// A successful check leaves those operations available for ordinary sync.
+  Future<void> verifySavedLineCorrections(
+    String businessId, String invoiceId, Map<String, dynamic> detail, {
+    String action = 'posting',
+  }) async {
+    final rows = await _database.customSelect(
+      "SELECT operation,payload_json,state FROM sync_outbox "
+      "WHERE business_id=? AND entity_id=? AND entity_type='document_edit' "
+      "AND state<>'done' AND operation NOT IN ('memo','warranty','move_line') ORDER BY id",
+      variables: [Variable(businessId), Variable(invoiceId)],
+    ).get();
+    if (rows.isEmpty) return;
+
+    final lines = _lines(detail);
+    final byId = {for (final line in lines) line['id']?.toString(): line};
+    final changes = <String, (String, Map<String, dynamic>)>{};
+    for (final row in rows) {
+      final operation = row.read<String>('operation');
+      final state = row.read<String>('state');
+      final payload = jsonDecode(row.read<String>('payload_json'));
+      if (payload is! Map<String, dynamic> ||
+          !const {'add_line', 'update_line', 'delete_line', 'copy_line'}.contains(operation)) {
+        throw StateError('An invoice item correction is unreadable. Review Items before $action.');
+      }
+      final localId = const {'add_line', 'copy_line'}.contains(operation);
+      final lineId = payload[localId ? 'local_line_id' : 'line_id']?.toString() ?? '';
+      if (lineId.isEmpty || !const {'pending', 'inflight'}.contains(state)) {
+        throw StateError('A saved invoice item correction conflicts with this invoice. Review Items before $action.');
+      }
+      changes[lineId] = (operation, payload);
+    }
+    num? number(Object? value) {
+      final parsed = num.tryParse(value?.toString() ?? '');
+      return parsed != null && parsed.isFinite ? parsed : null;
+    }
+
+    for (final entry in changes.entries) {
+      final (operation, payload) = entry.value;
+      final line = byId[entry.key];
+      final matches = switch (operation) {
+        'delete_line' => line == null,
+        'copy_line' => line != null && line['_local_pending'] == true,
+        _ => line != null &&
+            line['line_kind'] == payload['line_kind'] &&
+            const ['quantity', 'unit_price', 'tax_rate'].every((key) =>
+                number(line[key]) != null && number(line[key]) == number(payload[key])),
+      };
+      if (!matches) {
+        final name = line?['name'] ?? payload['name'] ?? 'an invoice item';
+        throw StateError('The saved correction for "$name" does not match the Items tab. Review and save the item before $action.');
+      }
+    }
+
+    final indexed = await _database.customSelect(
+      "SELECT total FROM local_documents WHERE business_id=? AND id=? AND kind='invoice'",
+      variables: [Variable(businessId), Variable(invoiceId)],
+    ).getSingleOrNull();
+    final total = number(detail['total_amount']);
+    final indexTotal = number(indexed?.data['total']);
+    var linesTotal = 0.0;
+    for (final line in lines) {
+      final net = number(line['net_amount']);
+      final tax = number(line['tax_amount']);
+      if (net == null || tax == null) {
+        throw StateError('Saved item amounts are incomplete. Review the Items total before $action.');
+      }
+      linesTotal += net + tax;
+    }
+    if (total == null || indexTotal == null ||
+        (total * 100).round() != (indexTotal * 100).round() ||
+        (total * 100).round() != (linesTotal * 100).round()) {
+      throw StateError('The saved item correction and invoice total disagree. Review and save the Items total before $action.');
+    }
+  }
+
   Future<void> _queue(
     String businessId,
     String documentId,

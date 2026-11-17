@@ -48,7 +48,7 @@ void main() {
 
     await tester.tap(find.text('Paid portion'));
     await tester.pumpAndSettle();
-    expect(find.text('Debt repaid'), findsOneWidget);
+    expect(find.text('Debt Repaid'), findsOneWidget);
     expect(find.text('Transferred'), findsOneWidget);
     expect(find.text('\$20.00'), findsOneWidget);
     expect(find.text('\$80.00'), findsOneWidget);

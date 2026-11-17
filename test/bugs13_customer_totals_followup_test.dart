@@ -86,7 +86,7 @@ void main() {
     final source = File('lib/screens/expenses_screen.dart').readAsStringSync();
     expect(source, contains('bool get _showFinancialSummary => _owner;'));
     final begin = source.indexOf('Future<void> _refreshPeriodTotals(');
-    final end = source.indexOf('Future<void> _hydrateFinancialHistory(', begin);
+    final end = source.indexOf('Future<void> _loadFinancialOptions(', begin);
     final method = source.substring(begin, end);
     expect(method, contains('if (!_showFinancialSummary || !mounted) return;'));
     expect(method, contains('const Duration(minutes: 30)'));

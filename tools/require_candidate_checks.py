@@ -24,6 +24,11 @@ CANDIDATE_BRANCHES = {CANDIDATE_BRANCH, "fix/post-b2382-ux-polish-20261021", "fi
 PAYROLL_CANDIDATE = "candidate/payroll-enabled"
 PAYROLL_VERIFICATION_BRANCH = "fix/tasks-test-parity-bugs30-20261106"
 CANDIDATE_BRANCHES.add(PAYROLL_CANDIDATE)
+# Owner-approved consolidated Bugs 33 phone test candidate. The gate still
+# validates exact source, workflow identity and required successful checks.
+BUGS33_RELEASE_BRANCH = "fix/bugs33-preserve-offline-financial-history-20261108"
+BUGS38_SOURCE_BRANCH = "fix/bugs38-round1-historical-edit-guard"
+CANDIDATE_BRANCHES.add(BUGS33_RELEASE_BRANCH)
 BUILD_WORKFLOW = ".github/workflows/android-debug.yml"
 REQUIRED_WORKFLOWS = {
     "diagnostics.yml": "Briskers Diagnostics",
@@ -36,10 +41,13 @@ GLORIA_RECOVERY_WORKFLOW = ("gloria-exact-total-regression.yml",
 
 def workflows_for_branch(branch):
     workflows = dict(REQUIRED_WORKFLOWS)
-    if branch == PAYROLL_CANDIDATE:
+    if branch in {PAYROLL_CANDIDATE, BUGS33_RELEASE_BRANCH}:
         workflows["offline-recovery-android-check.yml"] = "Offline recovery Android debug verification"
         filename, name = GLORIA_RECOVERY_WORKFLOW
         workflows[filename] = name
+    if branch == BUGS33_RELEASE_BRANCH:
+        workflows["retry-storm-regression.yml"] = "Retry storm protection"
+        workflows["offline-recurring-component.yml"] = "Offline recurring component"
     if branch == GLORIA_RECOVERY_BRANCH:
         filename, name = GLORIA_RECOVERY_WORKFLOW
         workflows[filename] = name
@@ -93,8 +101,10 @@ def context_from_environment(env, checkout_sha):
     except ValueError as error:
         raise GateError("Invalid GitHub repository ID") from error
     positive_integer(repository_id, "repository ID")
-    return Context(repository, repository_id, branch, sha,
-                   PAYROLL_VERIFICATION_BRANCH if branch == PAYROLL_CANDIDATE else None)
+    verification_branch = PAYROLL_VERIFICATION_BRANCH if branch == PAYROLL_CANDIDATE else None
+    if branch == BUGS33_RELEASE_BRANCH and env.get("BRISKERS_BUGS38_RELEASE") == "true":
+        verification_branch = BUGS38_SOURCE_BRANCH
+    return Context(repository, repository_id, branch, sha, verification_branch)
 
 
 class NoRedirects(HTTPRedirectHandler):
@@ -186,12 +196,12 @@ def validate_run(run, context, filename, name, workflow_id):
     path = run.get("path")
     if not isinstance(path, str) or path.split("@", 1)[0] != f".github/workflows/{filename}":
         raise GateError(f"Wrong workflow path for {filename}")
-    # Only the isolated Gloria regression is also triggered by branch pushes.
-    # Its workflow identity, source repository, exact SHA and branch must still
-    # match. Diagnostics/iOS keep their pull_request/manual-only event policy.
+    # Bugs 38's existing pull request is merged. Its continuation branch
+    # runs the same workflow files on push with the same exact-head checks.
     allowed_events = ALLOWED_EVENTS
-    if (filename == GLORIA_RECOVERY_WORKFLOW[0]
-            and context.branch == GLORIA_RECOVERY_BRANCH):
+    if (context.verification_branch == BUGS38_SOURCE_BRANCH or
+            (filename == GLORIA_RECOVERY_WORKFLOW[0]
+             and context.branch == GLORIA_RECOVERY_BRANCH)):
         allowed_events = ALLOWED_EVENTS | {"push"}
     if (run.get("workflow_id") != workflow_id or run.get("name") != name
             or run.get("head_sha") != context.sha

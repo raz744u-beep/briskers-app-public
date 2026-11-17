@@ -3,23 +3,20 @@ on:
   push:
     branches:
       - fix/gloria-rounding-preflight-20261030
-    paths:
-      - "tools/recovery/offline_invoice_exact_total_v2_DRAFT.sql"
-      - "tools/tests/test_offline_invoice_exact_total_draft.py"
-      - "tools/diagnostics/gloria_rounding_preflight.py"
-      - "lib/services/briskers_api.dart"
-      - "lib/services/offline_document_draft_service.dart"
-      - "lib/screens/settings/local_sync_status_screen.dart"
-      - "tools/require_candidate_checks.py"
-      - "tools/tests/test_candidate_checks.py"
-      - ".github/workflows/android-debug.yml"
-      - ".github/workflows/gloria-exact-total-regression.yml"
+      - fix/bugs38-round1-historical-edit-guard
   pull_request:
     paths:
       - "tools/recovery/offline_invoice_exact_total_v2_DRAFT.sql"
       - "tools/tests/test_offline_invoice_exact_total_draft.py"
       - "lib/services/briskers_api.dart"
       - "lib/services/offline_document_draft_service.dart"
+      - "lib/services/local_document_detail_cache.dart"
+      - "lib/services/invoice_payment_feed.dart"
+      - "lib/services/local_financial_cache.dart"
+      - "lib/screens/jobs/job_document_screen.dart"
+      - "lib/services/local_invoice_closure.dart"
+      - "lib/services/offline_financial_write_service.dart"
+      - "lib/screens/payroll/owner_payroll_screen.dart"
       - "lib/screens/settings/local_sync_status_screen.dart"
       - "tools/require_candidate_checks.py"
       - "tools/tests/test_candidate_checks.py"
@@ -35,3 +32,4 @@ jobs:
         run: python3 -m unittest discover -s tools/tests -p 'test_offline_invoice_exact_total_draft.py' -v
       - name: Original invoice decimal reproduction
         run: python3 tools/diagnostics/gloria_rounding_preflight.py
+

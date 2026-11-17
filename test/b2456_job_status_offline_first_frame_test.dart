@@ -44,7 +44,7 @@ void main() {
     expect(cachedVerifiedJobPaymentState([
       {'kind': 'invoice', 'total_amount': 100,
        'paid_amount': 70, 'pending_payment': 30},
-    ]), 'awaiting_clearance');
+    ]), 'recorded_pending');
     expect(cachedVerifiedJobPaymentState([
       {'kind': 'invoice', 'total_amount': 100, 'paid_amount': 100},
       {'kind': 'invoice', 'total_amount': 50},

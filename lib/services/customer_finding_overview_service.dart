@@ -13,24 +13,28 @@ class CustomerFindingCounts {
     required this.open,
     required this.inJob,
     required this.resolved,
+    this.notApplicable=0,
   });
 
   final int open;
   final int inJob;
   final int resolved;
+  final int notApplicable;
 
-  int get total => open + inJob + resolved;
+  int get total => open + inJob + resolved + notApplicable;
 
   static CustomerFindingCounts fromRows(Iterable<Map<String, dynamic>> rows) {
     final ids = <String>{};
     var open = 0;
     var inJob = 0;
     var resolved = 0;
+    var notApplicable=0;
     for (final row in rows) {
       final id = row['id']?.toString() ?? '';
       if (id.isEmpty || !ids.add(id)) continue;
       final status = row['status']?.toString();
-      if (status == 'resolved') {
+      if(status=='not_applicable'){notApplicable++;}
+      else if (status == 'resolved') {
         resolved++;
       } else if (status == 'in_job') {
         inJob++;
@@ -38,7 +42,7 @@ class CustomerFindingCounts {
         open++;
       }
     }
-    return CustomerFindingCounts(open: open, inJob: inJob, resolved: resolved);
+    return CustomerFindingCounts(open: open, inJob: inJob, resolved: resolved,notApplicable:notApplicable);
   }
 }
 

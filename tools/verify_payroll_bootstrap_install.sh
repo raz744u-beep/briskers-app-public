@@ -76,9 +76,37 @@ check_records baseline-launched
 intermediate=${BRISKERS_UPGRADE_INTERMEDIATE:-}
 if [ -n "$intermediate" ]; then
   case "$(basename "$intermediate")" in
+    Briskers-v0.10.9-b4667.apk) intermediate_hash=7fb638bb73b98ec10c43ed1d397f2ece6acfb08737afbd3ab8b7e9ad81e9412e ;;
+    Briskers-v0.10.9-b4668.apk) intermediate_hash=389dc3cb959180f4e5fbe460371d50cab9fe83297fb05066af0530df9c2fc820 ;;
+    Briskers-v0.10.9-b4669.apk) intermediate_hash=644a28aea2bd66caa80ad23f01f71d96d2a7455264d7e1c9bac6e6623c72e5b8 ;;
+    Briskers-v0.10.9-b4676.apk) intermediate_hash=feae67f0aa353c6fbb46a881ff43ec84452048661be1227d97ac269e9aa5133b ;;
+    Briskers-v0.10.9-b4671.apk) intermediate_hash=d708070e7d4e8c0f6418a676ade8bde57721aa6e0d139245e36d58a5bc120f44 ;;
+    Briskers-v0.10.9-b4670.apk) intermediate_hash=a8010b0a7758f80eb26288b8ce8d3834649a078fe1048bc9a44465b89d034389 ;;
+    Briskers-v0.10.9-b4665.apk) intermediate_hash=980fbd4e9d04a8879f52652bdd46cd8e9c878291c2b31cadec451a87a0768a77 ;;
+    Briskers-v0.10.9-b4663.apk) intermediate_hash=a136f5ca3a2be0b578e7142b807d8aa2c97d8cda88f3390d6fd718190c7fea6d ;;
+    Briskers-v0.10.9-b4661.apk) intermediate_hash=698479ce1e9b56521e8bfd8d8e5130cda192bc62466c8cd8383a5167b65e75eb ;;
+    Briskers-v0.10.9-b4660.apk) intermediate_hash=5ef2c883e8b95f18c4c5a444ff3c0c7512f0c5aefed99daf05c5f9b6e7b9b31f ;;
+    Briskers-v0.10.9-b4659.apk) intermediate_hash=c21dea4f9b8fad0af682443137e192cf46a7189c8d36a55e07fab2b65e6a5fc1 ;;
+    Briskers-v0.10.9-b4656.apk) intermediate_hash=5272f886fd7c9c37919d2e95049653628a4346621bb63b894e1cac7c912d6667 ;;
+    Briskers-v0.10.9-b4655.apk) intermediate_hash=4d70ea11200a4ee8285435bf6bbdf2ea62ae3af51d74731cd0fe2d9ff965257f ;;
+    Briskers-v0.10.9-b4653.apk) intermediate_hash=b2c6a5103fe2c890a394ae07a0cb32c18895645c3d6749192cad2cb78f1ec438 ;;
+    Briskers-v0.10.9-b4651.apk) intermediate_hash=1c204f7a7cdb112674661b2a7b41f6d222adffcd967a36d7eb2fc668c8bc24d1 ;;
+    Briskers-v0.10.9-b4649.apk) intermediate_hash=3366b38810f0d168b74afe813d39ee494253e44add38028dc904cb20111aff8a ;;
+    Briskers-v0.10.9-b4648.apk) intermediate_hash=b2b097237f2638daedcc18536b085ca191749a0abf862bb6735e200c5e1094ee ;;
+    Briskers-v0.10.9-b4646.apk) intermediate_hash=229311aa1d6b8b4935c3ec60d4684e2ec683e8204f732334248d3e07502ca590 ;;
+    Briskers-v0.10.9-b4645.apk) intermediate_hash=55142e76737d18ceafcfca603b18dc98e8c5fa4b358480e2d12f87dd79fd4024 ;;
+    Briskers-v0.10.9-b4640.apk) intermediate_hash=aab06ea48b27a55b23aa5378156ef7906bfcc63c4e3a9aea8c714c6a219fc70a ;;
+    Briskers-v0.10.9-b4638.apk) intermediate_hash=8ca7c81de6fdc771e78bcf190637209f831242c00606e38c328833266bf0d830 ;;
+    Briskers-v0.10.9-b4635.apk) intermediate_hash=b51a2e6e65a6feb567675a3a1cec8402c999f170d4beed556c43a678c2a2adeb ;;
+    Briskers-v0.10.9-b4632.apk) intermediate_hash=1865ec9bd59553b5a52b396a5663b4eae20369dd0bbe04278181cd086fc6c009 ;;
+    Briskers-v0.10.9-b4629.apk) intermediate_hash=17626f8317b3851bc780781f18ad0baf8360168c430d06f666983e4480848fb2 ;;
+    Briskers-v0.10.9-b4627.apk) intermediate_hash=72b0d373ede19de9a99a6abaefcd6c4de7a5d381fbbad967ca97a32128f574b7 ;;
+    Briskers-v0.10.9-b4620.apk) intermediate_hash=029c4407114f1f9894caabf5f95bb1ba50e46fd21ef4b09c52adda09ab91ac92 ;;
     Briskers-v0.10.9-b2571.apk) intermediate_hash=820845a388b63696525ccd7b2347a7690fec00690a227dd6ceb473f426572f2b ;;
     Briskers-v0.10.9-b2581.apk) intermediate_hash=50cadbc0d6a64fd8694e6dd78b0339634c746cbd83d6e84a8ec6c14b7b6a51b9 ;;
     Briskers-v0.10.9-b2582.apk) intermediate_hash=8737f3609320588081370fcfbf694f7cc7ca1b207c7c57df52bd9d5994858284 ;;
+    Briskers-v0.10.9-b2587.apk) intermediate_hash=3dd35d27decc90174dc1432970de5459baaa78ae4def068a126d27838ac353af ;;
+    Briskers-v0.10.9-b2586.apk) intermediate_hash=3e131b8fd491714b709d31838fbb3a3009f7626c540774a4b0056d869602d59b ;;
     *) echo 'Unknown signed intermediate APK' >&2; exit 1 ;;
   esac
   printf '%s  %s\n' "$intermediate_hash" "$intermediate" | sha256sum -c
@@ -96,6 +124,24 @@ check_records after-launch
 launch
 adb exec-out screencap -p > "$evidence/updated-restart.png"
 check_records after-restart
+if [[ "${BRISKERS_ESTIMATE_UPGRADE_PROBE:-0}" = 1 ]]; then
+  # Exercise the installed candidate against a pre-upgrade blank estimate in
+  # the isolated offline device. The separate retention check has already
+  # compared every original fixture row and the original receipt image.
+  python3 tools/verify_estimate_number_upgrade.py seed "$tmp/after-restart.sqlite"
+  adb push "$tmp/after-restart.sqlite" "$dbpath"
+  adb shell "rm -f '$dbpath-wal' '$dbpath-shm'; chown '$uid:$uid' '$dbpath'; restorecon '$dbpath'"
+  for phase in first-launch restart; do
+    launch
+    adb shell am force-stop "$package"
+    adb pull "$dbpath" "$tmp/estimate-$phase.sqlite"
+    if adb shell "test -f '$dbpath-wal'"; then
+      adb pull "$dbpath-wal" "$tmp/estimate-$phase.sqlite-wal"
+    fi
+    python3 tools/verify_estimate_number_upgrade.py verify "$tmp/estimate-$phase.sqlite" |
+      tee "$evidence/estimate-number-$phase.json"
+  done
+fi
 adb logcat -d > "$evidence/emulator-logcat.txt"
 if grep -E 'FATAL EXCEPTION|Fatal signal [0-9]+.*briskers' "$evidence/emulator-logcat.txt"; then
   echo "Emulator app crashed" >&2; exit 1

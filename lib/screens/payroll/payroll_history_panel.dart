@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
+import 'approved_tasks_ui.dart';
+import 'payroll_payment_correction.dart';
 
 /// Restored from Tasks TEST. All figures come from recorded settlements and
 /// their immutable work snapshots, grouped by the selected payroll week.
@@ -15,7 +17,14 @@ class PayrollHistoryPanel extends StatefulWidget {
     required this.onOpenJob,
     required this.onOpenInvoice,
     required this.unlocked,
+    this.employeeName,
+    this.onOpenTask,
+    this.onPaymentAction,
   });
+
+  final String? employeeName;
+  final Future<bool> Function(Map<String, dynamic>, PayrollPaymentAction)? onPaymentAction;
+  final ValueChanged<Map<String, dynamic>>? onOpenTask;
 
   final List<Map<String, dynamic>> payments;
   final ValueChanged<String> onOpenJob;
@@ -99,38 +108,130 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
           color: color))),
     ]));
 
-  void _showTaskHistory(_RecordedWeek week) {
+  void _showTaskHistory(_RecordedWeek initialWeek) {
     var visibleTaskCount = 10;
-    final expanded = <Object?>{};
-    final work = week.work;
+    final expanded = <String>{};
+    var selectedDate = initialWeek.date;
+    final grouped = <DateTime, List<Map<String, dynamic>>>{};
+    for (final payment in widget.payments) {
+      (grouped[DateTime.parse(payment['week'] as String)] ??= []).add(payment);
+    }
     Navigator.of(context).push<void>(MaterialPageRoute(
       builder: (context) => ValueListenableBuilder<bool>(
         valueListenable: widget.unlocked,
-        builder: (context, unlocked, _) => Scaffold(
-          appBar: AppBar(title: Text('Week of ${_date.format(week.date)}')),
+        builder: (context, unlocked, _) => StatefulBuilder(
+            builder: (context, updatePage) {
+              final week = _RecordedWeek(
+                selectedDate,
+                grouped[selectedDate] ?? [],
+              );
+              final work = week.work;
+              void move(int offset) => updatePage(() {
+                selectedDate = selectedDate.add(Duration(days: offset * 7));
+                expanded.clear();
+                visibleTaskCount = 10;
+              });
+              return Scaffold(
+                backgroundColor: taskCanvas,
+                appBar: const ApprovedTasksHeader(title: 'Weekly Payroll Details',
+                ),
           body: !unlocked
               ? const Center(child: Text('Owner payroll locked.'))
-              : StatefulBuilder(builder: (context, updatePage) => SafeArea(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
-                    children: [
-                      Row(children: [
-                        _metric('Gross pay', _money(week.gross), const Color(0xFF101828)),
-                        _metric('Debt repaid', _money(week.repaid), const Color(0xFF101828)),
-                        _metric('Transferred', _money(week.net), const Color(0xFF117C56)),
-                      ]),
-                      const Divider(height: 22),
-                      Text('Paid tasks (${work.length})',
-                        style: const TextStyle(fontWeight: FontWeight.w800)),
+              : SafeArea(
+                        child: ListView(
+                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 22),
+                          children: [
+                            Text(
+                              '${widget.employeeName ?? 'Employee'} — Weekly Payroll Details',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 20,
+                              ),
+                            ),
+                            Row(
+                              children: [
+                                IconButton(
+                                  tooltip: 'Previous paid week',
+                                  onPressed: () => move(-1),
+                                  icon: const Icon(Icons.chevron_left),
+                                ),
+                                Expanded(
+                  child: Text(
+                                    '${DateFormat('MMM d').format(selectedDate)} – ${_date.format(selectedDate.add(const Duration(days: 4)))}',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'Next paid week',
+                                  onPressed: () => move(1),
+                                  icon: const Icon(Icons.chevron_right),
+                                ),
+                              ],
+                            ),
+                            Row(
+                              children: [
+                                _detailMetric(
+                                  'Gross Pay',
+                                  week.gross + week.balance,
+                                  const Color(0xFFD6E9FF),
+                                  taskNavy,
+                                ),
+                                _detailMetric(
+                                  'Debt Repaid',
+                                  week.repaid,
+                                  const Color(0xFFFFE5C5),
+                                  taskAmber,
+                                ),
+                                _detailMetric(
+                                  'Transferred',
+                                  week.net,
+                                  const Color(0xFFE1F6D9),
+                                  taskGreen,
+                                ),
+                              ],
+                            ),
+                            if (week.balance != 0)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text('${week.balance > 0 ? 'Remaining payment' : 'Overpayment'} · ${_money(week.balance.abs())}'),
+                              ),
+                            const SizedBox(height: 12),
+                            Wrap(
+                              alignment: WrapAlignment.spaceBetween,
+                              spacing: 12,
+                              runSpacing: 4,
+                              children: [
+                                Text('Paid tasks (${work.length})',
+                        style: const TextStyle(fontWeight: FontWeight.w800,
+                                    fontSize: 17,
+                                  ),
+                                ),
+                                Text(
+                                  'Total: ${(week.minutes / 60).toStringAsFixed(2)} hrs · ${_money(week.net)}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: taskGreen,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
                       for (final row in work.take(visibleTaskCount))
                         _paidWork(
                           row,
-                          expanded: expanded.contains(row['credit_id']),
+                          expanded: expanded.contains(
+                                  '${row['operation_id']}:${row['credit_id']}',
+                                ),
                           onExpansion: (open) => updatePage(() {
-                            if (open) {
-                              expanded.add(row['credit_id']);
+                                  final id =
+                                      '${row['operation_id']}:${row['credit_id']}';
+                                  if (open) {
+                              expanded.add(id);
                             } else {
-                              expanded.remove(row['credit_id']);
+                              expanded.remove(id);
                             }
                           }),
                         ),
@@ -141,59 +242,227 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
                           child: Text('Load More · ${work.length - visibleTaskCount} remaining'),
                         ),
                       for (final payment in week.payments)
-                        if ((payment['work'] as List).isEmpty)
+                        if ((payment['work'] as List).isEmpty || payment['reversed_at'] != null || widget.onPaymentAction != null)
                           ListTile(
-                            title: Text('Payment · ${_money(payment['net'] as int)}'),
-                            subtitle: Text('${payment['method']} · ${payment['verified_date']}'),
+                            title: Text('${payment['reversed_at'] == null ? 'Payment' : 'Reversed payment'} · ${_money(payment['net'] as int)}'),
+                            subtitle: Text('${payment['method']} · ${payment['verified_date']}'
+                                '${payment['reversal_reason'] == null ? '' : '\n${payment['reversal_reason']}'}'),
+                            trailing: widget.onPaymentAction == null || payment['reversed_at'] != null
+                                ? null
+                                : PopupMenuButton<PayrollPaymentAction>(
+                                    tooltip: 'Payment actions',
+                                    onSelected: (action) async {
+                                      if (await widget.onPaymentAction!(payment, action) && context.mounted) {
+                                        Navigator.of(context).pop();
+                                      }
+                                    },
+                                    itemBuilder: (_) => const [
+                                      PopupMenuItem(
+                                        value: PayrollPaymentAction.edit,
+                                        child: Text('Edit'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: PayrollPaymentAction.delete,
+                                        child: Text('Delete'),
+                                      ),
+                                    ],
+                                  ),
                           ),
-                    ],
-                  ),
-                )),
+                            if (work.isEmpty && week.payments.isEmpty)
+                              const ListTile(
+                                title: Text(
+                                  'No recorded payroll for this week.',
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+              );
+            },
+          ),
         ),
       ),
-    ));
+    );
   }
+
+  Widget _detailMetric(
+    String title,
+    int cents,
+    Color background,
+    Color color,
+  ) => Expanded(
+    child: Container(
+      margin: const EdgeInsets.symmetric(horizontal: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 8),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              title,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              _money(cents),
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 
   Widget _paidWork(
     Map<String, dynamic> row, {
     required bool expanded,
     required ValueChanged<bool> onExpansion,
   }) {
-    final job = row['job_id'] as String?;
-    final invoice = row['invoice_id'] as String?;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ExpansionTile(
-        key: ValueKey(row['credit_id']),
-        showTrailingIcon: false,
-        onExpansionChanged: onExpansion,
-        tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-        title: Text(row['description'] as String? ?? 'Paid work',
-          maxLines: 2, overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Paid · ${_money(row['gross_cents'] as int?)}',
-            style: const TextStyle(color: Color(0xFF117C56))),
-          if (row['vehicle_label'] case final String label) Text(label),
-          Wrap(spacing: 8, children: [
-            if (job != null)
-              TextButton(onPressed: () => widget.onOpenJob(job),
-                child: Text('Job ${row['job_number'] ?? 'details'}')),
-            if (invoice != null)
-              TextButton(onPressed: () => widget.onOpenInvoice(invoice),
-                child: Text('Invoice ${row['document_number'] ?? 'details'}')),
-          ]),
-          Text('${((row['actual_minutes'] as int? ?? 0) / 60).toStringAsFixed(2)} hrs'
-            ' · ${row['method']} · ${row['verified_date']}'),
-          Text(expanded ? 'Tap to collapse' : 'Tap to expand',
-            style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B))),
-        ]),
-        children: [
-          ListTile(
-            title: Text('Payment ${row['operation_id']}'),
-            subtitle: Text('Credit ${row['credit_id']}'),
-          ),
-        ],
+    final job = row['job_id'] as String?,
+        invoice = row['invoice_id'] as String?;
+    final description = row['description']?.toString() ?? 'Paid work';
+    final date = DateTime.tryParse(row['verified_date']?.toString() ?? '');
+    return ApprovedTaskCardSurface(
+      borderColor: taskGreen,
+      child: Material(
+        color: Colors.transparent,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            InkWell(
+              onTap: () => onExpansion(!expanded),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text('Job ${row['job_number'] ?? '—'} · ${row['customer_name'] ?? 'Customer unavailable'}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: taskGreen,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            'Paid',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        Icon(
+                          expanded ? Icons.expand_less : Icons.expand_more,
+                          color: taskNavy,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${row['vehicle_label'] ?? 'Vehicle unavailable'} · $description',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 5),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${widget.employeeName ?? row['employee_name'] ?? 'Employee'} · ${((row['actual_minutes'] as int? ?? 0) / 60).toStringAsFixed(2)} h · ${row['method'] ?? 'Unknown'} · ${date == null ? 'Date unavailable' : DateFormat('MMM d, yyyy').format(date)}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF596574),
+                            ),
+                          ),
+                        ),
+                        Text(
+                          _money(row['gross_cents'] as int?),
+                          style: const TextStyle(
+                            color: taskGreen,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (expanded)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Divider(height: 12),
+                    Text('Description: $description'),
+                    Text(
+                      'Recorded labor: ${_money(row['gross_cents'] as int?)} · ${row['method']} · ${row['verified_date']}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(children: [
+                        if (row['task_id'] is String && widget.onOpenTask != null)
+                          Expanded(child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 8), visualDensity: VisualDensity.compact),
+                            onPressed: () => widget.onOpenTask!(row),
+                            icon: const Icon(Icons.build_outlined, size: 15),
+                            label: const FittedBox(fit: BoxFit.scaleDown, child: Text('View Task')),
+                          )),
+                        if (row['task_id'] is String && widget.onOpenTask != null && (job != null || invoice != null))
+                          const SizedBox(width: 5),
+                        if (job != null)
+                          Expanded(child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 8), visualDensity: VisualDensity.compact),
+                            onPressed: () => widget.onOpenJob(job),
+                            icon: const Icon(Icons.work_outline, size: 15),
+                            label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Open Job')),
+                          )),
+                        if (job != null && invoice != null) const SizedBox(width: 5),
+                        if (invoice != null)
+                          Expanded(child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 8), visualDensity: VisualDensity.compact),
+                            onPressed: () => widget.onOpenInvoice(invoice),
+                            icon: const Icon(Icons.receipt_long_outlined, size: 15),
+                            label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Open Invoice')),
+                          )),
+                      ]),
+                    if (row['task_id'] == null ||
+                        job == null ||
+                        invoice == null)
+                      const Text(
+                        'Some original links are unavailable in this saved record.',
+                        style: TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -237,11 +506,14 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
             Row(children: [
               _metric('Hours', (week.minutes / 60).toStringAsFixed(1),
                 const Color(0xFF101828)),
-              _metric('Gross', _money(week.gross), const Color(0xFF101828)),
+              _metric('Gross', _money(week.gross + week.balance), const Color(0xFF101828)),
               // Recorded gross was settled through net transfer and any
               // debt repayment. Remaining unrecorded tasks are not included.
               _metric('Paid', _money(week.gross), const Color(0xFF117C56)),
-              _metric('Balance', '—', const Color(0xFF64748B)),
+              if (week.balance == 0)
+                _metric('Balance', '—', const Color(0xFF64748B))
+              else
+                _metric('Balance', _money(week.balance), const Color(0xFF64748B)),
             ]),
           ]),
         ),
@@ -262,7 +534,7 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
     // Paid denotes verified gross compensation, while net bank/cash
     // transfer is separately visible in each week detail alongside debt repaid.
     final paid = weeks.fold<int>(0, (sum, week) => sum + week.gross);
-    final gross = weeks.fold<int>(0, (sum, week) => sum + week.gross);
+    final gross = weeks.fold<int>(0, (sum, week) => sum + week.gross + week.balance);
     return Column(children: [
       Padding(
         padding:const EdgeInsets.fromLTRB(12,10,12,9),
@@ -356,11 +628,16 @@ class _RecordedWeek {
   final List<Map<String, dynamic>> payments;
   List<Map<String, dynamic>> get work => [
     for (final payment in payments)
-      ...(payment['work'] as List<Map<String, dynamic>>),
+      if (payment['reversed_at'] == null)
+        ...(payment['work'] as List<Map<String, dynamic>>),
   ];
   int get minutes => work.fold(0, (sum, row) => sum + (row['actual_minutes'] as int? ?? 0));
   int get gross => _sum('gross');
   int get repaid => _sum('repayment');
   int get net => _sum('net');
-  int _sum(String field) => payments.fold(0, (sum, row) => sum + (row[field] as int));
+  int get balance => payments.fold(0, (sum, row) {
+    final net = row['net'] as int;
+    return row['reversed_at'] == null ? sum + (row['original_net'] as int? ?? net) - net : sum;
+  });
+  int _sum(String field) => payments.fold(0, (sum, row) => sum + (row['reversed_at'] == null ? row[field] as int : 0));
 }

@@ -11,6 +11,7 @@ import 'local_job_quarantine.dart';
 import 'local_document_detail_cache.dart';
 import 'local_financial_totals_journal.dart';
 import 'local_invoice_payment_coverage_events.dart';
+import 'local_invoice_closure.dart';
 
 /// Durable *local* payment capture and idempotent replay. This class records
 /// received payments only; it never finalizes payments or posts income.
@@ -773,18 +774,11 @@ class OfflineInvoicePaymentLedger {
           if (cacheInvoice != null) {
             await cacheInvoice(businessId, invoiceId, detail);
           } else {
-            final cache = LocalDocumentDetailCache(database: _database);
-            final cached = await cache.load(businessId, invoiceId);
-            final refreshed = Map<String, dynamic>.from(detail);
-            // Warranty detail has its own endpoint. A payment refresh must not
-            // erase the separately cached warranty needed while disconnected.
-            if (!refreshed.containsKey('offline_warranty_detail') &&
-                cached != null && cached.containsKey('offline_warranty_detail')) {
-              refreshed['offline_warranty_detail'] =
-                  cached['offline_warranty_detail'];
-            }
-            await cache.save(businessId, invoiceId, refreshed);
+            await _cachePaymentAcknowledgement(businessId, invoiceId, detail);
           }
+          await LocalInvoiceClosureStore(_database).acknowledgeIncomeReceipt(
+            businessId, invoiceId, operationId, paymentId,
+          );
           await _database.customStatement(
             'DELETE FROM sync_outbox WHERE id=?',
             [id],
@@ -883,15 +877,7 @@ class OfflineInvoicePaymentLedger {
           await _database.transaction(() async {
             await LocalJobQuarantine.assertReplayAllowed(
                 _database,businessId,outboxId:id);
-            final cache = LocalDocumentDetailCache(database:_database);
-            final oldDetail = await cache.load(businessId,invoiceId);
-            final refreshed = Map<String,dynamic>.from(server);
-            if (!refreshed.containsKey('offline_warranty_detail') &&
-                oldDetail?['offline_warranty_detail'] != null) {
-              refreshed['offline_warranty_detail'] =
-                  oldDetail!['offline_warranty_detail'];
-            }
-            await cache.save(businessId,invoiceId,refreshed);
+            await _cachePaymentAcknowledgement(businessId, invoiceId, server);
             await _database.customStatement(
               'DELETE FROM sync_outbox WHERE id=?',[id]);
           });
@@ -997,15 +983,7 @@ class OfflineInvoicePaymentLedger {
         await _database.transaction(() async {
           await LocalJobQuarantine.assertReplayAllowed(
               _database,businessId,outboxId:id);
-          final cache = LocalDocumentDetailCache(database:_database);
-          final oldDetail = await cache.load(businessId,invoiceId);
-          final refreshed = Map<String,dynamic>.from(after);
-          if (!refreshed.containsKey('offline_warranty_detail') &&
-              oldDetail?['offline_warranty_detail'] != null) {
-            refreshed['offline_warranty_detail'] =
-                oldDetail!['offline_warranty_detail'];
-          }
-          await cache.save(businessId,invoiceId,refreshed);
+          await _cachePaymentAcknowledgement(businessId, invoiceId, after);
           await _database.customStatement(
             'DELETE FROM sync_outbox WHERE id=?',[id]);
         });
@@ -1020,6 +998,28 @@ class OfflineInvoicePaymentLedger {
         break;
       }
     }
+  }
+
+  Future<void> _cachePaymentAcknowledgement(
+    String businessId, String invoiceId, Map<String, dynamic> server,
+  ) async {
+    final cache = LocalDocumentDetailCache(database: _database);
+    final saved = await cache.loadReadOnly(businessId, invoiceId);
+    final correction = await _database.customSelect(
+      "SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? "
+      "AND entity_type IN ('document_edit','invoice_tax_edit') AND state<>'done' LIMIT 1",
+      variables: [Variable(businessId), Variable(invoiceId)],
+    ).getSingleOrNull();
+    final next = <String, dynamic>{
+      ...server,
+      if (saved != null && correction != null) ...saved,
+      for (final key in ['payments', 'paid_amount', 'pending_payment'])
+        if (server.containsKey(key)) key: server[key],
+      if (!server.containsKey('offline_warranty_detail') &&
+          saved?['offline_warranty_detail'] != null)
+        'offline_warranty_detail': saved!['offline_warranty_detail'],
+    };
+    await cache.save(businessId, invoiceId, next);
   }
 
   Future<List<Map<String, dynamic>>> pendingForInvoice(

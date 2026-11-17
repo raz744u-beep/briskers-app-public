@@ -29,8 +29,8 @@ void main() {
     final s = File('lib/screens/payroll/payroll_history_panel.dart')
         .readAsStringSync();
     expect(s, contains("final paid = weeks.fold<int>(0, (sum, week) => sum + week.gross)"));
-    expect(s, contains("_metric('Debt repaid', _money(week.repaid)"));
-    expect(s, contains("_metric('Transferred', _money(week.net)"));
+    expect(s, matches(RegExp(r"_detailMetric\(\s*'Debt Repaid',\s*week.repaid")));
+    expect(s, matches(RegExp(r"_detailMetric\(\s*'Transferred',\s*week.net")));
     expect(s, contains("int get net => _sum('net')"));
     expect(s, contains("int get repaid => _sum('repayment')"));
   });

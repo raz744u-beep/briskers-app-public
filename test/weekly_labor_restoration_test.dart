@@ -60,7 +60,8 @@ void main() {
     expect(find.text('Partially Paid · Remaining hours only'), findsOneWidget);
     await tester.tap(find.byTooltip('Edit payable hours'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, 'Hours to pay this week'), '0.33');
+    await tester.enterText(find.byKey(const Key('payable-hours-input')), '0.33');
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Verify Payment'));

@@ -59,7 +59,7 @@ void main() {
       await tester.runAsync(() async {
       await LocalDocumentDetailCache.initialize(db);
       await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status,job_number) VALUES('job','shop','owner','Synthetic repair','open','J-TEST')");
-      await db.customStatement("INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) VALUES('2026-11-07','invoice','shop','job','invoice','TEST-100')");
+      await db.customStatement("INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) VALUES('2026-11-09','invoice','shop','job','invoice','TEST-100')");
       for (final employee in ['a', 'b']) {
         await db.customStatement('INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id,employee_name) VALUES(?,?,?,?,?)',
           [employee, 'shop', 'job', employee, employee == 'a' ? 'Alice' : 'Bob']);
@@ -95,18 +95,36 @@ void main() {
           businessId: 'shop', employeeId: 'a', employeeName: 'Alice', employeeRole: 'mechanic',
           database: db, unlockOwner: unlock, ownerConnection: network, initialTab: tab)));
       await tester.pumpWidget(screen());
-      await until(find.widgetWithText(FilledButton, 'Verify Payment'));
-      expect(find.text('Tasks'), findsOneWidget);
+      await until(find.textContaining('Currently Assigned Tasks'));
+      await tester.tap(find.text('Payroll'));
+      await tester.pumpAndSettle();
+      expect(find.text('Work'), findsOneWidget);
       expect(find.text('Payroll'), findsOneWidget);
       expect(find.text('Reports'), findsOneWidget);
       if (currentHolder) {
         // Owner bookkeeping must not require the employee to own a paired phone.
         await tester.tap(find.text('Payroll'));
         await tester.pumpAndSettle();
+        LinearGradient headerGradient(String title) => tester
+            .widgetList<Container>(find.ancestor(of: find.text(title),
+              matching: find.byType(Container)))
+            .map((container) => container.decoration)
+            .whereType<BoxDecoration>()
+            .map((decoration) => decoration.gradient)
+            .whereType<LinearGradient>()
+            .first;
+        await tester.scrollUntilVisible(find.text('Weekly Payment Summary'), 160,
+          scrollable: find.byType(Scrollable).last);
+        await tester.pumpAndSettle();
+        final weeklyGradient = headerGradient('Weekly Payment Summary');
+        expect(weeklyGradient.colors, const [
+          Color(0xFF31A9D9), Color(0xFF2075BC), Color(0xFF174B92),
+        ]);
         await tester.scrollUntilVisible(find.text('Advances & Repayments'), 220,
           scrollable: find.byType(Scrollable).last);
         await tester.ensureVisible(find.text('Advances & Repayments'));
         await tester.pumpAndSettle();
+        expect(headerGradient('Advances & Repayments'), weeklyGradient);
         await tester.tap(find.text('Advances & Repayments'));
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.byTooltip('Edit opening balance'));
@@ -127,14 +145,15 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.widgetWithText(FilledButton, 'Save Repayment'));
         await until(find.text(r'Remaining balance: $0.00'));
-        await tester.tap(find.text('Tasks'));
+        await tester.tap(find.text('Payroll'));
         await tester.pumpAndSettle();
-        await until(find.widgetWithText(FilledButton, 'Verify Payment'));
+        await until(find.byKey(const Key('verify-weekly-payment')));
       }
       // The recorded-labor review above WeeklyLaborReview makes the footer
       // scrollable on short phones; bring the existing payment action into
       // view before tapping it.
-      final verify = find.widgetWithText(FilledButton, 'Verify Payment');
+      final verify = find.byKey(const Key('verify-weekly-payment'));
+      await tester.scrollUntilVisible(find.byKey(const Key('verify-weekly-payment')),150,scrollable:find.descendant(of:find.byKey(const Key('employee-payroll-preparation')),matching:find.byType(Scrollable)).first);
       await tester.ensureVisible(verify);
       await tester.pumpAndSettle();
       expect(tester.widget<FilledButton>(verify).onPressed, isNotNull);

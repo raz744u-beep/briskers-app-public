@@ -7,6 +7,9 @@ import '../local/briskers_local_database.dart' hide LocalFinancialCache;
 import '../local/local_database_provider.dart';
 import 'local_financial_cache.dart';
 import 'local_document_detail_cache.dart';
+import 'local_invoice_closure.dart';
+import 'local_document_sql_store.dart';
+import 'local_transaction_search.dart';
 
 /// Read-only projection of real invoice receipts into Expenses & Income.
 /// No methods in this class insert, finalize, post, or charge a payment.
@@ -22,7 +25,7 @@ class InvoicePaymentFeed {
   static String paymentLabel(Map<String, dynamic> transaction) {
     final state = transaction['_receipt_state']?.toString().toLowerCase();
     final coverage = transaction['_payment_coverage']?.toString().toLowerCase();
-    if (state != 'posted') return 'Recorded';
+    if (state != 'posted' && state != 'local_finalized') return 'Recorded';
     if (coverage == 'paid') return 'Paid';
     if (coverage == 'partial') return 'Partial';
     return 'Recorded';
@@ -32,6 +35,7 @@ class InvoicePaymentFeed {
     switch (transaction['_receipt_state']?.toString().toLowerCase()) {
       case 'posted':
         return 'Synced';
+      case 'local_finalized':
       case 'local':
         return 'Local · saved on this device';
       case 'pending':
@@ -64,7 +68,9 @@ class InvoicePaymentFeed {
         ON c.business_id=o.business_id AND c.id=d.customer_id
       WHERE o.business_id=?
         AND o.entity_type='invoice_payment_received'
-        AND o.state IN ('pending','inflight')
+        AND (o.state IN ('pending','inflight') OR
+          (o.state='conflict' AND
+           o.last_error='Owner recovery payment preserved; sync disabled'))
       ORDER BY o.id
       ''',
       variables: [Variable<String>(businessId)],
@@ -101,7 +107,9 @@ class InvoicePaymentFeed {
         // Preserve the queue, but never invent a receipt from invalid payload.
       }
     }
-    final merged = mergeReceipts(server, local);
+    final finalized = await LocalInvoiceClosureStore(_db).finalizedIncome(businessId);
+    final merged = mergeReceipts(withLocalFinalization(server, finalized),
+        local.where((row) => !finalized.any((item) => _sameReceipt(item, row))).toList());
     final pendingCorrections = await _db.customSelect(
       """SELECT payload_json FROM sync_outbox
       WHERE business_id=? AND entity_type='invoice_pending_payment_edit'
@@ -118,6 +126,44 @@ class InvoicePaymentFeed {
       }
     }
     return overlayPendingPaymentEdits(merged,corrections);
+  }
+
+  static bool _sameReceipt(Map<String, dynamic> left, Map<String, dynamic> right) {
+    if (left['invoice_id'] != right['invoice_id']) return false;
+    Set<String> keys(Map<String, dynamic> row) => {
+      for (final key in ['receipt_id', 'operation_id', 'server_payment_id', 'transaction_id'])
+        if (row[key]?.toString().isNotEmpty == true) row[key].toString(),
+    };
+    return keys(left).intersection(keys(right)).isNotEmpty;
+  }
+
+  /// A posted allocation with an exact identity takes precedence. Legacy
+  /// posting can discard receipt IDs. Once posted allocations cover the
+  /// entire invoice, avoid adding a second representation of that income.
+  static List<Map<String, dynamic>> withLocalFinalization(
+    List<Map<String, dynamic>> authoritative,
+    List<Map<String, dynamic>> finalized,
+  ) {
+    final postedCents = <Object?, int>{};
+    for (final row in authoritative) {
+      if (row['receipt_state'] != 'posted') continue;
+      postedCents.update(row['invoice_id'],
+          (value) => value + (_amount(row['amount']) * 100).round(),
+          ifAbsent: () => (_amount(row['amount']) * 100).round());
+    }
+    final result = authoritative.toList();
+    for (final row in finalized) {
+      final total = (_amount(row['invoice_total']) * 100).round();
+      result.removeWhere((item) => item['receipt_state'] != 'posted' &&
+          _sameReceipt(item, row));
+      if ((total > 0 && (postedCents[row['invoice_id']] ?? 0) >= total) ||
+          authoritative.any((item) =>
+              item['receipt_state'] == 'posted' && _sameReceipt(item, row))) {
+        continue;
+      }
+      result.add(row);
+    }
+    return result;
   }
 
   /// Read-only view of amount/method/date corrections to server-pending
@@ -177,40 +223,39 @@ class InvoicePaymentFeed {
   /// or writing money. This runs AFTER the Expenses first paint.
   Future<List<Map<String, dynamic>>> pendingFromCachedInvoices(
       String businessId) async {
-    if (await _cache.hasServerInvoiceReceipts(businessId)) {
-      // A complete server RPC cache, even if empty, outranks stale documents.
-      return const [];
-    }
+    final serverComplete = await _cache.hasServerInvoiceReceipts(businessId);
+    final server = await _cache.loadInvoiceReceipts(businessId);
     final active = await _db.customSelect(
-      "SELECT id FROM local_documents "
-      "WHERE business_id = ? AND kind = 'invoice' "
-      "AND COALESCE(status, '') <> 'void'",
+      "SELECT id FROM local_documents WHERE business_id=? AND kind='invoice' "
+      "AND COALESCE(status,'') NOT IN ('void','voided','deleted')",
       variables: [Variable<String>(businessId)],
     ).get();
-    final invoiceIds = active.map((r) => r.read<String>('id')).toSet();
-    final prefs = await SharedPreferences.getInstance();
+    final invoiceIds = active.map((row) => row.read<String>('id')).toSet();
     final prefix = 'briskers_document_detail_${businessId}_';
+    await LocalDocumentSqlStore.ensure(_db);
+    final durable = await _db.customSelect(
+      'SELECT cache_key FROM local_document_details WHERE substr(cache_key,1,?)=? '
+      "AND json_valid(payload_json) AND json_extract(payload_json,'\$.kind')='invoice' "
+      "AND json_array_length(payload_json,'\$.payments')>0",
+      variables: [Variable(prefix.length), Variable(prefix)],
+    ).get();
+    invoiceIds.addAll(durable.map((row) => row.read<String>('cache_key').substring(prefix.length)));
+    final prefs = await SharedPreferences.getInstance();
+    final legacy = {
+      for (final key in prefs.getKeys())
+        if (key.startsWith(prefix)) key.substring(prefix.length),
+    };
+    final sqliteIds = {
+      for (final row in durable) row.read<String>('cache_key').substring(prefix.length),
+    };
     final detailCache = LocalDocumentDetailCache(database: _db);
     final pendingRows = <Map<String, dynamic>>[];
-    final aggregate = RegExp(
-        r'"pending_payment"\s*:\s*"?([0-9]+(?:\.[0-9]+)?)');
     var examined = 0;
-    for (final key in prefs.getKeys()) {
-      if (!key.startsWith(prefix)) continue;
-      final invoiceId = key.substring(prefix.length);
-      if (!invoiceIds.contains(invoiceId)) continue;
-      final raw = prefs.getString(key);
-      if (raw == null) continue;
-      final match = aggregate.firstMatch(raw);
-      if (match == null ||
-          (double.tryParse(match.group(1) ?? '') ?? 0) <= 0.005) {
-        continue;
-      }
-      // Honor local retirement/quarantine protections before exposing details.
-      final detail = await detailCache.load(businessId, invoiceId);
-      if (detail == null ||
-          detail['kind'] != 'invoice' ||
-          detail['status'] == 'void') {
+    for (final invoiceId in invoiceIds) {
+      if (!sqliteIds.contains(invoiceId) && !legacy.contains(invoiceId)) continue;
+      final detail = await detailCache.loadReadOnly(businessId, invoiceId, projectLifecycle: false);
+      if (detail == null || detail['id'] != invoiceId || detail['kind'] != 'invoice' ||
+          const ['void','voided','deleted'].contains(detail['status'])) {
         continue;
       }
       final rows = detail['payments'];
@@ -223,16 +268,22 @@ class InvoicePaymentFeed {
         final amount = _amount(payment['amount']);
         if (amount <= 0) continue;
         cumulative += amount;
-        if (payment['state']?.toString() != 'pending' ||
-            payment['pending_sync'] == true ||
-            payment['_local_pending_payment'] == true) {
+        final state = payment['state']?.toString();
+        final paymentId = payment['id']?.toString() ?? '';
+        final transactionId = payment['transaction_id']?.toString() ??
+            payment['financial_transaction_id']?.toString();
+        final locallyRecorded = payment['pending_sync'] == true;
+        final posted = state == 'posted' && transactionId?.isNotEmpty == true;
+        if (paymentId.isEmpty || payment['_local_pending_payment'] == true ||
+            (!posted && (state != 'pending' || (serverComplete && !locallyRecorded)))) {
           continue;
         }
-        final paymentId = payment['id']?.toString() ?? '';
-        if (paymentId.isEmpty) continue;
         final at = payment['entered_at']?.toString() ?? '';
         pendingRows.add({
           'receipt_id': paymentId,
+          'operation_id': payment['operation_id'],
+          'server_payment_id': payment['server_payment_id'],
+          'transaction_id': transactionId,
           'invoice_id': invoiceId,
           'document_number': detail['document_number'],
           'customer_name': detail['customer_name'] ?? 'Customer',
@@ -241,10 +292,9 @@ class InvoicePaymentFeed {
           'amount': amount,
           'invoice_total': total,
           'transaction_date': (payment['payment_date']?.toString().isNotEmpty == true)
-              ? payment['payment_date'] : (at.isNotEmpty
-                ? at.split('T').first : detail['document_date']),
+              ? payment['payment_date'] : (at.isNotEmpty ? at.split('T').first : null),
           'received_at': at,
-          'receipt_state': 'pending',
+          'receipt_state': posted ? 'posted' : locallyRecorded ? 'local' : 'pending',
           'coverage': total > 0 && cumulative + 0.005 >= total
               ? 'paid' : 'partial',
         });
@@ -255,7 +305,10 @@ class InvoicePaymentFeed {
         await Future<void>.delayed(Duration.zero);
       }
     }
-    return mergeReceipts(pendingRows, const []);
+    final finalized = await LocalInvoiceClosureStore(_db).finalizedIncome(businessId);
+    return mergeReceipts(const [], pendingRows.where((row) =>
+        !finalized.any((item) => _sameReceipt(item, row)) &&
+        !server.any((item) => _sameReceipt(item, row))).toList());
   }
 
   /// Stable identity is required to retire a local card without duplication.
@@ -275,7 +328,10 @@ class InvoicePaymentFeed {
     final local = previouslyVisible
         .where((row) => row['receipt_state']?.toString() == 'local')
         .toList();
-    return mergeReceipts([...authoritativePage, ...posted], local);
+    final finalized = previouslyVisible
+        .where((row) => row['receipt_state'] == 'local_finalized').toList();
+    return mergeReceipts(withLocalFinalization(
+        mergeReceipts([...authoritativePage, ...posted], const []), finalized), local);
   }
 
   /// Equal amounts or customer names NEVER establish receipt identity.
@@ -356,24 +412,34 @@ class InvoicePaymentFeed {
       final date = DateTime.tryParse(
         r['transaction_date']?.toString() ?? '',
       );
+      if (date == null && (startDate != null || endDate != null)) return false;
       if (date != null) {
         final day = DateTime(date.year, date.month, date.day);
         if (startDate != null && day.isBefore(startDate)) return false;
         if (endDate != null && day.isAfter(endDate)) return false;
       }
-      final needle = search?.trim().toLowerCase() ?? '';
-      if (needle.isEmpty) return true;
-      return [
-        r['customer_name'], r['document_number'], r['payment_method'],
-        r['amount'], r['job_number'], r['transaction_date'],
-      ].any((field) =>
-          field?.toString().toLowerCase().contains(needle) ?? false);
+      return LocalTransactionSearch.matches(r, search);
     }).toList();
 
+    final financialByPayment = <String, String>{};
+    for (final item in financial) {
+      final payment = item['invoice_payment_id']?.toString() ?? '';
+      final id = item['id']?.toString() ?? '';
+      if (payment.isEmpty || id.isEmpty || item['direction'] != 'income') continue;
+      // A receipt claimed by multiple financial rows is ambiguous.
+      financialByPayment.update(payment, (_) => '', ifAbsent: () => id);
+    }
     final allocations = <String, List<Map<String, dynamic>>>{};
     for (final r in eligible) {
-      if (r['receipt_state']?.toString() != 'posted') continue;
-      final transactionId = r['transaction_id']?.toString() ?? '';
+      var transactionId = r['receipt_state'] == 'posted'
+          ? r['transaction_id']?.toString() ?? '' : '';
+      if (transactionId.isEmpty) {
+        final matched = {
+          for (final key in ['receipt_id','operation_id','server_payment_id'])
+            if (financialByPayment[r[key]?.toString()] case final String id when id.isNotEmpty) id,
+        };
+        transactionId = matched.length == 1 ? matched.single : '';
+      }
       if (transactionId.isEmpty) continue;
       allocations.putIfAbsent(transactionId, () => []).add(r);
     }

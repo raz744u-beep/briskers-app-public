@@ -20,11 +20,12 @@ void main() {
     final confirmation = action.indexOf('await showDialog<String>');
     expect(action.indexOf('if (!_canForceReopen || _busy) return;'),
         inInclusiveRange(0, confirmation - 1));
-    expect(action.indexOf('forceOffline'), inInclusiveRange(0, confirmation - 1));
     expect(action, contains('_historicalInvoiceReopenDialog(dialogContext, reason)'));
     final accepted = action.indexOf('if (!mounted || confirmed == null) return;');
     final mutation = action.indexOf('_api.ownerForceReopenInvoice(');
     expect(accepted, greaterThan(confirmation));
+    expect(action.indexOf('forceOffline'), greaterThan(accepted));
+    expect(action, contains('LocalInvoiceClosure().reopen('));
     expect(mutation, greaterThan(accepted));
     expect(action, contains('expectedVersion: _version, reason: confirmed'));
     final eligibility = _section(invoice, 'bool get _canForceReopen =>',
@@ -40,26 +41,21 @@ void main() {
         'Future<void> _enterWarrantyPayment()');
     final dialog = action.indexOf('await showDialog<bool>');
     for (final guard in [
-      'if (!widget.isOwner) return;',
-      "_number(_detail?['pending_payment']) <= 0.005",
-      'BriskersConnectionModeController.instance.forceOffline',
-      '_queuedPaymentOperationIds.isNotEmpty',
-      '_offlineDocumentDraft.isLocalDraftId(widget.documentId)',
+      'if (!widget.isOwner || _startingFinalization) return;',
+      'amount <= 0.005',
     ]) {
       expect(action.indexOf(guard), inInclusiveRange(0, dialog - 1), reason: guard);
     }
     expect(action, contains('_estimate || _busy'));
-    expect(action, contains('_finalizeReceivedPaymentDialog(dialogContext, _money(amount))'));
-    final consent = action.indexOf('if (!confirmed || !mounted) return;');
-    final durableGuard = action.indexOf('InvoiceFinalizationGuard().run<void>(');
-    final mutation = action.indexOf('await _api.finalizePendingInvoicePayment(');
+    expect(action, contains('_finalizeReceivedPaymentDialog(context, _money(amount))'));
+    final consent = action.indexOf('if (confirmed != true || !mounted) return;');
+    final mutation = action.indexOf('OfflineInvoiceFinalization().finalizeLocally(');
     expect(consent, greaterThan(dialog));
-    expect(durableGuard, greaterThan(consent));
-    expect(mutation, greaterThan(durableGuard));
-    expect(action, contains('invoiceIds: [widget.documentId], isOwner: widget.isOwner'));
-    expect(action, contains('if (mounted && succeeded) {'));
-    expect(action, contains('await _offerCompletePaidJob();'));
-    expect(action, contains('await _autoCloseOwnerInvoiceIfReady();'));
+    expect(mutation, greaterThan(consent));
+    expect(action, isNot(contains('.flush(')));
+    expect(action, isNot(contains('finalizePendingInvoicePayment(')));
+    expect(action, contains('isOwner: widget.isOwner'));
+    expect(action, contains('confirmedDetail: detail'));
   });
 
   test('warranty company sheet scrolls around keyboard without bypassing name', () {

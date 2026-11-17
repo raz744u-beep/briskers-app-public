@@ -7,7 +7,7 @@ import 'employee_nickname_store.dart';
 class CompletedTaskHistory {
   CompletedTaskHistory(this.db);
   final BriskersLocalDatabase db;
-  Future<List<Map<String,dynamic>>> read(String business,{String? job,String? customer})async{
+  Future<List<Map<String,dynamic>>> read(String business,{String? job,String? customer, bool wholeTasksOnly=false})async{
     final schema=await db.customSelect("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('regular_payroll_tasks','regular_payroll_portions','local_mechanic_work_credits_v1','regular_payroll_employees','regular_payroll_task_sources')").get();
     if(schema.length!=5)return [];
     final extra=await db.customSelect("SELECT name FROM sqlite_master WHERE name='regular_payroll_actual_time'").get();
@@ -24,6 +24,7 @@ class CompletedTaskHistory {
       "WHERE t.business_id=? AND p.state='Done' AND c.completed=1 "
       "${meta.isEmpty?'':"AND NOT EXISTS (SELECT 1 FROM regular_payroll_assignment_meta m WHERE m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id AND m.active=0) "}"
       '${job==null?'':'AND t.job_id=? '} ${customer==null?'':'AND j.customer_id=? '}'
+      "${!wholeTasksOnly?'':"AND NOT EXISTS (SELECT 1 FROM regular_payroll_portions u WHERE u.business_id=t.business_id AND u.task_id=t.id AND u.state!='Done' ${meta.isEmpty?'':"AND NOT EXISTS (SELECT 1 FROM regular_payroll_assignment_meta um WHERE um.business_id=u.business_id AND um.task_id=u.task_id AND um.employee_id=u.employee_id AND um.active=0)"}) "}"
       'ORDER BY p.completed_date DESC,t.id,p.employee_id',
       variables:[business,?job,?customer].map(Variable<String>.new).toList()).get();
     final nicknames=await EmployeeNicknameStore(database:db).all(business);

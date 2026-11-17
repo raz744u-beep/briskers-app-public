@@ -1,3 +1,6 @@
+import '../../services/offline_financial_write_service.dart';
+import '../../core/supabase_config.dart';
+import '../../services/local_recurring_expense_edit.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
@@ -18,9 +21,15 @@ import '../../services/briskers_api.dart';
 import '../../services/warranty_receipt_reporting.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_financial_cache.dart';
+import '../../services/device_owner_authorization.dart';
 import '../../services/expenseiq_local_photo_sync.dart';
+import '../../local/local_database_provider.dart';
+import '../../services/local_payroll_repository.dart';
+import '../payroll/owner_payroll_connection.dart';
+import '../payroll/payroll_payment_correction.dart';
 import 'expense_entry_screen.dart';
 import 'transaction_recurring_dialog.dart';
+import '../settings/offline_recurring_screen.dart';
 import '../../core/recurring_schedule_status.dart';
 
 /// True for Android SAF folder grants that can be restored by user selection.
@@ -97,6 +106,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   Map<String, dynamic>? _detail;
   bool _loading = true;
   bool _canDeleteRecords = false;
+  bool _canEditPayrollAccount = false;
+  Map<String, dynamic>? _linkedPayrollPayment;
   bool _uploading = false;
   bool _reconnectingPhoto = false;
   String? _deletingAttachmentId;
@@ -185,6 +196,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     _loading = true;
     _hasAuthoritativeDetail = false;
     _canDeleteRecords = false;
+    _canEditPayrollAccount = false;
+    _linkedPayrollPayment = null;
     _uploading = false;
     _reconnectingPhoto = false;
     _deletingAttachmentId = null;
@@ -238,6 +251,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     final transactionId = widget.transactionId;
     final summary = widget.cachedDetail;
     _canDeleteRecords = false;
+    _canEditPayrollAccount = false;
+    _linkedPayrollPayment = null;
     unawaited(_loadLocalExpenseIqPhoto(generation));
     try {
       final saved = await _localFinancial.loadTransactionDetail(
@@ -255,9 +270,19 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         });
         return;
       }
-      final detail = _normalizedDetail(rawDetail)
-        ..['editable'] = saved != null && saved['recurring_engine_owned'] != true
-        ..['deletable'] = false;
+      final ownerSource = saved == null && widget.canDeleteTransaction
+          ? LocalFinancialCache.validatedEditSource(
+              (await _localFinancial.loadTransactions(businessId))
+                  .where((row) => row['id'] == transactionId).firstOrNull,
+              businessId, transactionId,
+            )
+          : null;
+      if (!_isCurrent(generation)) return;
+      final detail = _normalizedDetail(ownerSource ?? rawDetail)
+        ..['editable'] = saved != null ||
+            (ownerSource != null && !LocalFinancialCache.requiresOwnerAccountEdit(ownerSource))
+        ..['deletable'] = LocalFinancialCache.canVoidSavedExpense(saved) &&
+            LocalFinancialCache.validatedEditSource(saved, businessId, transactionId) != null;
       setState(() {
         _detail = detail;
         _detailSource = saved == null ? 'preview' : 'local';
@@ -265,6 +290,12 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         _error = null;
       });
       unawaited(_enrichVisibleExpense(detail, generation));
+      unawaited(_loadPayrollAccountPermission(generation));
+      if (widget.canDeleteTransaction && detail['deletable'] == true &&
+          await DeviceOwnerAuthorization.instance.canViewSavedOwnerPayroll(businessId) &&
+          _isCurrent(generation)) {
+        setState(() => _canDeleteRecords = true);
+      }
     } catch (error) {
       if (!mounted || !_isCurrent(generation)) return;
       setState(() {
@@ -284,6 +315,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     _loading = false;
     _error = null;
     _canDeleteRecords = false;
+    _canEditPayrollAccount = false;
+    _linkedPayrollPayment = null;
     if (offline) {
       unawaited(_loadOffline());
     } else {
@@ -291,17 +324,16 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     }
   }
 
-  Future<void> _loadLocalPreview(int generation) async {
+  Future<void> _loadLocalPreview(
+    int generation, Future<Map<String, dynamic>?> savedDetail,
+  ) async {
     try {
-      final saved = await _localFinancial.loadTransactionDetail(
-        widget.businessId,
-        widget.transactionId,
-      );
+      final saved = await savedDetail;
       if (!_isCurrent(generation) || _hasAuthoritativeDetail || saved == null) {
         return;
       }
       final detail = _normalizedDetail(saved)
-        ..['editable'] = false
+        ..['editable'] = saved['recurring_engine_owned'] == true
         ..['deletable'] = false;
       setState(() {
         _detail = detail;
@@ -309,6 +341,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         _loading = false;
       });
       unawaited(_enrichVisibleExpense(detail, generation));
+      unawaited(_loadPayrollAccountPermission(generation));
     } catch (_) {
       // Keep the already visible list summary if local storage is unavailable.
     }
@@ -341,8 +374,15 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     });
   }
 
+  bool _hasPendingPayrollChange(Map<String, dynamic>? expense) =>
+      expense?['payroll_amount_pending'] == true ||
+      expense?['sync_state'] == 'reversed' ||
+      (expense?['payroll_operation_id'] != null && expense?['sync_state'] == 'pending');
+
   Future<void> _load({bool hydrateLocal = true}) async {
-    if (widget.cachedDetail?['recurring_engine_owned'] == true ||
+    if (_hasPendingPayrollChange(_detail) ||
+        _hasPendingPayrollChange(widget.cachedDetail) ||
+        widget.cachedDetail?['recurring_engine_owned'] == true ||
         _detail?['recurring_engine_owned'] == true ||
         widget.transactionId.startsWith('local-recurring-')) {
       await _loadOffline();
@@ -358,7 +398,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     final api = _api;
     setState(() => _canDeleteRecords = false);
     unawaited(_loadLocalExpenseIqPhoto(generation));
-    if (hydrateLocal) unawaited(_loadLocalPreview(generation));
+    final localPreview = hydrateLocal
+        ? _localFinancial.loadTransactionDetail(businessId, transactionId) : null;
+    if (localPreview != null) unawaited(_loadLocalPreview(generation, localPreview));
     try {
       final rawDetail = Map<String, dynamic>.from(
         await _boundedRead(api.transactionDetail(businessId, transactionId)),
@@ -368,6 +410,16 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         return;
       }
       if (_detail?['recurring_engine_owned'] == true) return;
+      if (LocalFinancialCache.requiresOwnerAccountEdit(rawDetail)) {
+        final saved = await (localPreview ??
+            _localFinancial.loadTransactionDetail(businessId, transactionId))
+            .catchError((Object _) => null);
+        if (!_isCurrent(generation) || BriskersConnectionModeController.instance.forceOffline) return;
+        if (_hasPendingPayrollChange(saved)) {
+          await _loadOffline();
+          return;
+        }
+      }
       final detail = _normalizedDetail(rawDetail);
       setState(() {
         _detail = detail;
@@ -382,7 +434,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       unawaited(_enrichVisibleExpense(detail, generation));
       unawaited(_loadDeletePermission(generation, api, businessId));
       unawaited(
-        _cacheExpenseDetail(rawDetail, generation, businessId, transactionId),
+        _cacheExpenseDetail(rawDetail, generation, businessId, transactionId)
+            .then((_) => _loadPayrollAccountPermission(generation)),
       );
     } catch (error) {
       if (!mounted || !_isCurrent(generation)) return;
@@ -486,7 +539,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     final photo = _localExpenseIqPhoto;
     final filename = photo?['filename']?.toString() ?? '';
     final previousUri = photo?['source_uri']?.toString() ?? '';
-    if (filename.isEmpty || previousUri.isEmpty) {
+    if (filename.isEmpty) {
       _showOriginalPhotoError(StateError('Original receipt reference missing.'));
       return;
     }
@@ -515,6 +568,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         expectedFilename: filename,
         previousUri: previousUri,
         verifiedUri: verifiedUri,
+        verifiedBytes: bytes,
       );
       if (!mounted || !_isCurrent(generation)) return;
       _localPhotoBytes.remove(previousUri);
@@ -525,7 +579,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
           });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text(
-          'Original receipt access restored on this phone.',
+          'Original receipt saved on this phone.',
         )),
       );
     } catch (error) {
@@ -570,9 +624,16 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     }
   }
 
-  Future<Uint8List> _readLocalPhoto(String uri) =>
-      _localPhotoBytes.putIfAbsent(uri,
-        () => (widget.localPhotoReader ?? Saf().readFileBytes)(uri));
+  Future<Uint8List> _readLocalPhoto(String uri) {
+    final filename = _localExpenseIqPhoto?['filename']?.toString() ?? '';
+    return _localPhotoBytes.putIfAbsent(uri, () async {
+      final recovered = await _localExpenseIq.recoveredOriginal(
+        widget.businessId, widget.transactionId, filename,
+      );
+      if (recovered != null) return recovered;
+      return (widget.localPhotoReader ?? Saf().readFileBytes)(uri);
+    });
+  }
 
   // The original is looked up by this exact business + expense. A filename
   // alone must never connect images from separate expenses or ambiguous rows.
@@ -763,6 +824,11 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     });
 
     try {
+      if (_detail?['recurring_engine_owned']==true) {
+        await LocalRecurringExpenseEdit.save(businessId,transactionId,{},[
+          for(final file in files) {'filename':file.name,'mime_type':_mimeType(file.name),'bytes':await file.readAsBytes()},
+        ]);
+      } else {
       for (final file in files) {
         if (!_isCurrent(actionGeneration)) return;
         await api.uploadExpensePhoto(
@@ -772,6 +838,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
           mimeType: _mimeType(file.name),
           bytes: await file.readAsBytes(),
         );
+      }
       }
       widget.onChanged?.call();
       if (_isCurrent(actionGeneration)) await _load();
@@ -787,6 +854,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   }
 
   Future<void> _replaceReceipt(Map<String, dynamic> attachment) async {
+    if(_detail?['recurring_engine_owned']==true) { await _addReceipt(); return; }
     final editable = _detail?['editable'] == true;
     final generation = _loadGeneration;
     if (!editable || _uploading || _deletingAttachmentId != null) {
@@ -1021,12 +1089,96 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     }
   }
 
+  bool get _showPayrollAccountAction => widget.canDeleteTransaction &&
+      (LocalFinancialCache.requiresOwnerAccountEdit(_detail) ||
+       LocalFinancialCache.requiresOwnerAccountEdit(widget.cachedDetail));
+
+  Future<void> _loadPayrollAccountPermission(int generation) async {
+    if (!_showPayrollAccountAction) return;
+    final allowed = await DeviceOwnerAuthorization.instance
+        .canViewSavedOwnerPayroll(widget.businessId);
+    if (!_isCurrent(generation)) return;
+    setState(() => _canEditPayrollAccount = allowed);
+    if (!allowed) return;
+    final business = widget.businessId;
+    final transaction = widget.transactionId;
+    try {
+      final payment = await LocalPayrollRepository(localDatabase, business: business, owner: true)
+          .paymentForExpense(transaction);
+      if (_isCurrent(generation)) setState(() => _linkedPayrollPayment = payment);
+    } catch (error) {
+      if (_isCurrent(generation)) {
+        setState(() => _error = 'Could not check the saved payroll link: $error');
+      }
+    }
+  }
+
+  Future<void> _correctPayrollPayment(PayrollPaymentAction action) async {
+    final payment = _linkedPayrollPayment;
+    if (payment == null || _busy || !widget.canDeleteTransaction || !_canEditPayrollAccount) return;
+    final record = _recordGeneration;
+    final business = widget.businessId;
+    final correction = await PayrollPaymentCorrection.confirm(
+      context, payment, payment['employee_name'] as String, action,
+    );
+    if (correction == null || !mounted || record != _recordGeneration || _busy) return;
+    setState(() => _busy = true);
+    try {
+      final authority = DeviceOwnerAuthorization.instance.authority;
+      final grant = await authority.authorizeSession(business);
+      void assertOwner() {
+        if (!mounted || record != _recordGeneration || !widget.canDeleteTransaction) {
+          throw StateError('The selected expense changed.');
+        }
+        grant.assertValid(business, grant.actorId);
+      }
+
+      if (!mounted || record != _recordGeneration) return;
+      assertOwner();
+      final connection = await OwnerPayrollConnections.open(context, business, grant);
+      await correction.apply(business, grant.actorId, (operation) async {
+        assertOwner();
+        final proof = await connection.acquire(grant, operation);
+        return LocalPayrollRepository(
+          localDatabase, business: business, owner: true,
+          deviceId: connection.lease.identity.deviceId,
+          assertOwnerGrant: assertOwner,
+          ownerProof: proof,
+        );
+      });
+      if (!mounted || record != _recordGeneration) return;
+      widget.onChanged?.call();
+      if (action == PayrollPaymentAction.delete) {
+        Navigator.pop(context);
+      } else {
+        await _loadOffline();
+      }
+    } catch (error) {
+      if (mounted && record == _recordGeneration) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+      }
+    } finally {
+      if (mounted && record == _recordGeneration) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _edit() async {
     final detail = _detail;
-    if (detail == null || detail['editable'] != true || _busy) return;
+    if (detail == null || _busy ||
+        (detail['editable'] != true && !_showPayrollAccountAction)) {
+      return;
+    }
+    if (_showPayrollAccountAction && !_canEditPayrollAccount &&
+        !await DeviceOwnerAuthorization.instance.canViewSavedOwnerPayroll(widget.businessId)) {
+      if (mounted) setState(() => _error = 'Open the saved Briskers Owner account to edit this expense.');
+      return;
+    }
+    if (!mounted) return;
     var generation = _loadGeneration;
 
-    if (BriskersConnectionModeController.instance.forceOffline) {
+    if (BriskersConnectionModeController.instance.forceOffline ||
+        _canEditPayrollAccount ||
+        LocalFinancialCache.requiresOwnerAccountEdit(detail)) {
       final changed = await Navigator.push<bool>(
         context,
         MaterialPageRoute(
@@ -1047,7 +1199,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         if (saved != null && _isCurrent(generation)) {
           setState(() {
             _detail = Map<String, dynamic>.from(saved)
-              ..['editable'] = true
+              ..['editable'] = detail['editable'] == true
               ..['deletable'] = false;
             _error = null;
           });
@@ -1410,7 +1562,19 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       _error = null;
     });
     try {
-      await _api.voidManualTransaction(widget.businessId, widget.transactionId);
+      if (BriskersConnectionModeController.instance.forceOffline) {
+        final grant = await DeviceOwnerAuthorization.instance.authority
+            .authorizeLocal(widget.businessId);
+        if (!_isCurrent(actionGeneration)) return;
+        await OfflineFinancialWriteService().voidSavedExpense(
+          widget.businessId, widget.transactionId, ownerId: grant.actorId,
+          assertAuthorized: () => grant.assertValid(
+            widget.businessId, supabase.auth.currentUser?.id ?? '',
+          ),
+        );
+      } else {
+        await _api.voidManualTransaction(widget.businessId, widget.transactionId);
+      }
       widget.onChanged?.call();
       if (mounted && _isCurrent(actionGeneration)) Navigator.pop(context);
     } catch (error) {
@@ -1453,15 +1617,18 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         !widget.allowRecurring) {
       return;
     }
-    if (BriskersConnectionModeController.instance.forceOffline) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Connect to change the recurring schedule. '
-            'The original transaction remains available offline.',
-          ),
-        ),
+    if (widget.canDeleteTransaction ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(builder: (_) => OfflineRecurringScreen(
+          businessId: widget.businessId, transactionId: widget.transactionId,
+        )),
       );
+      if (mounted) {
+        widget.onChanged?.call();
+        await _load();
+      }
       return;
     }
     final generation = _loadGeneration;
@@ -1481,6 +1648,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
 
   Future<void> _handleMenu(String value) async {
     if (value == 'edit') await _edit();
+    if (value == 'payroll_edit') await _correctPayrollPayment(PayrollPaymentAction.edit);
+    if (value == 'payroll_delete') await _correctPayrollPayment(PayrollPaymentAction.delete);
     if (value == 'copy') await _copy();
     if (value == 'delete' && widget.canDeleteTransaction) await _delete();
   }
@@ -1641,7 +1810,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     );
     final recordGeneration = _recordGeneration;
     final income = detail['direction']?.toString() == 'income';
-    final editable = detail['editable'] == true;
+    final editable = detail['editable'] == true &&
+        (!LocalFinancialCache.requiresOwnerAccountEdit(detail) || widget.canDeleteTransaction);
     final deletable =
         widget.canDeleteTransaction &&
         _canDeleteRecords &&
@@ -1656,8 +1826,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       (detail['receipt_count'] ??
           widget.cachedDetail?['receipt_count'])?.toString() ?? '',
     ) ?? 0;
-    final counterparty =
-        detail['counterparty']?.toString() ?? (income ? 'Income' : 'Expense');
+    final payee = detail['counterparty']?.toString() ?? (income ? 'Income' : 'Expense');
+    final copyNumber = detail['copy_number'];
+    final counterparty = copyNumber == null ? payee : '$payee (Copy $copyNumber)';
     final category = detail['category']?.toString() ?? '';
     final account = detail['account']?.toString() ?? '';
     final date = detail['date']?.toString() ?? '';
@@ -1691,7 +1862,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         backgroundColor: color.withValues(alpha: 0.10),
         title: Text(income ? 'Income' : 'Expense'),
         actions: [
-          if (editable)
+          if (editable || _showPayrollAccountAction)
             PopupMenuButton<String>(
               onSelected: (value) {
                 if (mounted && recordGeneration == _recordGeneration) {
@@ -1699,23 +1870,42 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                 }
               },
               itemBuilder: (_) => [
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'edit',
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.edit_outlined),
-                    title: Text('Edit transaction'),
+                    leading: const Icon(Icons.edit_outlined),
+                    title: Text(_showPayrollAccountAction ? 'Edit account' : 'Edit transaction'),
                   ),
                 ),
-                const PopupMenuItem(
-                  value: 'copy',
+                if (_canEditPayrollAccount && _linkedPayrollPayment != null) ...[
+                  const PopupMenuItem(
+                    value: 'payroll_edit',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.payments_outlined),
+                      title: Text('Edit payment'),
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'payroll_delete',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.delete_outline),
+                      title: Text('Delete payment'),
+                    ),
+                  ),
+                ],
+                if (editable && !LocalFinancialCache.requiresOwnerAccountEdit(detail))
+                  const PopupMenuItem(
+                    value: 'copy',
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.copy_outlined),
                     title: Text('Copy transaction'),
                   ),
                 ),
-                if (deletable)
+                if (deletable && !LocalFinancialCache.requiresOwnerAccountEdit(detail))
                   const PopupMenuItem(
                     value: 'delete',
                     child: ListTile(
@@ -1819,6 +2009,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
           _DetailRow(label: 'Category', value: category),
           _DetailRow(label: 'Account', value: account),
           _DetailRow(label: 'Date', value: date),
+          if (detail['payment_method'] case final String method when method.isNotEmpty)
+            _DetailRow(label: 'Payment method', value: method),
           if (jobNumber.isNotEmpty) _DetailRow(label: 'Job', value: jobNumber),
           if (documentNumber.isNotEmpty)
             _DetailRow(label: 'Invoice', value: documentNumber),

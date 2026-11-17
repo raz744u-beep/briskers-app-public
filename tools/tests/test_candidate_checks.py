@@ -379,6 +379,19 @@ class ContextTests(unittest.TestCase):
     def test_valid_context(self):
         self.assertEqual(gate.context_from_environment(self.env, SHA), CONTEXT)
 
+    def test_bugs38_release_uses_the_existing_pr_source(self):
+        branch = gate.BUGS33_RELEASE_BRANCH
+        env = {
+            **self.env,
+            "BRISKERS_BUGS38_RELEASE": "true",
+            "GITHUB_REF": f"refs/heads/{branch}",
+            "GITHUB_WORKFLOW_REF": f"{CONTEXT.repository}/{gate.BUILD_WORKFLOW}@refs/heads/{branch}",
+        }
+        context = gate.context_from_environment(env, SHA)
+        self.assertEqual(context.verification_branch, gate.BUGS38_SOURCE_BRANCH)
+        self.assertIn("offline-recovery-android-check.yml", gate.workflows_for_branch(branch))
+        self.assertIn("retry-storm-regression.yml", gate.workflows_for_branch(branch))
+
     def test_wrong_checkout_rejected(self):
         with self.assertRaisesRegex(gate.GateError, "Checkout HEAD"):
             gate.context_from_environment(self.env, OTHER_SHA)

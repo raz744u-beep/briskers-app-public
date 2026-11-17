@@ -10,8 +10,8 @@ class RecurringRpcTransport {
   Future<Map<String, dynamic>> readSnapshot(String businessId) async {
     final identity = supabase.auth.currentSession?.user.id;
     if (identity == null) throw StateError('Open the saved shop account first.');
-    final data = await supabase.rpc('briskers_recurring_recovery_v1',
-      params: {'p_business_id': businessId}).timeout(const Duration(seconds: 45));
+    final data = await explicitSupabaseRead('briskers_recurring_recovery_v1', () => supabase.rpc('briskers_recurring_recovery_v1',
+      params: {'p_business_id': businessId}).timeout(const Duration(seconds: 45)));
     if (supabase.auth.currentSession?.user.id != identity) {
       throw StateError('Account changed during recurring download.');
     }

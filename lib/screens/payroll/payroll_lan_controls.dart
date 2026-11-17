@@ -18,8 +18,8 @@ Future<String?> payrollLanInput(
           onTapAlwaysCalled:true,
           onTap:()=>controller.selection=TextSelection(baseOffset:0,extentOffset:controller.text.length),
           decoration: InputDecoration(labelText: label),
-          autocorrect: false,
-          enableSuggestions: false,
+          autocorrect: !label.toLowerCase().contains('code'),
+          enableSuggestions: label.toLowerCase().contains('description'),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context),

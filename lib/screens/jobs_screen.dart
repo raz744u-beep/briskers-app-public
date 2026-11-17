@@ -1,3 +1,4 @@
+import '../widgets/list_interaction_hint.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
@@ -12,6 +13,7 @@ import '../core/module_modal_theme.dart';
 import '../services/briskers_api.dart';
 import '../services/employee_nickname_store.dart';
 import '../services/job_sync_service.dart';
+import '../services/job_task_summary.dart';
 import '../services/owner_job_retirement_service.dart';
 import '../services/job_summary_visibility.dart';
 import '../services/document_index_sync_service.dart';
@@ -76,6 +78,7 @@ class _JobsScreenState extends State<JobsScreen>
       widget.documentRepository ?? LocalDocumentRepository();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
   Map<String,Map<String,int>> _allocationHours = {};
+  Map<String,JobTaskProgress> _taskProgress = {};
   final _nicknameStore = EmployeeNicknameStore();
 
   List<Map<String, dynamic>>? _rows;
@@ -296,6 +299,7 @@ class _JobsScreenState extends State<JobsScreen>
       _search.clear();
       _rows = null;
       _allocationHours = {};
+      _taskProgress = {};
       _coldLocalReadScope = null;
       _documentMatches = const [];
       _statuses = const [];
@@ -403,12 +407,13 @@ class _JobsScreenState extends State<JobsScreen>
       // Job rows contain the vehicle and description together. Give their
       // SQLite read priority over counts/statuses/document search, which
       // previously queued several other queries first on the same database.
+      if(widget.roleCode=='owner')await _localJobs.reconcileNov12OwnerCompletion(businessId,isOwner:true);
       final rows = await _localJobs.listJobs(
         businessId,
         status: status,
         search: query,
         view: view,
-        sort: JobListSort.lastModified,
+        sort: JobListSort.creation,
         userId: userId,
         limit: limit,
       );
@@ -422,6 +427,15 @@ class _JobsScreenState extends State<JobsScreen>
         _onlineReady = online;
         _error = null;
       });
+      unawaited(() async {
+        try {
+          final ids = visibleRows.map((row) => row['id']).whereType<String>().toList();
+          final progress = await _localJobs.taskProgress(businessId, ids);
+          if (mounted && visibility.isCurrent(generation)) setState(() => _taskProgress = progress);
+        } catch (_) {
+          if (mounted && visibility.isCurrent(generation)) setState(() => _taskProgress = {});
+        }
+      }());
       if (_canManage) {
         unawaited(() async {
           Map<String,Map<String,int>> hours;
@@ -681,7 +695,7 @@ class _JobsScreenState extends State<JobsScreen>
     }
 
     Map<String, dynamic>? selectedStatus;
-    for (final status in _statuses) {
+    for (final status in ownerJobStatuses(_statuses)) {
       if (status['code']?.toString() == statusCode) {
         selectedStatus = status;
         break;
@@ -769,10 +783,10 @@ class _JobsScreenState extends State<JobsScreen>
   }
 
   List<Map<String, dynamic>> _availableStatusesFor(Map<String, dynamic> job) =>
-      _statuses;
+      ownerJobStatuses(_statuses);
 
   Widget _statusControl(Map<String, dynamic> job) {
-    final color = colorFromHex(job['status_color']?.toString());
+    final color = approvedJobListStatusColor(job);
     final label = jobStatusLabel(
       job['status']?.toString(),
       job['status_name']?.toString() ?? 'Status',
@@ -780,38 +794,13 @@ class _JobsScreenState extends State<JobsScreen>
     final busy = _busyJobId == job['id']?.toString() ||
         _pendingStatusIds.contains(job['id']?.toString());
 
-    final child = Container(
-      constraints: const BoxConstraints(maxWidth: 155),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.94),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.65)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Flexible(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                label,
-                maxLines: 1,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ),
-          if (_canManage && !busy) ...[
-            const SizedBox(width: 3),
-            Icon(Icons.chevron_right, size: 15, color: color),
-          ],
-        ],
-      ),
-    );
+    final child = ApprovedListStatusBadge(label:label,color:color,icon:switch(job['status']?.toString()) {
+      'in_progress'=>Icons.circle_outlined,
+      'completed' || 'closed'=>Icons.check,
+      'awaiting_parts' || 'waiting_parts'=>Icons.inventory_2_outlined,
+      'awaiting_payment'=>Icons.credit_card,
+      _=>jobStatusIcon(job['status_icon']?.toString()),
+    });
 
     if (!_canManage || busy) return child;
 
@@ -956,8 +945,21 @@ class _JobsScreenState extends State<JobsScreen>
 
   Widget _jobCard(Map<String, dynamic> job) => JobCompactCard(
     job: job,
+    approvedListDesign: true,
+    taskProgress: _taskProgress[job['id']],
     statusControl: _statusControl(job),
     onOpen: () => _openJob(job),
+    onOpenInvoice: job['invoice_id'] == null ? null : () async {
+      await Navigator.push<void>(context, MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: job['invoice_id'].toString(),
+          isOwner: widget.roleCode == 'owner',
+          roleCode: widget.roleCode,
+        ),
+      ));
+      if (mounted) unawaited(_load());
+    },
     onLongPress: () => _showJobActions(job),
     mechanicMinutes: _canManage ? _allocationHours[job['id']] : null,
     canOpen: _busyJobId != job['id']?.toString(),
@@ -1047,7 +1049,7 @@ class _JobsScreenState extends State<JobsScreen>
                               ],
                             ),
                           ),
-                          ..._statuses.map((status) {
+                          ...ownerJobStatuses(_statuses).map((status) {
                             final color = colorFromHex(
                               status['color_hex']?.toString(),
                             );
@@ -1082,7 +1084,7 @@ class _JobsScreenState extends State<JobsScreen>
                           builder: (context) {
                             Map<String, dynamic>? selected;
                             if (_selectedStatus != null) {
-                              for (final status in _statuses) {
+                              for (final status in ownerJobStatuses(_statuses)) {
                                 if (status['code']?.toString() ==
                                     _selectedStatus) {
                                   selected = status;
@@ -1208,6 +1210,7 @@ class _JobsScreenState extends State<JobsScreen>
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 100),
               children: [
+                const ListInteractionHint(),
                 // No redundant offline/refresh-failure banner here. Briskers'
                 // global connection header shows actual mode, last sync and
                 // pending/error status. Cached Jobs remain fully usable in

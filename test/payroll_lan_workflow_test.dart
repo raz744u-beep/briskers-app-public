@@ -79,7 +79,7 @@ void main() {
     );
     await owner.customStatement(
       "INSERT INTO local_documents(document_date,id,business_id,job_id,kind) "
-      "VALUES('2026-11-07','invoice','shop','job','invoice')",
+      "VALUES('2026-11-09','invoice','shop','job','invoice')",
     );
     for (final employee in employees) {
       await owner.customStatement(

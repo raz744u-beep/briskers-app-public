@@ -84,9 +84,8 @@ void main() {
   });
 
   test('unresolved invoice tax blocks payment finalization action', () {
-    final code=File('lib/screens/jobs/job_document_screen.dart')
-        .readAsStringSync();
-    expect(code,contains("_detail?['_local_pending_tax'] == true"));
+    final code = File('lib/services/offline_invoice_finalization.dart').readAsStringSync();
+    expect(code, contains('.verifySavedTaxCorrection(business, invoice, saved, action: action)'));
   });
 
 }

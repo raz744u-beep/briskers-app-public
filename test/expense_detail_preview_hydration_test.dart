@@ -234,6 +234,39 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('stale server amount cannot hide a pending payroll correction', (tester) async {
+    await tester.pumpWidget(MaterialApp(home: ExpenseDetailScreen(
+      businessId: _business,
+      transactionId: _transaction,
+      api: api,
+      financialCache: cache,
+      localPhotoSync: photos,
+      receiptReporting: reporting,
+    )));
+    final corrected = {
+      ..._detail('Saved payroll correction'),
+      'category': 'Payroll',
+      'payroll_operation_id': 'fixture-payment',
+      'payroll_amount_pending': true,
+      'sync_state': 'pending',
+      'amount': 31.25,
+    };
+    api.details.single.result.complete({
+      ..._detail('Older server payroll receipt'),
+      'category': 'Payroll',
+    });
+    await flushFrame(tester);
+    cache.reads.single.result.complete(corrected);
+    await flushFrame(tester);
+    cache.reads.last.result.complete(corrected);
+    await flushFrame(tester);
+    expect(find.text('-\$31.25'), findsOneWidget);
+    expect(find.text('Older server payroll receipt'), findsNothing);
+    expect(cache.writes, isEmpty);
+    expect(api.permissions, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('first frame shows summary while disk and network stay blocked', (
     tester,
   ) async {

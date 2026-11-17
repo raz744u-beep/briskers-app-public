@@ -9,9 +9,9 @@ void main() {
     final open = operationalJobStatusColor('open', null);
     final progress = operationalJobStatusColor('in_progress', null);
     final completed = operationalJobStatusColor('completed', null);
-    expect(open, const Color(0xFF2864A5));
-    expect(progress, const Color(0xFFB66D13));
-    expect(completed, const Color(0xFF26844D));
+    expect(open, const Color(0xFFD97706));
+    expect(progress, const Color(0xFF1674DB));
+    expect(completed, const Color(0xFF0A8F53));
     expect({open, progress, completed}.length, 3);
     expect(operationalJobStatusColor('complete', null), completed);
     expect(operationalJobStatusColor('in progress', null), progress);

@@ -75,7 +75,7 @@ void main() {
     }
     await LocalDocumentDetailCache.initialize(databases[0]);
     await databases[0].customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status) VALUES('job','shop','owner','Shared job','open')");
-    await databases[0].customStatement("INSERT INTO local_documents(document_date,id,business_id,job_id,kind) VALUES('2026-11-07','invoice','shop','job','invoice')");
+    await databases[0].customStatement("INSERT INTO local_documents(document_date,id,business_id,job_id,kind) VALUES('2026-11-09','invoice','shop','job','invoice')");
     for (final employee in ['a', 'b']) {
       await databases[0].customStatement('INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id) VALUES(?,?,?,?)',
         [employee, 'shop', 'job', employee]);

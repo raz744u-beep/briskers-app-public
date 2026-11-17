@@ -154,10 +154,26 @@ class LocalFinancialTotalsJournal {
       final id = row['id']?.toString() ?? '';
       if (id.isNotEmpty) byId[id] = Map<String, dynamic>.from(row);
     }
-    for (final raw in entries.values) {
+    final postedPaymentIds = <(String, String)>{
+      for (final row in byId.values)
+        if (row['direction'] == 'income' && row['sync_state'] != 'pending' &&
+            row['document_id']?.toString().isNotEmpty == true &&
+            row['invoice_payment_id']?.toString().isNotEmpty == true)
+          (row['document_id'].toString(), row['invoice_payment_id'].toString()),
+    };
+    for (final entry in entries.entries) {
+      final raw = entry.value;
       if (raw is! Map) continue;
       final before = raw['before'];
       final after = raw['after'];
+      const receiptPrefix = 'invoice-payment:';
+      if (entry.key.startsWith(receiptPrefix) && after is Map &&
+          postedPaymentIds.contains((
+            after['document_id']?.toString() ?? '',
+            entry.key.substring(receiptPrefix.length),
+          ))) {
+        continue;
+      }
       final beforeId = before is Map ? before['id']?.toString() : null;
       final afterId = after is Map ? after['id']?.toString() : null;
       if (beforeId != null && beforeId.isNotEmpty) byId.remove(beforeId);
@@ -490,12 +506,18 @@ class LocalFinancialTotalsJournal {
           row['id'].toString(): row,
     };
     final linkedOperations = <String, String>{};
+    final wholeInvoicePostings = <String, String>{};
     for (final receipt in receipts) {
       if (receipt['receipt_state'] != 'posted') continue;
       final op = receipt['operation_id']?.toString() ?? '';
       final transaction = receipt['transaction_id']?.toString() ?? '';
-      if (op.isNotEmpty && canonical.containsKey(transaction)) {
-        linkedOperations[op] = transaction;
+      if (!canonical.containsKey(transaction)) continue;
+      if (op.isNotEmpty) linkedOperations[op] = transaction;
+      final invoice = receipt['invoice_id']?.toString() ?? '';
+      final total = num.tryParse(receipt['invoice_total']?.toString() ?? '');
+      if (invoice.isNotEmpty && total != null && total.isFinite && total > 0 &&
+          _rawAmountCents(receipt) == (total * 100).round()) {
+        wholeInvoicePostings.update(invoice, (_) => '', ifAbsent: () => transaction);
       }
     }
     var changed = false;
@@ -509,10 +531,16 @@ class LocalFinancialTotalsJournal {
               row['recurring_rule_id'] == value['recurring_rule_id'] &&
               row['recurring_occurrence_date'] == value['recurring_occurrence_date']).toList()
           : <Map<String,dynamic>>[];
+      final invoice = value['document_id']?.toString();
+      final invoiceTotal = num.tryParse(value['invoice_total']?.toString() ?? '');
+      final wholeInvoice = value['locally_finalized_invoice_receipt'] == true &&
+          invoiceTotal != null && invoiceTotal.isFinite &&
+          (invoiceTotal * 100).round() == _rawAmountCents(value)
+          ? canonical[wholeInvoicePostings[invoice]] : null;
       final posted = canonical[id] ?? (recurringMatches.length == 1 ? recurringMatches.single : null) ??
           (key.startsWith('invoice-payment:')
               ? canonical[linkedOperations[key.substring('invoice-payment:'.length)]]
-              : null);
+              : null) ?? wholeInvoice;
       if (posted == null) continue;
       if (value['recurring_engine_owned'] == true && recurringMatches.length == 1) {
         // The new full baseline already contains the server occurrence. Keep

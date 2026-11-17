@@ -144,6 +144,12 @@ class DocumentIndexSyncService {
             'Its latest snapshot has been preserved; retry after reconciliation.',
           );
         }
+        // Estimates survive incomplete snapshots. Only an acknowledged,
+        // safety-checked deletion removes this exact row and its snapshot.
+        await _database.customStatement(
+          'DELETE FROM local_documents WHERE business_id=? AND id=?',
+          [businessId, entry.key],
+        );
       }
     });
     // A list index alone is not an offline document snapshot.

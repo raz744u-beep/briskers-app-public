@@ -77,7 +77,7 @@ void main() {
         'INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id) '
         'VALUES(?,?,?,?)', ['assignment', 'shop', initial!['job_id'], 'mechanic']);
       // Seed the already-settled pre-upgrade ledger before replaying the old invoice.
-      await db.customStatement("UPDATE local_documents SET document_date='2026-11-07' WHERE id=?", [invoiceId]);
+      await db.customStatement("UPDATE local_documents SET document_date='2026-11-09' WHERE id=?", [invoiceId]);
       await payroll.refreshInvoiceTasks();
       final originalTask = (await payroll.tasks()).single['id'];
       final allocation = (await payroll.work()).single['id'] as String;

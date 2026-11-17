@@ -18,8 +18,9 @@ void main() {
     final start = source.indexOf('Future<void> _finalizeEnteredPayments()');
     final end = source.indexOf('Future<void> _enterWarrantyPayment()', start);
     final finalize = source.substring(start, end);
-    expect(finalize, contains('if (!widget.isOwner) return;'));
-    expect(finalize, contains('_queuedPaymentOperationIds.isNotEmpty'));
+    expect(finalize, contains('if (!widget.isOwner || _startingFinalization) return;'));
+    expect(finalize, contains('OfflineInvoiceFinalization().finalizeLocally('));
+    expect(finalize, isNot(contains('finalizePendingInvoicePayment(')));
     expect(source, contains('if (widget.isOwner) ...['));
     expect(source, contains('Future<void> _offerCompleteJobAfterPaymentEntry()'));
     expect(source, contains('This does not finalize the '));

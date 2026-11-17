@@ -29,7 +29,7 @@ void main() {
     );
     await db.customStatement(
       "INSERT INTO local_documents (document_date, id, business_id, job_id, kind) "
-      "VALUES ('2026-11-07', 'invoice-a', 'shop-a', 'job-a', 'invoice')",
+      "VALUES ('2026-11-09', 'invoice-a', 'shop-a', 'job-a', 'invoice')",
     );
     await db.customStatement(
       "INSERT INTO local_job_assignments "

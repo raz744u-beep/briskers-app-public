@@ -63,16 +63,12 @@ class DocumentPresentation {
 
   String get statusCode {
     if (isVoid) return 'void';
-    if (isInvoice && (rawStatus == 'reopened' ||
-        _document['display_status_code']?.toString().toLowerCase() == 'reopened')) {
-      return 'reopened';
-    }
     if (!isInvoice) {
       if (_document['converted'] == true) return 'converted';
       return rawStatus.isEmpty ? 'draft' : rawStatus;
     }
     if (isClosed) return 'closed';
-    return fullyCovered ? 'pending_close' : 'open';
+    return fullyCovered ? 'paid' : 'open';
   }
 
   String get statusLabel {
@@ -82,8 +78,8 @@ class DocumentPresentation {
           return tr('documentVoid');
         case 'closed':
           return tr('invoiceClosed');
-        case 'pending_close':
-          return tr('invoicePendingClose');
+        case 'paid':
+          return tr('invoicePaid');
         case 'reopened':
           return 'Reopened';
         default:

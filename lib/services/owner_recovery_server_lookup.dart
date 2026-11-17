@@ -14,10 +14,10 @@ class OwnerRecoveryServerLookup {
         'An authenticated Owner session is required. No records changed.',
       );
     }
-    final result = await supabase.rpc(
+    final result = await explicitSupabaseRead('briskers_owner_recovery_lookup_v1', () => supabase.rpc(
       'briskers_owner_recovery_lookup_v1',
       params: request,
-    );
+    ));
     if (!BriskersConnectionModeController.instance.forceOffline) {
       throw StateError('Connection mode changed; recovery was not committed.');
     }

@@ -30,6 +30,7 @@ class CustomerVehicleFindingsSection extends StatefulWidget {
     this.canDelete = false,
     this.initiallyExpanded = false,
     this.cacheScopeKey,
+    this.currentJobId,
   });
 
   final String businessId;
@@ -41,6 +42,7 @@ class CustomerVehicleFindingsSection extends StatefulWidget {
   // Invoice entry uses a vehicle-scoped snapshot so it cannot overwrite
   // the Customer Overview's multi-vehicle cached Findings.
   final String? cacheScopeKey;
+  final String? currentJobId;
 
   @override
   State<CustomerVehicleFindingsSection> createState() =>
@@ -1033,12 +1035,7 @@ class _CustomerVehicleFindingsSectionState
           builder: (context, setSheetState) {
             final vehicle = finding['_vehicle_label']?.toString().trim() ?? '';
             final date = _dateLabel(finding['created_at']);
-            final rawStatus = finding['status']?.toString() ?? 'open';
-            final status = rawStatus == 'resolved'
-                ? 'Resolved'
-                : rawStatus == 'in_job'
-                ? 'In Job'
-                : 'Open';
+            final status = VehicleFindings.statusLabel(finding);
 
             Future<void> editFinding() async {
               final controller = TextEditingController(text: localBody);
@@ -1542,7 +1539,7 @@ class _CustomerVehicleFindingsSectionState
   }
 
   Future<void> _addFindingToJob(Map<String, dynamic> finding) async {
-    final jobId = await _chooseFindingJob(finding);
+    final jobId = widget.currentJobId ?? await _chooseFindingJob(finding);
     if (jobId != null && mounted) {
       await _changeFinding(
         () => _findingActions.addToJob(
@@ -1592,7 +1589,7 @@ class _CustomerVehicleFindingsSectionState
       builder: (context, snapshot) {
         final allRows = snapshot.data ?? const <Map<String, dynamic>>[];
         final open = allRows
-            .where((finding) => finding['status']?.toString() != 'resolved')
+            .where((finding) => !const {'resolved','in_job','not_applicable'}.contains(finding['status']))
             .toList();
 
         final showVehicle = widget.vehicles.length > 1;
@@ -1664,6 +1661,7 @@ class _CustomerVehicleFindingsSectionState
                 ),
               VehicleFindings(
                 findings: allRows,
+                jobId: widget.currentJobId,
                 busy: _busy,
                 canEdit: widget.canManage,
                 canManage: widget.canManage,
@@ -1673,6 +1671,7 @@ class _CustomerVehicleFindingsSectionState
                 onAddPhotos: _addFindingPhotos,
                 onAddToJob: _addFindingToJob,
                 onResolve: _resolveFinding,
+                onNotApplicable:(finding,note)=>_changeFinding(()=>_findingActions.notApplicable(widget.businessId,finding,note:note,customerId:widget.customerId)),
                 onReopen: (finding) => _changeFinding(
                   () => _findingActions.reopen(
                     widget.businessId,

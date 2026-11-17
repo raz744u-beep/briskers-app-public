@@ -26,7 +26,7 @@ void main() {
       "VALUES('job','shop','owner','Rear differential','open','J-24')");
     await db.customStatement(
       "INSERT INTO local_documents(document_date,id,business_id,job_id,kind,document_number) "
-      "VALUES('2026-11-07','invoice','shop','job','invoice','6342')");
+      "VALUES('2026-11-09','invoice','shop','job','invoice','6342')");
     final source={
       'id':'invoice','kind':'invoice','job_id':'job',
       'lines':[{'id':'rear','line_kind':'labor','description':'Replace rear differential fluid',

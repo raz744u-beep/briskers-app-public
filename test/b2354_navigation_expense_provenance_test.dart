@@ -4,12 +4,12 @@ import 'package:briskers_app/services/local_financial_cache.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Create estimate/invoice uses approved New action beside Search', () {
+  test('Create estimate/invoice uses approved floating New action', () {
     final src = File('lib/screens/documents_screen.dart').readAsStringSync();
-    expect(src, contains("ValueKey('documents-inline-new')"));
+    expect(src, contains("floatingActionButtonLocation: FloatingActionButtonLocation.endFloat"));
     expect(src, contains("key: const ValueKey('persistent-document-search')"));
     expect(src, contains('onPressed: _estimate'));
-    expect(src, isNot(contains('FloatingActionButton.extended(')));
+    expect(src, contains('FloatingActionButton.extended('));
     expect(src, contains('shape: RoundedRectangleBorder('));
     expect(src, contains("label: const Text('New'"));
     expect(src, isNot(contains('IconButton.filled(\n                    tooltip: _estimate')));

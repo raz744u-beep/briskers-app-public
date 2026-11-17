@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:drift/drift.dart' show Variable;
 import 'package:saf/saf.dart';
 
@@ -239,6 +240,38 @@ class ExpenseIqLocalPhotoSync {
     return rows.first.data;
   }
 
+  Future<Uint8List?> recoveredOriginal(
+    String businessId, String transactionId, String filename,
+  ) async {
+    final exists = await _database.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_expense_iq_originals'",
+    ).getSingleOrNull();
+    if (exists == null) return null;
+    final row = await _database.customSelect(
+      'SELECT content FROM local_expense_iq_originals '
+      'WHERE business_id=? AND transaction_id=? AND filename=?',
+      variables: [Variable(businessId), Variable(transactionId), Variable(filename)],
+    ).getSingleOrNull();
+    return row?.read<Uint8List>('content');
+  }
+
+  Future<Uint8List?> originalOnDevice(
+    String business, String transaction, Map<String, dynamic> photo,
+  ) async {
+    final filename = photo['filename']?.toString() ?? '';
+    if (filename.isEmpty) return null;
+    final saved = await recoveredOriginal(business, transaction, filename);
+    if (saved != null) return saved;
+    final uri = photo['source_uri']?.toString() ?? '';
+    if (uri.isEmpty) return null;
+    try {
+      final bytes = await _saf.readFileBytes(uri);
+      return bytes.isEmpty ? null : bytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Updates only this expense's original URI after the caller has opened
   /// the matching filename with Android's newly granted folder permission.
   /// Never changes uploaded/pending state or queues an upload. A stale or
@@ -249,18 +282,25 @@ class ExpenseIqLocalPhotoSync {
     required String expectedFilename,
     required String previousUri,
     required String verifiedUri,
+    Uint8List? verifiedBytes,
   }) async {
     if (businessId.isEmpty || transactionId.isEmpty ||
-        expectedFilename.isEmpty || previousUri.isEmpty ||
+        expectedFilename.isEmpty ||
         verifiedUri.isEmpty) {
       throw ArgumentError('A verified original receipt reference is required.');
     }
+    if (verifiedBytes != null &&
+        (verifiedBytes.length < 4 || verifiedBytes[0] != 0xff ||
+         verifiedBytes[1] != 0xd8 || verifiedBytes[2] != 0xff)) {
+      throw StateError('The selected original is not a readable JPEG.');
+    }
+    await _database.transaction(() async {
     final changed = await _database.customUpdate(
       '''
       UPDATE $_table
       SET source_uri = ?, updated_at = ?, last_error = NULL
       WHERE business_id = ? AND transaction_id = ?
-        AND filename = ? AND source_uri = ?
+        AND filename = ? AND coalesce(source_uri, '') = ?
       ''',
       variables: [
         Variable<String>(verifiedUri),
@@ -276,6 +316,18 @@ class ExpenseIqLocalPhotoSync {
         'This receipt was changed or could not be verified. No photo was relinked.',
       );
     }
+      if (verifiedBytes != null) {
+        await _database.customStatement('''CREATE TABLE IF NOT EXISTS
+          local_expense_iq_originals(business_id TEXT NOT NULL,
+          transaction_id TEXT NOT NULL, filename TEXT NOT NULL, content BLOB NOT NULL,
+          PRIMARY KEY(business_id,transaction_id,filename))''');
+        await _database.customStatement(
+          'INSERT OR IGNORE INTO local_expense_iq_originals '
+          '(business_id,transaction_id,filename,content) VALUES (?,?,?,?)',
+          [businessId, transactionId, expectedFilename, verifiedBytes],
+        );
+      }
+    });
   }
 
   Future<ExpenseIqBatchResult> uploadBatch(

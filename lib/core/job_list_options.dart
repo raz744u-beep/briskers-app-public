@@ -1,7 +1,7 @@
 /// Legacy query options retained for callers; Jobs uses All / latest activity.
 enum JobListView { recent, active, all }
 
-enum JobListSort { lastAccessed, lastModified, jobDate }
+enum JobListSort { lastAccessed, lastModified, jobDate, creation }
 
 /// Kept in route PageStorage to restore status, search and paging per user.
 /// Legacy view/sort fields are ignored by Jobs so saved settings cannot bring

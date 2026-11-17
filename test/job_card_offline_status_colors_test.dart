@@ -9,9 +9,9 @@ void main() {
     final open = operationalJobStatusColor('open', null);
     final progress = operationalJobStatusColor('in_progress', null);
     final complete = operationalJobStatusColor('completed', null);
-    expect(open, const Color(0xFF2864A5));
-    expect(progress, const Color(0xFFB66D13));
-    expect(complete, const Color(0xFF26844D));
+    expect(open, const Color(0xFFD97706));
+    expect(progress, const Color(0xFF1674DB));
+    expect(complete, const Color(0xFF0A8F53));
     expect({open, progress, complete}.length, 3);
     final card = File('lib/widgets/job_compact_card.dart').readAsStringSync();
     expect(card, contains('operationalJobStatusColor('));

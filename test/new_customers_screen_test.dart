@@ -133,6 +133,16 @@ void main() {
     },
   );
 
+  testWidgets('inline check records only that review without opening a profile', (tester) async {
+    await show(tester);
+    final row = find.ancestor(of: find.text('Alice New'), matching: find.byType(ListTile));
+    await tester.tap(find.descendant(of: row, matching: find.byIcon(Icons.check)));
+    await tester.pumpAndSettle();
+    expect(inbox.unread, {'arrival-b'});
+    expect(find.text('owner profile arrival-a'), findsNothing);
+    expect(find.descendant(of: row, matching: find.byIcon(Icons.check_circle_outline)), findsOneWidget);
+  });
+
   testWidgets('failed profile or Back without review preserves badge', (
     tester,
   ) async {

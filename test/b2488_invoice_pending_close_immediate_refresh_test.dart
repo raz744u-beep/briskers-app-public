@@ -53,13 +53,13 @@ void main() {
     }
   });
 
-  test('Open invoices transition to Pending Close immediately, never Closed', () {
+  test('Open invoices transition to Paid immediately, never Closed', () {
     final source = File('lib/screens/documents_screen.dart').readAsStringSync();
     expect(source, contains('LocalInvoicePaymentCoverageEvents.changes.listen('));
     expect(source, contains('_locallyCoveredInvoiceIds.add(event.invoiceId)'));
     expect(source, contains('_locallyCoveredInvoiceIds.remove(event.invoiceId)'));
     expect(source, contains("_locallyCoveredInvoiceIds.contains(row['id']?.toString())"));
-    expect(source, contains("return 'Pending Close';"));
+    expect(source, contains("return 'Paid';"));
     expect(source, contains("status != 'Closed' && status != 'Void' && status != 'Reopened'"));
     expect(source, contains('_localPaymentEvents?.cancel()'));
     expect(source, contains('_locallyCoveredInvoiceIds.clear();'));

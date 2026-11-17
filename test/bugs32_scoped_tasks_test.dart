@@ -8,7 +8,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    var labor = 0, general = 0;
+    var labor = 0, general = 0, opened=0;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: TasksWorkspace(
       scopedJob: 'job45',
       serviceTasks: [
@@ -22,17 +22,17 @@ void main() {
       ],
       allocationsByLine: const {}, employeeIds: const [], employeeName: (_) => '',
       serviceTaskCard: (_) => const Text('Allocation details'),
+      onOpenTask:(_,_)=>opened++,
       onAddGeneral: () => general++, onAddService: () => labor++,
       onEmployeeTap: (_) {}, onOpenJob: (_) {}, onGeneralStatus: (_, _) async {},
     ))));
     expect(find.text('J-46'), findsNothing);
-    expect(find.text('Labor 45'), findsNothing);
-    await tester.tap(find.text('J-45'));
-    await tester.pumpAndSettle();
+    expect(find.text('Labor 45'), findsOneWidget); // Approved closed card description.
     expect(find.text('Allocation details'), findsNothing);
-    await tester.tap(find.text('Labor 45'));
+    await tester.tap(find.text('Labor 45').last);
     await tester.pumpAndSettle();
-    expect(find.text('Allocation details'), findsOneWidget);
+    expect(opened,1);
+    expect(find.text('Allocation details'),findsNothing);
     await tester.tap(find.text('Labor Task'));
     await tester.tap(find.text('General Task'));
     expect([labor, general], [1, 1]);

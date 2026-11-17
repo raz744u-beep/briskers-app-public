@@ -7,20 +7,15 @@ void main() {
     expect(screen,contains('Finalize received payment?'));
     expect(screen,contains('Confirm that'));
     expect(screen,contains('Finalize Payment'));
-    expect(screen,contains('finalizePendingInvoicePayment('));
     final method=screen.indexOf('Future<void> _finalizeEnteredPayments()');
     final end=screen.indexOf('Future<void> _enterWarrantyPayment()',method);
-    expect(method,greaterThanOrEqualTo(0));
-    expect(end,greaterThan(method));
     final code=screen.substring(method,end);
-    expect(code,contains('forceOffline'));
-    expect(code,contains('if (!confirmed || !mounted) return;'));
-    expect(code,contains('await _api.finalizePendingInvoicePayment('));
-    final confirmed = code.indexOf('if (!confirmed || !mounted) return;');
-    final guard = code.indexOf('InvoiceFinalizationGuard().run<void>(');
-    final rpc = code.indexOf('await _api.finalizePendingInvoicePayment(');
-    expect(guard, greaterThan(confirmed));
-    expect(rpc, greaterThan(guard));
-    expect(code, contains('if (mounted && succeeded)'));
+    final consent=code.indexOf('if (confirmed != true || !mounted) return;');
+    final post=code.indexOf('OfflineInvoiceFinalization().finalizeLocally(');
+    expect(consent,greaterThan(0));
+    expect(post,greaterThan(consent));
+    expect(code,contains('confirmedDetail: detail'));
+    expect(code,isNot(contains('finalizePendingInvoicePayment(')));
+    expect(code,isNot(contains('.flush(')));
   });
 }

@@ -1,6 +1,8 @@
 name: Offline recurring component
 
 on:
+  push:
+    branches: [fix/bugs38-round1-historical-edit-guard]
   pull_request:
     paths:
       - 'lib/services/offline_recurring_repository.dart'
@@ -31,6 +33,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.9'
           channel: stable
           cache: true
       - name: Prepare test shell

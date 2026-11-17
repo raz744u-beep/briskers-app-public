@@ -241,7 +241,7 @@ void main() {
   });
 
   for (final withSummary in [true, false]) {
-    testWidgets('recurring detail stays local and read-only (summary: $withSummary)',
+    testWidgets('recurring detail stays local and editable (summary: $withSummary)',
         (tester) async {
       await BriskersConnectionModeController.instance.setMode(
         BriskersConnectionMode.online,
@@ -256,7 +256,10 @@ void main() {
           summary: withSummary ? saved : null);
       expect(find.text('Saved full detail'), findsOneWidget);
       expect(find.text('Stale server expense'), findsNothing);
-      expect(find.byType(PopupMenuButton<String>), findsNothing);
+      expect(find.byType(PopupMenuButton<String>), findsOneWidget);
+      await tester.tap(find.byType(PopupMenuButton<String>)); await tester.pumpAndSettle();
+      expect(find.text('Edit transaction'),findsOneWidget);
+      expect(find.text('Delete transaction'),findsNothing);
       expect(api.permissionCalls, 0);
       expect(cache.persisted, isNull);
       expect(cache.reads, 1);

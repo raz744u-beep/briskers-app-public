@@ -3,14 +3,15 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Invoices and Estimates New is aligned beside Search', () {
+  test('Invoices and Estimates New floats independently of Search', () {
     final source = File('lib/screens/documents_screen.dart').readAsStringSync();
-    expect(source, contains("ValueKey('documents-inline-new')"));
+    expect(source, contains("floatingActionButtonLocation: FloatingActionButtonLocation.endFloat"));
     expect(source, contains("key: const ValueKey('persistent-document-search')"));
     expect(source, contains('onPressed: _estimate'));
+    expect(source, isNot(contains("ValueKey('documents-inline-new')")));
     expect(source, contains('backgroundColor: accent'));
     expect(source, contains('borderRadius: BorderRadius.circular(14)'));
-    expect(source, isNot(contains('FloatingActionButton.extended(')));
+    expect(source, contains('FloatingActionButton.extended('));
   });
 
   test('Expenses New floats lower-right while Search uses its own row', () {

@@ -10,8 +10,8 @@ void main() {
         .readAsStringSync();
 
     expect(workspace, contains('final ValueChanged<String>? onAddRecheck;'));
-    expect(workspace, contains("label: const Text('Add Recheck')"));
-    expect(workspace, contains('widget.onAddRecheck!(entry.key)'));
+    expect(workspace, contains("title: const Text('Add Recheck')"));
+    expect(workspace, contains("widget.onAddRecheck!(task['job_id'] as String)"));
     expect(payroll, contains('onAddRecheck: (jobId) => _addRecheck(jobId: jobId)'));
     expect(payroll, contains('final job = jobId ?? widget.jobId;'));
     expect(payroll, contains("(employee['employee_id'] ?? employee['id']) as String"));

@@ -398,6 +398,7 @@ class CustomerVehicleSyncService {
       ],
     );
 
+    if (bundle.containsKey('vehicles')) {
     await _database.customStatement(
       '''
       DELETE FROM local_customer_vehicles
@@ -409,6 +410,8 @@ class CustomerVehicleSyncService {
       ''',
       [businessId, customerId, businessId],
     );
+
+    }
 
     for (final raw in vehicles) {
       if (raw is! Map) continue;
@@ -509,6 +512,10 @@ class CustomerVehicleSyncService {
       DELETE FROM local_vehicles
       WHERE business_id = ?
         AND local_vehicles.sync_state='synced'
+        AND NOT EXISTS (SELECT 1 FROM local_jobs j
+          WHERE j.business_id=local_vehicles.business_id AND j.vehicle_id=local_vehicles.id)
+        AND NOT EXISTS (SELECT 1 FROM local_findings f
+          WHERE f.business_id=local_vehicles.business_id AND f.vehicle_id=local_vehicles.id)
         AND NOT EXISTS (
           SELECT 1
           FROM local_customer_vehicles cv

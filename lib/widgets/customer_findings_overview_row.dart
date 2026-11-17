@@ -171,8 +171,8 @@ class _CustomerFindingsOverviewRowState
             ? (snapshot.hasError
                 ? 'Counts unavailable — tap to view'
                 : 'Checking saved vehicle findings...')
-            : 'Open ${counts.open} • In Job ${counts.inJob} '
-                '• Resolved ${counts.resolved}';
+            : 'Unresolved ${counts.open} • Resolved ${counts.inJob+counts.resolved}'
+                '${counts.notApplicable==0?'':' • Not Applicable ${counts.notApplicable}'}';
         return ListTile(
           key: const ValueKey('customer-overview-vehicle-findings'),
           dense: true,

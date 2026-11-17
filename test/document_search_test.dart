@@ -42,4 +42,14 @@ void main() {
     expect(matchesDocumentSearch(invoices[0], '2026-10-01'), false);
     expect(matchesDocumentSearch({'document_number': '6321', 'display_status':'Paid'}, 'Paid'), false);
   });
+  test('estimate search accepts the displayed date, ISO date and public number', () {
+    final estimate = {
+      'document_number': 'E-1997',
+      'document_date': '2026-11-16',
+    };
+    for (final query in ['Nov 16, 2026', '2026-11-16', '11/16/2026', 'E-1997']) {
+      expect(matchesDocumentSearch(estimate, query, includeDate: true), isTrue);
+    }
+    expect(matchesDocumentSearch(estimate, '11/15/2026', includeDate: true), isFalse);
+  });
 }

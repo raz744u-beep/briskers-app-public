@@ -19,8 +19,9 @@ import '../../services/recurring_sync_service.dart';
 import '../expenses/expense_detail_screen.dart';
 
 class OfflineRecurringScreen extends StatefulWidget {
-  const OfflineRecurringScreen({super.key, required this.businessId});
+  const OfflineRecurringScreen({super.key, required this.businessId, this.transactionId});
   final String businessId;
+  final String? transactionId;
   @override
   State<OfflineRecurringScreen> createState() => _OfflineRecurringScreenState();
 }
@@ -39,6 +40,9 @@ class _OfflineRecurringScreenState extends State<OfflineRecurringScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _run(_openSaved);
+    });
     _lockTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted || _busy || _grant == null || _authorized()) return;
       setState(() { _rules = []; _occurrences = []; _grant = null; });
@@ -83,6 +87,20 @@ class _OfflineRecurringScreenState extends State<OfflineRecurringScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _openSaved(OfflineRecurringRepository repo) async {
+    final transaction = widget.transactionId;
+    if (transaction == null) return;
+    final detail = await LocalFinancialCache().loadTransactionForEdit(
+      widget.businessId, transaction,
+    );
+    if (detail == null || detail['recurring_rule_id'] == null ||
+        detail['recurring_occurrence_date'] == null) {
+      _message = 'This expense has no verified schedule on this device.';
+      return;
+    }
+    await repo.adoptSavedExpense(detail);
   }
 
   Future<void> _download(OfflineRecurringRepository repo) async {
@@ -182,14 +200,16 @@ class _OfflineRecurringScreenState extends State<OfflineRecurringScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) {
+    final offline = BriskersConnectionModeController.instance.forceOffline;
+    return Scaffold(
     appBar: AppBar(title: const Text('Recurring transactions')),
     body: ListView(padding: const EdgeInsets.all(16), children: [
       Wrap(spacing: 8, runSpacing: 8, children: [
-        FilledButton(onPressed: _busy ? null : () => _run((_) async {}), child: const Text('Open saved schedules')),
-        OutlinedButton(onPressed: _busy ? null : () => _run(_download), child: const Text('Download existing')),
+        FilledButton(onPressed: _busy ? null : () => _run(_openSaved), child: const Text('Open saved schedules')),
+        OutlinedButton(onPressed: _busy || offline ? null : () => _run(_download), child: const Text('Download existing')),
         OutlinedButton(onPressed: _busy ? null : () => _run(_generate), child: const Text('Create due expenses')),
-        OutlinedButton(onPressed: _busy ? null : () => _run(_sync), child: const Text('Sync recurring only')),
+        OutlinedButton(onPressed: _busy || offline ? null : () => _run(_sync), child: const Text('Sync recurring only')),
       ]),
       const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text(
         'Download uses internet without enabling general sync. Schedule changes and due expenses save locally.')),
@@ -231,6 +251,7 @@ class _OfflineRecurringScreenState extends State<OfflineRecurringScreen> {
       ],
     ]),
   );
+  }
 }
 
 int _minor(String value) {

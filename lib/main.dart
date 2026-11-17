@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
 
 import 'app.dart';
 import 'services/local_document_detail_cache.dart';
@@ -88,6 +89,7 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
       await _runStep('Initializing secure session', () => Supabase.initialize(
         url: supabaseUrl,
         publishableKey: supabasePublishableKey,
+        httpClient: BriskersSupabaseHttpClient(http.Client()),
       ));
       DeviceOwnerAuthorization.instance.initialize();
       await _runStep('Starting photo background service',

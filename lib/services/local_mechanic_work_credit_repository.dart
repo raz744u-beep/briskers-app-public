@@ -34,15 +34,35 @@ class LocalMechanicWorkCreditRepository {
         PRIMARY KEY(business_id,credit_id,operation_id)
       )
     ''');
-    await _db.customStatement('''
-      CREATE TRIGGER IF NOT EXISTS payroll_covered_work_immutable
+    // Existing coverage stays immutable. The only new exception finishes an
+    // explicitly paid In Progress assignment at its unchanged assigned hours.
+    // Install the stronger scoped guard atomically before retiring the old one.
+    await _db.transaction(() async {
+      await _db.customStatement('''
+      CREATE TRIGGER IF NOT EXISTS payroll_covered_work_immutable_v2
       BEFORE UPDATE OF actual_minutes, rate_cents, completed, employee_id, job_id,
         labor_line_id, task_id, allocation_id, business_id
       ON local_mechanic_work_credits_v1
       WHEN EXISTS (SELECT 1 FROM regular_payroll_work_coverage
         WHERE business_id=OLD.business_id AND credit_id=OLD.allocation_id)
+      AND NOT (
+        OLD.completed=0 AND NEW.completed=1 AND NEW.revision>OLD.revision
+        AND NEW.business_id=OLD.business_id AND NEW.allocation_id=OLD.allocation_id
+        AND NEW.task_id=OLD.task_id AND NEW.employee_id=OLD.employee_id
+        AND NEW.job_id=OLD.job_id AND NEW.labor_line_id=OLD.labor_line_id
+        AND NEW.rate_cents=OLD.rate_cents AND NEW.paid_operation_id IS OLD.paid_operation_id
+        AND NEW.actual_minutes>0
+        AND NOT EXISTS(SELECT 1 FROM regular_payroll_work_coverage w
+          WHERE w.business_id=OLD.business_id AND w.credit_id=OLD.allocation_id
+          AND (COALESCE(json_extract(w.snapshot,'\$.in_progress_payment'),0)!=1
+            OR COALESCE(json_extract(w.snapshot,'\$.estimated_minutes'),-1)!=NEW.actual_minutes))
+        AND NEW.actual_minutes>=(SELECT SUM(w.minutes) FROM regular_payroll_work_coverage w
+          WHERE w.business_id=OLD.business_id AND w.credit_id=OLD.allocation_id)
+      )
       BEGIN SELECT RAISE(ABORT,'Paid work is immutable'); END
-    ''');
+      ''');
+      await _db.customStatement('DROP TRIGGER IF EXISTS payroll_covered_work_immutable');
+    });
     await _db.customStatement('''
       CREATE TRIGGER IF NOT EXISTS payroll_covered_work_no_delete
       BEFORE DELETE ON local_mechanic_work_credits_v1

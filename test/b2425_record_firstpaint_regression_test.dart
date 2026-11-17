@@ -61,11 +61,11 @@ void main() {
 
     final documents =
         File('lib/screens/documents_screen.dart').readAsStringSync();
-    expect(documents, contains("ValueKey('documents-inline-new')"));
+    expect(documents, contains("floatingActionButtonLocation: FloatingActionButtonLocation.endFloat"));
     expect(documents, contains('backgroundColor: accent'));
     expect(documents, contains('shape: RoundedRectangleBorder('));
     expect(documents, contains('borderRadius: BorderRadius.circular(14)'));
-    expect(documents, isNot(contains('FloatingActionButton.extended(')));
+    expect(documents, contains('FloatingActionButton.extended('));
 
     final expenses =
         File('lib/screens/expenses_screen.dart').readAsStringSync();

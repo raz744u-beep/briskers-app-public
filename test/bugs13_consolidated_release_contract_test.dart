@@ -44,7 +44,7 @@ void main() {
     expect(src, contains('_serverConfirmedTransactionIds.clear()'));
     expect(src, contains('_serverConfirmedBusinessId'));
     expect(src, contains('rows.map((row) => row[\'id\']'));
-    expect(src, contains('snapshot.map((row) => row[\'id\']'));
+    expect(src, contains('saveServerConfirmedTransactions(\n        businessId, rows,'));
     expect(src, contains('(!pending && !failed &&'));
     expect(src, contains('.contains(verifiedId)'));
     expect(src, contains('Transaction confirmed in shop database'));

@@ -62,6 +62,17 @@ class BriskersConnectionModeController extends ChangeNotifier {
     await prefs.setString(_preferenceKey, value.name);
   }
 
+  /// Background isolates have their own preference cache.
+  Future<bool> offlineForBackgroundRequest() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      return forceOffline || prefs.getString(_preferenceKey) == BriskersConnectionMode.offline.name;
+    } catch (_) {
+      return true;
+    }
+  }
+
   void ensureNetworkAllowed() {
     if (forceOffline) {
       throw StateError(

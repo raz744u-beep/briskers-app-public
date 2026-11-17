@@ -1,3 +1,5 @@
+import 'local_estimate_number.dart';
+import 'local_invoice_closure.dart';
 import 'package:drift/drift.dart';
 
 import '../core/document_presentation.dart';
@@ -39,6 +41,7 @@ class LocalDocumentRepository {
     : _database = database ?? localDatabase;
 
   final BriskersLocalDatabase _database;
+  BriskersLocalDatabase get database => _database;
 
   // Estimates and accounting are retained. A retired Job only hides invoices;
   // an exact invoice tombstone also applies after a stale reassignment response.
@@ -115,15 +118,28 @@ class LocalDocumentRepository {
       final fences = await _retirementFences(businessId);
       // A pending request can be rejected later. Retain its exact prior row
       // rather than letting an unrelated full refresh erase the recovery data.
+      final known = <String, Object?>{};
+      if (kind == null || kind == 'estimate') {
+        final estimates = await _database.customSelect(
+          "SELECT id,document_number FROM local_documents WHERE business_id=? AND kind='estimate' AND document_number IS NOT NULL",
+          variables: [Variable(businessId)],
+        ).get();
+        for (final row in estimates) {
+          known[row.read<String>('id')] = row.data['document_number'];
+        }
+      }
       final visible = _visibleDocumentSql('local_documents');
       await _database.customStatement(
         kind == null
-            ? "DELETE FROM local_documents WHERE business_id = ? AND sync_state = 'synced' AND $visible"
-            : "DELETE FROM local_documents WHERE business_id = ? AND kind = ? AND sync_state = 'synced' AND $visible",
+            ? "DELETE FROM local_documents WHERE business_id = ? AND sync_state = 'synced' AND kind<>'estimate' AND $visible"
+            : "DELETE FROM local_documents WHERE business_id = ? AND kind = ? AND sync_state = 'synced' AND kind<>'estimate' AND $visible",
         kind == null ? [businessId] : [businessId, kind],
       );
-      for (final document in documents) {
-        final id = document['id']?.toString() ?? '';
+      for (final incoming in documents) {
+        final id = incoming['id']?.toString() ?? '';
+        final number = incoming['kind'] == 'estimate' && id.isNotEmpty
+            ? LocalEstimateNumber.existing(known[id]) : null;
+        final document = number == null ? incoming : {...incoming, 'document_number': number};
         if (id.isEmpty || _serverDocumentBlocked(document,
           blockedDocuments: fences.documents, blockedJobs: fences.jobs)) {
           continue;
@@ -172,6 +188,13 @@ class LocalDocumentRepository {
           ],
         );
       }
+      for (final document in documents) {
+        final id = document['id']?.toString() ?? '';
+        if (document['kind'] == 'estimate' && id.isNotEmpty) {
+          await LocalEstimateNumber.repair(_database, businessId, id,
+            cachedIssued: document['issued_at'] != null || document['sent_at'] != null);
+        }
+      }
     });
   }
 
@@ -198,8 +221,11 @@ class LocalDocumentRepository {
   ) async {
     await _database.transaction(() async {
       final fences = await _retirementFences(businessId);
-      for (final document in documents) {
-        final id = document['id']?.toString() ?? '';
+      for (final incoming in documents) {
+        final id = incoming['id']?.toString() ?? '';
+        final number = incoming['kind'] == 'estimate' && id.isNotEmpty
+            ? await LocalEstimateNumber.stored(_database, businessId, id) : null;
+        final document = number == null ? incoming : {...incoming, 'document_number': number};
         if (id.isEmpty || _serverDocumentBlocked(document,
           blockedDocuments: fences.documents, blockedJobs: fences.jobs)) {
           continue;
@@ -247,6 +273,13 @@ class LocalDocumentRepository {
             _int(document['row_version']),
           ],
         );
+      }
+      for (final document in documents) {
+        final id = document['id']?.toString() ?? '';
+        if (document['kind'] == 'estimate' && id.isNotEmpty) {
+          await LocalEstimateNumber.repair(_database, businessId, id,
+            cachedIssued: document['issued_at'] != null || document['sent_at'] != null);
+        }
       }
     });
   }
@@ -351,7 +384,7 @@ class LocalDocumentRepository {
         }
       }
     }
-    return result;
+    return Future.wait(result.map((row) => LocalInvoiceClosureStore(_database).project(businessId,row)));
   }
 
   Future<String?> createdAtForDocument(

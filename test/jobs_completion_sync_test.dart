@@ -1,4 +1,5 @@
 import 'support/empty_retirement_gateway.dart';
+import 'package:briskers_app/services/local_job_core_projection.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/job_sync_service.dart';
@@ -156,5 +157,29 @@ void main() {
       );
     },
   );
+  test('pending vehicle correction survives repeated navigation projections and background pulls',()async{
+    const b='00000000-0000-4000-8000-000000000001';
+    final db=BriskersLocalDatabase(NativeDatabase.memory());addTearDown(db.close);
+    final api=_Api();final sync=JobSyncService(api:api,database:db,
+      cleanupGateway:_Cleanup(),retirementGateway:const EmptyRetirementGateway());
+    await sync.pull(b);
+    await OfflineJobAdminService(database:db).queueCore(b,'synthetic-j6',customerId:'terrance',
+      replaceVehicle:true,vehicleId:'c300',vehicleLabel:'2016 Mercedes C300',vehicleVin:'VIN-C300');
+    final before=(await db.customSelect('SELECT * FROM local_jobs').getSingle()).data;
+    for(var i=0;i<3;i++){
+      final view=await LocalJobCoreProjection.merge(db,b,Map<String,dynamic>.from(api.bundle()['job'] as Map));
+      expect(view['vehicle_id'],'c300');expect(view['vehicle'],'2016 Mercedes C300');
+      final local=await LocalJobRepository(database:db).jobDetail(b,'synthetic-j6');
+      expect(local!.job['vehicle_id'],'c300');
+      api.version++;await sync.pull(b);
+    }
+    final after=(await db.customSelect('SELECT * FROM local_jobs').getSingle()).data;
+    for(final key in ['vehicle_id','vehicle_label','vehicle_vin','customer_id','title','requested_work','planned_hours']){
+      expect(after[key],before[key],reason:key);
+    }
+    expect(after['sync_state'],'pending');
+    expect((await db.customSelect("SELECT * FROM sync_outbox WHERE entity_type='job_admin'").get()).length,1);
+  });
+
 }
 

@@ -1,3 +1,8 @@
+import 'nov12_job_completion.dart';
+import 'local_document_repository.dart';
+import 'local_document_sql_store.dart';
+import 'local_document_detail_cache.dart';
+import 'invoice_labor_work_summary.dart';
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
@@ -28,9 +33,13 @@ class LocalJobRepository {
     : _database = database ?? localDatabase;
 
   final BriskersLocalDatabase _database;
+  Future<void> reconcileNov12OwnerCompletion(String business,{required bool isOwner})=>Nov12JobCompletion(_database).reconcile(business,isOwner:isOwner);
 
   Future<Map<String,Map<String,int>>> allocationHours(String business,List<String> jobs) =>
       JobTaskSummary(_database).hours(business,jobs);
+
+  Future<Map<String,JobTaskProgress>> taskProgress(String business,List<String> jobs) =>
+      JobTaskSummary(_database).progressForJobs(business,jobs);
 
   // Shared device SQLite has one executor: avoid repeated DDL ahead of cards.
   // This is only an index/setup cache, not a bypass of retirement checks.
@@ -236,6 +245,19 @@ class LocalJobRepository {
          OR lower(COALESCE(j.vehicle_vin, '')) LIKE ?
          OR lower(COALESCE(j.vehicle_plate, '')) LIKE ?
          OR lower(j.title) LIKE ?
+         OR lower(COALESCE(j.requested_work, '')) LIKE ?
+         OR EXISTS (
+           SELECT 1 FROM local_documents d
+           JOIN local_document_details detail ON detail.cache_key =
+             'briskers_document_detail_' || j.business_id || '_' || d.id
+           JOIN json_each(CASE WHEN json_valid(detail.payload_json)
+             THEN COALESCE(json_extract(detail.payload_json, '\$.lines'),
+               json_extract(detail.payload_json, '\$.items'), '[]') ELSE '[]' END) line
+           WHERE d.business_id=j.business_id AND d.job_id=j.id AND d.kind='invoice'
+             AND lower(d.status) NOT IN ('void','voided','cancelled','canceled','deleted')
+             AND lower(COALESCE(json_extract(CASE WHEN line.type='object'
+               THEN line.value ELSE '{}' END, '\$.description'),
+               json_extract(CASE WHEN line.type='object' THEN line.value ELSE '{}' END, '\$.name'), '')) LIKE ?)
          OR EXISTS (
            SELECT 1 FROM local_customers c
            WHERE c.business_id = j.business_id AND c.id = j.customer_id
@@ -245,7 +267,7 @@ class LocalJobRepository {
                OR lower(COALESCE(c.list_email, '')) LIKE ?
                OR lower(COALESCE(c.list_phone, '')) LIKE ?)))
       """);
-      for (var i = 0; i < 11; i++) {
+      for (var i = 0; i < 13; i++) {
         variables.add(Variable<String>('%$query%'));
       }
     }
@@ -265,6 +287,7 @@ class LocalJobRepository {
     // Retirements are checked each time; the DDL indexes are installed once.
     await LocalJobRetirement.ensureSchema(_database);
     await _ensureListReadIndexes();
+    await LocalDocumentSqlStore.ensure(_database);
     final filters = _filters(
       businessId,
       status: status,
@@ -273,7 +296,9 @@ class LocalJobRepository {
     );
     // Completed means the work was completed, regardless of a later payment,
     // import correction or note. Missing dates fall back to meaningful activity.
-    final order = status?.toLowerCase() == 'completed'
+    final order = sort == JobListSort.creation
+        ? 'COALESCE(j.created_at,0) DESC,'
+        : status?.toLowerCase() == 'completed'
         ? 'COALESCE(NULLIF(j.completed_at, 0), j.activity_at) DESC, '
               'j.activity_at DESC,'
         : view == JobListView.active
@@ -296,7 +321,7 @@ class LocalJobRepository {
     // Only legacy callers keep the old provisional pin. The Jobs screen's All
     // list is strictly newest activity first, including pending local Jobs.
     final legacyPin =
-        view == JobListView.all || status?.toLowerCase() == 'completed'
+        sort == JobListSort.creation || view == JobListView.all || status?.toLowerCase() == 'completed'
         ? ''
         : """
           CASE WHEN (j.job_number = 'Pending sync' OR upper(j.job_number) LIKE 'TEMP-%')
@@ -336,7 +361,23 @@ class LocalJobRepository {
           ],
         )
         .get();
-    return rows.map(_jobListMap).toList();
+    final result=rows.map(_jobListMap).toList();
+    final documents=LocalDocumentRepository(database:_database);
+    final cache=LocalDocumentDetailCache(database:_database);
+    for(final job in result) {
+      final invoices=(await documents.listByJob(businessId,job['id'] as String))
+        .where((d)=>d['kind']=='invoice' && !const {'void','cancelled'}.contains(d['status'])).toList();
+      if(invoices.isEmpty) continue;
+      final invoice=invoices.first;
+      job['invoice_id']=invoice['id'];
+      job['invoice_number']=invoice['document_number'];
+      final detail=await cache.loadReadOnly(businessId,invoice['id'] as String);
+      if(detail==null || detail['job_id']!=job['id'] || detail['id']!=invoice['id']) continue;
+      final lines=invoiceLaborWorkSummary(detail).split('\n').where((s)=>s.trim().isNotEmpty).toList();
+      if (lines.isNotEmpty) job['work_summary']=lines.take(2).join(' · ');
+      job['additional_work_count']=lines.length>2 ? lines.length-2 : 0;
+    }
+    return result;
   }
 
   /// Customer navigation uses the same card projection as the main Jobs list.
@@ -529,6 +570,7 @@ class LocalJobRepository {
     JobListView view = JobListView.all,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    await LocalDocumentSqlStore.ensure(_database);
     final filters = _filters(
       businessId,
       status: status,
@@ -773,13 +815,13 @@ class LocalJobRepository {
     String jobId,
     String state,
   ) async {
-    if (!const {'paid', 'awaiting_clearance', 'awaiting_payment',
+    if (!const {'paid', 'recorded_pending', 'closed', 'awaiting_clearance', 'awaiting_payment',
                 'invoice_needed'}.contains(state)) {
       throw ArgumentError.value(state, 'state');
     }
     await _database.customStatement(
       "UPDATE local_jobs SET payment_state = ? "
-      "WHERE business_id = ? AND id = ? AND status = 'completed'",
+      "WHERE business_id = ? AND id = ?",
       [state, businessId, jobId],
     );
   }
@@ -951,6 +993,8 @@ class LocalJobRepository {
       'assigned_employee': row.readNullable<String>('assigned_employee_name'),
       'assigned_employee_id': row.readNullable<String>('assigned_employee_id'),
       'assigned_position': row.readNullable<String>('assigned_position'),
+      'invoice_id': row.data['invoice_id'],
+      'invoice_number': row.data['invoice_number'],
       'open_findings': row.read<int>('open_findings'),
       'pending_requests': row.read<int>('pending_request_count'),
       'can_request': capabilities['request_job'] == true,

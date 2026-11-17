@@ -63,7 +63,8 @@ class _NewCustomersScreenState extends State<NewCustomersScreen> {
   }
 
   Future<void> _markReviewed(Iterable<String> ids) async {
-    final reviewed = ids.toSet();
+    final reviewed = ids.where((id) => !_reviewed.contains(id)).toSet();
+    if (_saving || reviewed.isEmpty) return;
     if (mounted) setState(() => _saving = true);
     try {
       await widget.notifications.markReviewed(reviewed);
@@ -137,7 +138,7 @@ class _NewCustomersScreenState extends State<NewCustomersScreen> {
         ),
       if (_rows != null && _rows!.isNotEmpty)
         TextButton.icon(
-          onPressed: _saving
+          onPressed: _saving || _rows!.every((row) => _reviewed.contains(row['id'].toString()))
               ? null
               : () => _markReviewed(_rows!.map((row) => row['id'].toString())),
           icon: const Icon(Icons.done_all),
@@ -168,12 +169,16 @@ class _NewCustomersScreenState extends State<NewCustomersScreen> {
                       subtitle: phone.isEmpty
                           ? null
                           : Text(formatUsPhone(phone)),
-                      trailing: _reviewed.contains(row['id'])
+                      trailing: _reviewed.contains(row['id'].toString())
                           ? Icon(
                               Icons.check_circle_outline,
                               semanticLabel: tr('reviewed'),
                             )
-                          : const Icon(Icons.chevron_right),
+                          : IconButton(
+                              tooltip: tr('markCustomersReviewed'),
+                              onPressed: _saving ? null : () => _markReviewed([row['id'].toString()]),
+                              icon: const Icon(Icons.check),
+                            ),
                       onTap: () => _open(row),
                     );
                   },

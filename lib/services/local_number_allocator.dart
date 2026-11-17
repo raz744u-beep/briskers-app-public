@@ -18,6 +18,7 @@ class LocalNumberAllocator {
   }
 
   (String, String, String) _table(String kind) => switch(kind) {
+    'estimate' => ('local_documents','document_number'," AND kind='estimate'"),
     'invoice' => ('local_documents','document_number'," AND kind='invoice'"),
     'job' => ('local_jobs','job_number',''),
     _ => throw ArgumentError('Unsupported number kind'),
@@ -26,12 +27,14 @@ class LocalNumberAllocator {
     var value = raw?.toString().trim() ?? '';
     if (kind == 'job') {
       value = value.toUpperCase().replaceFirst(RegExp(r'^J-?'), '');
+    } else if (kind == 'estimate') {
+      value = value.toUpperCase().replaceFirst(RegExp(r'^E-'), '');
     } else if (kind == 'invoice') {
       value = value.toUpperCase().replaceFirst(RegExp(r'^(?:I-|MB-)'), '');
     }
     return RegExp(r'^\d+$').hasMatch(value) ? int.tryParse(value) : null;
   }
-  String display(String kind, int number) => kind == 'job' ? 'J-$number' : '$number';
+  String display(String kind, int number) => switch(kind) { 'job' => 'J-$number', 'estimate' => 'E-$number', _ => '$number' };
 
   Future<Map<int,Set<String>>> _used(String business, String kind) async {
     final (table,column,predicate)=_table(kind);
@@ -47,11 +50,20 @@ class LocalNumberAllocator {
   Future<int> _next(String business,String kind) async {
     final rows=await db.customSelect('SELECT next_number FROM local_number_counters '
       'WHERE business_id=? AND kind=?',variables:[Variable<String>(business),Variable<String>(kind)]).get();
-    if(rows.isNotEmpty) return rows.single.read<int>('next_number');
+    if (rows.isNotEmpty && kind != 'estimate') return rows.single.read<int>('next_number');
     final used=await _used(business,kind);
-    var next=1;
+    var next=rows.singleOrNull?.read<int>('next_number') ?? 1;
     for(final number in used.keys) { if(number>=next) next=number+1; }
-    await db.customStatement('INSERT INTO local_number_counters VALUES (?,?,?)',[business,kind,next]);
+    if (kind == 'estimate') {
+      final held = await db.customSelect(
+        'SELECT MAX(number) AS highest FROM local_number_reservations WHERE business_id=? AND kind=?',
+        variables: [Variable(business), Variable(kind)],
+      ).getSingle();
+      final highest = held.readNullable<int>('highest');
+      if (highest != null && highest >= next) next = highest + 1;
+    }
+    await db.customStatement('INSERT INTO local_number_counters VALUES (?,?,?) '
+      'ON CONFLICT(business_id,kind) DO UPDATE SET next_number=excluded.next_number',[business,kind,next]);
     return next;
   }
   /// Only explicit releases are offered; a gap alone is never evidence.
@@ -98,6 +110,14 @@ class LocalNumberAllocator {
   Future<int> allocate(String business,String kind,String entity,{int? requested}) async {
     return db.transaction(() async {
       await ensureSchema();
+      if (kind == 'estimate') {
+        final saved = await db.customSelect(
+          'SELECT number FROM local_number_reservations '
+          "WHERE business_id=? AND kind='estimate' AND entity_id=? AND active=1",
+          variables: [Variable(business), Variable(entity)],
+        ).getSingleOrNull();
+        if (saved != null) return saved.read<int>('number');
+      }
       var next=await _next(business,kind);
       var number=requested ?? next;
       if(number<1 || number>999999999) throw StateError('Enter a number from 1 to 999,999,999.');
@@ -121,6 +141,7 @@ class LocalNumberAllocator {
   /// Release the removed record's number, including pre-upgrade records. Only
   /// a free suffix at the current next number moves the automatic counter back.
   Future<void> release(String business,String kind,String entity,{Object? previousNumber}) async {
+    if (kind == 'estimate') return; // Issued estimate numbers are never reused.
     await ensureSchema();
     final existing=await _used(business,kind);
     var prior=_parse(previousNumber,kind);

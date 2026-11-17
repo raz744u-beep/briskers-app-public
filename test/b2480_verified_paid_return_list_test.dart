@@ -28,7 +28,7 @@ void main() {
     await subscription.cancel();
   });
 
-  test('Confirmed fully paid is Pending Close until authoritative Closed', () {
+  test('Confirmed fully paid is Paid until authoritative Closed', () {
     const previouslyOpen = <String, dynamic>{
       'id':'synthetic-invoice', 'kind':'invoice', 'status':'issued',
       'display_status_code':'open', 'total_amount':350.0,
@@ -40,7 +40,7 @@ void main() {
       'pending_payment':0.0,
       'display_status_code':'pending_close',
     };
-    expect(invoiceListStageWithReceipts(retainedPaid, receipts:350), 'Pending Close');
+    expect(invoiceListStageWithReceipts(retainedPaid, receipts:350), 'Paid');
     expect(invoiceListStageWithReceipts({
       ...retainedPaid, 'status':'closed',
       'display_status_code':'closed',
@@ -53,19 +53,16 @@ void main() {
     final detail=File('lib/screens/jobs/job_document_screen.dart').readAsStringSync();
     expect(docs, contains('VerifiedInvoicePaymentEvents.fullyPaid.listen('));
     expect(docs, contains('_verifiedFullyPaidInvoiceIds.add(event.invoiceId)'));
-    expect(docs, contains("return 'Pending Close';"));
+    expect(docs, contains("return 'Paid';"));
     expect(docs, contains("event.businessId != widget.businessId"));
     expect(docs, contains("row['id']?.toString() == event.invoiceId"));
     expect(docs, contains('_verifiedFullyPaidInvoiceIds.clear()'));
     expect(docs, contains('_verifiedFullyPaidInvoiceIds.remove(event.invoiceId)'));
     final finalize=detail.split('Future<void> _finalizeEnteredPayments() async {').last
       .split('Future<void> _enterWarrantyPayment() async {').first;
-    expect(finalize, contains('presentation.paymentDetailsKnown'));
-    expect(finalize, contains('presentation.finalizedCents! / 100'));
-    expect(finalize, contains('identity == widget.documentId'));
-    expect(finalize.indexOf('VerifiedInvoicePaymentEvents.confirmedFullyPaid('),
-      lessThan(finalize.indexOf('await _offerCompletePaidJob();')));
-    expect(finalize, contains('await _autoCloseOwnerInvoiceIfReady();'));
-    expect(finalize, contains('await _load(fastAfterMutation: true)'));
+    expect(finalize, contains('LocalInvoicePaymentCoverageEvents.committed('));
+    expect(finalize, contains('coversRemainingBalance: DocumentPresentation('));
+    expect(finalize.indexOf('OfflineInvoiceFinalization().finalizeLocally('),
+      lessThan(finalize.indexOf('LocalInvoicePaymentCoverageEvents.committed(')));
   });
 }

@@ -53,7 +53,7 @@ void main() {
     final expenses = await File('lib/screens/expenses_screen.dart').readAsString();
     expect(jobs, contains("tooltip: 'New Job'"));
     expect(jobs, contains('onPressed: _createNewJob'));
-    expect(documents, contains("ValueKey('documents-inline-new')"));
+    expect(documents, contains("floatingActionButtonLocation: FloatingActionButtonLocation.endFloat"));
     expect(documents, contains('onPressed: _showCloseInvoices'));
     expect(expenses, contains("ValueKey('expenses-new-floating')"));
     expect(expenses, contains('onPressed: _importing ? null : _showAddMenu'));
@@ -195,7 +195,7 @@ void main() {
 
   test('Jobs cards prefer job title over customer requested work', () async {
     final card = await File('lib/widgets/job_compact_card.dart').readAsString();
-    expect(card, contains('final description = title.isNotEmpty ? title : requested;'));
+    expect(card, contains('final displayDescription = jobDisplayDescription(job);'));
   });
 
   test('Paid Still Open uses translated copy and returns only paid unfinished Jobs', () async {
@@ -246,11 +246,9 @@ void main() {
 
   test('full payment offers job completion without auto closing work', () async {
     final invoice = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
-    expect(invoice, contains('_offerCompletePaidJob()'));
-    expect(invoice, contains("paid >= total - 0.005"));
-    expect(invoice, contains("await _api.jobDocuments(widget.businessId, jobId)"));
-    expect(invoice, contains("child: const Text('Keep In Progress')"));
-    expect(invoice, contains("title: const Text('Mark Job Completed?')"));
+    expect(invoice, contains('_offerCompleteJobAfterPaymentEntry()'));
+    expect(invoice, contains("child: const Text('Keep Job Open')"));
+    expect(invoice, contains("title: const Text('Payment entered in full')"));
     expect(invoice, contains("child: const Text('Complete Job')"));
   });
 

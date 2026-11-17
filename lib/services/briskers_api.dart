@@ -1617,14 +1617,14 @@ class BriskersApi {
     final client = supabase;
     final session = client.auth.currentSession;
     if (session == null) throw StateError('An active Briskers sign-in is required.');
-    final result = await client.rpc(
+    final result = await explicitSupabaseRead('briskers_read_recurring_expense_occurrence', () => client.rpc(
       'briskers_read_recurring_expense_occurrence',
       params: {
         'p_business_id': businessId,
         'p_rule_id': ruleId,
         'p_due_date': dueDate,
       },
-    ).timeout(const Duration(seconds: 15));
+    ).timeout(const Duration(seconds: 15)));
     if (client.auth.currentSession?.user.id != session.user.id) {
       throw StateError('The Briskers account changed during download.');
     }
@@ -1729,6 +1729,59 @@ class BriskersApi {
       },
     );
     return result.toString();
+  }
+
+  Future<void> syncPayrollExpenseAmount(
+    String businessId, {
+    required String operation,
+    required String transactionId,
+    required num previous,
+    required num amount,
+    required String date,
+    required int revision,
+  }) async {
+    await networkSupabase.rpc('briskers_sync_payroll_expense_amount_v1', params: {
+      'p_business_id': businessId,
+      'p_payroll_operation': operation,
+      'p_transaction_id': transactionId,
+      'p_expected_amount': previous,
+      'p_amount': amount,
+      'p_verified_date': date,
+      'p_revision': revision,
+    });
+  }
+
+  Future<void> syncPayrollExpenseReversal(
+    String businessId, {
+    required String operation,
+    required String transactionId,
+    required num amount,
+    required String date,
+  }) async {
+    await networkSupabase.rpc('briskers_sync_payroll_expense_reversal_v1', params: {
+      'p_business_id': businessId,
+      'p_payroll_operation': operation,
+      'p_transaction_id': transactionId,
+      'p_expected_amount': amount,
+      'p_verified_date': date,
+    });
+  }
+
+  Future<void> syncPayrollExpenseAccount(
+    String businessId,
+    String transactionId, {
+    required String expectedAccountId,
+    required String accountId,
+  }) async {
+    await networkSupabase.rpc(
+      'briskers_sync_payroll_expense_account_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+        'p_expected_account_id': expectedAccountId,
+        'p_account_id': accountId,
+      },
+    );
   }
 
   Future<void> updateManualTransaction(
@@ -2877,6 +2930,13 @@ class BriskersApi {
     return result.toString();
   }
 
+  Future<void> markFindingNotApplicable(String businessId,String findingId,
+    {required String originalBody,required String body})async{
+    await networkSupabase.rpc('briskers_mark_finding_not_applicable',params:{
+      'p_business_id':businessId,'p_finding_id':findingId,
+      'p_original_body':originalBody,'p_body':body});
+  }
+
   Future<void> updateVehicleFinding(
     String businessId,
     String findingId, {
@@ -3257,23 +3317,55 @@ class BriskersApi {
     required String customerId,
     String? vehicleId,
     required String operationId,
+    required String publicNumber,
     required String documentDate,
     required List<Map<String,dynamic>> lines,
     String? memo,
   }) async {
     final result=await networkSupabase.rpc(
-      'briskers_sync_offline_standalone_estimate_v1',
+      'briskers_sync_offline_standalone_estimate_v2',
       params:{
         'p_business_id':businessId,
         'p_customer_id':customerId,
         'p_vehicle_id':vehicleId,
         'p_operation_id':operationId,
+        'p_public_number':publicNumber,
         'p_document_date':documentDate,
         'p_lines':lines,
         'p_memo':memo,
       },
     );
     return result.toString();
+  }
+
+  Future<String> syncOfflineJobEstimate(
+    String businessId, {
+    required String jobId,
+    required String operationId,
+    required String publicNumber,
+    required String documentDate,
+    required List<Map<String, dynamic>> lines,
+    String? memo,
+  }) async {
+    final result = await networkSupabase.rpc('briskers_sync_offline_job_estimate_v2', params: {
+      'p_business_id': businessId,
+      'p_job_id': jobId,
+      'p_operation_id': operationId,
+      'p_public_number': publicNumber,
+      'p_document_date': documentDate,
+      'p_lines': lines,
+      'p_memo': memo,
+    });
+    return result.toString();
+  }
+
+  Future<void> syncEstimateNumber(String businessId, String estimateId, {required String number, required bool ownerConfirmed}) async {
+    await networkSupabase.rpc('briskers_sync_estimate_number_v2', params: {
+      'p_business_id': businessId,
+      'p_estimate_id': estimateId,
+      'p_public_number': number,
+      'p_owner_confirmed': ownerConfirmed,
+    });
   }
 
   Future<String> createEstimate(
@@ -4606,6 +4698,14 @@ class BriskersApi {
         'p_payment_id': paymentId,
       },
     );
+  }
+
+  Future<Map<String,dynamic>> finalizeInvoiceOnce(String businessId,
+      String invoiceId,String operationId,Map<String,dynamic> request) async {
+    final result = await networkSupabase.rpc('briskers_finalize_invoice_once_v1',
+      params:{'p_business_id':businessId,'p_invoice_id':invoiceId,
+        'p_operation_id':operationId,'p_request':request});
+    return Map<String,dynamic>.from(result as Map);
   }
 
   Future<String> finalizePendingInvoicePayment(

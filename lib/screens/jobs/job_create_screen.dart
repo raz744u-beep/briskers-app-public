@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../services/local_job_work_date.dart';
+import '../../widgets/job_date_field.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../core/connection_mode.dart';
 import 'job_detail_screen.dart';
@@ -39,6 +41,7 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
   String? _employeeId;
   String? _createdJobId;
   bool _loadingEmployees = true;
+  DateTime _jobDate = LocalJobWorkDate.today();
   bool _saving = false;
   String? _error;
 
@@ -100,11 +103,6 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
 
   Future<void> _save() async {
     final title = _title.text.trim();
-    if (title.isEmpty && _createdJobId == null) {
-      setState(() => _error = 'Job title is required.');
-      return;
-    }
-
     final plannedHours = num.tryParse(_plannedHours.text.trim());
     if (plannedHours == null || plannedHours < 0) {
       setState(() => _error = 'Enter a valid planned time.');
@@ -125,6 +123,7 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
             vehicleId: _vehicleId,
             vehicleLabel: _vehiclesLabel(),
             title: title,
+            jobDate: _jobDate,
             requestedWork: _requestedWork.text.trim().isEmpty
                 ? null : _requestedWork.text.trim(),
             plannedHours: plannedHours,
@@ -236,12 +235,14 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
                 : null,
           ),
           const SizedBox(height: 12),
+          JobDateField(value: _jobDate, onChanged: _saving || _createdJobId != null ? null : (date) => setState(() => _jobDate = date)),
+          const SizedBox(height: 12),
           TextField(
             controller: _title,
             enabled: _createdJobId == null,
             textCapitalization: TextCapitalization.sentences,
             decoration: const InputDecoration(
-              labelText: 'Job title *',
+              labelText: 'Job title',
               hintText: 'Example: Diagnose check engine light',
               prefixIcon: Icon(
                 Icons.build_outlined,
