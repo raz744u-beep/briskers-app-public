@@ -101,7 +101,9 @@ class LocalWarrantyCompanies {
   Future<void> flush(String business) {
     if (!_canSync()) return Future<void>.value();
     final active = _flushes[_db] ??= {};
-    return active[business] ??= _flush(business).whenComplete(() => active.remove(business));
+    return active[business] ??= _flush(business).whenComplete(() {
+      active.remove(business);
+    });
   }
 
   Future<void> _flush(String business) async {
