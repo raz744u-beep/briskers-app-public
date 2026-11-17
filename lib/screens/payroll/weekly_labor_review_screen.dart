@@ -77,6 +77,8 @@ class WeeklyLaborReview extends StatefulWidget {
 
 class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   final Map<String, double> _selected = {};
+  // Preserve deliberate exclusions when a task finishes behind its detail page.
+  final Set<String> _excluded = <String>{};
   final Set<String> _expandedTasks = <String>{};
   bool _showTip = true;
   Timer? _tipTimer;
@@ -132,22 +134,48 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     }
     if(widget.week!=oldWidget.week) {
       _week=widget.week; _selectUnpaid(); unawaited(_restoreDraft());
+      return;
     }
     final available = {
       for (final task in _eligible)
         if (_available(task) > 0) _id(task): _available(task),
     };
     _selected.removeWhere((id, _) => !available.containsKey(id));
+    final previousTasks = {for (final task in oldWidget.tasks) _id(task): task};
     final previousPaid = {for (final task in oldWidget.tasks) _id(task): task['paid_minutes']};
     _selected.removeWhere((id, _) =>
         widget.tasks.any((task) => _id(task) == id &&
             previousPaid[id] != task['paid_minutes']));
     _selected.updateAll((id, requested) => requested.clamp(0.0, available[id]!).toDouble(),);
+    // Task Details refreshes this same mounted review after a local completion.
+    // Apply the initial completed/unpaid default only to the new transition;
+    // never reset other choices, edited hours, or newly paid allocations.
+    for (final task in _eligible) {
+      final id = _id(task), previous = previousTasks[_id(task)];
+      if (previous != null && previous['state'] != 'Done' &&
+          task['state'] == 'Done' && available.containsKey(id) &&
+          (!widget.profileLayout || (task['paid_minutes'] as int? ?? 0) == 0) &&
+          previous['paid_minutes'] == task['paid_minutes'] && !_excluded.contains(id)) {
+        _selected.putIfAbsent(id, () => available[id]!);
+      }
+    }
+  }
+
+  void _choose(Map<String, dynamic> task, bool selected) {
+    final id = _id(task);
+    if (selected) {
+      _excluded.remove(id);
+      _selected.putIfAbsent(id, () => _available(task));
+    } else {
+      _excluded.add(id);
+      _selected.remove(id);
+    }
   }
 
   void _selectUnpaid() {
     _preparedAdjustment=0;_preparedRepayment=0;_preparedReason='';
     _selected.clear();
+    _excluded.clear();
     for (final task in _eligible) {
       final remaining = _available(task);
       if (remaining > 0 &&
@@ -203,12 +231,11 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     final all = items.isNotEmpty && items.every((t) => _selected.containsKey(_id(t)));
     setState(() {
       for (final t in items) {
-        final key = _id(t);
         if (all) {
-          _selected.remove(key);
+          _choose(t, false);
         } else {
           final hours = _available(t);
-          if (hours > 0) { _selected.putIfAbsent(key, () => hours); }
+          if (hours > 0) { _choose(t, true); }
         }
       }
     });
@@ -227,8 +254,9 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     );
     if (hours != null && mounted) { setState(() {
         if (hours == 0) {
-          _selected.remove(_id(task));
+          _choose(task, false);
         } else {
+          _excluded.remove(_id(task));
           _selected[_id(task)] = hours;
         }
       });
@@ -708,7 +736,9 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       final remaining=available[entry.key]??0;
       if(remaining>0 && entry.value>0) {_selected[entry.key]=(entry.value as num).clamp(0,remaining).toDouble();
         }
-    }});
+      }
+      _excluded..clear()..addAll(available.keys.where((id) => !_selected.containsKey(id)));
+    });
   }
   Future<void> _editPreparation(int labor) async {
     final debt=await widget.advanceBalance();
@@ -825,7 +855,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
               SizedBox(width:40,child:Checkbox(
                 semanticLabel:'Select $description for payroll',
                 value:_selected.containsKey(id),
-                onChanged:_saving?null:(v)=>setState((){if(v==true){_selected[id]=_available(task);}else{_selected.remove(id);}}),
+                onChanged:_saving?null:(v)=>setState(()=>_choose(task,v==true))),
               )),
               Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
                 Semantics(link:true,child:InkWell(
@@ -1132,8 +1162,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                         value:_selected.containsKey(_id(task)),
                         onChanged:_available(task)<=0 ? null :
                           (v)=>setState((){
-                            if(v==true) {_selected[_id(task)]=_available(task,);}
-                            else {_selected.remove(_id(task));}
+                            _choose(task,v==true);
                           }),
                       ),
                       Expanded(child:InkWell(
