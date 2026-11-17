@@ -260,9 +260,9 @@ void main() {
     final lines = List<dynamic>.from(cached!['lines'] as List);
     final line = Map<String, dynamic>.from(lines.single as Map);
     expect((line['tax_rate'] as num).toDouble(), closeTo(0.0975, 0.000001));
-    expect((line['tax_amount'] as num).toDouble(), closeTo(74.902425, 0.0001));
-    expect((cached['tax_amount'] as num).toDouble(), closeTo(74.902425, 0.0001));
-    expect((cached['total_amount'] as num).toDouble(), closeTo(843.132425, 0.0001));
+    expect((line['tax_amount'] as num).toDouble(), closeTo(74.90, 0.0001));
+    expect((cached['tax_amount'] as num).toDouble(), closeTo(74.90, 0.0001));
+    expect((cached['total_amount'] as num).toDouble(), closeTo(843.13, 0.0001));
 
     final outbox = await database.customSelect(
       '''

@@ -16,7 +16,9 @@ void main() {
     expect(fab, contains('FloatingActionButton.extended('));
     expect(fab, contains('onPressed: _showQuickActions'));
     expect(fab, contains("label: const Text('New')"));
-    expect(source, contains('EdgeInsets.fromLTRB(16,16,16,100)'));
+    expect(source, contains('EdgeInsets.fromLTRB(0,16,0,100)'));
+    expect(source, contains('child is BriskersControlledTabs ? child : Padding('));
+    expect(source, contains('padding: const EdgeInsets.symmetric(horizontal: 16)'));
     expect(source, isNot(contains('New Message')));
   });
 
