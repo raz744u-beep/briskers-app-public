@@ -41,10 +41,24 @@ void main(){
   testWidgets('480 payroll aligned metrics, dark whole-job link independent of selection, retained repayments and safe bottom',(t)async{
     size(t);final key=GlobalKey();String? opened;Map<String,double>? draft;
     await t.pumpWidget(MaterialApp(home:Scaffold(body:RepaintBoundary(key:key,child:WeeklyLaborReview(employeeId:'chris',employeeName:'Chris',week:DateTime(2026,11,9),profileLayout:true,savedRateCents:4000,tasks:[labor('oil','Oil Separator',600),labor('change','Oil Change',60),labor('brake','Brake Flush',60),labor('filter','Replace filters',60,state:'Open'),labor('paid48','Water pump',450,paid:true,start:'2026-11-02',end:'2026-11-06')],advanceBalance:()async=>5000,onOpenJob:(id)=>opened=id,saveDraft:(week,selected,a,r,reason)async{draft=selected;},recordPayment:(a,b,c,d,e,f,g,h,i)async{})))));
-    await t.pumpAndSettle();expect(find.text('Unpaid Labor (3)'),findsOneWidget);expect(find.text('12.00'),findsOneWidget);expect(find.text(r'$480.00'),findsWidgets);
+    await t.pumpAndSettle();expect(find.text('Unpaid Labor (3)'),findsOneWidget);expect(find.text('12.00'),findsNWidgets(2));expect(find.text(r'$480.00'),findsWidgets);
     final heights=['Unpaid Hours','Rate / Hr','Gross Pay'].map((label)=>t.getTopLeft(find.text(label).first).dy).toSet();expect(heights,hasLength(1));
     await t.tap(find.text('J-40 · Gloria Johnson'));await t.pumpAndSettle();expect(opened,'j40');expect(t.widget<Checkbox>(find.byType(Checkbox).first).value,isTrue);
     await capture(t,key,'nov13-payroll-480');
+    await t.scrollUntilVisible(find.text('Payment Total'), 180,
+      scrollable: find.byType(Scrollable).first);
+    final hoursRow = find.ancestor(of: find.text('Total Selected Hours'),
+      matching: find.byType(Row)).first;
+    final hours = find.descendant(of: hoursRow, matching: find.text('12.00'));
+    final unit = find.descendant(of: hoursRow, matching: find.text('hrs'));
+    final paymentRow = find.ancestor(of: find.text('Payment Total'),
+      matching: find.byType(Row)).first;
+    final payment = find.descendant(of: paymentRow, matching: find.text(r'$480.00'));
+    expect(t.getTopLeft(hours).dx, greaterThan(t.getTopLeft(unit).dx));
+    expect(t.getTopRight(hours).dx, closeTo(t.getTopRight(payment).dx, 0.01));
+    expect(t.widget<Text>(find.text('Payment Total')).style?.fontWeight, FontWeight.w700);
+    await t.ensureVisible(find.text('J-40 · Gloria Johnson'));
+    await t.pumpAndSettle();
     await t.tap(find.byType(Checkbox).first);await t.pumpAndSettle();expect(t.widget<Checkbox>(find.byType(Checkbox).first).value,isFalse);expect(opened,'j40');
     await t.scrollUntilVisible(find.text('Save (Draft)'),200,scrollable:find.byType(Scrollable).first);await t.ensureVisible(find.text('Save (Draft)'));await t.pumpAndSettle();await t.tap(find.text('Save (Draft)'));await t.pumpAndSettle();expect(draft!.keys.toSet(),{'change','brake'});await t.ensureVisible(find.text('Verify Weekly Payment'));expect(find.text('Adjustments & repayment'),findsOneWidget);expect(t.takeException(),isNull);await t.pumpWidget(const SizedBox.shrink());await t.pumpAndSettle();
   });
