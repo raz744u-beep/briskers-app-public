@@ -7,11 +7,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/local_warranty_companies.dart';
+import 'package:briskers_app/services/local_document_detail_cache.dart';
+import 'package:briskers_app/services/offline_document_edit_service.dart';
+import 'package:briskers_app/core/connection_mode.dart';
 
 class _Api extends BriskersApi {
   final companies = <Map<String, dynamic>>[];
   int creates = 0;
   int reads = 0;
+  int warrantyUpdates = 0;
+  int noteUpdates = 0;
+  String? linkedCompany;
   bool loseCreateReply = false;
   Completer<void>? updating;
 
@@ -41,6 +47,35 @@ class _Api extends BriskersApi {
     companies[index] = {'id':companyId,'name':name,'claims_phone':claimsPhone,
       'submission_email':submissionEmail,'portal_url':portalUrl,'notes':notes,'active':active};
   }
+  @override
+  Future<Map<String,dynamic>> documentDetail(String businessId, String documentId) async => {
+    'id':documentId,'kind':'invoice','origin':'native','status':'issued',
+    'legacy_read_only':false,'row_version':1 + warrantyUpdates,
+    'total_amount':100,'paid_amount':0,'lines':<Map<String,dynamic>>[],
+  };
+
+  @override
+  Future<Map<String,dynamic>> documentWarrantyDetail(String businessId, String documentId) async => {
+    'extended_warranty':true,'warranty_company_id':linkedCompany,
+  };
+
+  @override
+  Future<Map<String,dynamic>> updateDocumentWarranty(String businessId, String documentId,
+      {required int expectedVersion, required bool extendedWarranty,
+      String? warrantyCompanyId, String? claimNumber, String? authorizationNumber,
+      num? approvedAmount, num surchargeRate = .03}) async {
+    warrantyUpdates++;
+    linkedCompany = warrantyCompanyId;
+    return {};
+  }
+
+  @override
+  Future<void> updateDocumentNotes(String businessId, String documentId,
+      {required int expectedVersion, String? memo}) async {
+    noteUpdates++;
+    throw StateError('Warranty must use its own update endpoint.');
+  }
+
 }
 
 void main() {
@@ -110,4 +145,30 @@ void main() {
     expect(api.companies.single['notes'],'Newest');
     expect(api.creates,1);
   });
+  test('saved invoice warranty resolves a local company through the warranty endpoint', () async {
+    SharedPreferences.setMockInitialValues({});
+    await BriskersConnectionModeController.instance.setMode(BriskersConnectionMode.auto);
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final api = _Api();
+    final companies = LocalWarrantyCompanies(database:db,api:api,canSync:()=>true);
+    final id = await companies.save('shop',name:'Company');
+    final cache = LocalDocumentDetailCache(database:db);
+    await cache.save('shop','invoice',await api.documentDetail('shop','invoice'));
+    await db.customStatement("INSERT INTO local_documents(id,business_id,kind,status,total,row_version) "
+      "VALUES('invoice','shop','invoice','issued',100,1)");
+    final edits = OfflineDocumentEditService(database:db,cache:cache,api:api);
+    await edits.saveWarranty('shop','invoice',{
+      'extended_warranty':true,'warranty_company_id':id,'warranty_company_name':'Company',
+      'approved_amount':90,'claim_number':'CLAIM','surcharge_rate':.03,
+    });
+    await edits.flush('shop');
+    expect(api.warrantyUpdates,1);
+    expect(api.linkedCompany,'server-company');
+    expect(api.noteUpdates,0);
+    expect(api.creates,1);
+    expect((await cache.load('shop','invoice'))!['total_amount'],100);
+    expect(await db.customSelect('SELECT * FROM sync_outbox').get(),isEmpty);
+  });
+
 }
