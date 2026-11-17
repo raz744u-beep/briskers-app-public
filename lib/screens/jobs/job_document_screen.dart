@@ -583,7 +583,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         _detail?['_local_queued_payment_operation_ids'] ?? const [],
       ).map((id) => id.toString()).toSet();
 
-  Future<void> _load({bool fastAfterMutation = false}) async {
+  Future<void> _load({bool fastAfterMutation = false, bool localOnly = false}) async {
     final generation = ++_loadGeneration;
     if (await LocalJobRetirement.isDocumentBlocked(
         localDatabase, widget.businessId, widget.documentId)) {
@@ -594,7 +594,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       await LocalPayrollRepository(localDatabase,business:widget.businessId,owner:true).prepare();
     }
     final loadWatch = Stopwatch()..start();
-    final forceOffline =
+    final forceOffline = localOnly ||
         BriskersConnectionModeController.instance.forceOffline;
     var unsyncedDraft = false;
     if (!forceOffline) {
@@ -619,6 +619,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             roleCode: _navigationRoleCode,
           businessId: widget.businessId,
               documentId: serverId,
+              sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
               isOwner: widget.isOwner,
               canManageExpenses: widget.canManageExpenses,
               initialAction: widget.initialAction,
@@ -1130,7 +1131,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
-  Future<bool> _run(Future<void> Function() action) async {
+  Future<bool> _run(Future<void> Function() action, {bool localOnly = false}) async {
     if (_busy) return false;
     setState(() {
       _busy = true;
@@ -1138,7 +1139,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     });
     try {
       await action();
-      await _load(fastAfterMutation: true);
+      await _load(fastAfterMutation: true, localOnly: localOnly);
       return true;
     } catch (error) {
       if (mounted) setState(() => _error = error is StateError ? error.message.toString() : error.toString());
@@ -5045,13 +5046,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       );
       if (selectedRate == null || !mounted) return;
       final savedOffline = BriskersConnectionModeController.instance.forceOffline;
+      final pendingItems = lines.any((line) => line['_local_pending'] == true);
+      final savedLocally = savedOffline || pendingItems ||
+          _offlineDocumentDraft.isLocalDraftId(widget.documentId);
       final applied = await _run(() async {
         if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
           await _offlineDocumentDraft.updateTaxRate(
             widget.businessId, widget.documentId,
             oldRate: oldRate, newRate: selectedRate,
           );
-        } else if (lines.any((line) => line['_local_pending'] == true)) {
+        } else if (pendingItems) {
           await _offlineDocumentEdit.updateTaxRate(
             widget.businessId, widget.documentId,
             oldRate: oldRate, newRate: selectedRate,
@@ -5071,10 +5075,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             newRate: selectedRate,
           );
         }
-      });
+      }, localOnly: savedLocally);
+      if (applied && pendingItems) _startLineBackgroundSync();
       if (applied && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(savedOffline
+          SnackBar(content: Text(savedLocally
               ? 'Tax correction saved locally, pending sync. '
                 'Existing payment unchanged; review it separately.'
               : 'Invoice tax updated. Review any pending payment '

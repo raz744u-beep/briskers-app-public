@@ -16,7 +16,9 @@ class InvoiceTaxProposal {
       final price = num.tryParse('${line['unit_price']}');
       final rate = num.tryParse('${line['tax_rate']}');
       if (quantity == null || price == null || rate == null ||
-          !quantity.isFinite || !price.isFinite || !rate.isFinite) return false;
+          !quantity.isFinite || !price.isFinite || !rate.isFinite) {
+        return false;
+      }
       final net = quantity * price;
       rawTax += net * rate;
       roundedTaxCents += _cents(_money(_cents(net)) * rate);

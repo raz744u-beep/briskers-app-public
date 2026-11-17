@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -34,8 +35,16 @@ void main() {
 
   test('existing copied local invoice tax saves atomically and survives reopening', () async {
     SharedPreferences.setMockInitialValues({});
-    final db = BriskersLocalDatabase(NativeDatabase.memory());
-    addTearDown(db.close);
+    final directory = await Directory.systemTemp.createTemp('copied-tax-');
+    final file = File('${directory.path}/shop.sqlite');
+    var db = BriskersLocalDatabase(NativeDatabase(file));
+    final previousMode = LocalDocumentDetailCache.sqliteWritesEnabled;
+    LocalDocumentDetailCache.sqliteWritesEnabled = true;
+    addTearDown(() async {
+      await db.close();
+      LocalDocumentDetailCache.sqliteWritesEnabled = previousMode;
+      await directory.delete(recursive: true);
+    });
     final cache = LocalDocumentDetailCache(database: db);
     final service = OfflineDocumentDraftService(database: db, cache: cache);
     final id = await service.createQuickInvoice('shop',
@@ -45,7 +54,11 @@ void main() {
       ]);
     final before = (await cache.load('shop', id))!;
     await service.updateTaxRate('shop', id, oldRate: .0925, newRate: .0975);
-    final reopened = (await LocalDocumentDetailCache(database: db).load('shop', id))!;
+    await db.close();
+    SharedPreferences.setMockInitialValues({});
+    db = BriskersLocalDatabase(NativeDatabase(file));
+    final reopenedCache = LocalDocumentDetailCache(database: db);
+    final reopened = (await reopenedCache.load('shop', id))!;
     expect(reopened['tax_amount'], 9.75);
     expect(reopened['total_amount'], 159.75);
     expect(reopened['document_number'], before['document_number']);
@@ -54,9 +67,9 @@ void main() {
     expect(reopened['_local_tax_history'], hasLength(1));
     expect((await db.customSelect('SELECT * FROM sync_outbox').get()), hasLength(1));
     await db.customStatement('UPDATE sync_outbox SET attempt_count=1');
-    await expectLater(service.updateTaxRate('shop', id,
-      oldRate: .0975, newRate: .1), throwsStateError);
-    expect((await cache.load('shop', id))!['tax_amount'], 9.75);
+    await expectLater(OfflineDocumentDraftService(database: db, cache: reopenedCache)
+      .updateTaxRate('shop', id, oldRate: .0975, newRate: .1), throwsStateError);
+    expect((await reopenedCache.load('shop', id))!['tax_amount'], 9.75);
   });
   test('tax correction follows saved item edits without requiring sync', () async {
     SharedPreferences.setMockInitialValues({});
