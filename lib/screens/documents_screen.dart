@@ -44,7 +44,6 @@ import '../widgets/stale_keyboard_inset_guard.dart';
 import 'jobs/blank_invoice_setup_screen.dart';
 import 'shell_screen.dart';
 import 'jobs/job_document_screen.dart';
-import 'jobs/invoice_deletion_choice.dart';
 import 'expenses/expense_detail_screen.dart';
 
 /// Stable, language-independent values shared by filters, counts and cards.
@@ -684,10 +683,13 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           LocalJobRetirement.blockedDocumentIds(localDatabase, businessId));
       final deletedEstimates = estimate
           ? await _localDocuments.deletedEstimateIds(businessId) : const <String>{};
-      final localIdentityRows = await LocalInvoiceClosureStore(_localDocuments.database).projectRows(
-          businessId, await _localDocuments.listByKind(businessId, kind: kind));
-      final identityRows = await LocalDocumentIdentity(_localDocuments.database).projectRows(
-          businessId, List<Map<String,dynamic>>.from(fetched), localIdentityRows);
+      var identityRows = List<Map<String,dynamic>>.from(fetched);
+      if (businessId == LocalDocumentIdentity.gloriaBusiness &&
+          identityRows.any((row) => row['id'] == LocalDocumentIdentity.gloriaServer)) {
+        final localIdentityRows = await _localDocuments.listByKind(businessId, kind: kind);
+        identityRows = await LocalDocumentIdentity(_localDocuments.database).projectRows(
+            businessId, identityRows, localIdentityRows);
+      }
       final rows = await LocalInvoiceClosureStore(_localDocuments.database).projectRows(businessId,identityRows
           .where((row) => !blocked.contains('${row['id'] ?? ''}') &&
               !deletedEstimates.contains('${row['id'] ?? ''}'))
@@ -1028,184 +1030,24 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       return;
     }
 
-    final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
-    final pending = num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
-
-    if (!isEstimate && paid > 0) {
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Paid invoice'),
-          content: const Text(
-            'This invoice has finalized payment activity and cannot be '
-            'deleted. Use the correction/reversal workflow instead.',
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
-    if (!isEstimate && pending > 0) {
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Payments entered'),
-          content: const Text(
-            'Remove the entered payments first. Once there are no payments '
-            'on this invoice, it can be deleted.',
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
-    final label = isEstimate ? 'estimate' : 'invoice';
     final number = row['document_number']?.toString().trim() ?? '';
-    final documentId = row['id']?.toString() ?? '';
-    final localDraft = _offlineDrafts.isLocalDraftId(documentId);
-    bool deleteJob = false;
-    if (!isEstimate && !localDraft) {
-      if (BriskersConnectionModeController.instance.forceOffline) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Reconnect to delete an already-synced invoice.'),
-            ),
-          );
-        }
-        return;
-      }
-      Map<String, dynamic>? plan;
-      final jobId = row['job_id']?.toString() ?? '';
-      if (jobId.isNotEmpty) {
-        try {
-          plan = await _api.jobDeletionPlan(widget.businessId, jobId);
-        } catch (_) {
-          // Invoice-only remains available; the RPC will verify permission.
-        }
-      }
-      if (!mounted) return;
-      final choice = await showInvoiceDeletionChoice(
-        context,
-        invoiceNumber: number,
-        jobPlan: plan,
-      );
-      if (choice == null) return;
-      deleteJob = choice;
-    } else {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: Text('Delete $label?'),
-          content: Text(
-            number.isEmpty
-                ? 'This $label will be permanently deleted.'
-                : 'Delete $label #$number? This cannot be undone.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error,
-              ),
-              child: Text('Delete $label'),
-            ),
-          ],
-        ),
-      );
-      if (confirmed != true) return;
-    }
-
-    if (!mounted) return;
-    final progress = ValueNotifier<String>('Deleting…');
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          title: const Text('Please wait'),
-          content: ValueListenableBuilder<String>(
-            valueListenable: progress,
-            builder: (context, message, child) => Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(width: 16),
-                Flexible(child: Text(message)),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+    final confirmed = await showDialog<bool>(context: context,
+      builder: (dialog) => BriskersDialog(
+        title: 'Delete estimate?', icon: Icons.delete_outline,
+        content: Text(number.isEmpty ? 'Delete this estimate?' : 'Delete estimate #$number?'),
+        actions: [
+          OutlinedButton(style: BriskersDialog.cancelStyle,
+            onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancel')),
+          FilledButton(style: BriskersDialog.confirmStyle(destructive: true),
+            onPressed: () => Navigator.pop(dialog, true), child: const Text('Delete')),
+        ],
+      ));
+    if (confirmed != true) return;
     try {
-      if (!isEstimate && _offlineDrafts.isLocalDraftId(row['id'].toString())) {
-        await _offlineDrafts.cancelNeverSyncedQuickInvoice(
-          widget.businessId,
-          row['id'].toString(),
-        );
-      } else if (isEstimate) {
-        await _offlineDrafts.deleteEstimate(widget.businessId, row['id'].toString());
-      } else {
-        await _api.deleteInvoiceManaged(
-          widget.businessId,
-          row['id'].toString(),
-          deleteJob: deleteJob,
-        );
-      }
-
-      progress.value = 'Refreshing…';
-      await _load();
-      if (!mounted) return;
-      Navigator.of(context, rootNavigator: true).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            deleteJob
-                ? 'Invoice and Job deleted.'
-                : '${isEstimate ? 'Estimate' : 'Invoice'} deleted.',
-          ),
-        ),
-      );
+      await _offlineDrafts.deleteEstimate(widget.businessId, row['id'].toString());
+      if (mounted) await _load();
     } catch (error) {
-      if (!mounted) return;
-      Navigator.of(context, rootNavigator: true).pop();
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: Text(
-            '${isEstimate ? 'Estimate' : 'Invoice'} could not be deleted',
-          ),
-          content: Text(error.toString()),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
     }
   }
 
