@@ -234,10 +234,14 @@ void main(){
         [savedDate],
       );
     });
-    navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>const OwnerPayrollScreen(businessId:'shop')));
+    const payrollDock = Key('shared-payroll-dock');
+    navigator.currentState!.push(MaterialPageRoute<void>(builder:(_)=>const OwnerPayrollScreen(
+      businessId:'shop', sharedBottomNavigationBar: SizedBox(key: payrollDock, height: 60),
+    )));
     await tester.pumpAndSettle();
     await until(find.text('Review Weekly Labor (2 tasks)'));
     expect(find.byType(PayrollOverview),findsOneWidget);
+    expect(find.byKey(payrollDock),findsOneWidget);
     expect(find.text('Alpha'),findsOneWidget);expect(find.text('Beta'),findsOneWidget);
     expect(find.text('Paid'),findsNWidgets(2));expect(find.text('Total Paid'),findsOneWidget);
     await tester.runAsync(()async{
@@ -248,6 +252,7 @@ void main(){
     });
     await click(find.text('Review Weekly Labor (2 tasks)'));
     await until(find.text('Employee Profile'));
+    expect(find.byKey(payrollDock),findsOneWidget);
     
     expect(find.text('Work'),findsOneWidget);expect(find.text('General Tasks'),findsNothing);
     expect(find.textContaining('Currently Assigned Tasks'),findsOneWidget);

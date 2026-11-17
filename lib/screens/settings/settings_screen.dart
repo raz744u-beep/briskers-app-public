@@ -34,12 +34,14 @@ class SettingsScreen extends StatelessWidget {
     required this.businessName,
     required this.roleCode,
     this.onBusinessNameChanged,
+    this.sharedBottomNavigationBar,
   });
 
   final String businessId;
   final String businessName;
   final String roleCode;
   final ValueChanged<String>? onBusinessNameChanged;
+  final Widget? sharedBottomNavigationBar;
 
   Future<void> _chooseConnectionMode(BuildContext context) async {
     final controller = BriskersConnectionModeController.instance;
@@ -102,6 +104,7 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      bottomNavigationBar: sharedBottomNavigationBar,
       appBar: AppBar(
         toolbarHeight: 68,
         title: BriskersPageTitle(title: tr('settings'), logoHeight: 40),
@@ -116,7 +119,10 @@ class SettingsScreen extends StatelessWidget {
               title: const Text('Navigation'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.push<void>(context, MaterialPageRoute(
-                builder: (_) => NavigationSettingsScreen(businessId: businessId),
+                builder: (_) => NavigationSettingsScreen(
+                  businessId: businessId,
+                  sharedBottomNavigationBar: sharedBottomNavigationBar,
+                ),
               )),
             ),
           ListTile(
@@ -332,6 +338,7 @@ class SettingsScreen extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (_) => EmployeesSettingsScreen(
+                    sharedBottomNavigationBar: sharedBottomNavigationBar,
                     businessId: businessId,
                     isOwner: roleCode == 'owner',
                   ),

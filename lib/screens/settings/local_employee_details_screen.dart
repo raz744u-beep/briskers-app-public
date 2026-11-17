@@ -24,12 +24,14 @@ class LocalEmployeeDetailsScreen extends StatefulWidget {
     this.nicknameStore,
     this.unlockOwner,
     this.currentOwner,
+    this.sharedBottomNavigationBar,
   });
   final String businessId, employeeId;
   final String? rosterName, rosterPosition;
   final EmployeeNicknameStore? nicknameStore;
   final Future<LocalOwnerGrant> Function(String)? unlockOwner;
   final OwnerSessionIdentity? Function()? currentOwner;
+  final Widget? sharedBottomNavigationBar;
   @override
   State<LocalEmployeeDetailsScreen> createState() =>
       _LocalEmployeeDetailsScreenState();
@@ -969,6 +971,7 @@ class _LocalEmployeeDetailsScreenState
           )
         : localPayCents! / 100;
     return Scaffold(
+      bottomNavigationBar: widget.sharedBottomNavigationBar,
       backgroundColor: taskCanvas,
       appBar: const ApprovedTasksHeader(title: 'Employee Details'),
       body: ListView(

@@ -33,6 +33,7 @@ import 'jobs/job_detail_screen.dart';
 import 'payroll/mechanic_labor_screen.dart';
 import 'payroll/owner_payroll_screen.dart';
 import 'settings/employees_settings_screen.dart';
+import 'settings/navigation_settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -51,6 +52,7 @@ class HomeScreen extends StatefulWidget {
     this.invoicesOpenCount = 0,
     this.attentionRefreshToken = 0,
     this.estimatesNavigationBar,
+    this.onOpenOwnerSection,
   });
 
   final VoidCallback onCustomersTap;
@@ -67,6 +69,7 @@ class HomeScreen extends StatefulWidget {
   final int invoicesOpenCount;
   final int attentionRefreshToken;
   final Widget? estimatesNavigationBar;
+  final ValueChanged<ShopNavigationSection>? onOpenOwnerSection;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -898,6 +901,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  void _openOwnerSection(ShopNavigationSection section) {
+    final open = widget.onOpenOwnerSection;
+    if (open != null) {
+      open(section);
+      return;
+    }
+    Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => section == ShopNavigationSection.employees
+          ? EmployeesSettingsScreen(
+              businessId: widget.businessId,
+              isOwner: true,
+              sharedBottomNavigationBar: widget.estimatesNavigationBar,
+            )
+          : OwnerPayrollScreen(
+              businessId: widget.businessId,
+              globalTasks: section == ShopNavigationSection.tasks,
+              reportsOnly: section == ShopNavigationSection.reports,
+              sharedBottomNavigationBar: widget.estimatesNavigationBar,
+            ),
+    ));
+  }
+
   Future<void> _openDocument(String documentId, {
     bool freshlyCreated = false,
   }) async {
@@ -905,6 +930,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          sharedBottomNavigationBar: widget.estimatesNavigationBar,
           roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: documentId,
@@ -1397,26 +1423,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             const SizedBox(height: 8),
             _HomeTiles(
               onPayrollTap: OwnerPayrollScreen.enabled && widget.roleCode == 'owner'
-                ? () => Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>OwnerPayrollScreen(businessId:widget.businessId))) : null,
+                  ? () => _openOwnerSection(ShopNavigationSection.payroll) : null,
               onEmployeesTap: OwnerPayrollScreen.enabled && widget.roleCode == 'owner'
-                ? () => Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>EmployeesSettingsScreen(businessId:widget.businessId,isOwner:true))) : null,
+                  ? () => _openOwnerSection(ShopNavigationSection.employees) : null,
               onTasksTap: OwnerPayrollScreen.enabled && widget.roleCode == 'owner'
-                  ? () => Navigator.of(context).push<void>(MaterialPageRoute(
-                      builder: (_) => OwnerPayrollScreen(
-                        businessId: widget.businessId, globalTasks: true,
-                      ),
-                    ))
-                  : null,
+                  ? () => _openOwnerSection(ShopNavigationSection.tasks) : null,
               onReportsTap: () {
                 if (OwnerPayrollScreen.enabled && widget.roleCode == 'owner') {
-                  Navigator.of(context).push<void>(MaterialPageRoute(
-                    builder: (_) => OwnerPayrollScreen(
-                      businessId: widget.businessId, reportsOnly: true,
-                    ),
-                  ));
+                  _openOwnerSection(ShopNavigationSection.reports);
                 } else if (OwnerPayrollScreen.enabled && widget.roleCode == 'mechanic') {
                   Navigator.of(context).push<void>(MaterialPageRoute(
-                    builder: (_) => MechanicLaborScreen(businessId: widget.businessId),
+                    builder: (_) => MechanicLaborScreen(
+                      businessId: widget.businessId,
+                      sharedBottomNavigationBar: widget.estimatesNavigationBar,
+                    ),
                   ));
                 } else {
                   widget.onMoreTap();

@@ -14,6 +14,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('overlapping refresh extends downloaded history without losing older dates',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final cache = LocalFinancialCache(database: db);
+    await cache.savePostedHistoryCoverage('shop', null, DateTime(2026, 11, 15));
+    await cache.savePostedHistoryCoverage(
+      'shop', DateTime(2026, 11, 1), DateTime(2026, 11, 16),
+    );
+    expect(await cache.postedHistoryCoverage('shop'),
+        (start: null, end: DateTime(2026, 11, 16)));
+    await cache.savePostedHistoryCoverage(
+      'shop', DateTime(2027, 1, 1), DateTime(2027, 1, 31),
+    );
+    expect(await cache.postedHistoryCoverage('shop'),
+        (start: DateTime(2027, 1, 1), end: DateTime(2027, 1, 31)));
+  });
+
   test('Income includes a held receipt already visible on invoice #6357', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     addTearDown(db.close);

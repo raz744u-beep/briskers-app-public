@@ -25,6 +25,7 @@ class EmployeeEditScreen extends StatefulWidget {
     this.nicknameStore,
     this.unlockOwner,
     this.currentOwner,
+    this.sharedBottomNavigationBar,
   });
 
   final String businessId;
@@ -35,6 +36,7 @@ class EmployeeEditScreen extends StatefulWidget {
   final EmployeeNicknameStore? nicknameStore;
   final Future<LocalOwnerGrant> Function(String)? unlockOwner;
   final OwnerSessionIdentity? Function()? currentOwner;
+  final Widget? sharedBottomNavigationBar;
 
   @override
   State<EmployeeEditScreen> createState() => _EmployeeEditScreenState();
@@ -752,10 +754,12 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   Widget build(BuildContext context) {
     if (_editing && widget.isOwner) {
       return LocalEmployeeDetailsScreen(
+      sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
       businessId:widget.businessId,employeeId:widget.employeeId!,rosterName:widget.rosterName,rosterPosition:widget.rosterPosition,
       nicknameStore:widget.nicknameStore,unlockOwner:widget.unlockOwner,currentOwner:widget.currentOwner);
     }
     return Scaffold(
+      bottomNavigationBar: widget.sharedBottomNavigationBar,
       appBar: AppBar(
         title: Text(_editing ? 'Employee Details' : 'Add employee'),
         actions: [
@@ -766,6 +770,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
               icon: const Icon(Icons.history),
               onPressed: () => Navigator.of(context).push<void>(MaterialPageRoute(
                 builder: (_) => OwnerPayrollScreen(
+                  sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
                   businessId: widget.businessId, reportsOnly: true,
                   employeeId: widget.employeeId,
                   employeeName: _name.text.isEmpty ? null : _name.text,

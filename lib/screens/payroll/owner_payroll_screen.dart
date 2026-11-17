@@ -1183,14 +1183,17 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           ? JobDocumentScreen(
               businessId: widget.businessId, documentId: id, isOwner: true,
               roleCode: 'owner',
+              sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
             )
           : JobDetailScreen(
               businessId: widget.businessId, jobId: id, roleCode: 'owner',
+              bottomNavigationBar: widget.sharedBottomNavigationBar,
             ),
     ),);
   }
 
   Widget _reports() => Scaffold(
+    bottomNavigationBar: widget.sharedBottomNavigationBar,
     appBar: AppBar(title: Text(widget.employeeName ?? 'Payroll reports')),
     body: Column(children: [
       if(!_canView)const Text('Sign in as Owner to view payroll.'),
@@ -1276,6 +1279,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final additional = _laborAdditionalToBase;
     await Navigator.of(context).push<void>(MaterialPageRoute(
       builder: (_) => WeeklyLaborReview(
+        sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
         employeeId: employee, employeeName: _employeeLabel(employee),
         tasks: _work, week: _week,
         weeklyBaseCents: (base * 100).round(),
@@ -1951,6 +1955,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   void _openInvoiceHistory()=>Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>HistoricalInvoiceLaborReview(
+    sharedBottomNavigationBar:widget.sharedBottomNavigationBar,
     businessId:widget.businessId,database:_db,weekStart:DateTime(_week.year,_week.month,_week.day).subtract(Duration(days:_week.weekday-1)),canView:()=>mounted&&_canView)));
 
   Widget _workspace() {
@@ -2168,6 +2173,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         unlockOwner: widget.unlockOwner, ownerConnection: widget.ownerConnection,
         openEmployeeDetails: () => Navigator.of(context).push<bool>(MaterialPageRoute(
           builder: (_) => EmployeeEditScreen(
+            sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
             businessId: widget.businessId, isOwner: true, employeeId: id,
             rosterName: row['name']?.toString(),
             rosterPosition: (row['position'] ?? row['position_name'])?.toString(),
@@ -2214,7 +2220,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       r['invoice_id']==widget.invoiceId && r['source_line_id']==widget.focusLineId,).firstOrNull;
     final rows = _work.where((r)=>r['job_id']==widget.jobId && r['invoice_id']==widget.invoiceId &&
       r['source_line_id']==widget.focusLineId,).toList();
-    return Scaffold(appBar:AppBar(title:const Text('Manage Labor Assignments')),
+    return Scaffold(bottomNavigationBar: widget.sharedBottomNavigationBar,
+      appBar:AppBar(title:const Text('Manage Labor Assignments')),
       body:SafeArea(child:ListView(padding:const EdgeInsets.all(16),children:[
         if(_busy || _loadingLocal) const LinearProgressIndicator(),
         if(_error!=null) Text(_error!),
@@ -2255,6 +2262,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   }
 
   Widget _overview() => Scaffold(
+    bottomNavigationBar: widget.sharedBottomNavigationBar,
     appBar: AppBar(title: const Text('Payroll')),
     body: Column(children: [
       if(!_canView)const Text('Sign in as Owner to view payroll.'),
@@ -2274,6 +2282,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
   @override
   Widget build(BuildContext context) => widget.focusLineId != null ? _assignmentManager() : (widget.globalTasks || (_jobMode && widget.invoiceId == null)) ? _workspace() : widget.reportsOnly ? _reports() : widget.employeeId != null ? _profile() : !_jobMode ? _overview() : Scaffold(
+        bottomNavigationBar: widget.sharedBottomNavigationBar,
         appBar: AppBar(title: Text(widget.reportsOnly
             ? 'Payroll reports'
             : _jobMode ? 'Job labor tasks' : 'Owner payroll',),),
@@ -2350,6 +2359,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                     final employee = _employee!;
                     Navigator.of(context).push<bool>(MaterialPageRoute(
                       builder: (_) => WeeklyLaborReview(
+                        sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
                         employeeId: employee,
                         employeeName: _employees.where((row) => row['id'] == employee)
                             .firstOrNull?['name']?.toString() ?? 'Weekly payroll',

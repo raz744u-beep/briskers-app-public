@@ -8,9 +8,11 @@ class EmployeePositionsScreen extends StatefulWidget {
   const EmployeePositionsScreen({
     super.key,
     required this.businessId,
+    this.sharedBottomNavigationBar,
   });
 
   final String businessId;
+  final Widget? sharedBottomNavigationBar;
 
   @override
   State<EmployeePositionsScreen> createState() =>
@@ -112,6 +114,7 @@ class _EmployeePositionsScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      bottomNavigationBar: widget.sharedBottomNavigationBar,
       appBar: AppBar(
         title: const Text('Positions'),
       ),

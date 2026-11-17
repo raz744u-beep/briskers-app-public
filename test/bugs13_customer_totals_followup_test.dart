@@ -91,7 +91,7 @@ void main() {
     expect(method, contains('if (!_showFinancialSummary || !mounted) return;'));
     expect(method, contains('const Duration(minutes: 30)'));
     expect(method, contains('if (offline || (fresh && !force))'));
-    expect(method, contains('if (_pendingPeriodScope == scope) return;'));
+    expect(method, contains('if (_pendingPeriodScope == scope && !force) return;'));
     expect(method, contains('await journal.apply('));
     expect(method, contains('await journal.reconcileAndSaveBaseline('));
     expect(method, contains('Showing last verified totals; refresh failed.'));

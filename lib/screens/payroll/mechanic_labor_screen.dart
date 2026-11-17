@@ -9,11 +9,12 @@ import 'payroll_lan_controls.dart';
 
 class MechanicLaborScreen extends StatefulWidget {
   const MechanicLaborScreen({
-    super.key, required this.businessId, this.jobId,
+    super.key, required this.businessId, this.jobId, this.sharedBottomNavigationBar,
   });
 
   final String businessId;
   final String? jobId;
+  final Widget? sharedBottomNavigationBar;
 
   @override
   State<MechanicLaborScreen> createState() => _MechanicLaborScreenState();
@@ -153,6 +154,7 @@ class _MechanicLaborScreenState extends State<MechanicLaborScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
+    bottomNavigationBar: widget.sharedBottomNavigationBar,
     appBar: AppBar(
       title: const Text('My labor tasks'),
       actions: [

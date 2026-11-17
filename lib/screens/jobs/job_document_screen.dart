@@ -7982,6 +7982,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           context,
           MaterialPageRoute(
             builder: (_) => OwnerPayrollScreen(
+              sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
               businessId: widget.businessId,
               jobId: job,
             ),

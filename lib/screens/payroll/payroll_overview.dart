@@ -271,6 +271,6 @@ class _PayrollOverviewState extends State<PayrollOverview> {
           children: widget.employees.where((e) =>
             e['role'] != 'owner').map(_employeeCard).toList(),
         )),
-    _footer(),
+    SafeArea(top: false, child: _footer()),
   ]);
 }

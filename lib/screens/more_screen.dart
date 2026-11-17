@@ -14,12 +14,14 @@ class MoreScreen extends StatelessWidget {
     required this.businessName,
     required this.roleCode,
     this.onBusinessNameChanged,
+    this.onSettingsTap,
   });
 
   final String businessId;
   final String businessName;
   final String roleCode;
   final ValueChanged<String>? onBusinessNameChanged;
+  final VoidCallback? onSettingsTap;
 
   @override
   Widget build(BuildContext context) {
@@ -74,7 +76,7 @@ class MoreScreen extends StatelessWidget {
             title: Text(tr('settings')),
             subtitle: Text(tr('appOptions')),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () {
+            onTap: onSettingsTap ?? () {
               Navigator.push(
                 context,
                 MaterialPageRoute(

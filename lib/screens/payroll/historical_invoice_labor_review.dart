@@ -12,10 +12,12 @@ class HistoricalInvoiceLaborReview extends StatefulWidget {
   const HistoricalInvoiceLaborReview({
     super.key,
     required this.businessId,
+    this.sharedBottomNavigationBar,
     required this.database,
     required this.weekStart,
     required this.canView,
   });
+  final Widget? sharedBottomNavigationBar;
   final String businessId;
   final BriskersLocalDatabase database;
   final DateTime weekStart;
@@ -83,6 +85,7 @@ class _HistoricalInvoiceLaborReviewState
   Widget build(BuildContext context) {
     final end=widget.weekStart.add(const Duration(days:4));
     return Scaffold(
+      bottomNavigationBar: widget.sharedBottomNavigationBar,
       appBar:AppBar(title:const Text('Saved Invoice Labor · History')),
       body:!widget.canView()
         ? const Center(child:Text('Owner access required.'))

@@ -511,7 +511,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
 
   String get _roleLabel => roleLabel(widget.roleCode);
 
-  Widget _shellNavigationBar({bool nested = false}) {
+  Widget _shellNavigationBar({bool nested = false, ShopNavigationSection? selected}) {
     final owner = widget.roleCode == 'owner';
     final sections = [
       for (final item in (owner ? _navigation : ShopNavigationPreferences.defaults))
@@ -528,7 +528,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
       ShopNavigationSection.schedule: _homeAppointmentsCount,
     };
     return BriskersModuleDock(
-      selectedIndex: sections.indexOf(ShopNavigationSection.values[_index]),
+      selectedIndex: sections.indexOf(selected ?? ShopNavigationSection.values[_index]),
       destinations: [
         for (final section in sections)
           BriskersDockDestination(
@@ -542,7 +542,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
           _selectDockSection(section, nested: nested);
           return;
         }
-        if (nested) Navigator.of(context).popUntil((route) => route.isFirst);
+        if (nested) _returnToShell();
         _goTo(1);
         final request = ++_customerNavigationRequest;
         unawaited(_openCustomers(request));
@@ -551,8 +551,13 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     );
   }
 
+  void _returnToShell() {
+    final shellRoute = ModalRoute.of(context);
+    Navigator.of(context).popUntil((route) => route == shellRoute || route.isFirst);
+  }
+
   void _selectDockSection(ShopNavigationSection section, {required bool nested}) {
-    if (nested) Navigator.of(context).popUntil((route) => route.isFirst);
+    if (nested) _returnToShell();
     if (section == ShopNavigationSection.customers) {
       _selectCustomersFromDock();
       return;
@@ -561,9 +566,11 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
       _goTo(section.index);
       return;
     }
+    final dock = _shellNavigationBar(nested: true, selected: section);
     final Widget page;
     if (section == ShopNavigationSection.settings) {
       page = SettingsScreen(
+        sharedBottomNavigationBar: dock,
         businessId: widget.businessId,
         businessName: _businessName,
         roleCode: widget.roleCode,
@@ -572,8 +579,13 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     } else {
       if (widget.roleCode != 'owner' || !OwnerPayrollScreen.enabled) return;
       page = section == ShopNavigationSection.employees
-          ? EmployeesSettingsScreen(businessId: widget.businessId, isOwner: true)
+          ? EmployeesSettingsScreen(
+              businessId: widget.businessId,
+              isOwner: true,
+              sharedBottomNavigationBar: dock,
+            )
           : OwnerPayrollScreen(
+              sharedBottomNavigationBar: dock,
               businessId: widget.businessId,
               globalTasks: section == ShopNavigationSection.tasks,
               reportsOnly: section == ShopNavigationSection.reports,
@@ -595,6 +607,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
           onJobsTap: () => _goTo(2),
           onInvoicesTap: () => _goTo(4),
           onMoreTap: () => _goTo(7),
+          onOpenOwnerSection: (section) => _selectDockSection(section, nested: false),
           estimatesNavigationBar: _shellNavigationBar(nested: true),
           businessId: widget.businessId,
           roleCode: widget.roleCode,
@@ -704,6 +717,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
               businessId: widget.businessId,
               businessName: _businessName,
               roleCode: widget.roleCode,
+              onSettingsTap: () => _selectDockSection(ShopNavigationSection.settings, nested: false),
               onBusinessNameChanged: (name) =>
                   setState(() => _businessName = name),
             );

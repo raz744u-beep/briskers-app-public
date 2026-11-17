@@ -270,14 +270,19 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   DateTime? get _selectedRangeStart => _rangeStartDate;
   DateTime? get _selectedRangeEnd => _rangeEndDate;
 
-  bool get _postedRangeVerified {
-    final scope = _postedHistoryCoverage;
-    if (scope == null) return false;
-    final from = _selectedRangeStart;
-    return (scope.start == null || (from != null && !from.isBefore(scope.start!))) &&
-        !(_selectedRangeEnd ?? _dateOnly(DateTime.now())).isAfter(scope.end);
-  }
+  bool get _postedRangeVerified => _coversPeriod(
+    _postedHistoryCoverage, _selectedRangeStart, _selectedRangeEnd,
+  );
 
+  bool _coversPeriod(
+    ({DateTime? start, DateTime end})? coverage, DateTime? from, DateTime? to,
+  ) {
+    if (coverage == null) return false;
+    final coveredStart = coverage.start;
+    return (coveredStart == null ||
+        (from != null && !from.isBefore(coveredStart))) &&
+        !(to ?? _dateOnly(DateTime.now())).isAfter(coverage.end);
+  }
 
   DateTime? get _rangeStartDate {
     final today = _dateOnly(DateTime.now());
@@ -657,6 +662,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         BriskersConnectionModeController.instance.forceOffline;
     final startDate = _rangeStartDate;
     final endDate = _rangeEndDate;
+    final checkedThrough = endDate ?? _dateOnly(DateTime.now());
     final direction = _filter == 'all' ? null : _filter;
     final accountId = _accountFilterId;
     final categoryId = _categoryFilterId;
@@ -674,7 +680,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     ].join('|');
     // Restore complete stored totals and add all locally committed deltas.
     // The server is NOT a prerequisite for entering the Expenses screen.
-    if (_pendingPeriodScope == scope) return;
+    if (_pendingPeriodScope == scope && !force) return;
     final epoch = ++_periodEpoch;
     final journal = LocalFinancialTotalsJournal();
     _pendingPeriodScope = scope;
@@ -714,10 +720,13 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final rolloverPending = rolling != null && endDate != null &&
         rolling.verifiedThrough.isBefore(endDate);
     ExpensesPeriodTotals? local;
-    bool usingPartialLocalSubtotal = false;
+    bool usingSavedRows = false;
+    var hasCompleteLocalHistory = false;
     int localChanges = 0;
     try {
-      if (baseline != null && !offline) {
+      final coverage = await _localFinancial.postedHistoryCoverage(businessId);
+      hasCompleteLocalHistory = _coversPeriod(coverage, startDate, endDate);
+      if (baseline != null && (!offline || !hasCompleteLocalHistory)) {
         local = await journal.apply(
           businessId, baseline,
           startDate: startDate, endDate: endDate,
@@ -740,7 +749,13 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           direction: direction,
           accountId: accountId, categoryId: categoryId,
           counterpartyId: counterpartyId);
-        usingPartialLocalSubtotal = local != null;
+        if (hasCompleteLocalHistory) {
+          local ??= const ExpensesPeriodTotals(
+            income: 0, expenses: 0, transactions: 0,
+            feesUnverified: false, unverifiedIncomeReceipts: 0,
+          );
+        }
+        usingSavedRows = true;
       }
       localChanges = await journal.pendingCount(businessId);
     } catch (_) {
@@ -779,17 +794,19 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       _lastPeriodAt = lastVerified;
       _periodCalculating = false;
       _periodError = local == null
-          ? (offline ? 'No saved transactions for this period. Totals unavailable.'
+          ? (offline ? 'No saved transactions for this period. History may be missing.'
               : 'Preparing first complete local baseline…')
-          : usingPartialLocalSubtotal
+          : usingSavedRows
               ? 'Saved totals for $_rangeLabel · ${local.transactions} posted '
-                'transactions · ${_postedRangeVerified ? 'history checked for this period' : 'older records may be missing'}'
+                'transactions · ${hasCompleteLocalHistory ? 'history checked for this period' : 'history incomplete or unverified'}'
           : rolloverPending
               ? 'Saved local totals through ${DateFormat('MMM d').format(rolling.verifiedThrough)} · today not yet verified'
-              : localChanges > 0
-                  ? 'Includes $localChanges locally saved change(s) · sync pending'
-                  : offline
-                      ? 'Offline · saved totals verified ${DateFormat('MMM d, h:mm a').format(lastVerified!)}'
+              : offline
+                  ? 'Totals checked ${DateFormat('MMM d, h:mm a').format(lastVerified!)} '
+                    '· some transaction details may be missing on this device'
+                    '${localChanges > 0 ? ' · includes local changes' : ''}'
+                  : localChanges > 0
+                      ? 'Includes $localChanges locally saved change(s) · sync pending'
                       : 'Saved local totals · verified ${DateFormat('MMM d, h:mm a').format(lastVerified!)}';
     });
     if (offline || (fresh && !force)) {
@@ -808,7 +825,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         widget.businessId == businessId &&
         !BriskersConnectionModeController.instance.forceOffline;
     try {
-      final completeRows = <Map<String, dynamic>>[];
+      final fetchedPages = <int, List<Map<String, dynamic>>>{};
+      var pageSize = 0;
       final totals = await ExpensesPeriodTotals.calculate(
         isCurrent: current,
         readPage: (offset, limit) async {
@@ -821,13 +839,35 @@ class _ExpensesScreenState extends State<ExpensesScreen>
             categoryId: categoryId,
             counterpartyId: counterpartyId,
           );
-          completeRows.addAll(rows);
+          pageSize = limit;
+          fetchedPages[offset] = rows;
           return rows;
         },
         enrichPage: (rows) => const WarrantyReceiptReporting().enrich(
           businessId, rows, refresh: false,
         ),
       );
+      if (!current()) return;
+      final completeRows = <Map<String, dynamic>>[];
+      for (var offset = 0; fetchedPages.containsKey(offset); offset += pageSize) {
+        final page = fetchedPages[offset]!;
+        completeRows.addAll(page);
+        if (page.length < pageSize) break;
+      }
+      if (completeRows.length != totals.transactions) {
+        throw StateError('Transaction pages changed while totals were checked.');
+      }
+      var refreshedCoverage = _postedHistoryCoverage;
+      if (direction == null && accountId == null && categoryId == null &&
+          counterpartyId == null) {
+        // Save the same rows that supported the complete online totals.
+        // A later Force Offline session can use the underlying history.
+        await _localFinancial.mergeServerTransactions(businessId, completeRows);
+        await _localFinancial.savePostedHistoryCoverage(
+          businessId, startDate, checkedThrough,
+        );
+        refreshedCoverage = await _localFinancial.postedHistoryCoverage(businessId);
+      }
       if (!current()) return;
       // Retire only receipts proven identical by the complete authenticated
       // history and exact operation/transaction identities.
@@ -851,6 +891,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       } catch (_) { /* Keep the in-memory verified baseline. */ }
       if (!current()) return;
       setState(() {
+        _postedHistoryCoverage = refreshedCoverage;
         _serverPeriodBase = totals;
         _periodTotals = projected;
         _lastPeriodScope = scope;

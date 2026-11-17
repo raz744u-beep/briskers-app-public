@@ -508,18 +508,35 @@ class LocalFinancialCache {
 
   Future<void> savePostedHistoryCoverage(
     String business, DateTime? start, DateTime end,
-  ) async {
+  ) => _database.transaction(() async {
     String day(DateTime value) => value.toIso8601String().split('T').first;
+    DateTime nextDay(DateTime date) =>
+        DateTime(date.year, date.month, date.day + 1);
+
     final existing = await postedHistoryCoverage(business);
-    if (existing != null &&
-        (existing.start == null || (start != null && !existing.start!.isAfter(start))) &&
-        !existing.end.isBefore(end)) {
-      return;
+    var coveredStart = start;
+    var coveredEnd = end;
+    if (existing != null) {
+      final oldStart = existing.start;
+      // Keep the older part of a checked range when a later sync covers its
+      // tail. Never treat a gap between disjoint downloads as checked.
+      final contiguous = (start == null || !start.isAfter(nextDay(existing.end))) &&
+          (oldStart == null || !oldStart.isAfter(nextDay(end)));
+      if (contiguous) {
+        if (start == null || oldStart == null) {
+          coveredStart = null;
+        } else if (oldStart.isBefore(start)) {
+          coveredStart = oldStart;
+        }
+        if (existing.end.isAfter(end)) coveredEnd = existing.end;
+        if (coveredStart == oldStart && coveredEnd == existing.end) return;
+      }
     }
     await _save(business, _historyCoverageKey, jsonEncode({
-      'start': start == null ? null : day(start), 'end': day(end),
+      'start': coveredStart == null ? null : day(coveredStart),
+      'end': day(coveredEnd),
     }));
-  }
+  });
 
   Future<({DateTime? start, DateTime end})?> postedHistoryCoverage(String business) async {
     final raw = await _load(business, _historyCoverageKey);

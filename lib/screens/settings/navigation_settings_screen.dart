@@ -79,9 +79,14 @@ class ShopNavigationPreferences {
 }
 
 class NavigationSettingsScreen extends StatefulWidget {
-  const NavigationSettingsScreen({super.key, required this.businessId});
+  const NavigationSettingsScreen({
+    super.key,
+    required this.businessId,
+    this.sharedBottomNavigationBar,
+  });
 
   final String businessId;
+  final Widget? sharedBottomNavigationBar;
 
   @override
   State<NavigationSettingsScreen> createState() =>
@@ -137,6 +142,7 @@ class _NavigationSettingsScreenState extends State<NavigationSettingsScreen> {
   Widget build(BuildContext context) {
     final items = _items;
     return Scaffold(
+      bottomNavigationBar: widget.sharedBottomNavigationBar,
       appBar: AppBar(title: const BriskersPageTitle(title: 'Navigation')),
       body: items == null
           ? Center(

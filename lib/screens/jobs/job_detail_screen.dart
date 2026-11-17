@@ -3495,6 +3495,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          sharedBottomNavigationBar: widget.bottomNavigationBar,
           roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: documentId,
@@ -5935,6 +5936,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                 await Navigator.push<void>(
                   context,
                   MaterialPageRoute(builder: (_) => MechanicLaborScreen(
+                    sharedBottomNavigationBar: widget.bottomNavigationBar,
                     businessId: widget.businessId, jobId: widget.jobId,
                   )),
                 );

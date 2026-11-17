@@ -138,6 +138,9 @@ void main() {
               businessId: 'shop',
               jobId: 'job',
               database: db,
+              sharedBottomNavigationBar: SizedBox(
+                key: Key('persistent-tasks-dock'), height: 60,
+              ),
             ),
           ),
         ),
@@ -169,6 +172,7 @@ void main() {
 
       final button = find.byKey(const Key('job-mark-all-done'));
       await until(button);
+      expect(find.byKey(const Key('persistent-tasks-dock')), findsOneWidget);
       expect(
         tester.getTopLeft(button).dy,
         greaterThan(tester.getBottomLeft(find.text('Damien Hester')).dy),

@@ -23,10 +23,12 @@ class EmployeesSettingsScreen extends StatefulWidget {
     super.key,
     required this.businessId,
     required this.isOwner,
+    this.sharedBottomNavigationBar,
   });
 
   final String businessId;
   final bool isOwner;
+  final Widget? sharedBottomNavigationBar;
 
   @override
   State<EmployeesSettingsScreen> createState() =>
@@ -111,6 +113,7 @@ class _EmployeesSettingsScreenState
       await Navigator.push<void>(
         context,
         MaterialPageRoute(builder: (_) => OwnerPayrollScreen(
+          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
           businessId: widget.businessId,
           employeeId: employeeId,
           employeeName: employee?['nickname']?.toString() ?? name,
@@ -128,6 +131,7 @@ class _EmployeesSettingsScreenState
       context,
       MaterialPageRoute(
         builder: (_) => EmployeeEditScreen(
+          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
           businessId: widget.businessId,
           employeeId: employeeId,
           rosterName: name,
@@ -144,6 +148,7 @@ class _EmployeesSettingsScreenState
       context,
       MaterialPageRoute(
         builder: (_) => EmployeePositionsScreen(
+          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
           businessId: widget.businessId,
         ),
       ),
@@ -436,6 +441,7 @@ class _EmployeesSettingsScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      bottomNavigationBar: widget.sharedBottomNavigationBar,
       appBar: AppBar(
         title: const Text('Employees'),
         actions: [
@@ -455,7 +461,10 @@ class _EmployeesSettingsScreenState
               onPressed: () => Navigator.push<void>(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => OwnerPayrollScreen(businessId: widget.businessId),
+                  builder: (_) => OwnerPayrollScreen(
+                    businessId: widget.businessId,
+                    sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
+                  ),
                 ),
               ),
             ),

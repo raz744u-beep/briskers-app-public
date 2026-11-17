@@ -18,6 +18,7 @@ class WeeklyLaborReview extends StatefulWidget {
   const WeeklyLaborReview({
     super.key,
     required this.employeeId,
+    this.sharedBottomNavigationBar,
     required this.employeeName,
     required this.tasks,
     required this.advanceBalance,
@@ -44,6 +45,7 @@ class WeeklyLaborReview extends StatefulWidget {
 
   });
 
+  final Widget? sharedBottomNavigationBar;
   final String employeeId;
   final String employeeName;
   final List<Map<String, dynamic>> tasks;
@@ -1008,6 +1010,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       _available(task) <= 0.00001 && _paidHours(task) > 0
     ).length;
     return Scaffold(
+      bottomNavigationBar: widget.sharedBottomNavigationBar,
       appBar: widget.embedded ? null : AppBar(
         leading: IconButton(
           icon: const Icon(Icons.close),
