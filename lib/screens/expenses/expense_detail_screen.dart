@@ -625,13 +625,17 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   }
 
   Future<Uint8List> _readLocalPhoto(String uri) {
-    final filename = _localExpenseIqPhoto?['filename']?.toString() ?? '';
     return _localPhotoBytes.putIfAbsent(uri, () async {
-      final recovered = await _localExpenseIq.recoveredOriginal(
-        widget.businessId, widget.transactionId, filename,
-      );
-      if (recovered != null) return recovered;
-      return (widget.localPhotoReader ?? Saf().readFileBytes)(uri);
+      try {
+        return await _localExpenseIq.readOriginalPhoto(
+          widget.businessId, widget.transactionId, _localExpenseIqPhoto!,
+          reader: widget.localPhotoReader ?? Saf().readFileBytes,
+        );
+      } catch (_) {
+        // A failed read must be retried after folder permission is repaired.
+        _localPhotoBytes.remove(uri);
+        rethrow;
+      }
     });
   }
 
@@ -659,9 +663,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     final state = photo['state']?.toString() ?? 'pending';
     return Card(
       child: ListTile(
-        leading: uri.isEmpty
-            ? const Icon(Icons.image_not_supported_outlined)
-            : FutureBuilder<Uint8List>(
+        leading: FutureBuilder<Uint8List>(
                 future: _readLocalPhoto(uri),
                 builder: (context, snapshot) => snapshot.hasData
                     ? ClipRRect(
@@ -690,7 +692,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
               : 'Available locally · awaiting sync',
         ),
         trailing: const Icon(Icons.zoom_in_outlined),
-        onTap: uri.isEmpty ? null : () => _openLocalExpenseIqPhoto(uri),
+        onTap: () => _openLocalExpenseIqPhoto(uri),
       ),
     );
   }

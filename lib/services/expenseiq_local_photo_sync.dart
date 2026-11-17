@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:drift/drift.dart' show Variable;
 import 'package:saf/saf.dart';
 
@@ -258,18 +259,47 @@ class ExpenseIqLocalPhotoSync {
   Future<Uint8List?> originalOnDevice(
     String business, String transaction, Map<String, dynamic> photo,
   ) async {
-    final filename = photo['filename']?.toString() ?? '';
-    if (filename.isEmpty) return null;
-    final saved = await recoveredOriginal(business, transaction, filename);
-    if (saved != null) return saved;
-    final uri = photo['source_uri']?.toString() ?? '';
-    if (uri.isEmpty) return null;
     try {
-      final bytes = await _saf.readFileBytes(uri);
-      return bytes.isEmpty ? null : bytes;
+      return await readOriginalPhoto(business, transaction, photo);
     } catch (_) {
       return null;
     }
+  }
+
+  Future<Uint8List> readOriginalPhoto(
+    String business, String transaction, Map<String, dynamic> photo, {
+    Future<Uint8List> Function(String)? reader,
+  }) async {
+    final filename = photo['filename']?.toString() ?? '';
+    if (filename.isEmpty) throw StateError('Original receipt filename is missing.');
+    final saved = await recoveredOriginal(business, transaction, filename);
+    if (saved != null && saved.isNotEmpty) return saved;
+    final read = reader ?? _saf.readFileBytes;
+    final uri = photo['source_uri']?.toString() ?? '';
+    if (uri.isNotEmpty) {
+      try {
+        final bytes = await read(uri);
+        if (bytes.isNotEmpty) return bytes;
+      } catch (_) {
+        // Old per-file URIs may reference a revoked tree grant. Resolve the
+        // exact filename through the retained folder permission below.
+      }
+    }
+    const channel = MethodChannel('com.briskers/expenseiq');
+    final resolved = await channel.invokeMapMethod<String, dynamic>(
+      'resolveExpenseIqPhoto', {'filename': filename},
+    );
+    final resolvedUri = resolved?['uri']?.toString() ?? '';
+    if (resolved?['name'] != filename || resolvedUri.isEmpty) {
+      throw StateError('Reconnect the original receipt photo folder.');
+    }
+    final bytes = await read(resolvedUri);
+    await reconnectOriginalPhoto(
+      businessId: business, transactionId: transaction,
+      expectedFilename: filename, previousUri: uri,
+      verifiedUri: resolvedUri, verifiedBytes: bytes,
+    );
+    return bytes;
   }
 
   /// Updates only this expense's original URI after the caller has opened

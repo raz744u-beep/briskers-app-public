@@ -143,6 +143,25 @@ jobs:
                                   )
                               }
                           }
+                          "resolveExpenseIqPhoto" -> {
+                              val filename = call.argument<String>("filename").orEmpty()
+                              if (filename.isBlank() || filename.contains('/') ||
+                                  filename.contains('\\')) {
+                                  result.error("invalid_filename", "Invalid receipt photo filename.", null)
+                              } else {
+                                  Thread {
+                                      try {
+                                          val tree = savedExpenseIqPhotoTree()
+                                          val photo = if (tree == null) null else findReceiptPhoto(tree, filename)
+                                          runOnUiThread { result.success(photo) }
+                                      } catch (error: Exception) {
+                                          runOnUiThread {
+                                              result.error("folder_read_failed", error.message, null)
+                                          }
+                                      }
+                                  }.start()
+                              }
+                          }
                           "pickHistoricalPhotoFolder" -> openHistoricalPhotoFolderPicker(result)
                           "readExpenseIqFile", "readHistoricalPhotoFile" -> {
                               val uriText = call.argument<String>("uri")
@@ -414,7 +433,18 @@ jobs:
                       if (requestCode == pickHistoricalFolderRequestCode) {
                           pending.success(listHistoricalPhotos(treeUri))
                       } else if (requestCode == reconnectExpensePhotoRequestCode) {
-                          pending.success(findReceiptPhoto(treeUri, targetFilename.orEmpty()))
+                          val photo = findReceiptPhoto(treeUri, targetFilename.orEmpty())
+                          if (photo != null) {
+                              if (!contentResolver.persistedUriPermissions.any {
+                                      it.uri == treeUri && it.isReadPermission
+                                  }) {
+                                  throw SecurityException("Folder access could not be saved. Reconnect the photo folder.")
+                              }
+                              val saved = getSharedPreferences("briskers_expenseiq_photos", MODE_PRIVATE)
+                                  .edit().putString("tree_uri", treeUri.toString()).commit()
+                              if (!saved) throw IllegalStateException("Could not save the receipt photo folder.")
+                          }
+                          pending.success(photo)
                       } else {
                           pending.success(listReceiptPhotos(treeUri))
                       }
@@ -528,6 +558,27 @@ jobs:
                           )
                       }
                   }
+              }
+
+              private fun isExpenseIqPhotoTree(uri: Uri): Boolean {
+                  return try {
+                      DocumentsContract.getTreeDocumentId(uri).substringAfter(':', "")
+                          .equals("ExpenseIQ/Photos", ignoreCase = true)
+                  } catch (_: IllegalArgumentException) {
+                      false
+                  }
+              }
+
+              private fun savedExpenseIqPhotoTree(): Uri? {
+                  val readable = contentResolver.persistedUriPermissions.filter {
+                      it.isReadPermission && isExpenseIqPhotoTree(it.uri)
+                  }
+                  val saved = getSharedPreferences("briskers_expenseiq_photos", MODE_PRIVATE)
+                      .getString("tree_uri", null)
+                  readable.firstOrNull { it.uri.toString() == saved }?.let { return it.uri }
+                  // Reuse a single grant saved by older versions, which repaired
+                  // each photo individually without remembering the tree URI.
+                  return if (readable.size == 1) readable.single().uri else null
               }
 
               // A narrow offline regrant. Do not import, index, upload or reassign
