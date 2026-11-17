@@ -138,8 +138,9 @@ void main() {
               businessId: 'shop',
               jobId: 'job',
               database: db,
-              sharedBottomNavigationBar: SizedBox(
-                key: Key('persistent-tasks-dock'), height: 60,
+              sharedBottomNavigationBar: const SizedBox(
+                key: Key('persistent-tasks-dock'),
+                height: 60,
               ),
             ),
           ),
