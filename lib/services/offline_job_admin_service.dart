@@ -356,7 +356,7 @@ class OfflineJobAdminService {
     String? note,
   }) async {
     await _database.transaction(() async {
-      await _database.customStatement(
+      await _database.customUpdate(
         '''
         UPDATE local_jobs
         SET status = ?,
@@ -372,17 +372,18 @@ class OfflineJobAdminService {
             sync_state = 'pending'
         WHERE business_id = ? AND id = ?
         ''',
-        [
-          code,
-          name,
-          colorHex,
-          iconKey,
-          code,
-          DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
-          code,
-          businessId,
-          jobId,
+        variables: [
+          Variable(code),
+          Variable(name),
+          Variable<String>(colorHex),
+          Variable<String>(iconKey),
+          Variable(code),
+          Variable(DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000),
+          Variable(code),
+          Variable(businessId),
+          Variable(jobId),
         ],
+        updates: {_database.localJobs},
       );
       await _mergeOutbox(businessId, jobId, {
         'status_changed': true,
