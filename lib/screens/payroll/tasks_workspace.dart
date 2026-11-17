@@ -115,6 +115,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
     }
     return _status == 'All' ||
         (_status == 'Active' && status != 'Done') ||
+        (_status == 'Completed' && status == 'Done') ||
         status == _status;
   }
 
@@ -463,7 +464,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                               'All',
                               'Not Started',
                               'In Progress',
-                              'Done',
+                              'Completed',
                             ], (v) => status = v),
                             dropdown(
                               'Sort By',
@@ -550,6 +551,18 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
               ),
             ),
         ],
+      ),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton(
+          key: const Key('toggle-completed-tasks'),
+          onPressed: () => setState(() {
+            _status = _status == 'Completed' ? 'Active' : 'Completed';
+          }),
+          child: Text(_status == 'Completed'
+              ? 'Show active tasks'
+              : 'Show completed tasks'),
+        ),
       ),
       const SizedBox(height: 8),
       if (rows.isEmpty)

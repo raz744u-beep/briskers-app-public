@@ -100,12 +100,12 @@ void main(){
     }
     expect(t.takeException(),isNull);
   });
-  testWidgets('completed General Tasks are excluded only by Active and remain in All and Done filters',(t)async{
+  testWidgets('completed General Tasks are excluded only by Active and remain in All and Completed filters',(t)async{
     size(t);var status='in_progress';late StateSetter refresh;
     await t.pumpWidget(MaterialApp(home:Scaffold(body:StatefulBuilder(builder:(context,set){refresh=set;return TasksWorkspace(initialGeneral:true,serviceTasks:const [],generalTasks:[{'id':7,'employee_id':'owner','description':'Call customer','job_id':'j40','job_number':'J-40','customer_name':'Gloria Johnson','status':status,'due_at':DateTime(2026,11,20).millisecondsSinceEpoch}],allocationsByLine:const {},employeeName:(_)=>'Owner',employeeIds:const ['owner'],serviceTaskCard:(_)=>const SizedBox(),onAddService:(){},onAddGeneral:(){},onGeneralStatus:(_,next)async{set(()=>status=next);},onOpenJob:(_){},onEmployeeTap:(_){});}))));
     await t.pumpAndSettle();expect(find.text('Call customer'),findsOneWidget);
     refresh(()=>status='done');await t.pumpAndSettle();expect(find.text('Call customer'),findsNothing);expect(find.text('Tasks · 0 (Active)'),findsOneWidget);
     await t.tap(find.text('Show all task statuses'));await t.pumpAndSettle();expect(find.text('Call customer'),findsOneWidget);expect(find.text('Tasks · 1 (All)'),findsOneWidget);
-    await t.tap(find.byKey(const Key('toggle-task-filters')));await t.pumpAndSettle();await t.scrollUntilVisible(find.byKey(const ValueKey('Status:All')),150,scrollable:find.byType(Scrollable).last);await t.tap(find.byKey(const ValueKey('Status:All')));await t.pumpAndSettle();await t.tap(find.text('Done').last);await t.pumpAndSettle();await t.tap(find.text('Apply Filters'));await t.pumpAndSettle();expect(find.text('Call customer'),findsOneWidget);expect(find.text('Tasks · 1 (Done)'),findsOneWidget);expect(t.takeException(),isNull);
+    await t.tap(find.byKey(const Key('toggle-task-filters')));await t.pumpAndSettle();await t.scrollUntilVisible(find.byKey(const ValueKey('Status:All')),150,scrollable:find.byType(Scrollable).last);await t.tap(find.byKey(const ValueKey('Status:All')));await t.pumpAndSettle();await t.tap(find.text('Completed').last);await t.pumpAndSettle();await t.tap(find.text('Apply Filters'));await t.pumpAndSettle();expect(find.text('Call customer'),findsOneWidget);expect(find.text('Tasks · 1 (Completed)'),findsOneWidget);expect(t.takeException(),isNull);
   });
 }

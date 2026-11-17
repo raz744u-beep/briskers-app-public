@@ -6,8 +6,8 @@ import '../local/briskers_local_database.dart';
 import 'verified_paid_labor.dart';
 
 class JobTaskProgress {
-  const JobTaskProgress(this.done, this.total);
-  final int done, total;
+  const JobTaskProgress(this.done, this.total, [this.started = 0]);
+  final int done, total, started;
 }
 
 /// Read-only projections of the same task and portion IDs used by Payroll.
@@ -47,6 +47,7 @@ class JobTaskSummary {
                  ${auditReady ? "MAX(CASE WHEN EXISTS(SELECT 1 FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id AND a.event='owner_reviewed_unpaid_carry') THEN 1 ELSE 0 END)" : "0"} AS carried,
                  COUNT(p.id) AS portions,
                  COUNT(CASE WHEN p.state='Done' THEN 1 END) AS finished,
+                 COUNT(CASE WHEN p.state='In Progress' THEN 1 END) AS started,
                  GROUP_CONCAT(CASE WHEN p.state!='Done' THEN p.id END, '|') AS unfinished_ids
           FROM regular_payroll_tasks t
           JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id AND s.active=1
@@ -67,6 +68,7 @@ class JobTaskSummary {
           result[id] = JobTaskProgress(
             old.done + (done ? 1 : 0),
             old.total + 1,
+            old.started + (!done && row.read<int>('started') > 0 ? 1 : 0),
           );
         }
       }
@@ -83,6 +85,7 @@ class JobTaskSummary {
           result[id] = JobTaskProgress(
             old.done + (row.read<String>('status') == 'done' || historical.contains(row.read<int>('id')) ? 1 : 0),
             old.total + 1,
+            old.started + (row.read<String>('status') == 'in_progress' ? 1 : 0),
           );
         }
       }

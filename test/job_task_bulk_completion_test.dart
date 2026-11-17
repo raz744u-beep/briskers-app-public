@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:briskers_app/services/job_task_summary.dart';
 import 'dart:io';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
@@ -78,6 +79,91 @@ void main() {
           .map((r) => r.data)
           .toList(),
   ]);
+  test(
+    'Start All persists offline, preserves hours, and Finish All credits once',
+    () async {
+      await repo.addShopTask(
+        'kam',
+        'Due now',
+        'General',
+        job: 'J-53',
+        due: now,
+      );
+      await repo.addShopTask(
+        'kam',
+        'Future reminder',
+        'General',
+        job: 'J-53',
+        due: now.add(const Duration(days: 1)),
+      );
+      final before = await repo.work(job: 'J-53');
+      final plan = await bulk.plan('J-53', now, starting: true);
+      expect(plan.count, 7);
+      expect(await bulk.start(plan, now), 7);
+      final started = await repo.work(job: 'J-53');
+      expect(started.every((r) => r['state'] == 'In Progress'), isTrue);
+      expect(
+        started.map((r) => r['estimated_minutes']),
+        before.map((r) => r['estimated_minutes']),
+      );
+      expect(started.every((r) => r['actual_minutes'] == 0), isTrue);
+      expect(await repo.historyWithWork('kam'), isEmpty);
+      final progress = await JobTaskSummary(db).progress('shop', 'J-53');
+      expect(progress.started, 7);
+      expect(progress.done, 0);
+      final saved = await snapshot();
+      expect(await bulk.start(plan, now), 0);
+      expect(await snapshot(), saved);
+      await db.close();
+      db = BriskersLocalDatabase(NativeDatabase(file));
+      repo = LocalPayrollRepository(db, business: 'shop', owner: true);
+      bulk = JobTaskBulkCompletion(repo);
+      expect(await bulk.start(plan, now), 0);
+      final finish = await bulk.plan('J-53', now);
+      expect(await bulk.complete(finish, now), 7);
+      final finished = await repo.work(job: 'J-53');
+      expect(
+        finished.fold<int>(0, (n, r) => n + (r['actual_minutes'] as int)),
+        690,
+      );
+      expect(finished.every((r) => r['paid_minutes'] == 0), isTrue);
+      expect(await bulk.complete(finish, now), 0);
+      final general = await repo.shopTasks();
+      expect(
+        general.singleWhere((r) => r['description'] == 'Due now')['status'],
+        'done',
+      );
+      expect(
+        general.singleWhere(
+          (r) => r['description'] == 'Future reminder',
+        )['status'],
+        'planned',
+      );
+      expect((await repo.work(job: 'other')).single['state'], 'Open');
+      expect((await bulk.plan('old', now, starting: true)).count, 0);
+    },
+  );
+
+  test('Start All rejects changed hours and rolls back a failed later task', () async {
+    final stale = await bulk.plan('J-53', now, starting: true);
+    await repo.setEstimatedMinutes(
+      stale.labor.first['task_id'] as String,
+      'kam',
+      123,
+    );
+    final before = await snapshot();
+    await expectLater(bulk.start(stale, now), throwsStateError);
+    expect(await snapshot(), before);
+    final plan = await bulk.plan('J-53', now, starting: true);
+    await db.customStatement(
+      "CREATE TRIGGER simulated_start_failure BEFORE UPDATE ON regular_payroll_portions "
+      "WHEN NEW.id='${(plan.labor.last['id'] as String).replaceAll("'", "''")}' "
+      "BEGIN SELECT RAISE(ABORT,'Synthetic write failure'); END",
+    );
+    await expectLater(bulk.start(plan, now), throwsA(anything));
+    expect(await snapshot(), before);
+  });
+
   test(
     'six Kam tasks complete offline once with exact 11.5 hours; Paid invoice never pays wages',
     () async {

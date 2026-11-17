@@ -37,6 +37,7 @@ class JobListApprovedCard extends StatelessWidget {
     this.financialSummary,
     this.expandedDetails,
     this.footer,
+    this.taskAction,
   });
   final Map<String, dynamic> job;
   final String number,
@@ -49,7 +50,7 @@ class JobListApprovedCard extends StatelessWidget {
   final Map<String, int>? mechanicMinutes;
   final JobTaskProgress? progress;
   final Widget statusControl;
-  final Widget? financialSummary, expandedDetails, footer;
+  final Widget? financialSummary, expandedDetails, footer, taskAction;
   final VoidCallback? onOpen, onLongPress, onOpenInvoice;
 
   String hours(int minutes) {
@@ -107,6 +108,24 @@ class JobListApprovedCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 5),
+                    statusControl,
+                  ],
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        vehicle.isEmpty ? 'No vehicle' : vehicle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: black,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 5),
                     if (invoiceNumber.isNotEmpty)
                       Semantics(
                         link: true,
@@ -137,24 +156,7 @@ class JobListApprovedCard extends StatelessWidget {
                         'No invoice yet',
                         style: TextStyle(fontSize: 12, color: slate),
                       ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        vehicle.isEmpty ? 'No vehicle' : vehicle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: black,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    statusControl,
+
                   ],
                 ),
                 const SizedBox(height: 2),
@@ -238,7 +240,7 @@ class JobListApprovedCard extends StatelessWidget {
                   footer!
                 else
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       const Icon(
                         Icons.person_outline,
@@ -274,6 +276,10 @@ class JobListApprovedCard extends StatelessWidget {
                           ],
                         ),
                       ),
+                      if (taskAction != null) ...[
+                        const SizedBox(width: 8),
+                        taskAction!,
+                      ],
                     ],
                   ),
                 ?expandedDetails,

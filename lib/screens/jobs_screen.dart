@@ -1,3 +1,5 @@
+import '../core/work_status_colors.dart';
+import '../widgets/owner_confirmation_dialog.dart';
 import '../widgets/list_interaction_hint.dart';
 import 'dart:async';
 
@@ -797,7 +799,7 @@ class _JobsScreenState extends State<JobsScreen>
         _pendingStatusIds.contains(job['id']?.toString());
 
     final child = ApprovedListStatusBadge(label:label,color:color,icon:switch(job['status']?.toString()) {
-      'in_progress'=>Icons.circle_outlined,
+      'in_progress'=>Icons.sync,
       'completed' || 'closed'=>Icons.check,
       'awaiting_parts' || 'waiting_parts'=>Icons.inventory_2_outlined,
       'awaiting_payment'=>Icons.credit_card,
@@ -945,10 +947,114 @@ class _JobsScreenState extends State<JobsScreen>
     }
   }
 
+  final Set<String> _taskActionJobs = {};
+
+  Widget? _jobTaskAction(Map<String, dynamic> job) {
+    if (widget.roleCode != 'owner') return null;
+    final id = job['id'].toString();
+    final progress = _taskProgress[id];
+    if (progress == null || progress.total == 0) return null;
+    final done = progress.done == progress.total;
+    final starting = progress.started == 0;
+    final label = done ? 'Done' : starting ? 'Start' : 'Finish';
+    final color = done ? WorkStatusColors.done : WorkStatusColors.progress;
+    final icon = done || !starting ? Icons.check : Icons.play_arrow;
+    if (done) {
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, color: color, size: 18),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700)),
+      ]);
+    }
+    return FilledButton.icon(
+      key: ValueKey('job-task-action-$id'),
+      onPressed: _taskActionJobs.contains(id)
+          ? null : () => _changeAllJobTasks(job, starting: starting),
+      style: FilledButton.styleFrom(
+        backgroundColor: color,
+        foregroundColor: Colors.white,
+        minimumSize: const Size(0, 36),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        visualDensity: VisualDensity.compact,
+      ),
+      icon: Icon(icon, size: 18),
+      label: Text(label),
+    );
+  }
+
+  Future<void> _changeAllJobTasks(Map<String, dynamic> job, {
+    required bool starting,
+  }) async {
+    final id = job['id'].toString();
+    if (widget.roleCode != 'owner' || !_taskActionJobs.add(id)) return;
+    final user = _userId;
+    final business = widget.businessId;
+    void assertOwner() {
+      if (!mounted || widget.roleCode != 'owner' ||
+          widget.businessId != business || _userId != user) {
+        throw StateError('Sign in as Owner to edit these tasks.');
+      }
+    }
+    setState(() {});
+    try {
+      final service = _localJobs.taskActions(business, assertOwner: assertOwner);
+      final plan = await service.plan(id, DateTime.now(), starting: starting);
+      if (!mounted) return;
+      assertOwner();
+      if (plan.count == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+          starting
+              ? 'No tasks are ready to start. Review this job’s tasks.'
+              : 'No tasks are ready to finish. Review assignments, hours, and scheduled reminders.',
+        )));
+        return;
+      }
+      final action = starting ? 'Start' : 'Finish';
+      final number = job['job_number']?.toString() ?? id;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (_) => OwnerConfirmationDialog(
+          title: '$action all tasks?',
+          confirm: '$action All',
+          sections: [
+            Text('$action all ${plan.count} eligible unfinished '
+                '${plan.count == 1 ? 'task' : 'tasks'} in Job $number?'),
+            const SizedBox(height: 8),
+            const Text('Future reminders stay scheduled. '
+                'Tasks needing assignment or hours can be reviewed in the job.'),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+      assertOwner();
+      final count = starting
+          ? await service.start(plan, DateTime.now())
+          : await service.complete(plan, DateTime.now());
+      if (!mounted) return;
+      final progress = await _localJobs.taskProgress(business, [id]);
+      if (!mounted) return;
+      setState(() => _taskProgress.addAll(progress));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+        '$count ${count == 1 ? 'task' : 'tasks'} ${starting ? 'started' : 'finished'}.',
+      )));
+      widget.onJobsChanged?.call();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.toString())),
+        );
+      }
+    } finally {
+      _taskActionJobs.remove(id);
+      if (mounted) setState(() {});
+    }
+  }
+
   Widget _jobCard(Map<String, dynamic> job) => JobCompactCard(
     job: job,
     approvedListDesign: true,
     taskProgress: _taskProgress[job['id']],
+    taskAction: _jobTaskAction(job),
     statusControl: _statusControl(job),
     onOpen: () => _openJob(job),
     onOpenInvoice: job['invoice_id'] == null ? null : () async {

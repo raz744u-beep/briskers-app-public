@@ -1,3 +1,5 @@
+import 'job_task_bulk_completion.dart';
+import 'local_payroll_repository.dart';
 import 'nov12_job_completion.dart';
 import 'local_document_repository.dart';
 import 'local_document_sql_store.dart';
@@ -33,6 +35,12 @@ class LocalJobRepository {
     : _database = database ?? localDatabase;
 
   final BriskersLocalDatabase _database;
+
+  JobTaskBulkCompletion taskActions(String business, {
+    required void Function() assertOwner,
+  }) => JobTaskBulkCompletion(LocalPayrollRepository(
+    _database, business: business, owner: true, assertOwnerGrant: assertOwner,
+  ));
   Future<void> reconcileNov12OwnerCompletion(String business,{required bool isOwner})=>Nov12JobCompletion(_database).reconcile(business,isOwner:isOwner);
 
   Future<Map<String,Map<String,int>>> allocationHours(String business,List<String> jobs) =>

@@ -40,7 +40,6 @@ import '../../widgets/warranty_received_payment_dialog.dart';
 import '../../core/connection_mode.dart';
 import '../../core/invoice_pdf_preparation_policy.dart';
 import '../../core/briskers_i18n.dart';
-import '../../core/formatters.dart';
 import '../../core/invoice_status_style.dart';
 import '../../core/mileage_workflow.dart';
 import '../../core/invoice_pdf_mileage_projection.dart';
@@ -5596,15 +5595,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Widget _customerHeader() {
     final customer = _detail?['customer_name']?.toString().trim() ?? '';
-    final phone = _detail?['customer_phone']?.toString().trim() ?? '';
-    final email = _detail?['customer_email']?.toString().trim() ?? '';
-    final address = InvoicePartyVehicleProjection.readableAddress(
-      _detail?['customer_address']);
     final vehicle = _detail?['vehicle']?.toString().trim() ?? '';
-    final vin = _detail?['vehicle_vin']?.toString().trim() ?? '';
-    final plate = _detail?['vehicle_license_plate']?.toString().trim() ?? '';
-    final plateState = _detail?['vehicle_license_state']?.toString().trim() ?? '';
-    final license = [plateState,plate].where((s)=>s.isNotEmpty).join(' ');
     final mileage = _visibleInvoiceMileage;
     final mileageName = _usesInvoiceMileageOut ? 'Miles Out' : 'Miles';
     final documentDateRaw =
@@ -5719,51 +5710,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           underline: true,
           problemFlag: _detail?['customer_problem_flag'] == true,
         ),
-        if (phone.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          infoLine(
-            Icons.phone_outlined,
-            formatUsPhone(phone),
-            maxLines: 1,
-          ),
-        ],
-        if (email.isNotEmpty) ...[
-          const SizedBox(height: 5),
-          infoLine(Icons.email_outlined,email,maxLines:2),
-        ],
-        if (address.isNotEmpty) ...[
-          const SizedBox(height: 5),
-          infoLine(Icons.location_on_outlined,address,maxLines:3),
-        ],
-        if (phone.isEmpty && email.isEmpty && address.isEmpty)
-          const Padding(
-            padding: EdgeInsets.only(left:30,top:4),
-            child: Text('Contact details not available on this device.',
-              style: TextStyle(fontSize:12,color:Color(0xFF64748B))),
-          ),
         const SizedBox(height: 8),
         infoLine(
           Icons.directions_car_outlined,
           vehicleMileage.isEmpty ? 'No vehicle' : vehicleMileage,
           maxLines: 2,
-        ),
-        Padding(
-          padding: const EdgeInsets.only(left:30,top:5),
-          child: Text(
-            vin.isNotEmpty?'VIN: $vin':'VIN: Not entered',
-            style:const TextStyle(fontSize:12.5,
-              color:Color(0xFF405064),height:1.2),
-            softWrap:true,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(left:30,top:3),
-          child: Text(
-            license.isNotEmpty?'Plate: $license':'Plate: Not available locally',
-            style:const TextStyle(fontSize:12.5,
-              color:Color(0xFF405064),height:1.2),
-            softWrap:true,
-          ),
         ),
         if (!_estimate) mileageLine(),
       ],
@@ -5811,33 +5762,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   underline: true,
                   problemFlag: _detail?['customer_problem_flag'] == true,
                 ),
-                if (phone.isNotEmpty) ...[
-                  const SizedBox(height: 7),
-                  infoLine(
-                    Icons.phone_outlined,
-                    formatUsPhone(phone),
-                    maxLines: 1,
-                  ),
-                ],
-                if (email.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  infoLine(Icons.email_outlined,email,maxLines:2),
-                ],
-                if (address.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Padding(
-                    padding:const EdgeInsets.only(left:30),
-                    child:Text(address,maxLines:3,overflow:TextOverflow.ellipsis,
-                      style:const TextStyle(fontSize:11.5,height:1.15,
-                        color:Color(0xFF405064))),
-                  ),
-                ],
-                if (phone.isEmpty && email.isEmpty && address.isEmpty)
-                  const Padding(
-                    padding:EdgeInsets.only(left:30,top:4),
-                    child:Text('Contact not cached',
-                      style:TextStyle(fontSize:11.5,color:Color(0xFF64748B))),
-                  ),
               ],
             );
 
@@ -5848,21 +5772,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   Icons.directions_car_outlined,
                   vehicleMileage.isEmpty ? 'No vehicle' : vehicleMileage,
                   maxLines: 2,
-                ),
-                Padding(
-                  padding:const EdgeInsets.only(left:30,top:5),
-                  child:Text(vin.isNotEmpty?'VIN: $vin':'VIN: Not entered',
-                    maxLines:2,overflow:TextOverflow.ellipsis,
-                    style:const TextStyle(fontSize:11.5,
-                      color:Color(0xFF405064),height:1.15)),
-                ),
-                Padding(
-                  padding:const EdgeInsets.only(left:30,top:3),
-                  child:Text(license.isNotEmpty?'Plate: $license':
-                      'Plate: Not available locally',
-                    maxLines:2,overflow:TextOverflow.ellipsis,
-                    style:const TextStyle(fontSize:11.5,
-                      color:Color(0xFF405064),height:1.15)),
                 ),
                 if (!_estimate) mileageLine(),
               ],

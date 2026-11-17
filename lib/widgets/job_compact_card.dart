@@ -20,10 +20,12 @@ class JobCompactCard extends StatelessWidget {
     this.canOpen = true,
     this.approvedListDesign = false,
     this.taskProgress,
+    this.taskAction,
   });
 
   final Map<String, dynamic> job;
   final Widget statusControl;
+  final Widget? taskAction;
   final VoidCallback onOpen;
   final VoidCallback? onLongPress;
   final VoidCallback? onOpenInvoice;
@@ -67,6 +69,7 @@ class JobCompactCard extends StatelessWidget {
         vehicle: vehicle, description: displayDescription,
         mechanic: displayMechanic, employee: employee, mechanicMinutes: mechanicMinutes,
         progress: taskProgress, statusControl: statusControl,
+        taskAction: taskAction,
         onOpen: canOpen ? onOpen : null, onLongPress: canOpen ? onLongPress : null,
         onOpenInvoice: canOpen ? onOpenInvoice : null,
       );
