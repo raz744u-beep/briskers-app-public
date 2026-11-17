@@ -1,4 +1,5 @@
 import 'local_customer_vehicle_identity.dart';
+import 'invoice_tax_proposal.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 import 'offline_invoice_finalization.dart';
 import 'sync_replay_fence.dart';
@@ -85,9 +86,10 @@ class OfflineDocumentDraftService {
     var tax = 0.0;
     for (final line in lines) {
       if (line['line_kind'] == 'discount') continue;
-      final price = _number(line['quantity']) * _number(line['unit_price']);
-      net += price.toDouble();
-      tax += (price * _number(line['tax_rate'])).toDouble();
+      final price = (_number(line['quantity']) *
+          _number(line['unit_price']) * 100).round() / 100;
+      net += price;
+      tax += (price * _number(line['tax_rate']) * 100).round() / 100;
     }
     return (net: net, tax: tax, total: net + tax);
   }
@@ -1022,6 +1024,36 @@ class OfflineDocumentDraftService {
     await _saveDraft(businessId, documentId, detail, lines);
   }
 
+  Future<void> updateTaxRate(
+    String businessId, String documentId, {
+    required num oldRate, required num newRate,
+  }) async {
+    await _database.transaction(() async {
+      final detail = await _requireDraft(businessId, documentId);
+      if (detail['kind'] != 'invoice' || detail['closed_at'] != null ||
+          _number(detail['paid_amount']) > 0 || _number(detail['pending_payment']) > 0) {
+        throw StateError('Review recorded payments before changing tax.');
+      }
+      final lines = _lines(detail);
+      final taxable = lines.where((line) => _number(line['tax_rate']) > 0).toList();
+      if (taxable.isEmpty || taxable.any((line) =>
+          (_number(line['tax_rate']) - oldRate).abs() > 0.0000001)) {
+        throw StateError('Tax rates changed. Reopen the invoice.');
+      }
+      InvoiceTaxProposal.preview(lines: [
+        for (final line in lines) {...line,
+          'tax_mode': _number(line['tax_rate']) == 0 ? 'exempt' : 'default'},
+      ], rate: newRate);
+      final history = List<dynamic>.from(detail['_local_tax_history'] ?? const []);
+      history.add({'at': DateTime.now().toUtc().toIso8601String(),
+        'old_rate': oldRate, 'new_rate': newRate,
+        'old_tax': detail['tax_amount'], 'old_total': detail['total_amount']});
+      for (final line in taxable) { line['tax_rate'] = newRate; }
+      await _saveDraft(businessId, documentId,
+        {...detail, '_local_tax_history': history}, lines);
+    });
+  }
+
   Future<void> deleteLine(
     String businessId,
     String documentId,
@@ -1204,9 +1236,9 @@ class OfflineDocumentDraftService {
     for (var index = 0; index < lines.length; index++) {
       final line = lines[index];
       if (line['line_kind']?.toString() == 'discount') continue;
-      final amount =
-          _number(line['quantity']) * _number(line['unit_price']);
-      final lineTax = amount * _number(line['tax_rate']);
+      final amount = (_number(line['quantity']) *
+          _number(line['unit_price']) * 100).round() / 100;
+      final lineTax = (amount * _number(line['tax_rate']) * 100).round() / 100;
       lines[index] = <String, dynamic>{
         ...line,
         'net_amount': amount.toDouble(),

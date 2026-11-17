@@ -7,6 +7,24 @@ class InvoiceTaxProposal {
   static int _cents(num amount) => (amount * 100).round();
   static double _money(int cents) => cents / 100;
 
+  static bool matchesStoredTax(List<Map<String, dynamic>> lines, num stored) {
+    if (!stored.isFinite) return false;
+    var rawTax = 0.0;
+    var roundedTaxCents = 0;
+    for (final line in lines) {
+      final quantity = num.tryParse('${line['quantity']}');
+      final price = num.tryParse('${line['unit_price']}');
+      final rate = num.tryParse('${line['tax_rate']}');
+      if (quantity == null || price == null || rate == null ||
+          !quantity.isFinite || !price.isFinite || !rate.isFinite) return false;
+      final net = quantity * price;
+      rawTax += net * rate;
+      roundedTaxCents += _cents(_money(_cents(net)) * rate);
+    }
+    return (_cents(stored) - roundedTaxCents).abs() <= 1 ||
+        (_cents(stored) - _cents(rawTax)).abs() <= 1;
+  }
+
   /// Proposes the same rate for all ordinary taxable lines.
   /// Exempt/explicit custom rates are not changed. Records without an
   /// explicit classification are refused to avoid overriding exemptions.

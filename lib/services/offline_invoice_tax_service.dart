@@ -134,7 +134,7 @@ class OfflineInvoiceTaxService {
     final currentTax = _value(detail['tax_amount']);
     final currentTotal = _value(detail['total_amount']);
     if (!currentTax.isFinite || !currentTotal.isFinite ||
-        (_cents(currentTax) - _cents(_value(result['old_tax']))).abs() > 1) {
+        !InvoiceTaxProposal.matchesStoredTax(lines, currentTax)) {
       throw StateError('Cached invoice tax disagrees with its line items.');
     }
     final newTotal = _value(result['new_total']);
@@ -171,6 +171,8 @@ class OfflineInvoiceTaxService {
     return <String, dynamic>{
       ...base,
       'lines': updatedLines,
+      'net_amount': _money(_cents(_value(payload['new_total'])) -
+          _cents(_value(payload['new_tax']))),
       'tax_amount': payload['new_tax'],
       'total_amount': payload['new_total'],
       'sync_state': 'pending',
@@ -335,6 +337,7 @@ class OfflineInvoiceTaxService {
       'old_rate': oldRate,
       'new_rate': newRate,
       'old_total': base['total_amount'],
+      'old_tax': base['tax_amount'],
       'new_total': preview['new_total'],
       'new_tax': preview['new_tax'],
       'lines': _fingerprint(_lines(base)),

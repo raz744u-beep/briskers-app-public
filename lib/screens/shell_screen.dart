@@ -628,6 +628,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
             roleCode: widget.roleCode,
             customerIds: focused,
             notifications: _customerNotifications!,
+            detailBottomNavigationBar: _shellNavigationBar(nested: true),
             onViewAll: _viewAllCustomers,
           );
         }

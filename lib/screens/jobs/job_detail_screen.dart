@@ -3634,6 +3634,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           businessId: widget.businessId,
           customerId: customerId,
           roleCode: widget.roleCode,
+          sharedBottomNavigationBar: widget.bottomNavigationBar,
         ),
       ),
     );

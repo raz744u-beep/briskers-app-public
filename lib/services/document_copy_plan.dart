@@ -8,6 +8,7 @@ class DocumentCopyPlan {
     required String customerId,
     required String? vehicleId,
     bool includeOriginalNotes = false,
+    num? currentTaxRate,
   }) {
     final kind = original['kind']?.toString();
     if (kind != 'invoice' && kind != 'estimate') {
@@ -15,6 +16,10 @@ class DocumentCopyPlan {
     }
     if (customerId.trim().isEmpty) {
       throw ArgumentError('Select an existing customer.');
+    }
+    if (currentTaxRate != null &&
+        (!currentTaxRate.isFinite || currentTaxRate < 0 || currentTaxRate > 1)) {
+      throw ArgumentError('Invalid current sales tax rate.');
     }
     final sourceLines = original['lines'] is List
         ? original['lines']
@@ -47,7 +52,9 @@ class DocumentCopyPlan {
               'line_kind': item['line_kind']?.toString() ?? 'item',
               'quantity': item['quantity'],
               'unit_price': item['unit_price'],
-              'tax_rate': item['tax_rate'],
+              'tax_rate': currentTaxRate != null &&
+                      (num.tryParse('${item['tax_rate']}') ?? 0) > 0
+                  ? currentTaxRate : item['tax_rate'],
             },
       ],
     };

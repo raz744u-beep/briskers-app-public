@@ -288,6 +288,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
           customerName: customer['name']?.toString(),
           customerVehicles: vehicles,
           sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
+          detailBottomNavigationBar: widget.sharedBottomNavigationBar,
         ),
       ),
     );
@@ -1469,7 +1470,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(16,16,16,100),
+                padding: const EdgeInsets.fromLTRB(0,16,0,100),
                 children: [
                   if (_showingLocal)
                     const Padding(
@@ -1611,7 +1612,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                     ],
                   ],
                   const SizedBox(height: 96),
-                ],
+                ].map((child) => child is BriskersControlledTabs ? child : Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: child,
+                )).toList(),
               ),
             ),
       ),

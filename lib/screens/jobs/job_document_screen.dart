@@ -50,6 +50,7 @@ import '../../core/document_navigation_role.dart';
 import '../../core/standard_note_rules.dart';
 import '../../services/briskers_api.dart';
 import '../../services/invoice_tax_proposal.dart';
+import '../../widgets/briskers_dialog.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/document_pdf_service.dart';
 import '../../services/invoice_performance_metrics.dart';
@@ -4288,6 +4289,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         customerId: selectedCustomerId,
         vehicleId: selectedVehicleId,
         includeOriginalNotes: includeOriginalNotes,
+        currentTaxRate: _defaultTaxRate,
       );
       // One creation queue entry and a fully populated first snapshot.
       // No partially copied invoice can upload between line mutations.
@@ -4321,6 +4323,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           roleCode: _navigationRoleCode,
           businessId: widget.businessId,
           documentId: newId!,
+          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
           isOwner: widget.isOwner,
           canManageExpenses: widget.canManageExpenses,
           initialAction: 'edit',
@@ -4920,8 +4923,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }).toList();
     final result = InvoiceTaxProposal.preview(
       lines: classified, rate: newRate);
-    if ((_number(result['old_tax']) - _number(_detail?['tax_amount'])).abs() >
-        0.011) {
+    if (!InvoiceTaxProposal.matchesStoredTax(
+        lines, _number(_detail?['tax_amount']))) {
       throw StateError('Invoice tax does not match its lines. Reload and review.');
     }
     return result;
@@ -4972,8 +4975,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               problem = error.toString().replaceFirst('Bad state: ', '');
             }
             final offline = BriskersConnectionModeController.instance.forceOffline;
-            return AlertDialog(
-              title: const Text('Edit invoice tax'),
+            return BriskersDialog(
+              title: 'Edit invoice tax',
+              icon: Icons.percent,
               content: SingleChildScrollView(
                 child: Column(mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -5021,6 +5025,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     FocusScope.of(dialogContext).unfocus();
                     Navigator.pop(dialogContext);
                   },
+                  style: BriskersDialog.cancelStyle,
                   child: Text(tr('cancel')),
                 ),
                 FilledButton(
@@ -5030,6 +5035,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           FocusScope.of(dialogContext).unfocus();
                           Navigator.pop(dialogContext, rate);
                         },
+                  style: BriskersDialog.confirmStyle(),
                   child: Text(tr('saveChanges')),
                 ),
               ],
@@ -5040,7 +5046,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       if (selectedRate == null || !mounted) return;
       final savedOffline = BriskersConnectionModeController.instance.forceOffline;
       final applied = await _run(() async {
-        if (savedOffline) {
+        if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+          await _offlineDocumentDraft.updateTaxRate(
+            widget.businessId, widget.documentId,
+            oldRate: oldRate, newRate: selectedRate,
+          );
+        } else if (lines.any((line) => line['_local_pending'] == true)) {
+          await _offlineDocumentEdit.updateTaxRate(
+            widget.businessId, widget.documentId,
+            oldRate: oldRate, newRate: selectedRate,
+          );
+        } else if (savedOffline) {
           await _offlineInvoiceTax.saveOffline(
             widget.businessId, widget.documentId,
             expectedVersion: currentVersion,
@@ -5428,6 +5444,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           businessId: widget.businessId,
           customerId: customerId,
           roleCode: _navigationRoleCode,
+          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
         ),
       ),
     );

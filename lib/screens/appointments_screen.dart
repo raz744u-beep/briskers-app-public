@@ -1149,7 +1149,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
           color: Theme.of(context).scaffoldBackgroundColor,
           elevation: 1,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+            padding: const EdgeInsets.fromLTRB(0, 12, 0, 10),
             child: Column(
               children: [
                 Row(
@@ -1229,7 +1229,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
                 ]),
 
-              ],
+              ].map((child) => child is BriskersControlledTabs ? child : Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: child,
+              )).toList(),
             ),
           ),
         ),

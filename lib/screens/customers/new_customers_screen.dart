@@ -19,9 +19,11 @@ class NewCustomersScreen extends StatefulWidget {
     required this.notifications,
     required this.onViewAll,
     this.repository,
+    this.detailBottomNavigationBar,
     this.profileBuilder,
   });
 
+  final Widget? detailBottomNavigationBar;
   final String businessId;
   final String roleCode;
   final List<String> customerIds;
@@ -94,6 +96,7 @@ class _NewCustomersScreenState extends State<NewCustomersScreen> {
               customerId: id,
               roleCode: widget.roleCode,
               onReviewed: reviewed,
+              sharedBottomNavigationBar: widget.detailBottomNavigationBar,
             ),
       ),
     );

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'invoice_tax_proposal.dart';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
@@ -162,6 +163,47 @@ class OfflineDocumentEditService {
     );
   }
 
+  Future<void> updateTaxRate(
+    String businessId, String documentId, {
+    required num oldRate, required num newRate,
+  }) async {
+    await _database.transaction(() async {
+      final detail = await _requireCached(businessId, documentId);
+      if (detail['kind'] != 'invoice' || detail['origin'] != 'native' ||
+          detail['closed_at'] != null || detail['legacy_read_only'] == true ||
+          const ['closed', 'paid', 'void'].contains(detail['status']) ||
+          _number(detail['paid_amount']) > 0 || detail['_local_pending_tax'] == true) {
+        throw StateError('Review this invoice before changing tax.');
+      }
+      final lines = _lines(detail);
+      final taxable = lines.where((line) => _number(line['tax_rate']) > 0).toList();
+      if (taxable.isEmpty || taxable.any((line) =>
+          (_number(line['tax_rate']) - oldRate).abs() > 0.0000001)) {
+        throw StateError('Tax rates changed. Reopen the invoice.');
+      }
+      final preview = InvoiceTaxProposal.preview(lines: [
+        for (final line in lines) {...line,
+          'tax_mode': _number(line['tax_rate']) == 0 ? 'exempt' : 'default'},
+      ], rate: newRate);
+      if (_number(detail['pending_payment']) > _number(preview['new_total']) + 0.005) {
+        throw StateError('The corrected total is below recorded payments.');
+      }
+      for (final line in taxable) {
+        await _queue(businessId, documentId, 'update_line', {
+          'line_id': line['id'], 'name': line['name'],
+          'description': line['description'], 'quantity': line['quantity'],
+          'unit_price': line['unit_price'], 'tax_rate': newRate,
+          'line_kind': line['line_kind'], 'previous_tax_rate': line['tax_rate'],
+          'previous_invoice_tax': detail['tax_amount'],
+          'previous_invoice_total': detail['total_amount'],
+        });
+        line['tax_rate'] = newRate;
+        line['_local_pending'] = true;
+      }
+      await _saveDesired(businessId, documentId, detail, lines);
+    });
+  }
+
   Future<void> deleteLine(
     String businessId,
     String documentId,
@@ -315,8 +357,8 @@ class OfflineDocumentEditService {
       }
       final quantity = _number(line['quantity']);
       final unitPrice = _number(line['unit_price']);
-      final amount = quantity * unitPrice;
-      final lineTax = amount * _number(line['tax_rate']);
+      final amount = (quantity * unitPrice * 100).round() / 100;
+      final lineTax = (amount * _number(line['tax_rate']) * 100).round() / 100;
       final lineTotal = amount + lineTax;
       lines[index] = <String, dynamic>{
         ...line,

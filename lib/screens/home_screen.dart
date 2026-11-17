@@ -136,6 +136,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await Navigator.push<void>(context, MaterialPageRoute(
         builder: (_) => CustomerDetailScreen(
           businessId: widget.businessId, customerId: id, roleCode: widget.roleCode,
+          sharedBottomNavigationBar: widget.estimatesNavigationBar,
         ),
       ));
     } else if (record.kind == RecentRecordKind.job) {

@@ -38,67 +38,37 @@ class EmployeeListTile extends StatelessWidget {
             color: active ? role.color : Colors.grey,
           ),
         ),
-        title: Tooltip(
-        triggerMode: TooltipTriggerMode.manual,
-          message: '$nickname${legal == nickname ? '' : ' · $legal'}',
-          child: Text.rich(
-            TextSpan(
-              children: [
-                TextSpan(
-                  text: nickname,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                if (legal.isNotEmpty && legal != nickname)
-                  TextSpan(
-                    text: ' · $legal',
-                    style: const TextStyle(fontWeight: FontWeight.w400),
-                  ),
-              ],
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 15,
+        title: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(nickname, style: TextStyle(
+              fontSize: 15, fontWeight: FontWeight.w700,
               color: active ? const Color(0xFF17202A) : Colors.grey,
-            ),
-          ),
+            )),
+            if (legal.isNotEmpty && legal != nickname) ...[
+              const SizedBox(width: 12),
+              Expanded(child: Text(legal,
+                textAlign: TextAlign.right,
+                style: TextStyle(fontSize: 15,
+                  color: active ? const Color(0xFF17202A) : Colors.grey),
+              )),
+            ],
+          ],
         ),
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 3),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Flexible(
-                child: Text(
-                  '$position${active ? '' : ' · Inactive'}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: active ? role.color : Colors.grey,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              const Text(' · ', style: TextStyle(fontSize: 13)),
-              Flexible(
-                flex: 3,
-                child: Tooltip(
-        triggerMode: TooltipTriggerMode.manual,
-                  message: pay,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      pay,
-                      maxLines: 1,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: Color(0xFF414852),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+              Expanded(child: Text(
+                '$position${active ? '' : ' · Inactive'}',
+                style: TextStyle(fontSize: 13,
+                  color: active ? role.color : Colors.grey,
+                  fontWeight: FontWeight.w600),
+              )),
+              const SizedBox(width: 12),
+              Text(pay, textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 13, color: Color(0xFF414852))),
             ],
           ),
         ),
