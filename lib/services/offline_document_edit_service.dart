@@ -826,24 +826,15 @@ class OfflineDocumentEditService {
               .serverId(businessId, payload['warranty_company_id']?.toString()),
             outboxId: outboxId,
           );
-          await LocalJobQuarantine.guardReplay(
-            _database,
-            businessId,
-            () => _api.updateDocumentWarranty(
-              businessId,
-              documentId,
-              expectedVersion: version,
-              extendedWarranty: payload['extended_warranty'] == true,
-              warrantyCompanyId: companyId,
-              claimNumber: payload['claim_number']?.toString(),
-              authorizationNumber: payload['authorization_number']?.toString(),
-              approvedAmount: num.tryParse(payload['approved_amount']?.toString() ?? ''),
-              surchargeRate: num.tryParse(payload['surcharge_rate']?.toString() ?? '') ?? 0.03,
-            ),
-            outboxId: outboxId,
-          );
-          serverDetail = await _api.documentDetail(businessId, documentId);
-        } else if (operation == 'memo') {
+          var companyId = payload['warranty_company_id']?.toString();
+          if (companyId?.startsWith('local-warranty-') == true) {
+            companyId = await LocalJobQuarantine.guardReplay(
+              _database, businessId,
+              () => LocalWarrantyCompanies(database: _database, api: _api)
+                .serverId(businessId, companyId),
+              outboxId: outboxId,
+            );
+          }
           await LocalJobQuarantine.guardReplay(
             _database,
             businessId,

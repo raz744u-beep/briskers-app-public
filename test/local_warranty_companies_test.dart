@@ -11,12 +11,16 @@ import 'package:briskers_app/services/local_warranty_companies.dart';
 class _Api extends BriskersApi {
   final companies = <Map<String, dynamic>>[];
   int creates = 0;
+  int reads = 0;
   bool loseCreateReply = false;
   Completer<void>? updating;
 
   @override
   Future<List<Map<String, dynamic>>> warrantyCompanies(String businessId,
-      {bool includeInactive = false}) async => companies.map((row) => Map<String, dynamic>.from(row)).toList();
+      {bool includeInactive = false}) async {
+    reads++;
+    return companies.map((row) => Map<String, dynamic>.from(row)).toList();
+  }
 
   @override
   Future<String> createWarrantyCompany(String businessId, {required String name,
@@ -80,7 +84,9 @@ void main() {
     await expectLater(service.flush('shop'),throwsStateError);
     api.loseCreateReply=false;
     await Future.wait([service.flush('shop'),service.flush('shop')]);
+    final reads = api.reads;
     expect(await service.serverId('shop',id),'server-company');
+    expect(api.reads,reads);
     expect(api.creates,1);
     expect((await service.cached('shop')).single['id'],id);
     expect(api.companies.single['notes'],'Keep this');

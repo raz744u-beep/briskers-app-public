@@ -163,11 +163,17 @@ class LocalWarrantyCompanies {
   Future<String?> serverId(String business, String? id) async {
     if (id == null || id.isEmpty) return null;
     if (!id.startsWith('local-warranty-')) return id;
-    await flush(business);
-    final company = (await cached(business, includeInactive: true))
+    var company = (await cached(business, includeInactive: true))
       .where((company) => company['id'] == id).firstOrNull;
-    final remote = company?['_server_id']?.toString();
-    if (remote == null || remote.isEmpty) throw StateError('Warranty company is waiting to synchronize.');
+    var remote = company?['_server_id']?.toString();
+    if (remote != null && remote.isNotEmpty) return remote;
+    await flush(business);
+    company = (await cached(business, includeInactive: true))
+      .where((company) => company['id'] == id).firstOrNull;
+    remote = company?['_server_id']?.toString();
+    if (remote == null || remote.isEmpty) {
+      throw StateError('Warranty company is waiting to synchronize.');
+    }
     return remote;
   }
 }

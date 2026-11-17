@@ -374,6 +374,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
     final previousName = widget.detail['warranty_company_name']?.toString() ?? '';
     for (final entry in companies) {
       if (entry['id']?.toString() == previousId ||
+          entry['_server_id']?.toString() == previousId ||
           (previousId.isEmpty && entry['name']?.toString() == previousName)) {
         selected = entry;
         break;
@@ -717,7 +718,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
       Map<String, dynamic>? selected;
       final selectedId = widget.detail['warranty_company_id']?.toString() ?? '';
       for (final company in companies) {
-        if (company['id']?.toString() == selectedId) {
+        if (company['id']?.toString() == selectedId ||
+            company['_server_id']?.toString() == selectedId) {
           selected = company;
           break;
         }
