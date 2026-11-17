@@ -855,7 +855,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
               SizedBox(width:40,child:Checkbox(
                 semanticLabel:'Select $description for payroll',
                 value:_selected.containsKey(id),
-                onChanged:_saving?null:(v)=>setState(()=>_choose(task,v==true))),
+                onChanged:_saving?null:(v)=>setState(()=>_choose(task,v==true)),
               )),
               Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
                 Semantics(link:true,child:InkWell(
