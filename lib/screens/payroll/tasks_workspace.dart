@@ -528,7 +528,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
 
   Widget _flatList(List<Map<String, dynamic>> rows, bool general) => ListView(
     key: Key(general ? 'general-tasks-list' : 'service-tasks-list'),
-    padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+    padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
     children: [
       Row(
         children: [
@@ -556,6 +556,11 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
         alignment: Alignment.centerLeft,
         child: TextButton(
           key: const Key('toggle-completed-tasks'),
+          style: TextButton.styleFrom(
+            minimumSize: const Size(0, 28),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
           onPressed: () => setState(() {
             _status = _status == 'Completed' ? 'Active' : 'Completed';
           }),
@@ -564,7 +569,7 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
               : 'Show completed tasks'),
         ),
       ),
-      const SizedBox(height: 8),
+      const SizedBox(height: 4),
       if (rows.isEmpty)
         Padding(
           padding: const EdgeInsets.all(12),

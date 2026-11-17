@@ -110,6 +110,9 @@ void main() {
     await tester.pumpAndSettle();
     final finalize = find.text('Finalize Received Payment');
     await tester.scrollUntilVisible(finalize, 300, scrollable: find.byType(Scrollable).last);
+    await Scrollable.ensureVisible(tester.element(finalize), alignment: 0.5);
+    await tester.pumpAndSettle();
+    expect(finalize.hitTestable(), findsOneWidget);
     await tester.tap(finalize);
     await tester.pumpAndSettle();
     expect(find.text('Finalize received payment?'), findsOneWidget);

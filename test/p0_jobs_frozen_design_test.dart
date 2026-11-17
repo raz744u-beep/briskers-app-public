@@ -53,7 +53,7 @@ void main() {
     expect(invoice.style!.color,const Color(0xFF526171));
     expect(invoice.style!.decoration,TextDecoration.underline);
     expect(tester.getTopLeft(find.text('Invoice #6368')).dy,
-      closeTo(tester.getTopLeft(find.text('J-49  Rick Francis')).dy,3));
+      closeTo(tester.getTopLeft(find.text('2016 Mercedes E350')).dy,3));
     expect(tester.getBottomRight(find.byType(JobCompactCard).last).dy,lessThan(720));
     await tester.tap(find.text('Invoice #6368'));
     expect(invoiceOpens,1);expect(jobOpens,0);
