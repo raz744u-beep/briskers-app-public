@@ -6,12 +6,22 @@ import '../../core/briskers_colors.dart';
 import '../../core/vehicle_options.dart';
 import '../../services/briskers_api.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
+import '../../services/customer_workflow_preferences.dart';
+import '../../widgets/briskers_dialog.dart';
+import '../jobs/blank_invoice_setup_screen.dart';
+import '../jobs/job_create_screen.dart';
+import '../jobs/job_document_screen.dart';
 import 'new_vehicle_screen.dart';
 
+enum _NextCustomerAction { job, invoice, estimate }
+
 class NewCustomerScreen extends StatefulWidget {
-  const NewCustomerScreen({super.key, required this.businessId});
+  const NewCustomerScreen({
+    super.key, required this.businessId, this.roleCode = 'office',
+  });
 
   final String businessId;
+  final String roleCode;
 
   @override
   State<NewCustomerScreen> createState() => _NewCustomerScreenState();
@@ -147,22 +157,112 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
 
       if (!mounted) return;
 
-      await Navigator.push<bool>(
+      Map<String, dynamic>? savedVehicle;
+      final vehicleSaved = await Navigator.push<bool>(
         context,
         MaterialPageRoute(
           builder: (_) => NewVehicleScreen(
             businessId: widget.businessId,
             customerId: customerId,
+            onSaved: (vehicle) => savedVehicle = vehicle,
           ),
         ),
       );
 
+      if (!mounted) return;
+      final vehicle = savedVehicle;
+      if (vehicleSaved == true && vehicle != null) {
+        try {
+          await _offerNextAction(customerId, name, vehicle);
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Customer and vehicle saved. Open Jobs, Invoices, or Estimates to continue.'),
+            ));
+          }
+        }
+      }
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _offerNextAction(
+    String customerId, String name, Map<String, dynamic> vehicle,
+  ) async {
+    if (!const {'owner', 'manager', 'office'}.contains(widget.roleCode) ||
+        !await CustomerWorkflowPreferences(widget.businessId).offerNextAction() ||
+        !mounted) {
+      return;
+    }
+    final action = await showDialog<_NextCustomerAction>(
+      context: context,
+      builder: (dialog) => BriskersDialog(
+        title: 'Customer and vehicle saved',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (action, label, icon, color) in const [
+              (_NextCustomerAction.job, 'New Job', Icons.build_outlined, BriskersColors.jobs),
+              (_NextCustomerAction.invoice, 'New Invoice', Icons.receipt_long_outlined, BriskersColors.invoices),
+              (_NextCustomerAction.estimate, 'New Estimate', Icons.description_outlined, BriskersColors.estimates),
+            ])
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(icon, color: color),
+                title: Text(label),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.pop(dialog, action),
+              ),
+          ],
+        ),
+        actions: [
+          OutlinedButton(
+            style: BriskersDialog.cancelStyle,
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('Not Now'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == _NextCustomerAction.job) {
+      await Navigator.push<bool>(context, MaterialPageRoute(
+        builder: (_) => JobCreateScreen(
+          businessId: widget.businessId,
+          customerId: customerId,
+          customerName: name,
+          vehicles: [vehicle],
+          roleCode: widget.roleCode,
+        ),
+      ));
+      return;
+    }
+    final documentId = await Navigator.push<String>(context, MaterialPageRoute(
+      builder: (_) => BlankInvoiceSetupScreen(
+        businessId: widget.businessId,
+        kind: action.name,
+        initialCustomerId: customerId,
+        initialCustomerName: name,
+        initialVehicles: [vehicle],
+        createLocally: true,
+      ),
+    ));
+    if (!mounted || documentId == null || documentId.isEmpty) return;
+    await Navigator.push<void>(context, MaterialPageRoute(
+      builder: (_) => JobDocumentScreen(
+        businessId: widget.businessId,
+        roleCode: widget.roleCode,
+        documentId: documentId,
+        isOwner: widget.roleCode == 'owner',
+        canManageExpenses: action == _NextCustomerAction.invoice,
+        freshlyCreated: true,
+        initialAction: 'edit',
+      ),
+    ));
   }
 
   @override

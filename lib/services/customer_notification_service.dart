@@ -135,17 +135,20 @@ class CustomerNotificationService {
         .toList();
   });
 
-  Future<void> markReviewed(Iterable<String> customerIds) =>
+  Future<Set<String>> markReviewed(Iterable<String> customerIds) =>
       _serialized(() async {
-        if (userId.isEmpty || businessId.isEmpty) return;
+        if (userId.isEmpty || businessId.isEmpty) return <String>{};
         final prefs = await SharedPreferences.getInstance();
         final state = await _read(prefs);
-        if (state == null) return;
+        if (state == null) return <String>{};
         final events = Set<String>.from(state['event_ids'] as List);
         final read = Set<String>.from(state['read_ids'] as List);
-        read.addAll(customerIds.where(events.contains));
+        final accepted = customerIds.where(events.contains).toSet();
+        if (accepted.isEmpty) return accepted;
+        read.addAll(accepted);
         state['read_ids'] = read.toList();
         await _save(prefs, state);
         _changes.add(businessId);
+        return accepted;
       });
 }

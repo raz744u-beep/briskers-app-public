@@ -1,3 +1,5 @@
+import '../../services/local_recent_records.dart';
+import '../../widgets/recent_record_view.dart';
 import '../../services/local_estimate_number.dart';
 import '../../services/local_invoice_payment_coverage_events.dart';
 import '../../services/local_invoice_closure.dart';
@@ -227,7 +229,7 @@ class JobDocumentScreen extends StatefulWidget {
 }
 
 class _JobDocumentScreenState extends State<JobDocumentScreen>
-    with ModuleModalState<JobDocumentScreen> {
+    with ModuleModalState<JobDocumentScreen>, RecentRecordView<JobDocumentScreen> {
   @override
   Color get modalAccent => _accent;
   static const _api = BriskersApi();
@@ -1001,7 +1003,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     );
     reason.dispose();
     if (!mounted || confirmed == null) return;
-    if (BriskersConnectionModeController.instance.forceOffline) {
+    if (!BriskersConnectionModeController.instance.forceOnline) {
       await _run(() async {
         final grant = await DeviceOwnerAuthorization.instance.authority
             .authorizeLocal(widget.businessId);
@@ -8037,6 +8039,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   );
 
   Widget _buildDocumentContent(BuildContext context) {
+    final saved = _detail;
+    if (saved != null) {
+      final number = _estimate
+          ? LocalEstimateNumber.existing(saved['document_number'])
+          : saved['document_number']?.toString();
+      final label = [
+        if (number != null && number.isNotEmpty) '#$number',
+        saved['customer_name']?.toString() ?? '',
+      ].where((value) => value.isNotEmpty).join(' · ');
+      recordRecentView(widget.businessId, (
+        kind: _estimate ? RecentRecordKind.estimate : RecentRecordKind.invoice,
+        id: widget.documentId, label: label,
+      ));
+    }
     if (_loading) {
       return Scaffold(
         appBar: AppBar(

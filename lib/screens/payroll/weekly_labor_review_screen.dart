@@ -1,5 +1,6 @@
+import '../../core/briskers_colors.dart';
+import 'approved_tasks_ui.dart' show taskBlue, taskCanvas, taskGreen, taskNavy;
 import 'payroll_review_widgets.dart';
-import 'approved_tasks_ui.dart';
 import '../../services/payroll_owner_lease.dart';
 // ignore_for_file: prefer_interpolation_to_compose_strings
 import 'dart:async';
@@ -952,7 +953,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   horizontal: 12,
                   vertical: 10,
                 ),
-                decoration: const BoxDecoration(gradient: payrollSectionHeaderGradient),
+                decoration: const BoxDecoration(gradient: BriskersColors.blueHeader),
                 child: const Row(
                   children: [
                     Icon(Icons.calculate_outlined, color: Colors.white),

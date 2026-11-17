@@ -1,7 +1,7 @@
 name: Offline recovery Android debug verification
 on:
   push:
-    branches: [fix/bugs38-round1-historical-edit-guard]
+    branches: [fix/bugs38-round1-historical-edit-guard, fix/bugs38-consolidated]
   pull_request:
     paths:
       - 'lib/**'

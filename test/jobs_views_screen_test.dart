@@ -179,13 +179,13 @@ void main() {
       expect(find.byKey(const ValueKey('job-list-sort')), findsNothing);
       expect(find.text('Recent'), findsNothing);
       expect(find.text('Active'), findsNothing);
-      expect(find.text('All statuses'), findsOneWidget);
+      expect(find.text('All'), findsOneWidget);
       await tester.tap(find.byTooltip(tr('filterJobs')));
       await tester.pumpAndSettle();
-      expect(find.text('Completed'), findsOneWidget);
-      await tester.tap(find.text('Completed'));
+      expect(find.text('Closed'), findsOneWidget);
+      await tester.tap(find.text('Closed'));
       await tester.pumpAndSettle();
-      expect(repository.calls.last.status, 'completed');
+      expect(repository.calls.last.status, closedJobsFilter);
       expect(repository.calls.last.view, JobListView.all);
       expect(tester.takeException(), isNull);
     },
@@ -258,7 +258,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(repository.calls.last.view, JobListView.all);
     expect(repository.calls.last.sort, JobListSort.creation);
-    expect(repository.calls.last.status, 'completed');
+    expect(repository.calls.last.status, closedJobsFilter);
     expect(repository.calls.last.search, 'new');
     expect(repository.calls.last.limit, 60);
     expect(find.byType(SegmentedButton<JobListView>), findsNothing);
@@ -289,7 +289,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip(tr('filterJobs')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Completed'));
+    await tester.tap(find.text('Closed'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).first, 'new');
     await tester.pump(const Duration(milliseconds: 350));
@@ -299,14 +299,14 @@ void main() {
     visible.value = true;
     await tester.pumpAndSettle();
     expect(repository.calls.last.view, JobListView.all);
-    expect(repository.calls.last.status, 'completed');
+    expect(repository.calls.last.status, closedJobsFilter);
     expect(repository.calls.last.search, 'new');
     expect(find.text('new'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets(
-    'paid-still-open rows are not discarded by a second status filter',
+    'Open keeps paid jobs whose work remains open',
     (tester) async {
       final repository = _Jobs();
       await tester.pumpWidget(
@@ -315,10 +315,11 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip(tr('filterJobs')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Paid, Still Open').last);
+      await tester.tap(find.text('Open').last);
       await tester.pumpAndSettle();
-      expect(repository.calls.last.status, 'paid_still_open');
-      expect(find.byType(JobCompactCard), findsOneWidget);
+      expect(repository.calls.last.status, isNull);
+      expect(repository.calls.last.view, JobListView.active);
+      expect(find.byType(JobCompactCard), findsWidgets);
     },
   );
 
@@ -357,7 +358,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Recientes'), findsNothing);
       expect(find.text('Activos'), findsNothing);
-      expect(find.text('Todos los estados'), findsOneWidget);
+      expect(find.text('Todos'), findsOneWidget);
       expect(find.text('Último acceso'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.tap(find.byTooltip(tr('filterJobs')));
@@ -559,7 +560,7 @@ void main() {
 
   for (final language in ['en', 'es']) {
     testWidgets(
-      'paid filter wraps at 200% text size in a narrow $language popup',
+      'Closed filter fits at 200% text size in a narrow $language popup',
       (tester) async {
         tester.view.physicalSize = const Size(360, 740);
         tester.view.devicePixelRatio = 1;
@@ -582,7 +583,7 @@ void main() {
             .singleWhere(
               (entry) =>
                   entry is PopupMenuItem<String> &&
-                  entry.value == 'paid_still_open',
+                  entry.value == closedJobsFilter,
             );
         // Exercise the real menu entry within a 256px-wide popup,
         // independently of unrelated cards and header accessibility layouts.
@@ -599,7 +600,7 @@ void main() {
             home: Scaffold(
               body: Center(
                 child: PopupMenuButton<String>(
-                  key: const ValueKey('enlarged-paid-filter'),
+                  key: const ValueKey('enlarged-closed-filter'),
                   constraints: const BoxConstraints.tightFor(width: 256),
                   itemBuilder: (_) => [entry],
                   icon: const Icon(Icons.filter_list),
@@ -609,14 +610,14 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const ValueKey('enlarged-paid-filter')));
+        await tester.tap(find.byKey(const ValueKey('enlarged-closed-filter')));
         await tester.pumpAndSettle();
         final label = find.text(
-          language == 'en' ? 'Paid, Still Open' : 'Pagado, aún abierto',
+          language == 'en' ? 'Closed' : 'Cerrados',
         );
         expect(label, findsOneWidget);
         expect(MediaQuery.textScalerOf(tester.element(label)).scale(10), 20);
-        expect(tester.getSize(label).height, greaterThan(24));
+        expect(tester.getSize(label).height, greaterThan(20));
         expect(tester.getSize(label).width, lessThanOrEqualTo(222));
         expect(tester.takeException(), isNull);
         await tester.tap(label);

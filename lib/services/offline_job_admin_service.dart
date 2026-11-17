@@ -1,3 +1,4 @@
+import 'local_customer_vehicle_identity.dart';
 import 'local_task_assignment_store.dart';
 import 'local_job_work_date.dart';
 import 'dart:convert';
@@ -82,6 +83,9 @@ class OfflineJobAdminService {
     final id = _newJobId();
     final now = DateTime.now().toUtc();
     await _database.transaction(() async {
+      final identities = LocalCustomerVehicleIdentity(_database);
+      customerId = (await identities.resolve(businessId, customerId))!;
+      vehicleId = await identities.resolve(businessId, vehicleId);
       final numbers=LocalNumberAllocator(_database);
       final jobNumber=numbers.display('job',await numbers.allocate(businessId,'job',id));
       await _database.customStatement(

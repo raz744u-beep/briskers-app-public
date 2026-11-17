@@ -2,7 +2,7 @@ name: Offline recurring component
 
 on:
   push:
-    branches: [fix/bugs38-round1-historical-edit-guard]
+    branches: [fix/bugs38-round1-historical-edit-guard, fix/bugs38-consolidated]
   pull_request:
     paths:
       - 'lib/services/offline_recurring_repository.dart'

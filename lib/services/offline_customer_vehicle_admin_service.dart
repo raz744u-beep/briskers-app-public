@@ -1,3 +1,4 @@
+import 'local_customer_vehicle_identity.dart';
 import 'sync_replay_fence.dart';
 import 'dart:convert';
 
@@ -187,6 +188,8 @@ class OfflineCustomerVehicleAdminService {
       }
     }
     await _database.transaction(() async {
+      customerId = (await LocalCustomerVehicleIdentity(_database)
+          .resolve(businessId, customerId))!;
       await _database.customStatement(
         '''
         INSERT INTO local_vehicles (
@@ -284,6 +287,7 @@ class OfflineCustomerVehicleAdminService {
     // Remap the new server vehicle ID everywhere atomically.
           // Appointment create payloads must never retain a local vehicle ID.
     await _database.transaction(() async {
+      await LocalCustomerVehicleIdentity(_database).save(businessId, entityId, serverId);
             await _database.customStatement(
               'UPDATE local_customer_vehicles SET vehicle_id=? WHERE business_id=? AND vehicle_id=?',
               [serverId,businessId,entityId],
@@ -359,6 +363,7 @@ class OfflineCustomerVehicleAdminService {
     String businessId,String localId,String serverId,int queueId,
   ) async {
     await _database.transaction(() async {
+      await LocalCustomerVehicleIdentity(_database).save(businessId, localId, serverId);
       await _database.customStatement(
         'UPDATE local_customer_vehicles SET customer_id=? WHERE business_id=? AND customer_id=?',
         [serverId,businessId,localId],

@@ -52,7 +52,8 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
   @override
   void didUpdateWidget(covariant BriskersModuleDock oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.selectedIndex != widget.selectedIndex) {
+    if (oldWidget.selectedIndex != widget.selectedIndex ||
+        oldWidget.destinations.length != widget.destinations.length) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _revealSelected());
     }
   }
@@ -76,6 +77,10 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
 
   void _revealSelected() {
     if (!mounted || !_controller.hasClients) return;
+    if (widget.selectedIndex < 0) {
+      _syncArrows();
+      return;
+    }
     final position = _controller.position;
     final viewport = position.viewportDimension;
     final offset = position.pixels;

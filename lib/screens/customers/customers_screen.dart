@@ -264,7 +264,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
     final created = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => NewCustomerScreen(businessId: widget.businessId),
+        builder: (_) => NewCustomerScreen(businessId: widget.businessId, roleCode: widget.roleCode),
       ),
     );
     if (created == true) await _load();

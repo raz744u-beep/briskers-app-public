@@ -124,7 +124,8 @@ void main() {
     expect(start, greaterThan(0));
     expect(end, greaterThan(start));
     final initial = source.substring(start, end);
-    expect(initial, contains('InvoicePaymentFeed.combine('));
+    expect(initial, contains('_combinedTransactions'));
+    expect(source, contains('InvoicePaymentFeed.combine('));
     expect(initial, isNot(contains('final income = _transactions')));
     expect(initial, isNot(contains('final expenses = _transactions')));
     expect(source, contains('ExpensesPeriodTotals.calculate('));

@@ -1,3 +1,4 @@
+import '../../widgets/briskers_curved_tabs.dart';
 import '../../services/local_task_schedule.dart';
 import 'package:flutter/material.dart';
 
@@ -461,122 +462,16 @@ class ApprovedTaskListCard extends StatelessWidget {
   }
 }
 
-const payrollSectionHeaderGradient = LinearGradient(
-  begin: Alignment.centerLeft,
-  end: Alignment.centerRight,
-  colors: [Color(0xFF31A9D9), Color(0xFF2075BC), Color(0xFF174B92)],
-);
-
 class ApprovedProfileTabs extends StatelessWidget {
   const ApprovedProfileTabs({super.key});
-  @override
-  Widget build(BuildContext context) {
-    final controller = DefaultTabController.of(context);
-    const entries = [
-      ('Work', Color(0xFF2479C6)),
-      ('Payroll', Color(0xFF176B40)),
-      ('Reports', Color(0xFF6942A2)),
-      ('Taxes', Color(0xFF697586)),
-    ];
-    return AnimatedBuilder(
-      animation: controller,
-      builder: (context, _) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TabBar(
-            indicatorSize: TabBarIndicatorSize.tab,
-            indicatorWeight: 0,
-            // The shared stripe below the tab row is the only selection indicator.
-            indicator: const BoxDecoration(),
-            labelPadding: EdgeInsets.zero,
-            dividerHeight: 0,
-            labelColor: Colors.white,
-            unselectedLabelColor: const Color(0xFF111820),
-            tabs: [
-              for (final (i, entry) in entries.indexed)
-                Tab(
-                  height: 40,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      ClipPath(
-                        clipper: _ProfileTabClip(),
-                        child: Container(
-                          key: ValueKey('profile-tab-${entry.$1}'),
-                          alignment: Alignment.center,
-                          decoration: controller.index == i
-                              ? BoxDecoration(color: entry.$2)
-                              : const BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      Color(0xFFEAEDF3),
-                                      Color(0xFFDCE2EB),
-                                    ],
-                                  ),
-                                ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 9),
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    [
-                                      Icons.layers_outlined,
-                                      Icons.payments_outlined,
-                                      Icons.bar_chart,
-                                      Icons.description_outlined,
-                                    ][i],
-                                    size: 16,
-                                  ),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    entry.$1,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-          SizedBox(
-            width: double.infinity,
-            height: 3,
-            child: ColoredBox(
-              key: const ValueKey('profile-tabs-stripe'),
-              // Use the same theme value as the selected tab background.
-              color: entries[controller.index].$2,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
-class _ProfileTabClip extends CustomClipper<Path> {
   @override
-  Path getClip(Size s) => Path()
-    ..moveTo(0, s.height)
-    ..lineTo(8, 10)
-    ..quadraticBezierTo(11, 0, 21, 0)
-    ..lineTo(s.width - 21, 0)
-    ..quadraticBezierTo(s.width - 11, 0, s.width - 8, 10)
-    ..lineTo(s.width, s.height)
-    ..close();
-  @override
-  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
+  Widget build(BuildContext context) => const BriskersCurvedTabs(entries: [
+    (label: 'Work', color: Color(0xFF2479C6), icon: Icons.layers_outlined),
+    (label: 'Payroll', color: Color(0xFF176B40), icon: Icons.payments_outlined),
+    (label: 'Reports', color: Color(0xFF6942A2), icon: Icons.bar_chart),
+    (label: 'Taxes', color: Color(0xFF697586), icon: Icons.description_outlined),
+  ]);
 }
 
 class ApprovedEmployeeIdentity extends StatelessWidget {

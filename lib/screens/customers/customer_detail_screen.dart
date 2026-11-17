@@ -1,3 +1,6 @@
+import '../../services/local_recent_records.dart';
+import '../../widgets/recent_record_view.dart';
+import '../../widgets/briskers_curved_tabs.dart';
 import '../../services/local_estimate_number.dart';
 import '../../services/offline_document_draft_service.dart';
 import 'dart:convert';
@@ -66,7 +69,8 @@ class CustomerDetailScreen extends StatefulWidget {
   State<CustomerDetailScreen> createState() => _CustomerDetailScreenState();
 }
 
-class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
+class _CustomerDetailScreenState extends State<CustomerDetailScreen>
+    with RecentRecordView<CustomerDetailScreen> {
   static const _api = BriskersApi();
   final CustomerVehicleSyncService _sync =
       CustomerVehicleSyncService();
@@ -1364,6 +1368,13 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     final customer = Map<String, dynamic>.from(
       _data?['customer'] ?? widget.initialCustomerSummary ?? const {},
     );
+    if (_data != null && customer.isNotEmpty) {
+      recordRecentView(widget.businessId, (
+        kind: RecentRecordKind.customer,
+        id: widget.customerId,
+        label: (customer['name'] ?? customer['display_name'] ?? 'Customer').toString(),
+      ));
+    }
     if (_data == null) customer['name'] ??= customer['display_name'];
     final vehicles = List<dynamic>.from(
       _data?['vehicles'] ?? const [],
@@ -1481,24 +1492,16 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                         ),
                       ),
                     ),
-                  Row(children: [
-                    for (var i = 0; i < 4; i++)
-                      Expanded(child: TextButton(
-                        onPressed: () => setState(() => _customerTab = i),
-                        style: TextButton.styleFrom(
-                          backgroundColor: _customerTab == i
-                            ? BriskersColors.customers.withValues(alpha: 0.14) : null,
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                        ),
-                        child: Column(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(const <IconData>[Icons.dashboard_outlined,
-                            Icons.person_outline, Icons.directions_car_outlined,
-                            Icons.note_alt_outlined][i], size: 25),
-                          Text(const <String>['Overview', 'Info', 'Vehicles', 'Notes'][i],
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                        ]),
-                      )),
-                  ]),
+                  BriskersControlledTabs(
+                    entries: const [
+                      (label: 'Overview', color: BriskersColors.customers, icon: Icons.dashboard_outlined),
+                      (label: 'Info', color: BriskersColors.customerSave, icon: Icons.person_outline),
+                      (label: 'Vehicles', color: BriskersColors.vehicles, icon: Icons.directions_car_outlined),
+                      (label: 'Notes', color: BriskersColors.notes, icon: Icons.note_alt_outlined),
+                    ],
+                    selected: _customerTab,
+                    onSelected: (index) => setState(() => _customerTab = index),
+                  ),
                   const SizedBox(height: 8),
                   if (_customerTab == 1) Card(
                     child: ExpansionTile(

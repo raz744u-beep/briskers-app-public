@@ -215,7 +215,9 @@ class LocalJobRepository {
     if (view == JobListView.active) {
       where.add('lower(j.status) NOT IN $_finishedStatuses');
     }
-    if (status == 'paid_still_open') {
+    if (status == closedJobsFilter) {
+      where.add('lower(j.status) IN $_finishedStatuses');
+    } else if (status == 'paid_still_open') {
       // Payment state is never evidence that repair work is completed.
       where.add("lower(COALESCE(j.payment_state, '')) = 'paid'");
       where.add('lower(j.status) NOT IN $_finishedStatuses');

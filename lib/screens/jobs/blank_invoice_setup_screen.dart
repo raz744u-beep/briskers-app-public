@@ -20,6 +20,7 @@ class BlankInvoiceSetupScreen extends StatefulWidget {
     this.initialCustomerId,
     this.initialCustomerName,
     this.initialVehicles = const [],
+    this.createLocally = false,
     this.localCustomers,
     this.api,
   });
@@ -29,6 +30,7 @@ class BlankInvoiceSetupScreen extends StatefulWidget {
   final String? initialCustomerId;
   final String? initialCustomerName;
   final List<dynamic> initialVehicles;
+  final bool createLocally;
   // Injectable for deterministic offline-first picker regression tests.
   final LocalCustomerRepository? localCustomers;
   final BriskersApi? api;
@@ -364,7 +366,7 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
                   vehicleLabel: _vehicles.where((v) =>
                       v['id']?.toString() == _vehicleId).map(_vehicleName).firstOrNull,
                 )
-          : BriskersConnectionModeController.instance.forceOffline
+          : widget.createLocally || BriskersConnectionModeController.instance.forceOffline
           ? await _offlineDrafts.createQuickInvoice(
               widget.businessId,
               reuseInvoiceNumber: _reuseInvoice,

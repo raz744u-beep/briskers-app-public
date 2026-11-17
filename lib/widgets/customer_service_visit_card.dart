@@ -13,8 +13,10 @@ class CustomerServiceVisitCard extends StatefulWidget {
     required this.pending,
     required this.invoices,
     required this.onJob,
+    this.repairSummary = '',
   });
   final String date, jobNumber, vehicle, status;
+  final String repairSummary;
   final List<String> completed, pending;
   final List<({String number, VoidCallback open})> invoices;
   final VoidCallback? onJob;
@@ -142,6 +144,15 @@ class _CustomerServiceVisitCardState extends State<CustomerServiceVisitCard> {
                     ),
                   ],
                 ),
+                if (!_expanded && widget.repairSummary.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      widget.repairSummary,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 if (_expanded) ...[
                   const Divider(),
                   if (widget.completed.isNotEmpty)

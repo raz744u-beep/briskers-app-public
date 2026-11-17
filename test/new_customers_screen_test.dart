@@ -17,9 +17,10 @@ class _Inbox extends CustomerNotificationService {
   @override
   Future<List<String>> unreadCustomerIds() async => unread.toList();
   @override
-  Future<void> markReviewed(Iterable<String> ids) async {
+  Future<Set<String>> markReviewed(Iterable<String> ids) async {
     if (failSave) throw StateError('Storage not available');
     unread.removeAll(ids);
+    return ids.toSet();
   }
 }
 

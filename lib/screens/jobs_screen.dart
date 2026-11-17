@@ -84,10 +84,12 @@ class _JobsScreenState extends State<JobsScreen>
   List<Map<String, dynamic>>? _rows;
   List<Map<String, dynamic>> _statuses = const [];
   String? _selectedStatus;
-  JobListView get _listView => _selectedStatus == '__open__'
-      ? JobListView.active : JobListView.all;
-  String? get _queryStatus => _selectedStatus == '__open__'
-      ? null : _selectedStatus;
+  static const _closedJobStatuses = {'completed', 'cancelled', 'closed'};
+
+  JobListView get _listView =>
+      _selectedStatus == '__open__' ? JobListView.active : JobListView.all;
+  String? get _queryStatus =>
+      _selectedStatus == closedJobsFilter ? closedJobsFilter : null;
   static const _pageSize = 30;
   int _visibleLimit = _pageSize;
   bool _restoredView = false;
@@ -272,7 +274,11 @@ class _JobsScreenState extends State<JobsScreen>
     if (widget.defaultToOpen) {
       _selectedStatus = '__open__';
     } else if (saved is JobListPreferences) {
-      _selectedStatus = saved.status;
+      _selectedStatus = switch (saved.status) {
+        '__open__' || 'paid_still_open' => '__open__',
+        closedJobsFilter || 'completed' || 'cancelled' || 'closed' => closedJobsFilter,
+        _ => null,
+      };
       _search.text = saved.search;
       _visibleLimit = saved.visibleLimit;
     }
@@ -396,8 +402,8 @@ class _JobsScreenState extends State<JobsScreen>
     final generation = visibility.beginLoad();
     final businessId = widget.businessId;
     final query = _search.text.trim();
-    final status = _queryStatus;
     final view = _listView;
+    final status = _queryStatus;
     final limit = _visibleLimit;
     final userId = _userId;
     var localAvailable = false;
@@ -645,14 +651,12 @@ class _JobsScreenState extends State<JobsScreen>
     final prior = current[index];
     final oldCode = prior['status']?.toString() ?? '';
     final newCode = event.code.toLowerCase();
-    final finished = const {'completed', 'cancelled', 'closed'}
-        .contains(newCode);
-    final matchesCurrentFilter = _selectedStatus == '__open__'
-        ? !finished
-        : _selectedStatus == 'paid_still_open'
-            ? !finished && prior['payment_state'] == 'paid'
-            : _selectedStatus == null || _selectedStatus == '__all__' ||
-                _selectedStatus == event.code;
+    final finished = _closedJobStatuses.contains(newCode);
+    final matchesCurrentFilter = switch (_selectedStatus) {
+      '__open__' => !finished,
+      closedJobsFilter => finished,
+      _ => true,
+    };
     setState(() {
       final updated = List<Map<String, dynamic>>.from(current);
       if (matchesCurrentFilter) {
@@ -765,8 +769,6 @@ class _JobsScreenState extends State<JobsScreen>
 
   Iterable<Widget> _jobCards(List<Map<String, dynamic>> rows) =>
       rows.map(_jobCard);
-
-  int _statusCount(String code) => _statusCounts[code] ?? 0;
 
   Widget _menuCount(int count, {bool alwaysShow = false}) {
     if (count <= 0 && !alwaysShow) return const SizedBox.shrink();
@@ -1003,113 +1005,36 @@ class _JobsScreenState extends State<JobsScreen>
                           _rememberView();
                           _load(refreshRemote: false);
                         },
-                        itemBuilder: (_) => [
-                          PopupMenuItem<String>(
-                            value: '__open__',
-                            child: Row(children: [
-                              const Icon(Icons.work_outline),
-                              const SizedBox(width: 10),
-                              Expanded(child: Text(_text('Open jobs', 'Trabajos abiertos'))),
-                              _menuCount(_statusCounts.entries
-                                  .where((e) => !const {'completed','cancelled','closed'}.contains(e.key))
-                                  .fold<int>(0, (a, e) => a + e.value), alwaysShow: true),
-                            ]),
-                          ),
-                          PopupMenuItem<String>(
-                            value: 'paid_still_open',
-                            child: Row(
-                              children: [
-                                const Icon(Icons.payments_outlined),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    _text(
-                                      'Paid, Still Open',
-                                      'Pagado, aún abierto',
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          PopupMenuItem<String>(
-                            value: '__all__',
-                            child: Row(
-                              children: [
-                                const Icon(Icons.all_inclusive),
-                                const SizedBox(width: 10),
-                                Expanded(child: Text(tr('all'))),
-                                _menuCount(
-                                  _statusCounts.values.fold<int>(
-                                    0,
-                                    (a, b) => a + b,
-                                  ),
-                                  alwaysShow: true,
-                                ),
-                              ],
-                            ),
-                          ),
-                          ...ownerJobStatuses(_statuses).map((status) {
-                            final color = colorFromHex(
-                              status['color_hex']?.toString(),
-                            );
-                            final code = status['code']?.toString() ?? '';
-                            final count = _statusCount(code);
-                            return PopupMenuItem<String>(
-                              value: code,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    jobStatusIcon(
-                                      status['icon_key']?.toString(),
-                                    ),
-                                    color: color,
-                                  ),
+                        itemBuilder: (_) {
+                          final total = _statusCounts.values.fold(0, (a, b) => a + b);
+                          final closed = _statusCounts.entries
+                              .where((entry) => _closedJobStatuses.contains(entry.key.toLowerCase()))
+                              .fold(0, (count, entry) => count + entry.value);
+                          return [
+                            for (final (value, label, icon, count) in [
+                              ('__all__', tr('all'), Icons.all_inclusive, total),
+                              ('__open__', _text('Open', 'Abiertos'), Icons.work_outline, total - closed),
+                              (closedJobsFilter, _text('Closed', 'Cerrados'), Icons.lock_outline, closed),
+                            ])
+                              PopupMenuItem<String>(
+                                value: value,
+                                child: Row(children: [
+                                  Icon(icon),
                                   const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      jobStatusLabel(
-                                        status['code']?.toString(),
-                                        status['name']?.toString() ?? '',
-                                      ),
-                                    ),
-                                  ),
-                                  _menuCount(count),
-                                ],
+                                  Expanded(child: Text(label)),
+                                  _menuCount(count, alwaysShow: true),
+                                ]),
                               ),
-                            );
-                          }),
-                        ],
+                          ];
+                        },
                         child: Builder(
                           builder: (context) {
-                            Map<String, dynamic>? selected;
-                            if (_selectedStatus != null) {
-                              for (final status in ownerJobStatuses(_statuses)) {
-                                if (status['code']?.toString() ==
-                                    _selectedStatus) {
-                                  selected = status;
-                                  break;
-                                }
-                              }
-                            }
-                            final color = selected == null
-                                ? BriskersColors.jobs
-                                : colorFromHex(
-                                    selected['color_hex']?.toString(),
-                                  );
-                            final label = _selectedStatus == '__open__'
-                                ? _text('Open', 'Abiertos')
-                                : _selectedStatus == 'paid_still_open'
-                                ? _text(
-                                    'Paid, Still Open',
-                                    'Pagado, aún abierto',
-                                  )
-                                : selected == null
-                                ? _text('All statuses', 'Todos los estados')
-                                : jobStatusLabel(
-                                    selected['code']?.toString(),
-                                    selected['name']?.toString() ?? '',
-                                  );
+                            const color = BriskersColors.jobs;
+                            final label = switch (_selectedStatus) {
+                              '__open__' => _text('Open', 'Abiertos'),
+                              closedJobsFilter => _text('Closed', 'Cerrados'),
+                              _ => tr('all'),
+                            };
 
                             return Container(
                               padding: const EdgeInsets.symmetric(
@@ -1131,14 +1056,14 @@ class _JobsScreenState extends State<JobsScreen>
                                       label,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
+                                      style: const TextStyle(
                                         color: color,
                                         fontWeight: FontWeight.w800,
                                       ),
                                     ),
                                   ),
                                   const SizedBox(width: 3),
-                                  Icon(
+                                  const Icon(
                                     Icons.chevron_right,
                                     size: 18,
                                     color: color,

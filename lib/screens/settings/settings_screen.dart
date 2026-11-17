@@ -4,6 +4,7 @@ import '../../core/briskers_colors.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/connection_mode.dart';
 import '../../widgets/briskers_page_header.dart';
+import '../../services/customer_workflow_preferences.dart';
 import '../kiosk/kiosk_checkin_screen.dart';
 import 'catalog_settings_screen.dart';
 import 'email_templates_settings_screen.dart';
@@ -15,6 +16,7 @@ import 'job_statuses_settings_screen.dart';
 import 'kiosk_checkin_settings_screen.dart';
 import 'invoice_statuses_settings_screen.dart';
 import 'language_settings_screen.dart';
+import 'navigation_settings_screen.dart';
 import 'local_sync_status_screen.dart';
 import 'item_categories_settings_screen.dart';
 import 'payment_methods_settings_screen.dart';
@@ -106,6 +108,17 @@ class SettingsScreen extends StatelessWidget {
       ),
       body: ListView(
         children: [
+          if (roleCode == 'owner')
+            _CustomerNextActionSetting(businessId: businessId),
+          if (roleCode == 'owner')
+            ListTile(
+              leading: const Icon(Icons.view_week_outlined, color: BriskersColors.settings),
+              title: const Text('Navigation'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push<void>(context, MaterialPageRoute(
+                builder: (_) => NavigationSettingsScreen(businessId: businessId),
+              )),
+            ),
           ListTile(
             leading: const Icon(Icons.translate, color: BriskersColors.settings),
             title: Text(tr('language')),
@@ -535,4 +548,56 @@ class SettingsScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+class _CustomerNextActionSetting extends StatefulWidget {
+  const _CustomerNextActionSetting({required this.businessId});
+  final String businessId;
+
+  @override
+  State<_CustomerNextActionSetting> createState() => _CustomerNextActionSettingState();
+}
+
+class _CustomerNextActionSettingState extends State<_CustomerNextActionSetting> {
+  late final _prefs = CustomerWorkflowPreferences(widget.businessId);
+  bool? _enabled;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _prefs.offerNextAction().then((value) {
+      if (mounted) setState(() => _enabled = value);
+    }, onError: (Object _) {
+      if (mounted) setState(() => _enabled = true);
+    });
+  }
+
+  Future<void> _save(bool value) async {
+    setState(() => _saving = true);
+    try {
+      if (!await _prefs.setOfferNextAction(value)) {
+        throw StateError('Preference could not be saved.');
+      }
+      if (mounted) setState(() => _enabled = value);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not save the customer workflow setting.')),
+      );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => SwitchListTile(
+    secondary: const Icon(Icons.person_add_alt_1, color: BriskersColors.customers),
+    title: const Text('Offer the next action for new customers'),
+    subtitle: const Text('After saving a customer and vehicle, offer a job, invoice, or estimate.'),
+    value: _enabled ?? true,
+    activeThumbColor: BriskersColors.confirm,
+    onChanged: _enabled == null || _saving ? null : _save,
+  );
 }

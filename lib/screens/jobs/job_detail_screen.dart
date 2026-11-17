@@ -1,3 +1,5 @@
+import '../../services/local_recent_records.dart';
+import '../../widgets/recent_record_view.dart';
 import '../../services/offline_invoice_finalization.dart';
 import '../../services/local_invoice_closure.dart';
 import '../../services/local_job_core_projection.dart';
@@ -90,7 +92,7 @@ class JobDetailScreen extends StatefulWidget {
 }
 
 class _JobDetailScreenState extends State<JobDetailScreen>
-    with ModuleModalState<JobDetailScreen> {
+    with ModuleModalState<JobDetailScreen>, RecentRecordView<JobDetailScreen> {
   @override
   Color get modalAccent => BriskersColors.jobs;
   static const _api = BriskersApi();
@@ -5852,6 +5854,16 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     }
     if (_job == null) {
       return Scaffold(appBar: AppBar(backgroundColor: BriskersColors.jobs.withValues(alpha: 0.10), title: const Text('Job')), body: Center(child: Text(_error ?? 'Job not found.')));
+    }
+
+    if (!_contentBlocked && _job!['_first_frame_only'] != true) {
+      final label = [
+        _job!['job_number']?.toString() ?? '',
+        _job!['customer_name']?.toString() ?? '',
+      ].where((value) => value.isNotEmpty).join(' · ');
+      recordRecentView(widget.businessId, (
+        kind: RecentRecordKind.job, id: widget.jobId, label: label,
+      ));
     }
 
     final assignments = List<dynamic>.from(_job!['assignments'] ?? const []);

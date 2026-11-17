@@ -37,6 +37,10 @@ import 'home_screen.dart';
 import 'jobs_screen.dart';
 import 'more_screen.dart';
 import 'documents_screen.dart';
+import 'payroll/owner_payroll_screen.dart';
+import 'settings/employees_settings_screen.dart';
+import 'settings/navigation_settings_screen.dart';
+import 'settings/settings_screen.dart';
 
 class ShellScreen extends StatefulWidget {
   const ShellScreen({
@@ -75,6 +79,27 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   ];
 
   int _index = 0;
+  List<ShopNavigationItem> _navigation = ShopNavigationPreferences.defaults;
+
+  void _navigationChanged() {
+    if (ShopNavigationPreferences.changes.value == widget.businessId) {
+      unawaited(_loadNavigation());
+    }
+  }
+
+  Future<void> _loadNavigation() async {
+    if (widget.roleCode != 'owner') return;
+    final business = widget.businessId;
+    try {
+      final items = await ShopNavigationPreferences(business).load();
+      if (mounted && widget.businessId == business && widget.roleCode == 'owner') {
+        setState(() => _navigation = items);
+      }
+    } catch (_) {
+      // The default dock always provides access to Settings.
+    }
+  }
+
   int _customersRefreshToken = 0;
   int _customerNavigationRequest = 0;
   List<String>? _focusedCustomerIds;
@@ -117,6 +142,8 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    ShopNavigationPreferences.changes.addListener(_navigationChanged);
+    unawaited(_loadNavigation());
     // Schedule after the first frame: registration must never hold startup,
     // list navigation, database edits, or initial record paint.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -379,6 +406,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    ShopNavigationPreferences.changes.removeListener(_navigationChanged);
     _retirementRetry?.cancel();
     _retirementChanges?.cancel();
     _customerReviewsSubscription?.cancel();
@@ -483,44 +511,76 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
 
   String get _roleLabel => roleLabel(widget.roleCode);
 
-  Widget _shellNavigationBar({bool nested = false}) => BriskersModuleDock(
-    selectedIndex: _index,
-    destinations: [
-      const BriskersDockDestination(label: 'Home', icon: Icons.home_outlined, color: BriskersColors.today),
-      BriskersDockDestination(label: 'Customers', icon: Icons.people_outline, color: BriskersColors.customers, count: _homeCustomersNewCount),
-      BriskersDockDestination(label: 'Jobs', icon: Icons.build_outlined, color: BriskersColors.jobs, count: _homeJobsCount),
-      BriskersDockDestination(label: 'Estimates', icon: Icons.description_outlined, color: BriskersColors.estimates, count: _homeEstimatesOpenCount),
-      BriskersDockDestination(label: 'Invoices', icon: Icons.receipt_long_outlined, color: BriskersColors.invoices, count: _homeInvoicesOpenCount),
-      BriskersDockDestination(label: 'Schedule', icon: Icons.calendar_month_outlined, color: BriskersColors.schedule, count: _homeAppointmentsCount),
-      const BriskersDockDestination(label: 'Expenses', icon: Icons.account_balance_wallet_outlined, color: BriskersColors.expenses),
-      const BriskersDockDestination(label: 'More', icon: Icons.more_horiz, color: BriskersColors.more),
-    ],
-    onBadgeSelected: (index) {
-      if (index != 1) {
-        _goTo(index);
-        return;
-      }
-      if (nested) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
-      }
-      // A badge tap also changes screens immediately while IDs load.
-      _goTo(1);
-      final request = ++_customerNavigationRequest;
-      unawaited(_openCustomers(request));
-    },
-    onSelected: (index) {
-      if (nested) {
-        // A shared dock may be inside a sheet over a detail page.
-        // Explicit module navigation dismisses the nested routes first.
-        Navigator.of(context).popUntil((route) => route.isFirst);
-      }
-      if (index == 1) {
-        _selectCustomersFromDock();
-      } else {
-        _goTo(index);
-      }
-    },
-  );
+  Widget _shellNavigationBar({bool nested = false}) {
+    final owner = widget.roleCode == 'owner';
+    final sections = [
+      for (final item in (owner ? _navigation : ShopNavigationPreferences.defaults))
+        if (item.visible && (item.section.index < 8 ||
+            item.section == ShopNavigationSection.settings ||
+            (owner && OwnerPayrollScreen.enabled)))
+          item.section,
+    ];
+    final counts = {
+      ShopNavigationSection.customers: _homeCustomersNewCount,
+      ShopNavigationSection.jobs: _homeJobsCount,
+      ShopNavigationSection.estimates: _homeEstimatesOpenCount,
+      ShopNavigationSection.invoices: _homeInvoicesOpenCount,
+      ShopNavigationSection.schedule: _homeAppointmentsCount,
+    };
+    return BriskersModuleDock(
+      selectedIndex: sections.indexOf(ShopNavigationSection.values[_index]),
+      destinations: [
+        for (final section in sections)
+          BriskersDockDestination(
+            label: section.label, icon: section.icon, color: section.color,
+            count: counts[section] ?? 0,
+          ),
+      ],
+      onBadgeSelected: (position) {
+        final section = sections[position];
+        if (section != ShopNavigationSection.customers) {
+          _selectDockSection(section, nested: nested);
+          return;
+        }
+        if (nested) Navigator.of(context).popUntil((route) => route.isFirst);
+        _goTo(1);
+        final request = ++_customerNavigationRequest;
+        unawaited(_openCustomers(request));
+      },
+      onSelected: (position) => _selectDockSection(sections[position], nested: nested),
+    );
+  }
+
+  void _selectDockSection(ShopNavigationSection section, {required bool nested}) {
+    if (nested) Navigator.of(context).popUntil((route) => route.isFirst);
+    if (section == ShopNavigationSection.customers) {
+      _selectCustomersFromDock();
+      return;
+    }
+    if (section.index < 8) {
+      _goTo(section.index);
+      return;
+    }
+    final Widget page;
+    if (section == ShopNavigationSection.settings) {
+      page = SettingsScreen(
+        businessId: widget.businessId,
+        businessName: _businessName,
+        roleCode: widget.roleCode,
+        onBusinessNameChanged: (name) => setState(() => _businessName = name),
+      );
+    } else {
+      if (widget.roleCode != 'owner' || !OwnerPayrollScreen.enabled) return;
+      page = section == ShopNavigationSection.employees
+          ? EmployeesSettingsScreen(businessId: widget.businessId, isOwner: true)
+          : OwnerPayrollScreen(
+              businessId: widget.businessId,
+              globalTasks: section == ShopNavigationSection.tasks,
+              reportsOnly: section == ShopNavigationSection.reports,
+            );
+    }
+    Navigator.push<void>(context, MaterialPageRoute(builder: (_) => page));
+  }
 
   @override
   Widget build(BuildContext context) {

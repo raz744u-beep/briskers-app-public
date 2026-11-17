@@ -1,6 +1,8 @@
 /// Legacy query options retained for callers; Jobs uses All / latest activity.
 enum JobListView { recent, active, all }
 
+const closedJobsFilter = '__closed__';
+
 enum JobListSort { lastAccessed, lastModified, jobDate, creation }
 
 /// Kept in route PageStorage to restore status, search and paging per user.

@@ -1,3 +1,4 @@
+import '../widgets/briskers_curved_tabs.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -59,6 +60,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
   late JobSummaryVisibility _jobVisibility;
   List<Map<String, dynamic>>? _appointments;
+  static const _dateFilters = ['today', 'upcoming', 'past', 'all'];
   String _filter = 'today';
   final TextEditingController _search = TextEditingController();
   String? _error;
@@ -1186,64 +1188,20 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                // Four compact filters stay on one row. "Today" includes all
-                // appointment statuses; confirmed-only remains an internal
-                // query for kiosk and other workflows, not a duplicate tab.
-                Row(
-                  children: [
-                    for (final option in const <String>[
-                      'today',
-                      'upcoming',
-                      'past',
-                      'all',
-                    ])
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 3),
-                          child: ChoiceChip(
-                            label: SizedBox(
-                              width: double.infinity,
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  option == 'today'
-                                      ? tr('today')
-                                      : option == 'upcoming'
-                                          ? tr('upcoming')
-                                          : option == 'past'
-                                              ? tr('past')
-                                              : tr('all'),
-                                  maxLines: 1,
-                                ),
-                              ),
-                            ),
-                            labelPadding: const EdgeInsets.symmetric(
-                              horizontal: 3,
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 7),
-                            selected: _filter == option,
-                            onSelected: (_) {
-                              if (_filter == option) return;
-                              setState(() => _filter = option);
-                              unawaited(_loadLocal(reportError: true));
-                            },
-                            selectedColor: BriskersColors.actionBlue
-                                .withValues(alpha: 0.16),
-                            side: BorderSide(
-                              color: BriskersColors.actionBlue.withValues(
-                                alpha: _filter == option ? 0.75 : 0.34,
-                              ),
-                            ),
-                            labelStyle: TextStyle(
-                              color: BriskersColors.actionBlue,
-                              fontWeight: _filter == option
-                                  ? FontWeight.w800
-                                  : FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
+                BriskersControlledTabs(
+                  entries: [
+                    (label: tr('today'), color: BriskersColors.appointments, icon: Icons.today_outlined),
+                    (label: tr('upcoming'), color: BriskersColors.appointments, icon: Icons.event_available_outlined),
+                    (label: tr('past'), color: BriskersColors.appointments, icon: Icons.history),
+                    (label: tr('all'), color: BriskersColors.appointments, icon: Icons.calendar_month_outlined),
                   ],
+                  selected: _dateFilters.indexOf(_filter),
+                  onSelected: (index) {
+                    final option = _dateFilters[index];
+                    if (_filter == option) return;
+                    setState(() => _filter = option);
+                    unawaited(_loadLocal(reportError: true));
+                  },
                 ),
                 const SizedBox(height: 10),
                 Row(children: [

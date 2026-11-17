@@ -28,7 +28,7 @@ void main() {
     expect(goTo, contains('_focusedCustomerIds = null;'));
     expect(goTo, contains('_customersRefreshToken++;'));
     expect(goTo, isNot(contains('unawaited(_openCustomers(request))')));
-    expect(shell, contains('onBadgeSelected: (index)'));
+    expect(shell, contains('onBadgeSelected: (position)'));
     expect(shell, contains('unawaited(_openCustomers(request))'));
     expect(dock, contains('widget.onBadgeSelected!(index)'));
     expect(retained, contains('retainedIndices = const {0, 1, 2, 3, 4, 5, 6}'));

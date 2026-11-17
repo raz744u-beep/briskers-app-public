@@ -6,15 +6,15 @@ void main() {
   test('Appointment screen exposes four compact filters on one row', () {
     final source = File('lib/screens/appointments_screen.dart')
         .readAsStringSync();
-    final start = source.indexOf('// Four compact filters stay on one row.');
+    final start = source.indexOf('BriskersControlledTabs(');
     final end = source.indexOf('const SizedBox(height: 10)', start);
     expect(start, greaterThanOrEqualTo(0));
     expect(end, greaterThan(start));
     final filters = source.substring(start, end);
-    expect(filters, contains('Row('));
-    expect(filters, isNot(contains('Wrap(')));
-    expect(filters, contains('Expanded('));
-    expect(filters, contains('FittedBox('));
+    final shared = File('lib/widgets/briskers_curved_tabs.dart').readAsStringSync();
+    expect(shared, contains('TabBar('));
+    expect(shared, contains('FittedBox('));
+    expect(shared, isNot(contains('isScrollable: true')));
     for (final option in <String>["'today'", "'upcoming'", "'past'", "'all'"]) {
       expect(filters, contains(option));
     }

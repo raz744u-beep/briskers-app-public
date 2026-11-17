@@ -1,3 +1,4 @@
+import 'package:briskers_app/widgets/owner_confirmation_dialog.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:drift/native.dart';
@@ -174,7 +175,7 @@ void main() {
       );
       await click(button);
       await until(find.textContaining('Complete 6 tasks for this job?'));
-      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.byType(OwnerConfirmationDialog), findsOneWidget);
       await click(find.text('Cancel'));
       await tester.runAsync(() async {
         expect(
@@ -183,10 +184,10 @@ void main() {
         );
       });
       await click(button);
-      await until(find.byType(AlertDialog));
+      await until(find.byType(OwnerConfirmationDialog));
       await click(
         find.descendant(
-          of: find.byType(AlertDialog),
+          of: find.byType(OwnerConfirmationDialog),
           matching: find.text('Mark All Done'),
         ),
       );

@@ -14,11 +14,13 @@ class NewVehicleScreen extends StatefulWidget {
     required this.businessId,
     required this.customerId,
     this.vehicle,
+    this.onSaved,
   });
 
   final String businessId;
   final String customerId;
   final Map<String, dynamic>? vehicle;
+  final ValueChanged<Map<String, dynamic>>? onSaved;
 
   bool get isEditing => vehicle != null;
 
@@ -137,7 +139,7 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
             : _keyPassword.text.trim(),
       );
 
-      await _offlineAdmin.queueVehicle(
+      final vehicleId = await _offlineAdmin.queueVehicle(
         widget.businessId,
         widget.customerId,
         vehicleId:
@@ -161,7 +163,16 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
         }
       }
 
-      if (mounted) Navigator.pop(context, true);
+      if (!mounted) return;
+      widget.onSaved?.call({
+        'id': vehicleId,
+        'make': params.make,
+        'model': params.model,
+        'year': params.year,
+        'vin': params.vin,
+        'mileage': params.mileage,
+      });
+      Navigator.pop(context, true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {

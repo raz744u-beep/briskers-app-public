@@ -17,6 +17,11 @@ import '../services/offline_document_draft_service.dart';
 import '../services/weather_service.dart';
 import 'appointments/appointment_manage_screen.dart';
 import 'customers/new_customer_screen.dart';
+import 'customers/customer_detail_screen.dart';
+import '../services/local_recent_records.dart';
+import '../services/local_job_access_history.dart';
+import '../services/local_customer_vehicle_identity.dart';
+import '../widgets/owner_confirmation_dialog.dart';
 import 'documents_screen.dart';
 import 'expenses/expense_entry_screen.dart';
 import 'expenses_screen.dart';
@@ -69,6 +74,118 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _recurringCatchUpRunning = false;
+  StreamSubscription<(String, String)>? _recentSubscription;
+  List<RecentRecord> _recent = const [];
+  (String, String)? _recentScope;
+
+  LocalRecentRecords? get _recentStore {
+    final user = LocalJobAccessHistory.currentUserId;
+    return user == null ? null : LocalRecentRecords(widget.businessId, user);
+  }
+
+  Future<void> _loadRecent() async {
+    final store = _recentStore;
+    if (store == null) return;
+    final scope = (store.business, store.user);
+    try {
+      final rows = await store.load();
+      final current = _recentStore;
+      if (mounted && current != null && (current.business, current.user) == scope) {
+        setState(() { _recent = rows; _recentScope = scope; });
+      }
+    } catch (_) {
+      // The Home navigation remains available if device history is unreadable.
+    }
+  }
+
+  Future<void> _clearRecent() async {
+    final store = _recentStore;
+    if (store == null) return;
+    final clear = await showDialog<bool>(
+      context: context,
+      builder: (_) => const OwnerConfirmationDialog(
+        title: 'Clear Recently Viewed?',
+        sections: [Text('Clear the shortcuts from this device.')],
+        confirm: 'Clear History',
+        destructive: true,
+      ),
+    );
+    if (clear != true || !mounted || _recentStore?.user != store.user ||
+        widget.businessId != store.business) {
+      return;
+    }
+    try {
+      await store.clear();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not clear Recently Viewed.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _openRecent(RecentRecord record) async {
+    if (record.kind == RecentRecordKind.customer) {
+      final id = await LocalCustomerVehicleIdentity(localDatabase)
+          .resolve(widget.businessId, record.id);
+      if (!mounted || id == null) return;
+      await Navigator.push<void>(context, MaterialPageRoute(
+        builder: (_) => CustomerDetailScreen(
+          businessId: widget.businessId, customerId: id, roleCode: widget.roleCode,
+        ),
+      ));
+    } else if (record.kind == RecentRecordKind.job) {
+      await Navigator.push<void>(context, MaterialPageRoute(
+        builder: (_) => JobDetailScreen(
+          businessId: widget.businessId, jobId: record.id, roleCode: widget.roleCode,
+        ),
+      ));
+    } else {
+      await _openDocument(record.id);
+    }
+  }
+
+  Widget _recentlyViewed() {
+    final store = _recentStore;
+    if (store == null || _recentScope != (store.business, store.user)) {
+      return const SizedBox.shrink();
+    }
+    return Card(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      child: Column(
+        children: [
+          ListTile(
+            title: const Text('Recently Viewed', style: TextStyle(fontWeight: FontWeight.w800)),
+            trailing: _recent.isEmpty ? null : TextButton(
+              onPressed: _clearRecent, child: const Text('Clear History'),
+            ),
+            subtitle: _recent.isEmpty ? const Text('No records viewed yet.') : null,
+          ),
+          for (final record in _recent)
+            ListTile(
+              dense: true,
+              leading: Icon(switch (record.kind) {
+                RecentRecordKind.customer => Icons.person_outline,
+                RecentRecordKind.job => Icons.build_outlined,
+                RecentRecordKind.invoice => Icons.receipt_long_outlined,
+                RecentRecordKind.estimate => Icons.description_outlined,
+              }),
+              title: Text(record.label.isEmpty ? record.kind.name : record.label,
+                maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: Text(switch (record.kind) {
+                RecentRecordKind.customer => 'Customer',
+                RecentRecordKind.job => 'Job',
+                RecentRecordKind.invoice => 'Invoice',
+                RecentRecordKind.estimate => 'Estimate',
+              }),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _openRecent(record),
+            ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _catchUpRecurring() async {
     if (_recurringCatchUpRunning || widget.roleCode != 'owner') return;
@@ -137,6 +254,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _recentSubscription = LocalRecentRecords.changes.listen((scope) {
+      if (scope == (widget.businessId, LocalJobAccessHistory.currentUserId)) {
+        unawaited(_loadRecent());
+      }
+    });
+    unawaited(_loadRecent());
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_catchUpRecurring());
@@ -152,6 +275,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    unawaited(_recentSubscription?.cancel());
     WidgetsBinding.instance.removeObserver(this);
     BriskersConnectionModeController.instance.removeListener(_onConnectionMode);
     super.dispose();
@@ -160,6 +284,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(covariant HomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.attentionRefreshToken != widget.attentionRefreshToken) {
+      unawaited(_loadRecent());
+    }
     if (oldWidget.businessId != widget.businessId || oldWidget.roleCode != widget.roleCode) {
       unawaited(_catchUpRecurring());
     }
@@ -1315,6 +1443,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         MaterialPageRoute(
                           builder: (_) => NewCustomerScreen(
                             businessId: widget.businessId,
+                            roleCode: widget.roleCode,
                           ),
                         ),
                       );
@@ -1431,6 +1560,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               estimatesOpenCount: widget.estimatesOpenCount,
               invoicesOpenCount: widget.invoicesOpenCount,
             ),
+            const SizedBox(height: 12),
+            _recentlyViewed(),
             const SizedBox(height: 24),
           ],
         ),

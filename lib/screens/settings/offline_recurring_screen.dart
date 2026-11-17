@@ -1,3 +1,4 @@
+import '../../widgets/briskers_dialog.dart';
 import 'dart:async';
 import 'dart:math';
 
@@ -297,10 +298,16 @@ class _RuleEditorState extends State<_RuleEditor> {
   void dispose() { for (final c in [amount,date,end,remarks,interval]) { c.dispose(); } super.dispose(); }
   List<RecurringRow> options(String key) => [for (final r in widget.options[key] as List? ?? [])
     if (r is Map && r['active'] != false) Map<String,dynamic>.from(r)];
+  String? savedLabel(String optionsKey) => widget.rule?[switch (optionsKey) {
+    'accounts' => 'account',
+    'categories' => 'category',
+    _ => 'counterparty',
+  }]?.toString();
+
   Widget select(String label, String key, String? selected, void Function(String?) changed) {
     final rows = options(key);
     if (selected != null && !rows.any((r) => r['id'] == selected)) {
-      rows.add({'id': selected, 'name': 'Saved $label'});
+      rows.add({'id': selected, 'name': savedLabel(key) ?? 'Saved $label'});
     }
     return DropdownButtonFormField<String>(initialValue: selected, isExpanded: true,
       decoration: InputDecoration(labelText: label),
@@ -313,13 +320,15 @@ class _RuleEditorState extends State<_RuleEditor> {
       OfflineRecurringRepository.day(date.text.trim());
       if (end.text.trim().isNotEmpty) OfflineRecurringRepository.day(end.text.trim());
       OfflineRecurringRepository.nextDate(date.text.trim(), frequency, int.parse(interval.text));
-      String? name(String key, String? id) => options(key).where((r) => r['id'] == id).firstOrNull?['name'] as String?;
+      String? name(String key, String? id, String idField) =>
+          options(key).where((row) => row['id'] == id).firstOrNull?['name']?.toString() ??
+          (id != null && id == widget.rule?[idField] ? savedLabel(key) : null);
       Navigator.pop(context, <String,dynamic>{
         if (widget.rule != null) ...widget.rule!,
         'id': widget.rule?['id'] ?? _uuid(), 'business_id': widget.businessId,
         'direction': direction, 'account_id': account, 'category_id': category,
-        'vendor_id': vendor, 'account': name('accounts',account), 'category': name('categories',category),
-        'counterparty': name('counterparties',vendor), 'amount_minor': _minor(amount.text),
+        'vendor_id': vendor, 'account': name('accounts', account, 'account_id'), 'category': name('categories', category, 'category_id'),
+        'counterparty': name('counterparties', vendor, 'vendor_id'), 'amount_minor': _minor(amount.text),
         'frequency': frequency, 'interval_count': int.parse(interval.text),
         'next_date': date.text.trim(), 'end_date': end.text.trim().isEmpty ? null : end.text.trim(),
         'remarks': remarks.text.trim(), 'is_repeating': active,
@@ -327,9 +336,9 @@ class _RuleEditorState extends State<_RuleEditor> {
     } catch (e) { setState(() => error = e.toString()); }
   }
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.rule == null ? 'New recurring transaction' : 'Edit recurring transaction'),
-    content: SizedBox(width: 420, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+  Widget build(BuildContext context) => BriskersDialog(
+    title: widget.rule == null ? 'New recurring transaction' : 'Edit recurring transaction',
+    content: SizedBox(width: 420, child: Column(mainAxisSize: MainAxisSize.min, children: [
       DropdownButtonFormField<String>(initialValue: direction, decoration: const InputDecoration(labelText: 'Type'),
         items: [for (final v in ['expense','income']) DropdownMenuItem(value:v,child:Text(v))], onChanged:(v)=>setState(()=>direction=v!)),
       select('Account','accounts',account,(v)=>setState(()=>account=v)),
@@ -344,8 +353,12 @@ class _RuleEditorState extends State<_RuleEditor> {
       TextField(controller:remarks,decoration:const InputDecoration(labelText:'Remarks')),
       SwitchListTile(title:const Text('Repeating'),value:active,onChanged:(v)=>setState(()=>active=v)),
       if(error!=null) Text(error!),
-    ]))),
-    actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Cancel')),
-      FilledButton(onPressed:save,child:const Text('Save locally'))],
+    ])),
+    actions: [
+      OutlinedButton(style: BriskersDialog.cancelStyle,
+        onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      FilledButton(style: BriskersDialog.confirmStyle(),
+        onPressed: save, child: const Text('Save locally')),
+    ],
   );
 }

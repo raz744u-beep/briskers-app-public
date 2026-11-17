@@ -22,6 +22,7 @@ import '../services/financial_history_recovery.dart';
 import '../services/invoice_payment_feed.dart';
 import '../services/expenses_period_totals.dart';
 import '../services/local_expense_subtotal.dart';
+import '../services/local_transaction_search.dart';
 import '../services/verified_expense_totals_cache.dart';
 import '../services/local_financial_totals_journal.dart';
 import '../services/expenseiq_local_photo_sync.dart';
@@ -98,6 +99,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   String? _categoryFilterId;
   String? _counterpartyFilterId;
   Timer? _searchDebounce;
+  String _appliedSearch = '';
+  List<Map<String, dynamic>>? _offlineScopeRows;
+  List<Map<String, dynamic>>? _offlineMatches;
+  final _searchIndex = Expando<String>();
+  Object? _combinedScope;
+  List<Map<String, dynamic>> _combinedRows = const [];
   String? _error;
   bool _showingLocal = false;
   // Cache-first is normal in Auto mode; only an actual transaction-page
@@ -193,6 +200,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       _categoryFilterId = null;
       _counterpartyFilterId = null;
       _searchController.clear();
+      _appliedSearch = '';
+      _offlineScopeRows = null;
+      _offlineMatches = null;
       _transactions = const [];
       _invoiceReceipts = const [];
       _visibleCount = _pageSize;
@@ -232,14 +242,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         _scrollController.position.extentAfter >= 500) {
       return;
     }
-    final count = InvoicePaymentFeed.combine(
-      financial: _transactions, receipts: _invoiceReceipts,
-      startDate: _selectedRangeStart, endDate: _selectedRangeEnd,
-      search: _searchController.text,
-      direction: _filter == 'all' ? null : _filter,
-      filteredAccount: _accountFilterId != null ||
-          _categoryFilterId != null || _counterpartyFilterId != null,
-    ).length;
+    final count = _combinedTransactions.length;
     if (_visibleCount < count) {
       setState(() => _visibleCount += _pageSize);
     } else {
@@ -263,7 +266,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         today.day <= lastDay ? today.day : lastDay);
   }
 
-  bool get _searching => _searchController.text.trim().isNotEmpty;
+  bool get _searching => _appliedSearch.isNotEmpty;
   DateTime? get _selectedRangeStart => _rangeStartDate;
   DateTime? get _selectedRangeEnd => _rangeEndDate;
 
@@ -296,7 +299,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       case '6m':
         return _monthsAgoClamped(today, 6);
       case '1y':
-        return DateTime(today.year - 1, today.month, today.day);
+        return _monthsAgoClamped(today, 12);
       case 'custom':
         return _customStartDate;
       case 'all':
@@ -358,9 +361,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       offset: offset,
       startDate: _selectedRangeStart,
       endDate: _selectedRangeEnd,
-      search: _searchController.text.trim().isEmpty
-          ? null
-          : _searchController.text.trim(),
+      search: _searching ? _appliedSearch : null,
       direction: _filter == 'all' ? null : _filter,
       accountId: _accountFilterId,
       categoryId: _categoryFilterId,
@@ -413,6 +414,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     bool refreshReceipts = false,
     bool forceTotals = false,
   }) async {
+    _appliedSearch = _searchController.text.trim();
+    _offlineScopeRows = null;
+    _offlineMatches = null;
     final epoch = ++_loadEpoch;
     _loadingMore = false;
     final businessId = widget.businessId;
@@ -499,7 +503,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         unawaited(_refreshInvoiceReceipts(businessId));
       }
     }
-    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
+    final mode = BriskersConnectionModeController.instance;
+    final forceOffline = mode.forceOffline;
+    final forceOnline = mode.forceOnline;
 
     if (!forceOnline) {
       try {
@@ -507,15 +513,19 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           widget.businessId,
           startDate: _selectedRangeStart,
           endDate: _selectedRangeEnd,
-          search: _searchController.text.trim().isEmpty
-              ? null
-              : _searchController.text.trim(),
+          search: !forceOffline && _searching ? _appliedSearch : null,
           direction: _filter == 'all' ? null : _filter,
           accountId: _accountFilterId,
           categoryId: _categoryFilterId,
           counterpartyId: _counterpartyFilterId,
           includeCachedDetails: true,
         );
+        if (!_isCurrentLoad(epoch, businessId)) return;
+        if (forceOffline) {
+          _offlineScopeRows = localRows;
+          localRows = _matchOfflineSearch(localRows);
+          _offlineMatches = localRows;
+        }
         // The first offline frame displays at most 50 transactions.
         // Enrich only those rows. Enriching the entire ~1,000-row snapshot
         // first can delay the page and unnecessarily process many receipts.
@@ -543,8 +553,6 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         if (_isCurrentLoad(epoch, businessId) &&
             (localRows.isNotEmpty || localOptions.isNotEmpty)) {
           setState(() {
-            _transactions = localRows.take(_pageSize).toList();
-            _hasMore = hasMoreLocal;
             _quickTemplates = List<dynamic>.from(
               localOptions['quick_templates'] ?? const [],
             ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
@@ -670,6 +678,13 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final epoch = ++_periodEpoch;
     final journal = LocalFinancialTotalsJournal();
     _pendingPeriodScope = scope;
+    if (_lastPeriodScope != scope) {
+      setState(() {
+        _periodTotals = null;
+        _periodError = null;
+        _periodCalculating = true;
+      });
+    }
     final sameScope = _lastPeriodScope == scope && _serverPeriodBase != null;
     final sqliteSaved = await journal.loadBaseline(businessId, scope);
     // Migrate an older complete verified snapshot from preferences once.
@@ -702,7 +717,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     bool usingPartialLocalSubtotal = false;
     int localChanges = 0;
     try {
-      if (baseline != null) {
+      if (baseline != null && !offline) {
         local = await journal.apply(
           businessId, baseline,
           startDate: startDate, endDate: endDate,
@@ -718,6 +733,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         );
         final effective = await journal.overlayCachedRows(businessId, cached);
         local = await LocalExpenseSubtotal.calculate(effective,
+          enrichPage: (rows) => const WarrantyReceiptReporting().enrich(
+            businessId, rows, refresh: false,
+          ),
           startDate: startDate, endDate: endDate,
           direction: direction,
           accountId: accountId, categoryId: categoryId,
@@ -764,7 +782,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           ? (offline ? 'No saved transactions for this period. Totals unavailable.'
               : 'Preparing first complete local baseline…')
           : usingPartialLocalSubtotal
-              ? 'Local totals · saved transactions only; older records may be missing'
+              ? 'Saved totals for $_rangeLabel · ${local.transactions} posted '
+                'transactions · ${_postedRangeVerified ? 'history checked for this period' : 'older records may be missing'}'
           : rolloverPending
               ? 'Saved local totals through ${DateFormat('MMM d').format(rolling.verifiedThrough)} · today not yet verified'
               : localChanges > 0
@@ -986,12 +1005,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       // Offline has the same paginated browsing as online. Only page the
       // locally saved ledger; never connect merely to reveal older records.
       if (local) {
-        final cached = await _localFinancial.loadTransactions(
+        final cached = _offlineMatches ?? await _localFinancial.loadTransactions(
           businessId,
           startDate: _selectedRangeStart,
           endDate: _selectedRangeEnd,
-          search: _searchController.text.trim().isEmpty
-              ? null : _searchController.text.trim(),
+          search: _searching ? _appliedSearch : null,
           direction: _filter == 'all' ? null : _filter,
           accountId: _accountFilterId,
           categoryId: _categoryFilterId,
@@ -1099,10 +1117,42 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
   }
 
+  List<Map<String, dynamic>> _matchOfflineSearch(
+    List<Map<String, dynamic>> rows,
+  ) {
+    if (!_searching) return rows;
+    final query = _appliedSearch.toLowerCase();
+    final words = query.split(RegExp(r'\s+'));
+    return rows.where((row) {
+      final fields = _searchIndex[row] ??= LocalTransactionSearch.fields(row);
+      return fields.contains(query) || words.every(fields.contains);
+    }).toList();
+  }
+
+  void _applySearch() {
+    _searchDebounce?.cancel();
+    final saved = _offlineScopeRows;
+    if (saved == null || !BriskersConnectionModeController.instance.forceOffline) {
+      unawaited(_load(showLoading: false));
+      return;
+    }
+    ++_loadEpoch;
+    setState(() {
+      _appliedSearch = _searchController.text.trim();
+      final matches = _matchOfflineSearch(saved);
+      _offlineMatches = matches;
+      _transactions = matches.take(_pageSize)
+          .map(WarrantyReceiptReporting.unverified).toList();
+      _visibleCount = _pageSize;
+      _loadingMore = false;
+      _hasMore = matches.length > _pageSize;
+    });
+  }
+
   void _searchChanged(String _) {
     _searchDebounce?.cancel();
     _searchDebounce = Timer(const Duration(milliseconds: 350), () {
-      if (mounted) _load(showLoading: false);
+      if (mounted) _applySearch();
     });
   }
 
@@ -1845,18 +1895,42 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
   }
 
+  List<Map<String, dynamic>> get _combinedTransactions {
+    final scope = (_transactions, _invoiceReceipts, _selectedRangeStart,
+      _selectedRangeEnd, _appliedSearch, _filter, _accountFilterId,
+      _categoryFilterId, _counterpartyFilterId);
+    if (_combinedScope != scope) {
+      _combinedRows = InvoicePaymentFeed.combine(
+        financial: _transactions,
+        receipts: _invoiceReceipts,
+        startDate: _selectedRangeStart,
+        endDate: _selectedRangeEnd,
+        search: _appliedSearch,
+        direction: _filter == 'all' ? null : _filter,
+        filteredAccount: _accountFilterId != null ||
+            _categoryFilterId != null || _counterpartyFilterId != null,
+      );
+      _combinedScope = scope;
+    }
+    return _combinedRows;
+  }
+
+  String get _searchSubtotal {
+    final rows = _offlineMatches ?? _transactions;
+    final cents = rows.fold<int>(0, (sum, row) {
+      final amount = num.tryParse(row['amount']?.toString() ?? '') ?? 0;
+      if (!amount.isFinite) return sum;
+      return sum + (amount * 100).round() *
+          (row['direction'] == 'expense' ? -1 : 1);
+    });
+    final scope = _offlineMatches == null ? 'Loaded' : 'Saved';
+    return '$scope posted search subtotal · ${rows.length} matches · '
+        '${_money(cents / 100)} net before fees';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final allVisible = InvoicePaymentFeed.combine(
-      financial: _transactions,
-      receipts: _invoiceReceipts,
-      startDate: _selectedRangeStart,
-      endDate: _selectedRangeEnd,
-      search: _searchController.text,
-      direction: _filter == 'all' ? null : _filter,
-      filteredAccount: _accountFilterId != null ||
-          _categoryFilterId != null || _counterpartyFilterId != null,
-    );
+    final allVisible = _combinedTransactions;
     final visible = allVisible.take(_visibleCount).toList();
     final moreReceiptPages = allVisible.length > _visibleCount;
     final receiptsUnverified = _periodTotals?.feesUnverified == true;
@@ -1890,10 +1964,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       // some Android startup paths and prevents immediate navigation.
       body: RefreshIndicator(
               onRefresh: () => _load(forceTotals: true),
-              child: ListView(
+              child: CustomScrollView(
                 controller: _scrollController,
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
-                children: [
+                slivers: [
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                    sliver: SliverList.list(children: [
                   if (!widget.showAppBar) ...[
                     Padding(
                       padding: const EdgeInsets.fromLTRB(6, 2, 6, 14),
@@ -2019,26 +2095,22 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                     leading: const Icon(Icons.search),
                     elevation: const WidgetStatePropertyAll<double>(3),
                     shadowColor: const WidgetStatePropertyAll<Color>(Colors.black26),
-                    onChanged: (value) {
-                      setState(() {});
-                      _searchChanged(value);
-                    },
-                    onSubmitted: (_) {
-                      _searchDebounce?.cancel();
-                      _load(showLoading: false);
-                    },
+                    onChanged: _searchChanged,
+                    onSubmitted: (_) => _applySearch(),
                     trailing: [
-                      if (_searchController.text.isNotEmpty)
-                        IconButton(
+                      ValueListenableBuilder<TextEditingValue>(
+                        valueListenable: _searchController,
+                        builder: (_, value, child) =>
+                            value.text.isEmpty ? const SizedBox.shrink() : child!,
+                        child: IconButton(
                           tooltip: 'Clear search',
                           onPressed: () {
-                            _searchDebounce?.cancel();
                             _searchController.clear();
-                            setState(() {});
-                            _load(showLoading: false);
+                            _applySearch();
                           },
                           icon: const Icon(Icons.close),
                         ),
+                      ),
                     ],
                   ),
                   if (_owner) ...[
@@ -2071,9 +2143,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       padding: const EdgeInsets.only(top: 5, left: 4),
                       child: Text(
                         _showFinancialSummary
-                          ? 'Displayed search subtotal · ${allVisible.length} loaded matches · '
-                            '${_money(allVisible.fold<num>(0, (total, row) => total + ((num.tryParse(row['amount']?.toString() ?? '') ?? 0) *
-                                (row['direction'] == 'expense' ? -1 : 1))))} net'
+                          ? _searchSubtotal
                           : 'Search checks saved transactions in the selected date range.',
                         style: const TextStyle(fontSize: 12, color: Color(0xFF667085)),
                       ),
@@ -2344,8 +2414,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                              : 'No transactions in this view.'),
                        ),
                      )
-                  else
-                    ...visible.map((transaction) {
+                    ]),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    sliver: SliverList.builder(
+                      itemCount: visible.length,
+                      itemBuilder: (context, index) {
+                      final transaction = visible[index];
                       final incomeRow =
                           transaction['direction']?.toString() == 'income';
                       final payee =
@@ -2651,7 +2727,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                           ),
                         ),
                       );
-                    }),
+                      },
+                    ),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 100),
+                    sliver: SliverList.list(children: [
                   if (_loadingMore)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 18),
@@ -2672,6 +2753,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                          ),
                        ),
                      ),
+                    ]),
+                  ),
                 ],
               ),
             ),

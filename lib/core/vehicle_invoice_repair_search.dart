@@ -3,13 +3,16 @@
 class VehicleInvoiceRepairSearch {
   const VehicleInvoiceRepairSearch._();
 
-  static List<String> repairDescriptions(Map<String, dynamic> invoice) {
+  static List<String> repairDescriptions(
+    Map<String, dynamic> invoice, {bool laborOnly = false}
+  ) {
     final result = <String>[];
     final seen = <String>{};
     final lines = invoice['lines'];
     if (lines is! List) return result;
     for (final raw in lines) {
       if (raw is! Map) continue;
+      if (laborOnly && !_isLabor(raw)) continue;
       final description = [
         raw['description'],
         raw['service_description'],
@@ -22,6 +25,16 @@ class VehicleInvoiceRepairSearch {
       result.add(entry);
     }
     return result;
+  }
+
+  static bool _isLabor(Map line) {
+    final kind = line['line_kind']?.toString().trim().toLowerCase();
+    final unit = line['pricing_unit']?.toString().trim().toLowerCase();
+    final name = (line['name'] ?? line['item_name'] ?? line['title'])
+        ?.toString().trim().toLowerCase();
+    return kind == 'labor' || kind == 'service' ||
+        const {'labor', 'labour'}.contains(name) ||
+        const {'hr', 'hrs', 'hour', 'hours'}.contains(unit);
   }
 
   static String summary(Map<String, dynamic> invoice) {

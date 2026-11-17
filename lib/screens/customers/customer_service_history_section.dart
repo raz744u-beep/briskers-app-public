@@ -846,6 +846,10 @@ class _CustomerServiceHistorySectionState
         final id=job['id'].toString();
         final invoices=job['_invoice'] is Map ? [Map<String,dynamic>.from(job['_invoice'] as Map)] : _documents.where((d)=>d['kind']=='invoice'&&d['job_id']==id).toList();
         final descriptions=<String>{for(final d in invoices)...VehicleInvoiceRepairSearch.repairDescriptions(d)};
+        final labor = <String>{
+          for (final invoice in invoices)
+            ...VehicleInvoiceRepairSearch.repairDescriptions(invoice, laborOnly: true),
+        };
         final done=<String>{...?_completedRepairs[id]}..removeWhere((s)=>s.trim().isEmpty);
         final status=job['status']?.toString()??'open';
         // A paid/closed invoice alone is not proof every repair was performed.
@@ -856,6 +860,7 @@ class _CustomerServiceHistorySectionState
           jobNumber:job['job_number']?.toString()??'Job',
           vehicle:(job['vehicle']??job['vehicle_label'])?.toString()??'Vehicle not recorded',
           status:status,completed:done.toList(),pending:pending.toList(),
+          repairSummary: labor.join(' · '),
           invoices:[for(final d in invoices)(number:'#${d['document_number']??''}',open:()=>_openDocument(d))],
           onJob:job['_invoice'] is Map ? null : ()=>_openJob(job));
       }),
@@ -879,6 +884,9 @@ class _CustomerServiceHistorySectionState
         final detail = snapshot.hasData && snapshot.data!.isNotEmpty
             ? snapshot.data! : document;
         final repairs = VehicleInvoiceRepairSearch.repairDescriptions(detail);
+        final labor = VehicleInvoiceRepairSearch.repairDescriptions(
+          detail, laborOnly: true,
+        );
         final status = DocumentPresentation(detail).statusLabel;
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -893,12 +901,11 @@ class _CustomerServiceHistorySectionState
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (date.isNotEmpty) Text(date),
-                Text(repairs.isEmpty
-                    ? 'Open invoice to view repairs'
-                    : repairs.length == 1
-                        ? repairs.first
-                        : '${repairs.first} (+${repairs.length - 1} more)',
-                    maxLines: 3, overflow: TextOverflow.ellipsis),
+                if (labor.isNotEmpty)
+                  Text(labor.join(' · '),
+                    maxLines: 2, overflow: TextOverflow.ellipsis)
+                else if (repairs.isEmpty)
+                  const Text('Open invoice to view repairs'),
                 if (status.isNotEmpty) Text(status),
               ],
             ),

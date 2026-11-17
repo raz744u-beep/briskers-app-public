@@ -3,6 +3,14 @@ import 'package:flutter/material.dart';
 class BriskersColors {
   const BriskersColors._();
 
+  static const blueHeader = LinearGradient(
+    begin: Alignment.centerLeft,
+    end: Alignment.centerRight,
+    colors: [Color(0xFF31A9D9), Color(0xFF2075BC), Color(0xFF174B92)],
+  );
+  static const confirm = Color(0xFF008F83);
+  static const destructive = Color(0xFFB91C1C);
+
   // Main navigation.
   static const today = Color(0xFF3949AB);
   static const actionBlue = Color(0xFF3B82F6);

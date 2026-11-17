@@ -50,4 +50,24 @@ void main() {
     expect(totals!.income,383.09);
     expect(totals.transactions,1);
   });
+
+  test('All Time and Year to Date reconcile independently of six months', () async {
+    final rows = [
+      row('last-year', 'expense', 71.36, date: '2025-02-12'),
+      row('january', 'expense', 175, date: '2026-01-01'),
+      row('may', 'income', 120, date: '2026-05-15'),
+      row('november', 'income', 1637.63, date: '2026-11-16'),
+    ];
+    final all = (await LocalExpenseSubtotal.calculate(rows))!;
+    final year = (await LocalExpenseSubtotal.calculate(rows,
+      startDate: DateTime(2026, 1, 1), endDate: DateTime(2026, 11, 16)))!;
+    final sixMonths = (await LocalExpenseSubtotal.calculate(rows,
+      startDate: DateTime(2026, 5, 16), endDate: DateTime(2026, 11, 16)))!;
+    expect((all.transactions, all.income, all.expenses), (4, 1757.63, 246.36));
+    expect((year.transactions, year.income, year.expenses), (3, 1757.63, 175));
+    expect((sixMonths.transactions, sixMonths.income, sixMonths.expenses), (1, 1637.63, 0));
+    expect(all.dailyBreakdown!['2025-02-12']!.expensesCents, 7136);
+    expect(all.unverifiedIncomeReceipts, 2);
+  });
+
 }

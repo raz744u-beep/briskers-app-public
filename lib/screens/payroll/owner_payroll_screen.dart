@@ -1,3 +1,4 @@
+import '../../core/briskers_colors.dart';
 import 'payroll_expense_review.dart';
 import 'payroll_review_widgets.dart';
 import 'approved_tasks_ui.dart';
@@ -713,12 +714,19 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       final plan=await service.plan(widget.jobId!,DateTime.now());
       if(!mounted || !_canView) return;
       if(plan.count==0) { await _load(); return; }
-      final confirmed=await showDialog<bool>(context:context,builder:(dialog)=>AlertDialog(
-        title:const Text('Mark All Done?'),
-        content:Text('Complete ${plan.count} ${plan.count==1?'task':'tasks'} for this job? Assigned mechanics and hours stay unchanged. Future reminders are excluded. This does not mark wages Paid.'),
-        actions:[TextButton(onPressed:()=>Navigator.pop(dialog,false),child:const Text('Cancel')),
-          FilledButton(onPressed:()=>Navigator.pop(dialog,true),child:const Text('Mark All Done'))],
-      ));
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (_) => OwnerConfirmationDialog(
+          title: 'Mark All Done?',
+          confirm: 'Mark All Done',
+          sections: [
+            Text('Complete ${plan.count} ${plan.count == 1 ? 'task' : 'tasks'} for this job?'),
+            const SizedBox(height: 8),
+            const Text('Assignments and hours stay saved. Future reminders stay scheduled. '
+                'Wages are paid separately in Payroll.'),
+          ],
+        ),
+      );
       if(confirmed!=true || !mounted || !_canView) return;
       await _runOwnerTaskEdit(() async {
         final completed=await service.complete(plan,DateTime.now());
@@ -1435,7 +1443,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     return Card(clipBehavior:Clip.antiAlias,child:Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Material(color:Colors.transparent,child:Container(decoration:const BoxDecoration(gradient:payrollSectionHeaderGradient),child:ListTile(
+        Material(color:Colors.transparent,child:Container(decoration:const BoxDecoration(gradient:BriskersColors.blueHeader),child:ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal:12),
           leading: const Icon(Icons.handshake_outlined,
             color: Colors.white,),
@@ -1783,6 +1791,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     });
     return EmployeeWorkReview(
         key: PageStorageKey('${widget.employeeId}-WorkScroll'),
+        employeeId: widget.employeeId,
         week: week,
         rows: _work,
         jobs: const [],
@@ -2066,16 +2075,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           final controller = DefaultTabController.of(context);
           return AnimatedBuilder(
             animation: controller,
-            builder: (context, _) => IndexedStack(
-              key: ValueKey(widget.employeeId),
-              index: controller.index,
-              sizing: StackFit.expand,
-              children: [
-                _safeTab(_tasksTab, 'Tasks'),
-                _safeTab(_payrollTab, 'Payroll'),
-                _safeTab(_reportsPanel, 'Reports'),
-                _taxesTab(),
-              ],
+            builder: (context, _) => KeyedSubtree(
+              key: ValueKey((widget.employeeId, controller.index)),
+              child: switch (controller.index) {
+                0 => _safeTab(_tasksTab, 'Work'),
+                1 => _safeTab(_payrollTab, 'Payroll'),
+                2 => _safeTab(_reportsPanel, 'Reports'),
+                _ => _taxesTab(),
+              },
             ),
           );
         }),),
@@ -2084,7 +2091,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   );
 
   Widget _safeTab(Widget Function() content, String name) {
-    if (_canView && _hasLocalData && (name=='Tasks'||_reportsLoaded)) { return SafeArea(top: false, child: content());
+    if (_canView && _hasLocalData && (name=='Work'||_reportsLoaded)) { return SafeArea(top: false, child: content());
     }
     return Center(child: Padding(padding: const EdgeInsets.all(20), child: Text(
       !_canView ? '$name requires the saved Owner account.'

@@ -198,13 +198,7 @@ void main() {
     expect(card, contains('final displayDescription = jobDisplayDescription(job);'));
   });
 
-  test('Paid Still Open uses translated copy and returns only paid unfinished Jobs', () async {
-    final source = await File('lib/screens/jobs_screen.dart').readAsString();
-    expect(source, contains("value: 'paid_still_open'"));
-    expect(
-      source,
-      matches(RegExp(r"_text\(\s*'Paid, Still Open',\s*'Pagado, aún abierto'")),
-    );
+  test('Jobs separates finished work from active work without changing payment state', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     addTearDown(db.close);
     final repository = LocalJobRepository(database: db);
@@ -223,25 +217,15 @@ void main() {
         [item.$1, item.$2, item.$3],
       );
     }
-    for (final view in JobListView.values) {
-      final rows = await repository.listJobs(
-        'shop',
-        view: view,
-        status: 'paid_still_open',
-      );
-      expect(rows.map((row) => row['id']).toSet(), {
-        'paid-open',
-        'paid-working',
-      });
-      expect(
-        await repository.jobCount(
-          'shop',
-          view: view,
-          status: 'paid_still_open',
-        ),
-        2,
-      );
-    }
+    final open = await repository.listJobs('shop', view: JobListView.active);
+    expect(open.map((row) => row['id']).toSet(), {
+      'paid-open', 'paid-working', 'part-paid', 'unpaid',
+    });
+    final closed = await repository.listJobs('shop', status: closedJobsFilter);
+    expect(closed.map((row) => row['id']).toSet(), {
+      'paid-completed', 'paid-cancelled', 'paid-closed',
+    });
+    expect(await repository.jobCount('shop', status: closedJobsFilter), 3);
   });
 
   test('full payment offers job completion without auto closing work', () async {
@@ -370,7 +354,7 @@ void main() {
     final home = await File('lib/screens/home_screen.dart').readAsString();
     final docs = await File('lib/screens/documents_screen.dart').readAsString();
     expect(shell, contains('estimatesNavigationBar: _shellNavigationBar(nested: true)'));
-    expect(shell, contains("label: 'Estimates'"));
+    expect(shell, contains("ShopNavigationSection.estimates: _homeEstimatesOpenCount"));
     expect(home, contains('sharedBottomNavigationBar: widget.estimatesNavigationBar'));
     expect(docs, matches(RegExp(r'widget\.sharedBottomNavigationBar\s*\?\?\s*NavigationBar\(')));
   });

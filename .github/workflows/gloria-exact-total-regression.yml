@@ -4,6 +4,7 @@ on:
     branches:
       - fix/gloria-rounding-preflight-20261030
       - fix/bugs38-round1-historical-edit-guard
+      - fix/bugs38-consolidated
   pull_request:
     paths:
       - "tools/recovery/offline_invoice_exact_total_v2_DRAFT.sql"

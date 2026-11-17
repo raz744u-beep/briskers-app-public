@@ -70,8 +70,14 @@ class LocalEstimateNumber {
     return existing(row?.data['document_number']);
   }
 
-  /// Only drafts are repaired automatically. An issued estimate requires
-  /// confirmation, and the old identifier is retained in an append-only audit.
+  static bool _internalPlaceholder(String? number) {
+    final value = number?.trim() ?? '';
+    return value.isEmpty ||
+        RegExp(r'^E-EST-[0-9A-Z-]+$', caseSensitive: false).hasMatch(value);
+  }
+
+  /// Missing values and former internal IDs can be repaired in place.
+  /// Other issued identifiers require confirmation and remain in the audit.
   static Future<String?> repair(
     BriskersLocalDatabase db,
     String business,
@@ -95,7 +101,10 @@ class LocalEstimateNumber {
         cachedIssued ||
         !isDraft(row.data['status']) ||
         row.read<int>('converted') != 0;
-    if (issued && !confirmed && historical == null) return null;
+    if (issued && !confirmed && historical == null &&
+        !(_internalPlaceholder(previous) && _internalPlaceholder(cachedNumber))) {
+      return null;
+    }
     final number = historical ?? await allocate(db, business, id);
     if (historical != null) {
       final others = await db

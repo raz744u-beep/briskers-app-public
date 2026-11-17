@@ -2,7 +2,7 @@ name: Briskers iOS compile check
 
 on:
   push:
-    branches: [fix/bugs38-round1-historical-edit-guard]
+    branches: [fix/bugs38-round1-historical-edit-guard, fix/bugs38-consolidated]
   workflow_dispatch:
   pull_request:
     paths:

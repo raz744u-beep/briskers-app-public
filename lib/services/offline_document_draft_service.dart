@@ -1,3 +1,4 @@
+import 'local_customer_vehicle_identity.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 import 'offline_invoice_finalization.dart';
 import 'sync_replay_fence.dart';
@@ -165,6 +166,11 @@ class OfflineDocumentDraftService {
     };
 
     await _database.transaction(() async {
+      final identities = LocalCustomerVehicleIdentity(_database);
+      customerId = (await identities.resolve(businessId, customerId))!;
+      vehicleId = await identities.resolve(businessId, vehicleId);
+      detail['customer_id'] = customerId;
+      detail['vehicle_id'] = vehicleId;
       final numbers=LocalNumberAllocator(_database);
       checkReuseAuthorization();
       for (final choice in {'invoice': reuseInvoiceNumber, 'job': reuseJobNumber}.entries) {
@@ -564,6 +570,11 @@ class OfflineDocumentDraftService {
       'sync_state':'pending','_local_snapshot':true,'_local_draft':true,
     };
     await _database.transaction(() async {
+      final identities = LocalCustomerVehicleIdentity(_database);
+      customerId = (await identities.resolve(businessId, customerId))!;
+      vehicleId = await identities.resolve(businessId, vehicleId);
+      detail['customer_id'] = customerId;
+      detail['vehicle_id'] = vehicleId;
       final number = await LocalEstimateNumber.allocate(_database, businessId, id);
       detail['document_number'] = number;
       await _database.customStatement(

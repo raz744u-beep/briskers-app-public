@@ -35,6 +35,22 @@ void main() {
     expect(repairs[2], contains('Thermostat'));
   });
 
+  test('collapsed Jaguar visit summary uses saved labor lines', () {
+    final invoice = <String, dynamic>{
+      'document_number': '4207',
+      'lines': [
+        {'line_kind': 'labor', 'description': 'Diagnose cooling system'},
+        {'line_kind': 'labor', 'description': 'Replace water pump'},
+        {'line_kind': 'labor', 'description': 'Repair coolant hoses'},
+        {'line_kind': 'item', 'name': 'Coolant'},
+      ],
+    };
+    expect(VehicleInvoiceRepairSearch.repairDescriptions(invoice, laborOnly: true), [
+      'Diagnose cooling system', 'Replace water pump', 'Repair coolant hoses',
+    ]);
+    expect(VehicleInvoiceRepairSearch.repairDescriptions(invoice), hasLength(4));
+  });
+
   test('customer history includes browse-all, expandable repairs, unmatched group', () {
     final src = File(
       'lib/screens/customers/customer_service_history_section.dart'

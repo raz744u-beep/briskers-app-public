@@ -200,7 +200,7 @@ void main() {
   }
 
   Future<void> filter(WidgetTester tester, String label) async {
-    await tester.tap(find.widgetWithText(ChoiceChip, label));
+    await tester.tap(find.widgetWithText(Tab, label));
     await tester.pumpAndSettle();
   }
 

@@ -67,11 +67,11 @@ class _NewCustomersScreenState extends State<NewCustomersScreen> {
     if (_saving || reviewed.isEmpty) return;
     if (mounted) setState(() => _saving = true);
     try {
-      await widget.notifications.markReviewed(reviewed);
+      final saved = await widget.notifications.markReviewed(reviewed);
       if (mounted) {
         setState(() {
-          _reviewed.addAll(reviewed);
-          _error = null;
+          _reviewed.addAll(saved);
+          _error = saved.length == reviewed.length ? null : tr('newCustomersReviewError');
         });
       }
     } catch (_) {

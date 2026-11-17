@@ -56,9 +56,9 @@ void main() {
     final navStart = source.indexOf('Widget _shellNavigationBar(');
     final navEnd = source.indexOf('Widget build(BuildContext context)', navStart);
     final nav = source.substring(navStart, navEnd);
-    expect(nav, contains('if (index == 1) {'));
+    expect(nav, contains('if (section == ShopNavigationSection.customers) {'));
     expect(nav, contains('_selectCustomersFromDock();'));
-    expect(nav, contains('onBadgeSelected: (index)'));
+    expect(nav, contains('onBadgeSelected: (position)'));
     expect(nav, contains('unawaited(_openCustomers(request));'));
 
     // The unread list retains its View all action for opening the normal
