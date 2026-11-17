@@ -19,6 +19,7 @@ import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_document_repository.dart';
 import 'package:briskers_app/services/local_invoice_closure.dart';
 import 'package:briskers_app/services/offline_invoice_finalization.dart';
+import 'package:briskers_app/services/offline_document_edit_service.dart';
 import 'package:briskers_app/screens/documents_screen.dart';
 
 class CloseApi extends BriskersApi {
@@ -134,6 +135,63 @@ void main() {
     expect((await db.customSelect('SELECT operation_id FROM local_invoice_closures').getSingle()).data,isNot(original));
     expect(DocumentPresentation((await LocalDocumentDetailCache(database:db).loadReadOnly('shop','6359'))!).isClosed,isTrue);
   });
+  test('Reginald closes offline with a saved item edit and keeps one posted Income receipt', () async {
+    const business = 'shop';
+    const id = '6357';
+    final cache = LocalDocumentDetailCache(database: db);
+    final saved = {
+      ...detail(id, 1637.62),
+      'document_number': id,
+      'job_number': 'J-38',
+      'customer_name': 'Reginald Willis',
+      'pending_payment': 1637.63,
+      'lines': [
+        {'id': 'repair', 'line_kind': 'item', 'name': 'Repair', 'quantity': 1,
+          'unit_price': 1637.62, 'tax_rate': 0, 'net_amount': 1637.62, 'tax_amount': 0},
+      ],
+      'payments': [
+        {'id': 'original-cash-6357', 'state': 'pending', 'amount': 1637.63,
+          'payment_method_name': 'Cash', 'payment_date': '2026-11-03'},
+      ],
+    };
+    await cache.save(business, id, saved);
+    await OfflineDocumentEditService(database: db).updateLine(
+      business, id, 'repair', name: 'Repair', quantity: 1,
+      unitPrice: 1637.63, taxRate: 0, lineKind: 'item',
+    );
+    await OfflineInvoiceFinalization(database: db)
+        .finalizeLocally(business, id, isOwner: true);
+    final before = await paymentHistory();
+    final income = await LocalInvoiceClosureStore(db).finalizedIncome(business, invoice: id);
+    expect(income.single['amount'], 1637.63);
+    expect(income.single['receipt_id'], 'original-cash-6357');
+
+    final closure = LocalInvoiceClosure(database: db, api: api);
+    await db.customStatement("UPDATE sync_outbox SET state='conflict' WHERE operation='update_line'");
+    await expectLater(closure.close(business, [id], isOwner: true),
+      throwsA(isA<StateError>().having((e) => e.message, 'message', contains('Review Items before closing'))));
+    await db.customStatement("UPDATE sync_outbox SET state='pending' WHERE operation='update_line'");
+    await closure.close(business, [id], isOwner: true);
+    await closure.close(business, [id], isOwner: true);
+    final closed = (await cache.loadReadOnly(business, id))!;
+    expect(DocumentPresentation(closed).isClosed, isTrue);
+    expect(closed['total_amount'], 1637.63);
+    expect(await paymentHistory(), before);
+    expect(await LocalInvoiceClosureStore(db).finalizedIncome(business, invoice: id), income);
+
+    await db.close();
+    db = BriskersLocalDatabase(NativeDatabase(File('${dir.path}/db.sqlite')));
+    await BriskersConnectionModeController.instance.setMode(BriskersConnectionMode.auto);
+    await LocalDocumentRepository(database: db).upsertFromServer(business, [saved]);
+    await LocalInvoiceClosure(database: db, api: api).flush(business);
+    final rows = await LocalDocumentRepository(database: db).listByKind(business, kind: 'invoice');
+    expect(documentListStage(rows.singleWhere((row) => row['id'] == id), estimate: false), 'Closed');
+    expect(await paymentHistory(), before);
+    expect(await LocalInvoiceClosureStore(db).finalizedIncome(business, invoice: id), income);
+    expect(api.closes, 0);
+    expect(api.payments, 0);
+  });
+
   test('historical read-only invoice can close without unlocking or editing its payment history',() async {
     final cache=LocalDocumentDetailCache(database:db);
     await cache.save('shop','6359',{...detail('6359',7882.11,pending:false),'legacy_read_only':true});

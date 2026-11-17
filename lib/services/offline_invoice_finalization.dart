@@ -180,6 +180,37 @@ class OfflineInvoiceFinalization {
     );
   }
 
+  /// Validate that saved corrections match this invoice and apply them
+  /// locally. Ordinary synchronization can still send the preserved edits.
+  Future<Map<String, dynamic>> verifyLocalFinancialDetail(
+    String business, String invoice, Map<String, dynamic> saved, {
+    List<Map<String, dynamic>>? queuedReceipts,
+    bool forClosing = false,
+  }) async {
+    final ledger = OfflineInvoicePaymentLedger(database: db);
+    final action = forClosing ? 'closing' : 'posting';
+    try {
+      await OfflineDocumentEditService(database: db)
+          .verifySavedLineCorrections(business, invoice, saved, action: action);
+      final taxed = await OfflineInvoiceTaxService(database: db)
+          .verifySavedTaxCorrection(business, invoice, saved, action: action);
+      final original = OfflineInvoicePaymentLedger.projectPendingPayments(
+        taxed, queuedReceipts ?? await ledger.pendingForInvoice(business, invoice),
+      );
+      final corrected = OfflineInvoicePaymentLedger.projectPendingEdits(
+        original, await ledger.pendingEditsForInvoice(business, invoice),
+      );
+      if (corrected['_payment_reconciliation_required'] == true) {
+        throw StateError(original['_payment_reconciliation_required'] == true
+            ? 'The saved receipt could overlap another payment. Review Payments before $action.'
+            : 'A saved payment correction does not match the original receipt. Review that payment before $action.');
+      }
+      return corrected;
+    } on FormatException {
+      throw StateError('A saved correction cannot be read. Review Items and Payments before $action.');
+    }
+  }
+
   /// Finalize the existing local receipts without creating another payment.
   /// The receipt markers and Income rows commit together.
   Future<void> finalizeLocally(
@@ -208,24 +239,12 @@ class OfflineInvoiceFinalization {
       final queued = await ledger.pendingForInvoice(business, invoice);
       late Map<String, dynamic> detail;
       try {
-        await OfflineDocumentEditService(database: db)
-            .verifySavedLineCorrections(business, invoice, saved);
-        final taxed = await OfflineInvoiceTaxService(database: db)
-            .verifySavedTaxCorrection(business, invoice, saved);
-        final paymentEdits = await ledger.pendingEditsForInvoice(business, invoice);
-        final original = OfflineInvoicePaymentLedger.projectPendingPayments(taxed, queued);
-        detail = OfflineInvoicePaymentLedger.projectPendingEdits(original, paymentEdits);
-        if (detail['_payment_reconciliation_required'] == true) {
-          throw StateError(original['_payment_reconciliation_required'] == true
-              ? 'The saved receipt could overlap another payment. Review the Payments list before posting.'
-              : 'A saved payment correction does not match the original receipt. Review that payment on the Payment tab.');
-        }
+        detail = await verifyLocalFinancialDetail(
+          business, invoice, saved, queuedReceipts: queued,
+        );
       } on StateError {
         if (resumeSavedRequest) return;
         rethrow;
-      } on FormatException {
-        if (resumeSavedRequest) return;
-        throw StateError('A saved correction cannot be read. Review Items and Payments before posting.');
       }
       if (resumeSavedRequest) {
         final intent = await db.customSelect(

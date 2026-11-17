@@ -8,7 +8,6 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_document_detail_cache.dart';
-import 'offline_invoice_payment_ledger.dart';
 import 'verified_invoice_close_events.dart';
 import 'sync_replay_fence.dart';
 
@@ -244,10 +243,10 @@ class LocalInvoiceClosure {
           throw StateError('Open this invoice once to verify its saved payment details.');
         }
         if (existing.isNotEmpty) continue;
-        final edits=await db.customSelect("SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? AND entity_type IN ('invoice_pending_payment_edit','invoice_tax_edit','document_edit')",variables:[Variable(business),Variable(id)]).get();
-        if(edits.isNotEmpty) throw StateError('Finish the saved invoice corrections before closing.');
-        final detail=OfflineInvoicePaymentLedger.projectPendingPayments(saved,
-          await OfflineInvoicePaymentLedger(database:db).pendingForInvoice(business,id));
+        if (DocumentPresentation(saved).isClosed) continue;
+        final corrected = await OfflineInvoiceFinalization(database: db)
+            .verifyLocalFinancialDetail(business, id, saved, forClosing: true);
+        final detail = await store.projectFinalized(business, corrected);
         final financial=DocumentPresentation(detail);
         if(!financial.paymentDetailsKnown || !financial.fullyCovered || financial.isVoid) {
           throw StateError('Only invoices fully covered by saved payments can be closed. Payments are unchanged.');

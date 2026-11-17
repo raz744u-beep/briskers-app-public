@@ -1318,7 +1318,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       try {
         final closure = LocalInvoiceClosure(database:_localDocuments.database,api:_api);
         await closure.close(widget.businessId, ids, isOwner:widget.isOwner);
-        unawaited(closure.flush(widget.businessId));
         if (mounted) unawaited(_load());
         if (!sheetContext.mounted) return;
         setSheetState(() {

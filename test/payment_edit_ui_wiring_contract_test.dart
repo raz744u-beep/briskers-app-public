@@ -85,7 +85,7 @@ void main() {
 
   test('unresolved invoice tax blocks payment finalization action', () {
     final code = File('lib/services/offline_invoice_finalization.dart').readAsStringSync();
-    expect(code, contains('.verifySavedTaxCorrection(business, invoice, saved)'));
+    expect(code, contains('.verifySavedTaxCorrection(business, invoice, saved, action: action)'));
   });
 
 }

@@ -353,8 +353,9 @@ class OfflineDocumentEditService {
   /// Validate the last queued change for each line against the saved invoice.
   /// A successful check leaves those operations available for ordinary sync.
   Future<void> verifySavedLineCorrections(
-    String businessId, String invoiceId, Map<String, dynamic> detail,
-  ) async {
+    String businessId, String invoiceId, Map<String, dynamic> detail, {
+    String action = 'posting',
+  }) async {
     final rows = await _database.customSelect(
       "SELECT operation,payload_json,state FROM sync_outbox "
       "WHERE business_id=? AND entity_id=? AND entity_type='document_edit' "
@@ -372,12 +373,12 @@ class OfflineDocumentEditService {
       final payload = jsonDecode(row.read<String>('payload_json'));
       if (payload is! Map<String, dynamic> ||
           !const {'add_line', 'update_line', 'delete_line', 'copy_line'}.contains(operation)) {
-        throw StateError('An invoice item correction is unreadable. Review Items before posting.');
+        throw StateError('An invoice item correction is unreadable. Review Items before $action.');
       }
       final localId = const {'add_line', 'copy_line'}.contains(operation);
       final lineId = payload[localId ? 'local_line_id' : 'line_id']?.toString() ?? '';
       if (lineId.isEmpty || !const {'pending', 'inflight'}.contains(state)) {
-        throw StateError('A saved invoice item correction conflicts with this invoice. Review Items before posting.');
+        throw StateError('A saved invoice item correction conflicts with this invoice. Review Items before $action.');
       }
       changes[lineId] = (operation, payload);
     }
@@ -399,7 +400,7 @@ class OfflineDocumentEditService {
       };
       if (!matches) {
         final name = line?['name'] ?? payload['name'] ?? 'an invoice item';
-        throw StateError('The saved correction for "$name" does not match the Items tab. Review and save the item before posting.');
+        throw StateError('The saved correction for "$name" does not match the Items tab. Review and save the item before $action.');
       }
     }
 
@@ -414,14 +415,14 @@ class OfflineDocumentEditService {
       final net = number(line['net_amount']);
       final tax = number(line['tax_amount']);
       if (net == null || tax == null) {
-        throw StateError('Saved item amounts are incomplete. Review the Items total before posting.');
+        throw StateError('Saved item amounts are incomplete. Review the Items total before $action.');
       }
       linesTotal += net + tax;
     }
     if (total == null || indexTotal == null ||
         (total * 100).round() != (indexTotal * 100).round() ||
         (total * 100).round() != (linesTotal * 100).round()) {
-      throw StateError('The saved item correction and invoice total disagree. Review and save the Items total before posting.');
+      throw StateError('The saved item correction and invoice total disagree. Review and save the Items total before $action.');
     }
   }
 

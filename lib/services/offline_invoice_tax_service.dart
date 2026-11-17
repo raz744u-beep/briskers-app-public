@@ -230,12 +230,13 @@ class OfflineInvoiceTaxService {
   /// An unsynchronized correction can still be committed locally. Require
   /// the original line identity, recalculated totals and the durable index.
   Future<Map<String, dynamic>> verifySavedTaxCorrection(
-    String businessId, String invoiceId, Map<String, dynamic> saved,
-  ) async {
+    String businessId, String invoiceId, Map<String, dynamic> saved, {
+    String action = 'posting',
+  }) async {
     final rows = await _queued(businessId, invoiceId);
     if (rows.isEmpty) return saved;
-    const message = 'The saved tax correction conflicts with this invoice. '
-        'Review Sales Tax and the Items total before posting.';
+    final message = 'The saved tax correction conflicts with this invoice. '
+        'Review Sales Tax and the Items total before $action.';
     if (rows.length != 1 ||
         !const {'pending', 'inflight'}.contains(rows.single.read<String>('state'))) {
       throw StateError(message);
