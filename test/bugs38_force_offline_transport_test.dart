@@ -60,6 +60,36 @@ void main() {
     },
   );
 
+  test('only the explicit history read can refresh the session offline', () async {
+    final sent = <Uri>[];
+    final client = BriskersSupabaseHttpClient(MockClient((request) async {
+      sent.add(request.url);
+      return http.Response('{}', 200);
+    }));
+    addTearDown(client.close);
+    await mode.setMode(BriskersConnectionMode.offline);
+
+    const rpc = 'briskers_list_transactions_recurring_v1';
+    final history = Uri.parse('$supabaseUrl/rest/v1/rpc/$rpc');
+    final refresh = Uri.parse('$supabaseUrl/auth/v1/token?grant_type=refresh_token');
+    final blocked = [
+      Uri.parse('$supabaseUrl/auth/v1/token?grant_type=password'),
+      Uri.parse('$supabaseUrl/auth/v1/token?grant_type=refresh_token&grant_type=password'),
+      Uri.parse('$supabaseUrl/rest/v1/rpc/briskers_create_manual_transaction'),
+      refresh.replace(scheme: 'http'),
+    ];
+    await explicitSupabaseRead(rpc, () async {
+      for (final target in blocked) {
+        await expectLater(client.post(target), throwsA(isA<http.ClientException>()));
+      }
+      await client.post(refresh);
+      await client.post(history);
+    });
+    await expectLater(client.post(refresh), throwsA(isA<http.ClientException>()));
+    expect(sent, [refresh, history]);
+    expect(mode.forceOffline, isTrue);
+  });
+
   test(
     'worker checks persisted changes even with a stale isolate mode',
     () async {

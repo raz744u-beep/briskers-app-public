@@ -16,6 +16,10 @@ SupabaseClient get networkSupabase {
 }
 
 final _explicitRead = Object();
+const _financialHistoryRpcs = {
+  'briskers_list_transactions_recurring_v1',
+  'briskers_list_documents_v4',
+};
 
 /// This scope permits only the read the Owner explicitly initiated.
 Future<T> explicitSupabaseRead<T>(String rpc, Future<T> Function() read) {
@@ -23,12 +27,11 @@ Future<T> explicitSupabaseRead<T>(String rpc, Future<T> Function() read) {
     'briskers_recurring_recovery_v1',
     'briskers_read_recurring_expense_occurrence',
     'briskers_owner_recovery_lookup_v1',
-    'briskers_list_transactions_recurring_v1',
-    'briskers_list_documents_v4',
+    ..._financialHistoryRpcs,
   }.contains(rpc)) {
     throw ArgumentError('This read requires an online connection.');
   }
-  return runZoned(read, zoneValues: {_explicitRead: '/rest/v1/rpc/$rpc'});
+  return runZoned(read, zoneValues: {_explicitRead: rpc});
 }
 
 class BriskersSupabaseHttpClient extends http.BaseClient {
@@ -42,10 +45,19 @@ class BriskersSupabaseHttpClient extends http.BaseClient {
     if (readPersistedMode
         ? await mode.offlineForBackgroundRequest()
         : mode.forceOffline) {
+      final rpc = Zone.current[_explicitRead];
+      // The SDK renews an expired access token before sending the RPC.
+      // This one grant does not allow sign-in, other RPCs, or outbox writes.
+      final historySessionRefresh = _financialHistoryRpcs.contains(rpc) &&
+          request.url.path == '/auth/v1/token' &&
+          request.url.query == 'grant_type=refresh_token';
+      final requestedRead = rpc is String &&
+          request.url.path == '/rest/v1/rpc/$rpc';
       if (readPersistedMode ||
           request.method != 'POST' ||
-          request.url.host != Uri.parse(supabaseUrl).host ||
-          request.url.path != Zone.current[_explicitRead]) {
+          request.url.scheme != 'https' ||
+          request.url.origin != supabaseUrl ||
+          (!requestedRead && !historySessionRefresh)) {
         throw http.ClientException(
           'Supabase access is paused in Force Offline.',
         );

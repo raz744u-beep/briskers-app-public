@@ -21,6 +21,6 @@ void main() {
     expect(screen, contains("title: 'Download saved history?'"));
     expect(screen, contains('if (!allowed || !mounted) return;'));
     expect(screen, contains('FinancialHistoryRecovery('));
-    expect(screen, contains("Force Offline '"));
+    expect(screen, contains("Force Offline stays enabled"));
   });
 }

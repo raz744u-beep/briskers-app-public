@@ -22,6 +22,18 @@ class FinancialHistoryRecovery {
   static const pageSize = 200;
   static const maxPages = 150;
 
+  static String failureMessage(Object error) {
+    if (error is AuthRetryableFetchException) {
+      return 'Could not refresh your Owner session for the download. '
+          'Check the internet connection and tap Download again.';
+    }
+    if (error is AuthException) {
+      return 'Your Owner sign-in could not be renewed. Sign in again before downloading history.';
+    }
+    return error.toString();
+  }
+
+
   /// The invoice index RPC returns a single JSON value containing all rows.
   /// Import it without deleting device-only invoices or replaying the outbox.
   Future<int> downloadInvoices(String businessId) async {

@@ -16,9 +16,9 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-Map<String, dynamic> _authResponse() {
+Map<String, dynamic> _authResponse({bool expired = false}) {
   String segment(Object data) => base64Url.encode(utf8.encode(jsonEncode(data))).replaceAll('=', '');
-  final claims = {'sub': 'test-owner', 'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600};
+  final claims = {'sub': 'test-owner', 'exp': DateTime.now().millisecondsSinceEpoch ~/ 1000 + (expired ? -60 : 3600)};
   final token = "${segment({'alg': 'HS256', 'typ': 'JWT'})}.${segment(claims)}.Zml4dHVyZQ";
   return {'access_token': token, 'refresh_token': 'test-refresh',
     'token_type': 'bearer', 'expires_in': 3600,
@@ -81,7 +81,7 @@ void main() {
     expect((await db.customSelect('SELECT COUNT(*) AS n FROM sync_outbox').getSingle()).data['n'], 0);
   });
 
-  test('Force Offline downloads past 1,000 rows and reports saved years after restart', () async {
+  test('Force Offline renews an expired session and retains 1,000+ rows after restart', () async {
     SharedPreferences.setMockInitialValues({});
     final mode = BriskersConnectionModeController.instance;
     await mode.setMode(BriskersConnectionMode.auto);
@@ -112,12 +112,16 @@ void main() {
       },
     ];
     final requested = <String>[];
+    final grantTypes = <String?>[];
     final client = SupabaseClient(supabaseUrl, 'fixture',
+      authOptions: const AuthClientOptions(autoRefreshToken: false),
       httpClient: BriskersSupabaseHttpClient(MockClient((request) async {
         requested.add(request.url.path);
         final args = jsonDecode(request.body) as Map;
+        final grantType = request.url.queryParameters['grant_type'];
+        if (request.url.path == '/auth/v1/token') grantTypes.add(grantType);
         final Object result = switch (request.url.path) {
-          '/auth/v1/token' => _authResponse(),
+          '/auth/v1/token' => _authResponse(expired: grantType == 'password'),
           '/rest/v1/rpc/briskers_list_documents_v4' => invoices,
           '/rest/v1/rpc/briskers_list_transactions_recurring_v1' =>
             posted.skip(args['p_offset'] as int).take(args['p_limit'] as int).toList(),
@@ -129,6 +133,7 @@ void main() {
     );
     addTearDown(client.dispose);
     await client.auth.signInWithPassword(email: 'owner@example.invalid', password: 'fixture');
+    expect(client.auth.currentSession?.isExpired, isTrue);
     await mode.setMode(BriskersConnectionMode.offline);
     final cache = LocalFinancialCache(database: db);
     await cache.saveTransactions('shop', posted.take(1000).toList());
@@ -138,6 +143,8 @@ void main() {
       end: DateTime(2026, 11, 17), onPage: (_) {}), 1240);
     expect(await recovery.downloadInvoices('shop'), 1100);
     expect(mode.forceOffline, isTrue);
+    expect(grantTypes, ['password', 'refresh_token']);
+    expect(requested[1], '/auth/v1/token');
     expect(requested.where((path) => path.contains('list_transactions')), hasLength(7));
     final requestsAfterDownload = requested.length;
     await db.close();

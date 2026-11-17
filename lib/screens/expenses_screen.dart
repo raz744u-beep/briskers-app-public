@@ -1129,8 +1129,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         icon: Icons.download_for_offline_outlined,
         content: const Text(
           'Download all posted income and expenses through today, plus the '
-          'invoice list. The records are saved to this device. Force Offline '
-          'stays enabled and queued changes stay on the device.',
+          'invoice list. The download can renew your Owner session if needed. '
+          'Force Offline stays enabled and queued changes stay on the device.',
         ),
         actions: [
           OutlinedButton(style: BriskersDialog.cancelStyle,
@@ -1165,7 +1165,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         final invoices = await recovery.downloadInvoices(business);
         message += ' Saved $invoices invoice records.';
       } catch (error) {
-        message += ' Invoice history could not be downloaded. $error';
+        message += ' Invoice history could not be downloaded. '
+            '${FinancialHistoryRecovery.failureMessage(error)}';
       }
       if (!mounted || business != widget.businessId) return;
       setState(() => _historyRecoveryMessage = message);
@@ -1173,8 +1174,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     } catch (error) {
       if (!mounted) return;
       setState(() => _historyRecoveryMessage =
-        'Download incomplete: $error. Already saved records were retained. '
-        'No payments were submitted.');
+        'Download incomplete. ${FinancialHistoryRecovery.failureMessage(error)} '
+        'Saved records were retained and queued payments stayed on this device.');
       // Refresh the local view only, never toggle connection mode.
       await _load(showLoading: false);
     } finally {

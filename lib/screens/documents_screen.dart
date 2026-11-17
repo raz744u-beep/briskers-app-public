@@ -871,7 +871,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     } catch (error) {
       if (mounted && widget.businessId == business) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Invoice download incomplete. $error')),
+          SnackBar(content: Text('Invoice download incomplete. '
+            '${FinancialHistoryRecovery.failureMessage(error)}')),
         );
       }
     } finally {
