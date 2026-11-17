@@ -36,6 +36,7 @@ void main() {
     expect(find.byType(BriskersDialog),findsOneWidget);
     expect(tester.widget<TextField>(find.byType(TextField).first).textCapitalization,TextCapitalization.words);
     await tester.enterText(find.byType(TextField).first,'endurance');
+    await tester.pump();
     await tester.tap(find.text('Save'));
     await settle();
     expect(find.text('Endurance'),findsOneWidget);

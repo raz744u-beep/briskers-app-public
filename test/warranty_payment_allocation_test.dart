@@ -1,3 +1,6 @@
+import 'package:drift/native.dart';
+import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/local/local_database_provider.dart';
 import 'package:briskers_app/core/briskers_i18n.dart';
 import 'package:briskers_app/core/briskers_colors.dart';
 import 'package:briskers_app/core/warranty_payment_amounts.dart';
@@ -47,9 +50,16 @@ Widget _panel({required List<Map<String, dynamic>> payments,
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  late BriskersLocalDatabase db;
   setUp(() async {
+    db = BriskersLocalDatabase(NativeDatabase.memory());
+    debugUseLocalDatabase(db);
     SharedPreferences.setMockInitialValues({});
     await BriskersLanguageController.instance.setLanguage('en');
+  });
+  tearDown(() async {
+    debugUseLocalDatabase(null);
+    await db.close();
   });
 
   test('customer fee allocation stays separate from actual gross invoice credit', () {
@@ -255,6 +265,11 @@ void main() {
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Edit'));
       await tester.tap(find.text('Edit'));
+      await tester.pumpAndSettle();
+      for (var attempt = 0; attempt < 30 && find.byType(TextField).evaluate().isEmpty; attempt++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+        await tester.pump(const Duration(milliseconds: 50));
+      }
       await tester.pumpAndSettle();
       final approval = find.byWidgetPredicate((widget) => widget is TextField &&
         widget.decoration?.labelText == 'Approved warranty amount');

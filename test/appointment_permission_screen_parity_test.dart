@@ -399,7 +399,10 @@ void main() {
   test('Warranty options and detail cache are prepared for offline reopening', () async {
     final shell = await File('lib/screens/shell_screen.dart').readAsString();
     final invoice = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
-    expect(shell, contains('briskers_warranty_companies_'));
+    expect(shell, contains('LocalWarrantyCompanies().available(widget.businessId)'));
+    final companies = await File('lib/services/local_warranty_companies.dart').readAsString();
+    expect(companies, contains('briskers_warranty_companies_'));
+    expect(companies, contains('local_warranty_companies'));
     expect(invoice, contains("'offline_warranty_detail': warrantyDetail"));
   });
 
@@ -434,7 +437,7 @@ void main() {
     final source = await File('lib/screens/jobs/invoice_warranty_panel.dart').readAsString();
     expect(source, contains('isScrollControlled: true'));
     expect(source, contains('MediaQuery.viewInsetsOf(sheetContext).bottom + 18'));
-    expect(source, contains("allowCreate: false"));
+    expect(source, contains("allowCreate: true"));
     expect(source, contains("tr('saveWarrantyInformation')"));
   });
 

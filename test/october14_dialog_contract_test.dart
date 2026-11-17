@@ -64,18 +64,16 @@ void main() {
       'Future<void> _editCompany(',
       'Future<void> _editNote(',
     );
-    expect(action, contains('useSafeArea: true'));
-    expect(action, contains('isScrollControlled: true'));
-    expect(action, contains('backgroundColor: Theme.of(context).colorScheme.surface'));
-    expect(action, contains('minHeight: MediaQuery.sizeOf(sheetContext).height * 0.65'));
-    expect(action, contains('maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.91'));
-    expect(action, contains('SingleChildScrollView('));
-    expect(action, contains('MediaQuery.viewInsetsOf(sheetContext).bottom + 26'));
-    expect(action, contains('if (name.text.trim().isNotEmpty) { Navigator.pop(sheetContext, true);'));
+    expect(action, contains('BriskersDialog('));
+    expect(action, contains('textCapitalization: TextCapitalization.words'));
+    expect(action, contains('BriskersDialog.confirmStyle()'));
+    expect(action, contains('value.text.trim().isEmpty ? null'));
     final cancellation = action.indexOf('if (save != true || companyName.isEmpty) return;');
     expect(cancellation, greaterThan(0));
-    expect(action.indexOf('await _api.createWarrantyCompany('), greaterThan(cancellation));
-    expect(action.indexOf('await _api.updateWarrantyCompany('), greaterThan(cancellation));
+    expect(action.indexOf('await _companyStore.save('), greaterThan(cancellation));
+    final shared = File('lib/widgets/briskers_dialog.dart').readAsStringSync();
+    expect(shared, contains('SingleChildScrollView('));
+    expect(shared, contains('Flexible('));
     for (final label in [
       'Company name', 'Claims phone', 'Invoice submission email',
       'Portal / website (optional)', 'Notes (optional)',
@@ -84,7 +82,7 @@ void main() {
     }
   });
 
-  test('invoice warranty creation uses tested dialog and validates before RPC', () {
+  test('invoice warranty creation uses tested dialog and validates before local save', () {
     final action = _section(
       'lib/screens/jobs/invoice_warranty_panel.dart',
       'Future<Map<String, dynamic>?> _createCompany(',
@@ -94,7 +92,7 @@ void main() {
     expect(action, contains('autofocusName: initialName.isEmpty'));
     final validation = action.indexOf('if (save != true || companyName.isEmpty) return null;');
     expect(validation, greaterThan(0));
-    expect(action.indexOf('await _api.createWarrantyCompany('), greaterThan(validation));
+    expect(action.indexOf('await store.save('), greaterThan(validation));
     expect(action, contains('final companyName = name.text.trim();'));
     expect(action, contains('final claimsPhone = formatWarrantyPhone(phone.text.trim());'));
     expect(action, contains('final submissionEmail = email.text.trim();'));
