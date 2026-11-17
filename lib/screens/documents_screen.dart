@@ -1,8 +1,9 @@
+import '../services/local_document_identity.dart';
 import '../services/local_estimate_number.dart';
 import '../widgets/list_interaction_hint.dart';
 import '../services/offline_invoice_payment_ledger.dart';
 import '../services/local_invoice_closure.dart';
-import 'jobs/owner_local_delete_action.dart';
+import 'jobs/owner_local_invoice_delete_action.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
@@ -683,7 +684,11 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           LocalJobRetirement.blockedDocumentIds(localDatabase, businessId));
       final deletedEstimates = estimate
           ? await _localDocuments.deletedEstimateIds(businessId) : const <String>{};
-      final rows = await LocalInvoiceClosureStore(_localDocuments.database).projectRows(businessId,List<Map<String, dynamic>>.from(fetched)
+      final localIdentityRows = await LocalInvoiceClosureStore(_localDocuments.database).projectRows(
+          businessId, await _localDocuments.listByKind(businessId, kind: kind));
+      final identityRows = await LocalDocumentIdentity(_localDocuments.database).projectRows(
+          businessId, List<Map<String,dynamic>>.from(fetched), localIdentityRows);
+      final rows = await LocalInvoiceClosureStore(_localDocuments.database).projectRows(businessId,identityRows
           .where((row) => !blocked.contains('${row['id'] ?? ''}') &&
               !deletedEstimates.contains('${row['id'] ?? ''}'))
           .toList());
@@ -714,7 +719,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       // pending documents remain protected by the repository.
       if (!documentListDataEquals(_savedRows, rows)) {
         try {
-          await _localDocuments.replaceFromServer(businessId, rows, kind: kind);
+          await _localDocuments.replaceFromServer(businessId, rows.where((row) => row['_local_snapshot'] != true).toList(), kind: kind);
           // Track what actually reached disk even if a later refresh has
           // invalidated this read. Otherwise A -> B (saving) -> A could skip
           // the final write while the index incorrectly still contains B.
@@ -1011,13 +1016,15 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     if (!widget.isOwner) return;
 
     final isEstimate = row['kind']?.toString() == 'estimate';
-    final localJob=row['job_id']?.toString() ?? '';
-    if(!isEstimate && localJob.isNotEmpty) {
+    if (!isEstimate) {
       try {
-        final deleted=await deleteOwnerLocalJob(context,businessId:widget.businessId,
-          jobId:localJob,label:row['job_number']?.toString() ?? 'Job');
-        if(deleted && mounted) await _load();
-      } catch(error) { if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(error.toString()))); }
+        final deleted = await deleteOwnerLocalInvoice(context,
+          businessId: widget.businessId, invoiceId: '${row['id'] ?? ''}',
+          number: '${row['document_number'] ?? ''}');
+        if (deleted && mounted) await _load();
+      } catch (error) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+      }
       return;
     }
 

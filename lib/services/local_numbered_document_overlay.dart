@@ -1,3 +1,4 @@
+import '../core/document_presentation.dart';
 import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
@@ -27,14 +28,17 @@ class LocalNumberedDocumentOverlay {
     final number = row.readNullable<String>('document_number')?.trim() ?? '';
     if (number.isEmpty) return cached;
     final job = row.readNullable<String>('job_number')?.trim() ?? '';
-    return <String, dynamic>{
+    final projected = <String, dynamic>{
       ...cached,
       'document_number': number,
       'status': row.readNullable<String>('status') ?? cached['status'],
       'display_status_code': row.readNullable<String>('display_status_code') ??
           cached['display_status_code'],
-      'display_status': 'Open',
+      'display_status': cached['display_status'],
       if (job.isNotEmpty) 'job_number': job,
     };
+    final presentation = DocumentPresentation(projected);
+    if (presentation.isClosed) projected['display_status'] = 'Closed';
+    return projected;
   }
 }

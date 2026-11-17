@@ -1,12 +1,12 @@
+import '../../services/local_document_identity.dart';
 import '../../services/local_recent_records.dart';
 import '../../widgets/recent_record_view.dart';
 import '../../services/local_estimate_number.dart';
 import '../../services/local_invoice_payment_coverage_events.dart';
 import '../../services/local_invoice_closure.dart';
-import '../../services/local_payroll_repository.dart';
 import '../payroll/owner_payroll_screen.dart';
 import '../payroll/job_tasks_access.dart';
-import 'owner_local_delete_action.dart';
+import 'owner_local_invoice_delete_action.dart';
 import '../../core/supabase_config.dart';
 import '../../services/device_owner_authorization.dart';
 import '../../services/local_invoice_number_service.dart';
@@ -92,7 +92,6 @@ import '../../widgets/document_tab_label.dart';
 import 'standard_note_editor_sheet.dart';
 import 'standard_note_picker_sheet.dart';
 import 'job_detail_screen.dart';
-import 'invoice_deletion_choice.dart';
 
 Widget _historicalInvoiceReopenDialog(
   BuildContext context,
@@ -584,13 +583,26 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Future<void> _load({bool fastAfterMutation = false, bool localOnly = false}) async {
     final generation = ++_loadGeneration;
+    final identities = LocalDocumentIdentity(localDatabase);
+    final canonicalId = await identities.canonicalId(widget.businessId, widget.documentId);
+    if (canonicalId != widget.documentId) {
+      if (!mounted || generation != _loadGeneration) return;
+      await Navigator.pushReplacement<void, void>(context, MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          roleCode: _navigationRoleCode, businessId: widget.businessId,
+          documentId: canonicalId, isOwner: widget.isOwner,
+          canManageExpenses: widget.canManageExpenses,
+          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
+          initialAction: widget.initialAction, initialTab: widget.initialTab,
+        ),
+      ));
+      return;
+    }
+
     if (await LocalJobRetirement.isDocumentBlocked(
         localDatabase, widget.businessId, widget.documentId)) {
       if (mounted && generation == _loadGeneration) _blockRetiredDocument();
       return;
-    }
-    if (OwnerPayrollScreen.enabled && widget.isOwner) {
-      await LocalPayrollRepository(localDatabase,business:widget.businessId,owner:true).prepare();
     }
     final loadWatch = Stopwatch()..start();
     final forceOffline = localOnly ||
@@ -609,7 +621,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         widget.documentId,
       );
       final serverId = cached?['_server_document_id']?.toString() ?? '';
-      if (serverId.isNotEmpty && serverId != widget.documentId) {
+      final serverCanonical = serverId.isEmpty ? '' :
+          await identities.canonicalId(widget.businessId, serverId);
+      if (serverId.isNotEmpty && serverId != widget.documentId &&
+          serverCanonical != widget.documentId) {
         if (!mounted || generation != _loadGeneration) return;
         await Navigator.pushReplacement<void, void>(
           context,
@@ -630,7 +645,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       }
       // A never-synced invoice must stay editable locally even in Auto mode,
       // rather than querying the server with a temporary local ID.
-      unsyncedDraft = serverId.isEmpty;
+      unsyncedDraft = serverId.isEmpty || serverCanonical == widget.documentId;
     }
 
     if (forceOffline || unsyncedDraft) {
@@ -659,6 +674,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           await _offlineDocumentEdit.repairPendingCatalogTaxes(
             widget.businessId,
             cachedRate,
+            documentId: widget.documentId,
           );
         } catch (_) {}
       }
@@ -4341,148 +4357,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       return;
     }
 
-    final localJob=_detail!['job_id']?.toString() ?? '';
-    if(localJob.isNotEmpty) {
-      setState(()=>_busy=true);
-      try {
-        final deleted=await deleteOwnerLocalJob(context,businessId:widget.businessId,
-          jobId:localJob,label:_detail!['job_number']?.toString() ?? 'Job');
-        if(deleted && mounted) Navigator.pop(context,true);
-      } catch (error) {
-        if (!mounted) return;
-        setState(() => _error = error.toString());
-        // The loaded invoice does not render _error. Keep a failed deletion
-        // visible until acknowledged, including failures before confirmation.
-        await showDialog<void>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Invoice was not deleted'),
-            content: SelectableText(error.toString()),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-      }
-      finally { if(mounted) setState(()=>_busy=false); }
-      return;
-    }
-
-
-
-    if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Delete invoice?'),
-          content: const Text('This invoice will be permanently deleted.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: Text(tr('cancel')),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Delete invoice'),
-            ),
-          ],
-        ),
-      );
-      if (confirmed != true) return;
-      try {
-        await _offlineDocumentDraft.cancelNeverSyncedQuickInvoice(
-          widget.businessId,
-          widget.documentId,
-        );
-        if (mounted) Navigator.pop(context);
-      } catch (error) {
-        if (mounted) setState(() => _error = error.toString());
-      }
-      return;
-    }
-
-    final finalizedPaid = _number(_detail!['paid_amount']);
-    final pendingPaid = _number(_detail!['pending_payment']);
-
-    if (finalizedPaid > 0) {
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Paid invoice'),
-          content: const Text(
-            'This invoice has finalized payment activity, so it cannot be deleted or reused. Use the correction/reversal workflow if it needs to be changed.',
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: Text(tr('ok')),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
-    if (pendingPaid > 0) {
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Payments entered'),
-          content: const Text(
-            'Remove the entered payments first. Once there are no payments on this invoice, it can be reassigned or deleted.',
-          ),
-          actions: [
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: _documentActionColor,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
-    if (BriskersConnectionModeController.instance.forceOffline) {
-      if (mounted) {
-        setState(() => _error =
-            'Reconnect to delete an already-synced invoice.');
-      }
-      return;
-    }
-    Map<String,dynamic>? jobPlan;
-    final jobId=_detail?['job_id']?.toString() ?? '';
-    if (jobId.isNotEmpty) {
-      try {
-        jobPlan=await _api.jobDeletionPlan(widget.businessId,jobId);
-      } catch (_) {
-        // The owner can still delete the invoice alone.
-      }
-    }
-    if (!mounted) return;
-    final deleteJob=await showInvoiceDeletionChoice(
-      context,
-      invoiceNumber:_detail?['document_number']?.toString() ?? '',
-      jobPlan:jobPlan,
-    );
-    if (deleteJob == null) return;
-
+    setState(() => _busy = true);
     try {
-      setState(() { _busy = true; _error = null; });
-      await _api.deleteInvoiceManaged(
-        widget.businessId,widget.documentId,deleteJob:deleteJob,
-      );
-      if (mounted) Navigator.pop(context);
+      final deleted = await deleteOwnerLocalInvoice(context,
+        businessId: widget.businessId, invoiceId: widget.documentId,
+        number: '${_detail!['document_number'] ?? ''}');
+      if (deleted && mounted) Navigator.pop(context, true);
     } catch (error) {
-      if (mounted) setState(() => _error=error.toString());
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
     } finally {
-      if (mounted) setState(() => _busy=false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 

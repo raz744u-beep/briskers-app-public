@@ -1,3 +1,4 @@
+import 'local_document_identity.dart';
 import 'local_document_sql_store.dart';
 import 'local_estimate_number.dart';
 import 'local_invoice_closure.dart';
@@ -48,7 +49,13 @@ class LocalDocumentRepository {
   // an exact invoice tombstone also applies after a stale reassignment response.
   static String _visibleDocumentSql(String alias) =>
       """
-    NOT EXISTS (SELECT 1 FROM owner_recovery_aliases a
+    NOT EXISTS (SELECT 1 FROM local_document_detail_deleted x
+      WHERE x.cache_key='briskers_document_detail_' || $alias.business_id || '_' || $alias.id)
+    AND NOT EXISTS (SELECT 1 FROM local_document_identity_aliases a
+      WHERE a.business_id=$alias.business_id AND a.alias_id=$alias.id
+        AND EXISTS (SELECT 1 FROM local_documents original
+          WHERE original.business_id=a.business_id AND original.id=a.canonical_id))
+    AND NOT EXISTS (SELECT 1 FROM owner_recovery_aliases a
       WHERE a.business_id = $alias.business_id
         AND a.server_invoice_id = $alias.id
         AND a.local_invoice_id <> $alias.id
@@ -63,6 +70,7 @@ class LocalDocumentRepository {
   """;
 
   Future<void> _ensureRecoveryAliasTable() async {
+    await LocalDocumentIdentity(_database).prepare();
     await _database.customStatement(
       """CREATE TABLE IF NOT EXISTS owner_recovery_aliases (
         business_id TEXT NOT NULL,
@@ -134,8 +142,8 @@ class LocalDocumentRepository {
       final visible = _visibleDocumentSql('local_documents');
       await _database.customStatement(
         kind == null
-            ? "DELETE FROM local_documents WHERE business_id = ? AND sync_state = 'synced' AND kind<>'estimate' AND $visible"
-            : "DELETE FROM local_documents WHERE business_id = ? AND kind = ? AND sync_state = 'synced' AND kind<>'estimate' AND $visible",
+            ? "DELETE FROM local_documents WHERE business_id = ? AND sync_state = 'synced' AND kind<>'estimate' AND NOT EXISTS (SELECT 1 FROM local_document_identity_aliases a WHERE a.business_id=local_documents.business_id AND a.canonical_id=local_documents.id) AND $visible"
+            : "DELETE FROM local_documents WHERE business_id = ? AND kind = ? AND sync_state = 'synced' AND kind<>'estimate' AND NOT EXISTS (SELECT 1 FROM local_document_identity_aliases a WHERE a.business_id=local_documents.business_id AND a.canonical_id=local_documents.id) AND $visible",
         kind == null ? [businessId] : [businessId, kind],
       );
       for (final incoming in documents) {

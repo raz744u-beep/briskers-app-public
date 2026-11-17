@@ -1,3 +1,5 @@
+import 'local_document_sql_store.dart';
+import 'local_document_detail_cache.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -167,6 +169,11 @@ class LocalJobRetirement {
     String businessId,
   ) async {
     final ids = await _ids(db, businessId, 'invoice');
+    await LocalDocumentSqlStore.ensure(db);
+    final prefix = LocalDocumentDetailCache.key(businessId, '');
+    final removed = await db.customSelect('SELECT cache_key FROM local_document_detail_deleted '
+      'WHERE substr(cache_key,1,?)=?',variables:[Variable(prefix.length),Variable(prefix)]).get();
+    ids.addAll(removed.map((row)=>row.read<String>('cache_key').substring(prefix.length)));
     final linked = await db
         .customSelect(
           "SELECT d.id FROM local_documents d WHERE d.business_id=? AND d.kind='invoice' "
@@ -192,13 +199,16 @@ class LocalJobRetirement {
     String businessId,
     String documentId,
   ) async {
-    if((await _ids(db,businessId,'invoice')).contains(documentId) ||
-       (await _ids(db,businessId,'estimate')).contains(documentId)) { return true; }
     await ensureSchema(db);
+    if (await LocalDocumentSqlStore.deleted(db, LocalDocumentDetailCache.key(businessId, documentId))) return true;
+    final purgeTable = await db.customSelect("SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_offline_job_purge_entities'").getSingleOrNull();
+    if (purgeTable != null && (await db.customSelect(
+      "SELECT 1 FROM local_offline_job_purge_entities WHERE business_id=? AND entity_kind IN ('invoice','estimate') AND entity_id=? LIMIT 1",
+      variables:[Variable(businessId),Variable(documentId)]).get()).isNotEmpty) return true;
     return (await db.customSelect(
       """SELECT 1 FROM local_job_retirement_entities e
       WHERE e.business_id = ? AND e.state IN $blockedStates
-        AND ((e.entity_kind = 'invoice' AND e.entity_id = ?)
+        AND ((e.entity_kind IN ('invoice','estimate') AND e.entity_id = ?)
           OR (e.entity_kind = 'job' AND EXISTS (
             SELECT 1 FROM local_documents d
             WHERE d.business_id = e.business_id AND d.id = ?

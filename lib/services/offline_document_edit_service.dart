@@ -530,9 +530,24 @@ class OfflineDocumentEditService {
 
   Future<int> repairPendingCatalogTaxes(
     String businessId,
-    num defaultTaxRate,
-  ) async {
+    num defaultTaxRate, {
+    String? documentId,
+  }) async {
     if (defaultTaxRate <= 0) return 0;
+
+    final pendingRows = await _database.customSelect(
+      '''
+      SELECT DISTINCT entity_id
+      FROM sync_outbox
+      WHERE business_id = ?
+        AND entity_type = 'document_edit'
+        AND state = 'pending'
+        AND (? IS NULL OR entity_id = ?)
+      ''',
+      variables: [Variable<String>(businessId), Variable<String>(documentId), Variable<String>(documentId)],
+    ).get();
+
+    if (pendingRows.isEmpty) return 0;
 
     final catalogItems = await _catalog.items(
       businessId,
@@ -543,17 +558,6 @@ class OfflineDocumentEditService {
         if ((item['id']?.toString() ?? '').isNotEmpty)
           item['id'].toString(): item['taxable'] == true,
     };
-
-    final pendingRows = await _database.customSelect(
-      '''
-      SELECT DISTINCT entity_id
-      FROM sync_outbox
-      WHERE business_id = ?
-        AND entity_type = 'document_edit'
-        AND state = 'pending'
-      ''',
-      variables: [Variable<String>(businessId)],
-    ).get();
 
     var repaired = 0;
     for (final row in pendingRows) {
