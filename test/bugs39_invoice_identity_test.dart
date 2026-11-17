@@ -1,3 +1,4 @@
+import 'package:briskers_app/services/customer_document_summary_service.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:drift/native.dart';
@@ -29,7 +30,7 @@ void main() {
   const payments = [{'id':'cash-1','amount':3000.0},{'id':'cash-2','amount':4882.11}];
   late String saved;
   final server = <String,dynamic>{'id':remote,'kind':'invoice','document_number':'6359',
-    'status':'issued','total_amount':7882.11,'job_id':'c6a23164-c09a-490d-8b00-c3e84e7282fb'};
+    'status':'issued','customer_id':'remote-customer','total_amount':7882.11,'job_id':'c6a23164-c09a-490d-8b00-c3e84e7282fb'};
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
@@ -37,13 +38,15 @@ void main() {
     db = BriskersLocalDatabase(NativeDatabase(File('${dir.path}/db.sqlite')));
     await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status,job_number,customer_name,vehicle_label) VALUES (?,?,'owner','Repair','closed','J-40','Gloria Johnson','2016 Audi A8L')",[job,business]);
     await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind,document_number,status,display_status_code,total,sync_state) VALUES (?,?,?,'invoice','6359','closed','closed',7882.11,'synced')",[original,business,job]);
+    await db.customStatement("UPDATE local_documents SET customer_id='original-customer' WHERE id=?",[original]);
+    await LocalDocumentDetailCache.initialize(db);
     saved = jsonEncode({'id':original,'kind':'invoice','status':'closed','closed_at':'2026-11-16',
       'total_amount':7882.11,'paid_amount':7882.11,'payments':payments,
       'lines':[{'id':'labor','description':'Repair engine','quantity':24.6}]});
     await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key(business,original),saved);
     await LocalDocumentRepository(database:db).upsertFromServer(business,[server]);
   });
-  tearDown(() async { await db.close(); await dir.delete(recursive:true); });
+  tearDown(() async { await db.close(); await dir.delete(recursive:true); LocalDocumentDetailCache.sqliteWritesEnabled=false; });
 
   Future<LocalOwnerGrant> grant() async {
     const identity = OwnerSessionIdentity('owner','session');
@@ -92,6 +95,19 @@ void main() {
     expect((await db.customSelect('SELECT * FROM local_invoice_delete_audit').get()).length,1);
     expect(await LocalDocumentSqlStore.read(db,LocalDocumentDetailCache.key(business,original)),saved);
     await expectLater(LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key(business,'separate-record'),'{}'),throwsA(anything));
+  });
+
+  test('customer history resolves both local and server customer IDs to the complete Closed invoice',() async {
+    final summaries=CustomerDocumentSummaryService(database:db);
+    for (final customer in ['original-customer','remote-customer']) {
+      final rows=await summaries.forCustomer(business,customer,includeClosed:true);
+      expect(rows.map((row)=>row['id']),[original]);
+      expect(rows.single['status'],'closed');
+      expect(rows.single['payments'],payments);
+    }
+    final detail=await summaries.hydrate(business,server);
+    expect(detail['id'],original);
+    expect(detail['payments'],payments);
   });
 
   test('stale alias deletion is refused, preserving canonical invoice',() async {

@@ -36,6 +36,9 @@ class LocalDocumentIdentity {
   }
 
   Future<String> canonicalId(String business, String id) async {
+    // This repair has one independently verified alias. Ordinary invoice
+    // opens/customer hydration require no identity-table work.
+    if (business != gloriaBusiness || id != gloriaServer) return id;
     await prepare();
     final row = await db.customSelect('''SELECT a.canonical_id
       FROM local_document_identity_aliases a JOIN local_documents d

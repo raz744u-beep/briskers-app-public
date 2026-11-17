@@ -1,3 +1,5 @@
+import 'local_document_identity.dart';
+import 'local_document_repository.dart';
 import 'package:drift/drift.dart';
 
 import '../core/document_presentation.dart';
@@ -36,6 +38,19 @@ class CustomerDocumentSummaryService {
   ) async {
     final id = index['id']?.toString() ?? '';
     if (id.isEmpty) return Map.from(index);
+    final canonical = await LocalDocumentIdentity(_database).canonicalId(businessId, id);
+    if (canonical != id) {
+      final originals = await LocalDocumentRepository(database: _database)
+          .listByKind(businessId, kind: 'invoice');
+      for (final original in originals) {
+        if (original['id'] != canonical) continue;
+        // Index-only zero placeholders must not override saved receipt detail.
+        final identity = {...original}..remove('paid_amount')..remove('pending_payment');
+        return hydrate(businessId, identity);
+      }
+      return const {};
+    }
+
     if (await _blocked(businessId, index)) return const {};
     final cached =
         await _cache.load(businessId, id) ?? const <String, dynamic>{};
@@ -101,20 +116,26 @@ class CustomerDocumentSummaryService {
     String customerId, {
     bool includeClosed = false,
   }) async {
+    await LocalDocumentIdentity(_database).prepare();
     final rows = await _database
         .customSelect(
           'SELECT d.*, j.vehicle_id, j.vehicle_label, j.job_number '
           'FROM local_documents d LEFT JOIN local_jobs j '
           'ON j.business_id=d.business_id AND j.id=d.job_id '
-          'WHERE d.business_id=? AND d.customer_id=? '
+          'WHERE d.business_id=? AND (d.customer_id=? OR EXISTS('
+          'SELECT 1 FROM local_document_identity_aliases a JOIN local_documents remote '
+          'ON remote.business_id=a.business_id AND remote.id=a.alias_id '
+          'WHERE a.business_id=d.business_id AND a.canonical_id=d.id AND remote.customer_id=?)) '
           "AND lower(COALESCE(d.status,''))<>'void'",
           variables: [
             Variable<String>(businessId),
+            Variable<String>(customerId),
             Variable<String>(customerId),
           ],
         )
         .get();
     final result = <Map<String, dynamic>>[];
+    final seen = <String>{};
     for (final row in rows) {
       final index = <String, dynamic>{
         'id': row.read<String>('id'),
@@ -133,7 +154,7 @@ class CustomerDocumentSummaryService {
         'converted': row.read<int>('converted') == 1,
       };
       final document = await hydrate(businessId, index);
-      if (document.isEmpty) continue;
+      if (document.isEmpty || !seen.add('${document['id']}')) continue;
       if (!includeClosed && DocumentPresentation(document).isClosed) continue;
       result.add(document);
     }

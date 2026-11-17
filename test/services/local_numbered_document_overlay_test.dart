@@ -31,6 +31,15 @@ void main() {
     expect(displayed['total_amount'],100);
     expect(original['document_number'],null);
   });
+  test('number overlay preserves Closed and saved receipts',() async {
+    await db.customStatement("INSERT INTO local_documents(id,business_id,kind,status,display_status_code,document_number,sync_state,total) VALUES ('closed','shop','invoice','issued','open','6359','pending',7882.11)");
+    final original=<String,dynamic>{'id':'closed','kind':'invoice','status':'closed',
+      'closed_at':'2026-11-16','paid_amount':7882.11,'pending_payment':0,
+      'payments':[{'amount':3000},{'amount':4882.11}]};
+    final shown=await LocalNumberedDocumentOverlay(database:db).apply('shop','closed',original);
+    expect(shown['display_status'],'Closed');
+    expect(shown['payments'],original['payments']);
+  });
   test('no assigned number leaves cached local invoice unchanged',() async {
     final original=<String,dynamic>{'id':'missing','lines':[],'document_number':null};
     expect(await LocalNumberedDocumentOverlay(database:db)

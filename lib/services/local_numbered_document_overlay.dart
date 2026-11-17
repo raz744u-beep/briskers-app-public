@@ -37,8 +37,14 @@ class LocalNumberedDocumentOverlay {
       'display_status': cached['display_status'],
       if (job.isNotEmpty) 'job_number': job,
     };
+    // Lifecycle projection has already applied explicit Owner reopening.
+    // An older numbering row cannot undo the resulting Closed decision.
+    if (DocumentPresentation(cached).isClosed) {
+      projected['status'] = 'closed';
+      projected['display_status_code'] = 'closed';
+    }
     final presentation = DocumentPresentation(projected);
-    if (presentation.isClosed) projected['display_status'] = 'Closed';
+    projected['display_status'] = presentation.statusLabel;
     return projected;
   }
 }

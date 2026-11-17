@@ -204,7 +204,9 @@ class LocalJobRetirement {
     final purgeTable = await db.customSelect("SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_offline_job_purge_entities'").getSingleOrNull();
     if (purgeTable != null && (await db.customSelect(
       "SELECT 1 FROM local_offline_job_purge_entities WHERE business_id=? AND entity_kind IN ('invoice','estimate') AND entity_id=? LIMIT 1",
-      variables:[Variable(businessId),Variable(documentId)]).get()).isNotEmpty) return true;
+      variables:[Variable(businessId),Variable(documentId)]).get()).isNotEmpty) {
+      return true;
+    }
     return (await db.customSelect(
       """SELECT 1 FROM local_job_retirement_entities e
       WHERE e.business_id = ? AND e.state IN $blockedStates
