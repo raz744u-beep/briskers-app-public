@@ -747,7 +747,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           businessId, includeCachedDetails: true,
         );
         final effective = await journal.overlayCachedRows(businessId, cached);
-        local = await LocalExpenseSubtotal.calculate(effective,
+        final annual = (direction == null || direction == 'expense') &&
+                accountId == null && categoryId == null && counterpartyId == null
+            ? await _localFinancial.reuseClosedYearExpenses(
+                businessId, effective, from: startDate, through: endDate,
+                coverage: coverage, currentYear: DateTime.now().year,
+              )
+            : (liveRows: effective, cents: 0, count: 0);
+        local = await LocalExpenseSubtotal.calculate(annual.liveRows,
           enrichPage: (rows) => const WarrantyReceiptReporting().enrich(
             businessId, rows, refresh: false,
           ),
@@ -755,6 +762,15 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           direction: direction,
           accountId: accountId, categoryId: categoryId,
           counterpartyId: counterpartyId);
+        if (annual.count != 0) {
+          local = ExpensesPeriodTotals(
+            income: local?.income ?? 0,
+            expenses: (((local?.expenses ?? 0) * 100).round() + annual.cents) / 100,
+            transactions: (local?.transactions ?? 0) + annual.count,
+            feesUnverified: local?.feesUnverified ?? false,
+            unverifiedIncomeReceipts: local?.unverifiedIncomeReceipts ?? 0,
+          );
+        }
         if (hasCompleteLocalHistory) {
           local ??= const ExpensesPeriodTotals(
             income: 0, expenses: 0, transactions: 0,
@@ -815,7 +831,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       ? 'Includes $localChanges locally saved change(s) · sync pending'
                       : 'Saved local totals · verified ${DateFormat('MMM d, h:mm a').format(lastVerified!)}';
     });
-    if (offline || (fresh && !force)) {
+    final savedClosedPeriod = hasCompleteLocalHistory && endDate != null &&
+        endDate.isBefore(DateTime(DateTime.now().year));
+    if (offline || (!force && (fresh || savedClosedPeriod))) {
       _pendingPeriodScope = null;
       return;
     }

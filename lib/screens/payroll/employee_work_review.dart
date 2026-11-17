@@ -87,11 +87,22 @@ class EmployeeWorkReview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final start = monday(week);
-    final visible = rows.where((row) => fallsInWeek(row, week)).toList();
-    final inProgressPaid = visible.where((row) => row['state'] == 'In Progress')
-        .fold<int>(0, (sum, row) => sum + (row['paid_minutes'] as int? ?? 0));
-    int sum(Iterable<Map<String, dynamic>> rs) =>
-        rs.fold(0, (n, r) => n + minutes(r));
+    final currentWeek = start == monday(DateTime.now());
+    final visible = rows.where((row) {
+      if (fallsInWeek(row, week)) return true;
+      // An active task can carry into the current week after its planned end.
+      final scheduledEnd = LocalTaskSchedule.parse(row['work_end_date']) ?? date(row);
+      return currentWeek && row['state'] == 'In Progress' &&
+          row['source_active'] != 0 && row['assignment_conflict'] != 1 &&
+          scheduledEnd != null && scheduledEnd.isBefore(start);
+    }).toList();
+    int unpaidAssignment(Map<String, dynamic> row) {
+      final assigned = row['estimated_minutes'] as int? ?? 0;
+      final paid = row['paid_minutes'] as int? ?? 0;
+      return (assigned - paid).clamp(0, 0x7fffffff);
+    }
+    int sum(Iterable<Map<String, dynamic>> rs, {bool unpaid = false}) =>
+        rs.fold(0, (n, r) => n + (unpaid ? unpaidAssignment(r) : minutes(r)));
     String hrs(int n) => (n / 60).toStringAsFixed(2);
     return Theme(
       data: Theme.of(context).copyWith(
@@ -304,7 +315,7 @@ class EmployeeWorkReview extends StatelessWidget {
                           child: FittedBox(
                             fit: BoxFit.scaleDown,
                             child: Text(
-                              'Total assigned: ${hrs(visible.fold<int>(0, (n, row) => n + (row['estimated_minutes'] as int? ?? 0)))} hrs',
+                              'Total assigned: ${hrs(sum(visible, unpaid: true))} hrs',
                               maxLines: 1,
                               style: const TextStyle(fontSize: 12,
                                 fontWeight: FontWeight.w800, color: Color(0xFF075C18)),
@@ -347,7 +358,7 @@ class EmployeeWorkReview extends StatelessWidget {
                                           ? 'Completed'
                                           : state == 'Open'
                                           ? 'Not Started'
-                                          : state}\n${hrs(sum(visible.where((r) => r['state'] == state)))} hrs',
+                                          : state}\n${hrs(sum(visible.where((r) => r['state'] == state), unpaid: state != 'Done'))} hrs',
                                       textAlign: TextAlign.center,
                                       style: TextStyle(
                                         fontWeight: FontWeight.w800,
@@ -355,12 +366,6 @@ class EmployeeWorkReview extends StatelessWidget {
                                         color: color(state),
                                       ),
                                     ),
-                                    if (state == 'In Progress' && inProgressPaid > 0)
-                                      Text(
-                                        '(includes ${hrs(inProgressPaid)} hrs paid on these tasks)',
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(fontSize: 11),
-                                      ),
                                   ],
                                 ),
                               ),

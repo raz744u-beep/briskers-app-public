@@ -10,6 +10,7 @@ class CustomerProblemFlagCard extends StatelessWidget {
     required this.note,
     required this.canEdit,
     required this.onEdit,
+    this.embedded = false,
   });
 
   final String customerId;
@@ -17,22 +18,11 @@ class CustomerProblemFlagCard extends StatelessWidget {
   final String note;
   final bool canEdit;
   final VoidCallback onEdit;
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: ExpansionTile(
-        key: PageStorageKey<String>('customer-problem-flag-$customerId'),
-        initiallyExpanded: false,
-        leading: Icon(
-          flagged ? Icons.flag : Icons.outlined_flag,
-          color: flagged ? Colors.red : null,
-        ),
-        title: const Text(
-          'Problem customer',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-        children: [
+    final fields = <Widget>[
           CheckboxListTile(
             title: const Text(
               'Show a red flag beside this customer throughout Briskers.',
@@ -49,7 +39,35 @@ class CustomerProblemFlagCard extends StatelessWidget {
               trailing: canEdit ? const Icon(Icons.edit_outlined) : null,
               onTap: canEdit ? onEdit : null,
             ),
-        ],
+    ];
+    if (embedded) {
+      return Column(children: [
+        ListTile(
+          dense: true,
+          leading: Icon(flagged ? Icons.flag : Icons.outlined_flag,
+            color: Theme.of(context).colorScheme.error),
+          title: const Text('Problem customer',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: const Text('Show a red flag beside this customer throughout Briskers.'),
+          trailing: Checkbox(value: flagged, onChanged: canEdit ? (_) => onEdit() : null),
+          onTap: canEdit ? onEdit : null,
+        ),
+        ...fields.skip(1),
+      ]);
+    }
+    return Card(
+      child: ExpansionTile(
+        key: PageStorageKey<String>('customer-problem-flag-$customerId'),
+        initiallyExpanded: false,
+        leading: Icon(
+          flagged ? Icons.flag : Icons.outlined_flag,
+          color: flagged ? Colors.red : null,
+        ),
+        title: const Text(
+          'Problem customer',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        children: fields,
       ),
     );
   }

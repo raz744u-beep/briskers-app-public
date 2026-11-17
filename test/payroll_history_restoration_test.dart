@@ -32,7 +32,19 @@ void main() {
         ],
       ),
     )));
-    await tester.tap(find.text('Week of Oct 26, 2026'));
+    final paidCard = find.ancestor(of: find.text('Paid portion'), matching: find.byType(Card)).first;
+    expect(tester.getTopLeft(find.text('Tap to view details')).dy,
+      greaterThan(tester.getBottomLeft(paidCard).dy));
+    await tester.tap(find.text('All Time'));
+    await tester.pumpAndSettle();
+    expect(find.text('Payroll History · Date range'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('2026')).dy,
+      greaterThan(tester.getTopLeft(find.text('All Time').last).dy));
+    await tester.tap(find.text('2026'));
+    await tester.tap(find.text('Apply'));
+    await tester.pumpAndSettle();
+    expect(find.text('Total paid · 2026'), findsOneWidget);
+    await tester.tap(find.text('Tap to view details'));
     await tester.pumpAndSettle();
     expect(find.text('Gross Pay'), findsOneWidget);
     expect(find.text('Debt Repaid'), findsOneWidget);

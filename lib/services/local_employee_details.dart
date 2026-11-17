@@ -150,6 +150,17 @@ class LocalEmployeeDetails {
     }
   }
 
+  Future<bool> syncSsn(String shop, String employee, LocalOwnerGrant grant) async {
+    grant.assertValid(shop, grant.actorId);
+    BriskersConnectionModeController.instance.ensureNetworkAllowed();
+    final value = await const BriskersApi().revealEmployeeSsn(shop, employee)
+        .timeout(const Duration(seconds: 10));
+    grant.assertValid(shop, grant.actorId);
+    if (value == null || value.trim().isEmpty) return false;
+    await cache.saveSsn(shop, employee, value, grant);
+    return true;
+  }
+
   Future<Map<String, dynamic>> remoteDetail(
     String shop, String employee, LocalOwnerGrant grant,
   ) async {

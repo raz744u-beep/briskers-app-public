@@ -935,7 +935,10 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   : null),
             ),
             if (unit != null) ...[Text(unit), const SizedBox(width: 6)],
-            Text(value, style: const TextStyle(fontWeight: FontWeight.w800)),
+            Text(value, textAlign: TextAlign.end, style: const TextStyle(
+              fontWeight: FontWeight.w800,
+              fontFeatures: [FontFeature.tabularFigures()],
+            )),
           ],
         ),
       );

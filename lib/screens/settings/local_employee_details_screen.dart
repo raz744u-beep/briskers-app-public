@@ -6,7 +6,6 @@ import '../../core/connection_mode.dart';
 import '../../core/formatters.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/device_owner_authorization.dart';
-import '../../services/briskers_api.dart';
 import '../../services/employee_nickname_store.dart';
 import '../../services/local_employee_details.dart';
 import '../../services/local_owner_authorization.dart';
@@ -38,10 +37,11 @@ class LocalEmployeeDetailsScreen extends StatefulWidget {
 }
 
 class _LocalEmployeeDetailsScreenState
-    extends State<LocalEmployeeDetailsScreen> {
+    extends State<LocalEmployeeDetailsScreen> with WidgetsBindingObserver {
   static const cache = SecureEmployeeDetailsCache();
   Map<String, dynamic> details = {}, pending = {};
   String nickname = '', message = '';
+  String? revealedSsn;
   String? localPayType;
   int? localPayCents;
   List<String> conflicts = [];
@@ -53,6 +53,7 @@ class _LocalEmployeeDetailsScreenState
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(load());
     BriskersConnectionModeController.instance.addListener(connectionChanged);
     timer = Timer.periodic(const Duration(seconds: 2), (_) {
@@ -63,6 +64,7 @@ class _LocalEmployeeDetailsScreenState
           if (mounted) {
             setState(() {
               grant = null;
+              revealedSsn = null;
               details = {};
               pending = {};
               conflicts = [];
@@ -83,11 +85,25 @@ class _LocalEmployeeDetailsScreenState
   @override
   void dispose() {
     timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     for (final controller in _editControllers) {
       controller.dispose();
     }
     BriskersConnectionModeController.instance.removeListener(connectionChanged);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed && revealedSsn != null && mounted) {
+      setState(() => revealedSsn = null);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (ModalRoute.isCurrentOf(context) == false) revealedSsn = null;
   }
 
   void connectionChanged() {
@@ -209,6 +225,7 @@ class _LocalEmployeeDetailsScreenState
           ? (defaults?['base_cents'] as int?)
           : (employee['rate'] as int?);
       details = savedDetails;
+      revealedSsn = null;
       pending = Map<String, dynamic>.from(value?['pending'] as Map? ?? {});
       final syncedAlias = savedDetails['nickname']?.toString() ?? '';
       nickname = savedDetails.containsKey('nickname') &&
@@ -258,45 +275,58 @@ class _LocalEmployeeDetailsScreenState
     }
   }
 
+  Future<void> syncSsn() async {
+    final access = grant;
+    if (access == null || busy) return;
+    setState(() { busy = true; revealedSsn = null; });
+    try {
+      final saved = await const LocalEmployeeDetails().syncSsn(
+        widget.businessId, widget.employeeId, access,
+      );
+      if (mounted) {
+        setState(() => message = saved
+            ? 'SSN saved securely on this device. Use Show to view it offline.'
+            : 'There is no full SSN available to sync for this employee.');
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => message =
+            'Could not sync the SSN. Refresh / Sync the employee profile and try again.');
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   Future<void> showSsn() async {
-    if (grant == null || busy || details.isEmpty) return;
-    if (BriskersConnectionModeController.instance.forceOffline) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Full SSN needs an online Owner connection. The last four digits remain available offline.'),
-      ));
+    final access = grant;
+    if (access == null || busy) return;
+    if (revealedSsn != null) {
+      setState(() => revealedSsn = null);
       return;
     }
     setState(() => busy = true);
     try {
-      grant!.assertValid(widget.businessId, grant!.actorId);
-      BriskersConnectionModeController.instance.ensureNetworkAllowed();
-      final ssn = await const BriskersApi().revealEmployeeSsn(
-        widget.businessId, widget.employeeId,
+      final digits = await cache.readSsn(
+        widget.businessId, widget.employeeId, access,
       );
-      grant!.assertValid(widget.businessId, grant!.actorId);
-      if (!mounted) return;
-      final digits = digitsOnly(ssn ?? '');
-      if (digits.length != 9) {
+      access.assertValid(widget.businessId, access.actorId);
+      if (!mounted || WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed ||
+          ModalRoute.of(context)?.isCurrent == false) {
+        return;
+      }
+      if (digits == null) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No full SSN is available for this employee.'),
+          content: Text('Full SSN is not saved here yet. Connect and use Sync SSN to this device.'),
         ));
         return;
       }
-      await showDialog<void>(
-        context: context,
-        builder: (dialog) => AlertDialog(
-          title: const Text('Employee SSN'),
-          content: Text('${digits.substring(0, 3)}-${digits.substring(3, 5)}-${digits.substring(5)}',
-              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w700)),
-          actions: [TextButton(
-            onPressed: () => Navigator.pop(dialog), child: const Text('Hide'),
-          )],
-        ),
-      );
+      setState(() => revealedSsn =
+          '${digits.substring(0, 3)}-${digits.substring(3, 5)}-${digits.substring(5)}');
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Owner verification could not reveal the SSN. Reconnect and try again.'),
+          content: Text('Could not unlock the saved SSN for this Owner session.'),
         ));
       }
     } finally {
@@ -933,9 +963,9 @@ class _LocalEmployeeDetailsScreenState
         )
       : ListTile(
           dense: true,
-          visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+          visualDensity: VisualDensity.standard,
           minLeadingWidth: 22,
-          horizontalTitleGap: 7,
+          horizontalTitleGap: 12,
           contentPadding: EdgeInsets.zero,
           leading: Icon(icon, color: taskNavy, size: 21),
           title: Text(
@@ -954,6 +984,7 @@ class _LocalEmployeeDetailsScreenState
         );
   @override
   Widget build(BuildContext context) {
+    final shownSsn = ModalRoute.of(context)?.isCurrent == false ? null : revealedSsn;
     final name = value('name', fallback: widget.rosterName ?? 'Employee');
     final option = (details['positions'] as List? ?? [])
         .where((p) => p['id'] == details['position_id'])
@@ -990,18 +1021,20 @@ class _LocalEmployeeDetailsScreenState
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      nickname.isEmpty ? name : nickname,
-                      style: const TextStyle(
-                        fontSize: 25,
-                        fontWeight: FontWeight.w800,
-                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Expanded(child: Text(
+                          nickname.isEmpty ? name : nickname,
+                          style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
+                        )),
+                        if (nickname.isNotEmpty && nickname != name) ...[
+                          const SizedBox(width: 10),
+                          Flexible(child: Text(name, textAlign: TextAlign.end)),
+                        ],
+                      ],
                     ),
-                    if (nickname.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(name),
-                      ),
                     const SizedBox(height: 6),
                     Wrap(
                       spacing: 10,
@@ -1066,54 +1099,33 @@ class _LocalEmployeeDetailsScreenState
               label: const Text('Review conflicting changes'),
             ),
           section('Employment & Pay', Icons.work_outline, [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    children: [
-                      detail(
-                        'Payment Type',
-                        details['payment_type'] == null
-                            ? 'Not saved locally'
-                            : fixed
-                            ? 'Fixed weekly'
-                            : 'Hourly',
-                        Icons.person_outline,
-                        onTap: grant != null && details.isNotEmpty
-                            ? editPay
-                            : null,
-                      ),
-                      detail(
-                        fixed ? 'Weekly pay' : 'Hourly rate',
-                        rate == null
-                            ? 'Not saved locally'
-                            : '\$${rate.toStringAsFixed(2)} / ${fixed ? 'week' : 'hr'}',
-                        Icons.payments_outlined,
-                        color: taskGreen,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    children: [
-                      detail(
-                        'Pay Method',
-                        value('default_payment_method'),
-                        Icons.credit_card,
-                        onTap: grant != null &&
-                                details.containsKey('default_payment_method')
-                            ? () => editDetails()
-                            : null,
-                      ),
-                      detail('Position', role, Icons.engineering_outlined),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+            LayoutBuilder(builder: (context, constraints) {
+              final twoColumns = constraints.maxWidth >=
+                  MediaQuery.textScalerOf(context).scale(300);
+              const gap = 16.0;
+              final width = twoColumns
+                  ? (constraints.maxWidth - gap) / 2 : constraints.maxWidth;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Wrap(spacing: gap, runSpacing: 8, children: [
+                  for (final field in [
+                    detail('Payment Type',
+                      (localPayType ?? details['payment_type']) == null
+                          ? 'Not saved locally' : fixed ? 'Fixed weekly' : 'Hourly',
+                      Icons.person_outline,
+                      onTap: grant != null && details.isNotEmpty ? editPay : null),
+                    detail('Pay Method', value('default_payment_method'), Icons.credit_card,
+                      onTap: grant != null && details.containsKey('default_payment_method')
+                          ? () => editDetails() : null),
+                    detail(fixed ? 'Weekly pay' : 'Hourly rate',
+                      rate == null ? 'Not saved locally'
+                          : '\$${rate.toStringAsFixed(2)} / ${fixed ? 'week' : 'hr'}',
+                      Icons.payments_outlined, color: taskGreen),
+                    detail('Position', role, Icons.engineering_outlined),
+                  ]) SizedBox(width: width, child: field),
+                ]),
+              );
+            }),
           ]),
           section('Contact Information', Icons.badge_outlined, [
             detail('Phone', employeePhone(value('phone')), Icons.phone_outlined, inline: true),
@@ -1133,13 +1145,24 @@ class _LocalEmployeeDetailsScreenState
             detail(
               'SSN',
               inline: true,
-              details['ssn_last4'] == null
+              shownSsn ?? (details['ssn_last4'] == null
                   ? 'Not saved locally'
-                  : '***-**-${details['ssn_last4']}',
+                  : '***-**-${details['ssn_last4']}'),
               Icons.badge_outlined,
               onTap: grant != null && details.isNotEmpty ? showSsn : null,
-              actionLabel: grant != null && details.isNotEmpty ? 'Show' : null,
+              actionLabel: grant != null && details.isNotEmpty
+                  ? (shownSsn == null ? 'Show' : 'Hide') : null,
             ),
+            if (grant != null && details['ssn_last4'] != null &&
+                !BriskersConnectionModeController.instance.forceOffline)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: busy ? null : syncSsn,
+                  icon: const Icon(Icons.sync, size: 16),
+                  label: const Text('Sync SSN to this device'),
+                ),
+              ),
             const Divider(height: 1),
             detail(
               'W-9 Status',

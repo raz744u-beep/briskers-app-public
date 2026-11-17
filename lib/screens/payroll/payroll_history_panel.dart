@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../widgets/briskers_dialog.dart';
 import 'approved_tasks_ui.dart';
 import 'payroll_payment_correction.dart';
 
@@ -62,8 +63,6 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
         return !week.isBefore(DateTime(today.year,today.month,today.day)
           .subtract(const Duration(days:29)));
       case 'All': return true;
-      case '2026': return week.year == 2026;
-      case '2025': return week.year == 2025;
       case 'This Month': return week.year == today.year &&
           week.month == today.month;
       case 'Last Month':
@@ -80,8 +79,72 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
         return _custom != null &&
           !week.isBefore(_custom!.start) &&
           !week.isAfter(_custom!.end);
-      default: return true;
+      default: return int.tryParse(_period) == week.year;
     }
+  }
+
+  Future<void> _pickPeriod() async {
+    var choice = _period;
+    final years = {
+      DateTime.now().year,
+      DateTime.now().year - 1,
+      for (final payment in widget.payments)
+        if (DateTime.tryParse('${payment['week']}') case final week?) week.year,
+    }.toList()..sort((a, b) => b.compareTo(a));
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      clipBehavior: Clip.antiAlias,
+      backgroundColor: Colors.white,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => FractionallySizedBox(
+          heightFactor: 0.78,
+          child: SafeArea(top: false, child: Column(children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(gradient: BriskersColors.blueHeader),
+              child: const Text('Payroll History · Date range', style: TextStyle(
+                color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700,
+              )),
+            ),
+            Expanded(child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              children: [
+                for (final label in [
+                  'All', ...years.map((year) => '$year'), 'This Week', 'Last Week',
+                  'Last 30 Days', 'This Month', 'Last Month', 'Last 3 Months',
+                  'Last 6 Months', 'Year to Date', 'Custom',
+                ]) ListTile(
+                  dense: true,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  selected: choice == label,
+                  selectedTileColor: BriskersColors.tabPurple.withValues(alpha: .12),
+                  selectedColor: BriskersColors.tabPurple,
+                  title: Text(label == 'All' ? 'All Time' : label == 'Custom' ? 'Custom range…' : label),
+                  trailing: choice == label ? const Icon(Icons.check)
+                      : label == 'Custom' ? const Icon(Icons.chevron_right) : null,
+                  onTap: () => update(() => choice = label),
+                ),
+              ],
+            )),
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                OutlinedButton(style: BriskersDialog.cancelStyle,
+                  onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                const SizedBox(width: 8),
+                FilledButton(style: BriskersDialog.confirmStyle(),
+                  onPressed: () => Navigator.pop(context, choice), child: const Text('Apply')),
+              ]),
+            ),
+          ])),
+        ),
+      ),
+    );
+    if (selected != null && mounted) await _change(selected);
   }
 
   Future<void> _change(String chosen) async {
@@ -469,7 +532,8 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
 
   Widget _card(_RecordedWeek week) {
     const bg = Color(0xFFE9F8EF);
-    return Card(
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Card(
       margin: const EdgeInsets.only(bottom: 9),
       color: bg, elevation: 0.6,
       child: InkWell(
@@ -497,12 +561,6 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
               ),
             ]),
             const SizedBox(height: 13),
-            const Align(
-              alignment: Alignment.centerRight,
-              child: Text('Tap to view details',
-                style: TextStyle(fontSize: 10.5,
-                  color: Color(0xFF64748B)))),
-            const SizedBox(height: 5),
             Row(children: [
               _metric('Hours', (week.minutes / 60).toStringAsFixed(1),
                 const Color(0xFF101828)),
@@ -518,7 +576,15 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
           ]),
         ),
       ),
-    );
+      ),
+      Align(
+        alignment: Alignment.centerRight,
+        child: TextButton(
+          onPressed: () => _showTaskHistory(week),
+          child: const Text('Tap to view details', style: TextStyle(fontSize: 13)),
+        ),
+      ),
+    ]);
   }
 
   @override
@@ -542,27 +608,13 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
           const Expanded(child:Text('Payroll History',
             maxLines:1,overflow:TextOverflow.ellipsis,
             style:TextStyle(fontSize:18,fontWeight:FontWeight.w800))),
-          SizedBox(width:159,child:DropdownButtonFormField<String>(
-            key:ValueKey('reports-period-$_period'),
-            initialValue:_period,
-            isExpanded:true,
-            decoration:InputDecoration(
-              isDense:true,
-              contentPadding:const EdgeInsets.symmetric(
-                horizontal:10,vertical:9),
-              border:OutlineInputBorder(
-                borderRadius:BorderRadius.circular(14))),
-            items:const [
-              'All','2026','2025','This Week','Last Week',
-              'Last 30 Days','This Month','Last Month',
-              'Last 3 Months','Last 6 Months','Year to Date','Custom',
-            ].map((label)=>DropdownMenuItem(value:label,
-              child:Text(label,overflow:TextOverflow.ellipsis,
-                style:const TextStyle(fontSize:12)))).toList(),
-            onChanged:(value) {
-              if(value!=null) {_change(value);}
-            },
-          )),
+          OutlinedButton.icon(
+            key: ValueKey('reports-period-$_period'),
+            onPressed: _pickPeriod,
+            iconAlignment: IconAlignment.end,
+            icon: const Icon(Icons.arrow_drop_down),
+            label: Text(_period == 'All' ? 'All Time' : _period),
+          ),
           const SizedBox(width:7),
           const Icon(Icons.history,color:BriskersColors.jobs,size:22),
         ]),

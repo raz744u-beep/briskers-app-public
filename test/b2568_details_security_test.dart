@@ -22,6 +22,17 @@ void main(){
     expect((saved!['details'] as Map)['name'],'Verified Employee');
     expect((saved['details'] as Map).containsKey('ssn'),isFalse);
     await expectLater(cache.read('other','employee',grant),throwsStateError);
-    await auth.revoke();await expectLater(cache.read('shop','employee',grant),throwsStateError);
+    expect(await cache.readSsn('shop', 'employee', grant), isNull);
+    await expectLater(cache.saveSsn('shop', 'employee', '000-00-0000', grant), throwsStateError);
+    await cache.saveSsn('shop', 'employee', '000-00-6789', grant);
+    expect(await const SecureEmployeeDetailsCache().readSsn('shop', 'employee', grant), '000006789');
+    expect(await cache.readSsn('shop', 'different-employee', grant), isNull);
+    await expectLater(cache.readSsn('other', 'employee', grant), throwsStateError);
+    expect((await cache.read('shop', 'employee', grant)).toString(), isNot(contains('000006789')));
+    await cache.save('shop', 'employee', {'id': 'employee', 'ssn_last4': '0001'}, grant);
+    expect(await cache.readSsn('shop', 'employee', grant), isNull);
+    await auth.revoke();
+    await expectLater(cache.readSsn('shop','employee',grant), throwsStateError);
+    await expectLater(cache.read('shop','employee',grant),throwsStateError);
   });
 }

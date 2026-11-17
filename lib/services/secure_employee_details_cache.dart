@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'local_owner_authorization.dart';
 
-/// Owner/session-bound encrypted profiles. Only last-four SSN digits are allowed.
+/// Owner/session-bound encrypted profiles. Full SSNs have a separate protected key.
 /// Local edits and their comparison baselines stay encrypted, never in SQLite.
 class SecureEmployeeDetailsCache {
   const SecureEmployeeDetailsCache();
@@ -37,6 +37,37 @@ class SecureEmployeeDetailsCache {
   static final Map<String, Future<void>> _writes = {};
   String _key(String shop, String actor, String employee) =>
       'briskers_employee_private_v1:${jsonEncode([shop, actor, employee])}';
+  String _ssnKey(String shop, String actor, String employee) =>
+      'briskers_employee_ssn_v1:${jsonEncode([shop, actor, employee])}';
+
+  /// This separate value never appears in profile maps, edit queues or SQLite.
+  Future<void> saveSsn(
+    String shop, String employee, String value, LocalOwnerGrant grant,
+  ) async {
+    grant.assertValid(shop, grant.actorId);
+    final digits = value.trim().replaceAll('-', '');
+    final profile = await read(shop, employee, grant);
+    final last4 = (profile?['details'] as Map?)?['ssn_last4'];
+    if (!RegExp(r'^\d{9}$').hasMatch(digits) || last4 != digits.substring(5)) {
+      throw StateError('The SSN does not match the saved employee record.');
+    }
+    grant.assertValid(shop, grant.actorId);
+    await _storage.write(key: _ssnKey(shop, grant.actorId, employee), value: digits);
+    grant.assertValid(shop, grant.actorId);
+  }
+
+  Future<String?> readSsn(
+    String shop, String employee, LocalOwnerGrant grant,
+  ) async {
+    grant.assertValid(shop, grant.actorId);
+    final digits = await _storage.read(key: _ssnKey(shop, grant.actorId, employee));
+    grant.assertValid(shop, grant.actorId);
+    if (digits == null || !RegExp(r'^\d{9}$').hasMatch(digits)) return null;
+    final profile = await read(shop, employee, grant);
+    return (profile?['details'] as Map?)?['ssn_last4'] == digits.substring(5)
+        ? digits : null;
+  }
+
   Map<String, dynamic> _safe(Map<String, dynamic> input) {
     final result = {
       for (final k in safeKeys)

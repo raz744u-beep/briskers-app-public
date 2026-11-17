@@ -80,7 +80,7 @@ void main() {
     ),
   );
 
-  testWidgets('Weekly Labor note wraps without resizing any column', (t) async {
+  testWidgets('Weekly Labor shows remaining hours in equal-width columns', (t) async {
     size(t, width: 360);
     await t.pumpWidget(app(Scaffold(body: EmployeeWorkReview(
       week: week,
@@ -93,12 +93,12 @@ void main() {
     ))));
     await t.pumpAndSettle();
     final note = find.text('(includes 8.00 hrs paid on these tasks)');
-    await t.ensureVisible(note);
+    await t.ensureVisible(find.text('In Progress\n12.00 hrs'));
     await t.pumpAndSettle();
 
     final metrics = [
       find.text('Completed\n0.00 hrs'),
-      find.text('In Progress\n20.00 hrs'),
+      find.text('In Progress\n12.00 hrs'),
       find.text('Not Started\n0.00 hrs'),
     ];
     final widths = <double>[];
@@ -113,8 +113,8 @@ void main() {
     }
     expect(widths[1], closeTo(widths[0], 0.01));
     expect(widths[2], closeTo(widths[0], 0.01));
-    expect(t.widget<Text>(note).style?.fontSize, 11);
-    expect(t.getSize(note).height, greaterThan(20));
+    expect(note, findsNothing);
+    expect(find.text('Total assigned: 12.00 hrs'), findsOneWidget);
     expect(find.text('Total Paid This Week'), findsOneWidget);
     expect(t.takeException(), isNull);
   });
@@ -272,7 +272,7 @@ void main() {
       expect(children.last,isA<WorkPayrollSummary>());
       expect(find.text('Oil Change'),findsNothing,reason:'Completed labor must not be repeated below Work summary');
       expect(find.text('Weekly Labor'),findsOneWidget);
-      expect(find.text('Total assigned: 21.00 hrs'),findsOneWidget,reason:'Removing duplicate UI retains every allocation in weekly totals');
+      expect(find.text('Total assigned: 21.00 hrs'),findsOneWidget,reason:'Unpaid work retains every allocation in weekly totals');
       expect(find.text('Review & Pay').hitTestable(),findsOneWidget);
       final button=find.widgetWithText(FilledButton,'Review & Pay');
       final summary=find.byKey(const Key('work-payroll-summary'));

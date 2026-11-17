@@ -19,12 +19,14 @@ class CustomerNotesSection extends StatefulWidget {
     super.key,
     required this.businessId,
     required this.customerId,
-    this.initiallyExpanded = false,
+    this.composerRequest = 0,
+    required this.canAdd,
   });
 
   final String businessId;
   final String customerId;
-  final bool initiallyExpanded;
+  final int composerRequest;
+  final bool canAdd;
 
   @override
   State<CustomerNotesSection> createState() => _CustomerNotesSectionState();
@@ -42,6 +44,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
   List<Map<String, dynamic>> _notes = const [];
   final List<XFile> _photos = [];
   bool _loading = true;
+  late bool _showComposer = widget.composerRequest != 0;
   bool _canDeleteRecords = false;
   bool _saving = false;
   String? _error;
@@ -63,6 +66,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
   @override
   void didUpdateWidget(covariant CustomerNotesSection oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.composerRequest != oldWidget.composerRequest) _showComposer = true;
     if (oldWidget.businessId != widget.businessId ||
         oldWidget.customerId != widget.customerId) {
       _notes = const [];
@@ -277,6 +281,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
       if (mounted) {
         setState(() {
           _notes = notes;
+          _showComposer = false;
           _saving = false;
           _error = null;
         });
@@ -603,7 +608,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
             width: double.infinity,
             child: FilledButton.icon(
               style: FilledButton.styleFrom(
-                backgroundColor: BriskersColors.customers,
+                backgroundColor: BriskersColors.confirm,
                 foregroundColor: Colors.white,
               ),
               onPressed: _saving ? null : _addNote,
@@ -614,7 +619,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.add_comment_outlined),
-              label: Text(_saving ? 'Saving...' : 'Add note'),
+              label: Text(_saving ? 'Saving...' : 'Save note'),
             ),
           ),
           if (_error != null) ...[
@@ -636,27 +641,25 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
 
   @override
   Widget build(BuildContext context) {
-    final count = _notes.length;
-
     return Card(
-      child: ExpansionTile(
-        initiallyExpanded: widget.initiallyExpanded,
-        maintainState: false,
-        leading: const Icon(
-          Icons.note_alt_outlined,
-          color: BriskersColors.notes,
-        ),
-        title: const Text(
-          'Notes',
-          style: TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: _loading
-            ? const Text('Loading notes...')
-            : Text(count == 1 ? '1 note' : '$count notes'),
+      child: Column(
         children: [
+          ListTile(
+            leading: const Icon(Icons.note_alt_outlined, color: BriskersColors.tabGray),
+            title: const Text('Customer notes', style: TextStyle(fontWeight: FontWeight.w700)),
+            trailing: widget.canAdd && !_showComposer ? FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: BriskersColors.confirm, foregroundColor: Colors.white),
+              onPressed: () => setState(() => _showComposer = true),
+              icon: const Icon(Icons.add),
+              label: const Text('Add note'),
+            ) : null,
+          ),
           const Divider(height: 1),
-          const SizedBox(height: 12),
-          _composer(),
+          if (_showComposer && widget.canAdd) ...[
+            const SizedBox(height: 12),
+            _composer(),
+          ],
           if (_loading)
             const Padding(
               padding: EdgeInsets.all(16),
@@ -664,10 +667,10 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
             )
           else if (_notes.isEmpty)
             const Padding(
-              padding: EdgeInsets.fromLTRB(16, 4, 16, 16),
+              padding: EdgeInsets.all(16),
               child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('No customer notes yet.'),
+                alignment: Alignment.center,
+                child: Text('No saved notes'),
               ),
             )
           else

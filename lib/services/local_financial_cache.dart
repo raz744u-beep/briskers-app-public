@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
+import 'package:cryptography/dart.dart';
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
@@ -549,6 +550,85 @@ class LocalFinancialCache {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Reuse full closed-year expense totals only when coverage and the
+  /// effective ledger rows match. The caller has already applied local edits
+  /// and reversals. Row identities detect additions/deletions, and amounts
+  /// detect edits. Income stays on the receipt verification path.
+  Future<({List<Map<String, dynamic>> liveRows, int cents, int count})>
+      reuseClosedYearExpenses(
+    String business,
+    List<Map<String, dynamic>> rows, {
+    required DateTime? from,
+    required DateTime? through,
+    required ({DateTime? start, DateTime end})? coverage,
+    required int currentYear,
+  }) async {
+    if (coverage == null) return (liveRows: rows, cents: 0, count: 0);
+    final live = <Map<String, dynamic>>[];
+    final byYear = <int, Map<String, String>>{};
+    final eligible = <int, bool>{};
+    for (final row in rows) {
+      final date = row['direction'] == 'expense'
+          ? DateTime.tryParse(row['transaction_date']?.toString() ?? '')
+          : null;
+      final id = row['id']?.toString().trim() ?? '';
+      if (date == null || date.year >= currentYear || id.isEmpty) {
+        live.add(row);
+        continue;
+      }
+      final year = date.year;
+      if (!eligible.putIfAbsent(year, () {
+        final first = DateTime(year);
+        final last = DateTime(year, 12, 31);
+        return (from == null || !first.isBefore(from)) &&
+            (through == null || !last.isAfter(through)) &&
+            (coverage.start == null || !first.isBefore(coverage.start!)) &&
+            !last.isAfter(coverage.end);
+      })) {
+        live.add(row);
+        continue;
+      }
+      (byYear[year] ??= {})[id] = row['amount']?.toString() ?? '';
+    }
+    var cents = 0;
+    var count = 0;
+    for (final MapEntry(key: year, value: records) in byYear.entries) {
+      final ids = records.keys.toList()..sort();
+      final input = jsonEncode([for (final id in ids) [id, records[id]]]);
+      final fingerprint = base64Encode(const DartSha256().hashSync(utf8.encode(input)).bytes);
+      final key = 'closed_year_expenses_v1_$year';
+      int? cached;
+      try {
+        final raw = await _load(business, key);
+        final value = raw == null ? null : jsonDecode(raw);
+        if (value is Map && value['fingerprint'] == fingerprint &&
+            value['cents'] is int && (value['cents'] as int) >= 0) {
+          cached = value['cents'] as int;
+        }
+      } catch (_) {
+        // Rebuild a missing or unreadable aggregate from the ledger.
+      }
+      if (cached == null) {
+        var yearCents = 0;
+        for (final raw in records.values) {
+          final amount = num.tryParse(raw);
+          if (amount == null || !amount.isFinite || amount < 0 ||
+              !(amount * 100).isFinite) {
+            throw StateError('A posted transaction has an invalid amount.');
+          }
+          yearCents += (amount * 100).round();
+        }
+        await _save(business, key, jsonEncode({
+          'fingerprint': fingerprint, 'cents': yearCents,
+        }));
+        cached = yearCents;
+      }
+      cents += cached;
+      count += records.length;
+    }
+    return (liveRows: live, cents: cents, count: count);
   }
 
   static const _linkedExpensesKey = 'linked_expenses_complete_v1';

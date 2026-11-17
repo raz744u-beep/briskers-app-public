@@ -31,6 +31,7 @@ import '../../services/job_summary_visibility.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
 import '../appointments/appointment_create_screen.dart';
 import '../jobs/job_create_screen.dart';
+import '../payroll/approved_tasks_ui.dart' show ApprovedTasksHeader;
 import '../jobs/job_document_screen.dart';
 import '../documents_screen.dart';
 import '../jobs/job_detail_screen.dart';
@@ -88,7 +89,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
   bool get _canEditLocal => _data != null && _canManageQuickActions;
   bool get _canManageQuickActions => canManageCustomerActions(widget.roleCode);
   final GlobalKey _notesSectionKey = GlobalKey();
-  bool _expandQuickNotes = false;
+  int _noteComposerRequest = 0;
   int _customerTab = 0; // Overview, Info, Vehicles, Notes.
   int _activityRevision = 0;
 
@@ -1321,7 +1322,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
   }
 
   void _openCustomerNoteComposer() {
-    setState(() { _expandQuickNotes = true; _customerTab = 3; });
+    setState(() { _noteComposerRequest++; _customerTab = 3; });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final target = _notesSectionKey.currentContext;
       if (mounted && target != null) {
@@ -1404,28 +1405,18 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
 
     return StaleKeyboardInsetGuard(
       child: Scaffold(
-      appBar: AppBar(
-        centerTitle: true,
-        backgroundColor: BriskersColors.customers.withValues(alpha: 0.12),
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: Text(
-                '${customer['name'] ?? 'Customer'}',
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
+      appBar: ApprovedTasksHeader(
+        title: '${customer['name'] ?? 'Customer'}',
+        actions: [
+          if (customer['problem_flag'] == true)
+            const Padding(
+              padding: EdgeInsets.only(right: 12),
+              child: Icon(Icons.flag, color: Color(0xFFFF8585), size: 20),
             ),
-            if (customer['problem_flag'] == true) ...[
-              const SizedBox(width: 6),
-              const Icon(Icons.flag, color: Colors.red, size: 20),
-            ],
-          ],
-        ),
+        ],
       ),
       bottomNavigationBar: widget.sharedBottomNavigationBar,
-      floatingActionButton: _data == null || !_canManageQuickActions
+      floatingActionButton: _data == null || !_canManageQuickActions || _customerTab == 3
           ? null
           : FloatingActionButton.extended(
               onPressed: _showQuickActions,
@@ -1504,11 +1495,17 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                   ),
                   const SizedBox(height: 8),
                   if (_customerTab == 1) Card(
-                    child: ExpansionTile(
-                      initiallyExpanded: false,
-                      leading: const Icon(Icons.person_outline, color: BriskersColors.customers),
-                      title: const Text('Customer information', style: TextStyle(fontWeight: FontWeight.bold)),
-                      children: [ListTile(
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(children: [
+                      Container(
+                        decoration: const BoxDecoration(gradient: BriskersColors.blueHeader),
+                        child: const ListTile(
+                          leading: Icon(Icons.person_outline, color: Colors.white),
+                          title: Text('Customer information', style: TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.w700)),
+                        ),
+                      ),
+                      ListTile(
                       leading: const CircleAvatar(
                         child: Icon(Icons.person_outline),
                       ),
@@ -1563,20 +1560,19 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                       onTap: _canEditLocal
                           ? () => _editCustomer(customer)
                           : null,
-                    )],
-                    ),
+                      ),
+                      const Divider(height: 1, indent: 16, endIndent: 16),
+                      CustomerProblemFlagCard(
+                        customerId: widget.customerId,
+                        flagged: customer['problem_flag'] == true,
+                        note: customer['problem_flag_note']?.toString() ?? '',
+                        canEdit: _canEditLocal,
+                        onEdit: _editProblemFlag,
+                        embedded: true,
+                      ),
+                    ]),
                   ),
-                  const SizedBox(height: 10),
                   if (_customerTab == 0) _customerOverviewCard(),
-                  const SizedBox(height: 10),
-                  if (_customerTab == 1) CustomerProblemFlagCard(
-                    customerId: widget.customerId,
-                    flagged: customer['problem_flag'] == true,
-                    note: customer['problem_flag_note']?.toString() ?? '',
-                    canEdit: _canEditLocal,
-                    onEdit: _editProblemFlag,
-                  ),
-                  const SizedBox(height: 18),
                   if (_customerTab == 2) CustomerVehiclesSection(
                     vehicles: vehicles,
                     showAdd: false,
@@ -1585,7 +1581,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                     onRepairHistory: _showVehicleRepairHistory,
                     enabled: _canEditLocal,
                   ),
-                  const SizedBox(height: 18),
+                  if (_customerTab == 2) const SizedBox(height: 18),
                   if (_customerTab == 2) Card(
                     child: ListTile(
                       leading: const Icon(Icons.car_repair_outlined, color: BriskersColors.vehicles),
@@ -1596,19 +1592,13 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                       onTap: () => _openAllVehicleFindings(vehicles),
                     ),
                   ),
-                  const SizedBox(height: 18),
-                  if (_customerTab == 3) Container(
+                  if (_customerTab == 3) CustomerNotesSection(
                     key: _notesSectionKey,
-                    child: KeyedSubtree(
-                      key: ValueKey(_expandQuickNotes),
-                      child: CustomerNotesSection(
-                        businessId: widget.businessId,
-                        customerId: widget.customerId,
-                        initiallyExpanded: _expandQuickNotes,
-                      ),
-                    ),
+                    businessId: widget.businessId,
+                    customerId: widget.customerId,
+                    composerRequest: _noteComposerRequest,
+                    canAdd: _canManageQuickActions,
                   ),
-                  const SizedBox(height: 18),
                   if (_customerTab == 0) ...[
                     if (_onlineReady && widget.roleCode == 'owner') ...[
                       const SizedBox(height: 18),

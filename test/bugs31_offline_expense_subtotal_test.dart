@@ -1,3 +1,7 @@
+import 'package:briskers_app/local/briskers_local_database.dart' show BriskersLocalDatabase;
+import 'package:briskers_app/services/local_financial_cache.dart';
+import 'package:briskers_app/services/local_financial_totals_journal.dart';
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/services/local_expense_subtotal.dart';
 
@@ -8,6 +12,57 @@ void main() {
     'transaction_date':date,'counterparty':'Synthetic supplier',
     'category_id':category,
   };
+
+  test('closed expense years reuse exact cents and update only the changed year', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final cache = LocalFinancialCache(database: db);
+    final journal = LocalFinancialTotalsJournal(database: db);
+    final rows = [
+      row('old', 'expense', 10.12, date: '2024-02-03'),
+      row('moved', 'expense', 23.79, date: '2025-01-02'),
+      row('new', 'expense', 34.57),
+      row('payment', 'income', 12.34, date: '2025-05-01'),
+    ];
+    Future<({List<Map<String, dynamic>> liveRows, int cents, int count})> total(
+      List<Map<String, dynamic>> effective, {DateTime? from, DateTime? through,
+        DateTime? coverageStart}) =>
+        LocalFinancialCache(database: db).reuseClosedYearExpenses('shop', effective,
+          from: from, through: through,
+          coverage: (start: coverageStart, end: DateTime(2026, 11, 17)),
+          currentYear: 2026);
+    Future<List<String>> payloads() async => (await db.customSelect(
+      "SELECT payload_json FROM local_financial_cache WHERE cache_key LIKE 'closed_year_expenses_v1_%' ORDER BY cache_key",
+    ).get()).map((row) => row.read<String>('payload_json')).toList();
+    await cache.saveTransactions('shop', rows);
+    final saved = await cache.loadTransactions('shop');
+    final first = await total(await journal.overlayCachedRows('shop', saved));
+    expect(first.cents, 3391);
+    expect(first.count, 2);
+    expect(first.liveRows.map((row) => row['id']).toSet(), {'new', 'payment'});
+    final before = await payloads();
+    expect((await total(saved.reversed.toList())).cents, 3391);
+    expect(await payloads(), before);
+
+    // Moving an expense crosses the two financial years and corrects each.
+    final changed = [
+      rows.first, row('moved', 'expense', 1.21, date: '2024-12-31'),
+      rows[2], rows[3], row('added', 'expense', 2.05, date: '2025-02-03'),
+    ];
+    expect((await total(changed)).cents, 1338);
+    final moved = await payloads();
+    expect(moved[0], isNot(before[0]));
+    expect(moved[1], isNot(before[1]));
+    final reduced = changed.where((row) => row['id'] != 'old').toList();
+    expect((await total(reduced)).cents, 326);
+    final deleted = await payloads();
+    expect(deleted[0], isNot(moved[0]));
+    expect(deleted[1], moved[1]);
+    final partial = await total(rows, from: DateTime(2025, 2), through: DateTime(2025, 5));
+    expect(partial.count, 0);
+    expect((await total(rows, coverageStart: DateTime(2025, 2))).count, 0);
+    expect(await payloads(), deleted);
+  });
 
   test('offline subtotal uses all saved unique IDs not first visible page',
       () async {

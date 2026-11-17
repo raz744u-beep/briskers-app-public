@@ -74,7 +74,7 @@ void main(){
     await t.tap(find.byTooltip('Previous work week'));await t.pumpAndSettle();
     expect(find.text('Weekly Labor'),findsOneWidget);
     expect(find.text('Completed\n7.50 hrs'),findsOneWidget);
-    expect(find.text('Total assigned: 7.50 hrs'),findsOneWidget);
+    expect(find.text('Total assigned: 0.00 hrs'),findsOneWidget);
     expect(find.text('0.00 hrs'),findsOneWidget); // Previously paid work is not unpaid.
     expect(rows.first['paid'],1);expect(rows.first['remaining_minutes'],0);
     expect(rows.last['paid'],0);expect(rows.last['remaining_minutes'],600);
