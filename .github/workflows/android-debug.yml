@@ -850,6 +850,9 @@ jobs:
             test "$BUILD_NUMBER" -gt 2568
           fi
 
+          printf 'BRISKERS_APK_VERSION=%s\nBRISKERS_APK_BUILD=%s\n' \
+            "$VERSION" "$BUILD_NUMBER" >> "$GITHUB_ENV"
+
           # Native-asset downloads (notably sqlite3) occasionally arrive
           # corrupted from the upstream CDN. Clean only generated/native
           # build state and retry the release build a few times.
@@ -893,13 +896,8 @@ jobs:
       - name: Name APK by version
         working-directory: generated
         run: |
-          VERSION="$(awk '/^version:/ {print $2}' pubspec.yaml | cut -d+ -f1)"
-          BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
-          if [ "$GITHUB_REF_NAME" = fix/bugs33-preserve-offline-financial-history-20261108 ]; then
-            BUILD_NUMBER=$((3000 + GITHUB_RUN_NUMBER))
-            test "$BUILD_NUMBER" -gt 4676
-          fi
-          test "$BUILD_NUMBER" -gt 2545
+          VERSION="${BRISKERS_APK_VERSION:?Missing compiled APK version}"
+          BUILD_NUMBER="${BRISKERS_APK_BUILD:?Missing compiled APK build number}"
           APK="build/app/outputs/flutter-apk/Briskers-v${VERSION}-b${BUILD_NUMBER}.apk"
           cp build/app/outputs/flutter-apk/app-release.apk "$APK"
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
