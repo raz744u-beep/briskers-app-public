@@ -1,10 +1,16 @@
+import 'local_job_identity.dart';
+import 'local_job_retirement.dart';
+import 'local_job_work_state.dart';
 import 'local_customer_vehicle_identity.dart';
 import 'local_task_assignment_store.dart';
 import 'local_job_work_date.dart';
+
 import 'dart:convert';
+
 import 'local_number_allocator.dart';
 import 'job_status_local_events.dart';
 import 'employee_nickname_store.dart';
+
 import 'dart:math';
 
 import 'package:drift/drift.dart';
@@ -26,8 +32,9 @@ class OfflineJobAdminService {
   final BriskersLocalDatabase _database;
   // Share this service's injected database. Never initialize an extra
   // device database from a synthetic test or an offline assignment action.
-  late final EmployeeNicknameStore _nicknames =
-      EmployeeNicknameStore(database: _database);
+  late final EmployeeNicknameStore _nicknames = EmployeeNicknameStore(
+    database: _database,
+  );
 
   String _employeesKey(String businessId) =>
       'briskers_job_employees_$businessId';
@@ -86,8 +93,11 @@ class OfflineJobAdminService {
       final identities = LocalCustomerVehicleIdentity(_database);
       customerId = (await identities.resolve(businessId, customerId))!;
       vehicleId = await identities.resolve(businessId, vehicleId);
-      final numbers=LocalNumberAllocator(_database);
-      final jobNumber=numbers.display('job',await numbers.allocate(businessId,'job',id));
+      final numbers = LocalNumberAllocator(_database);
+      final jobNumber = numbers.display(
+        'job',
+        await numbers.allocate(businessId, 'job', id),
+      );
       await _database.customStatement(
         """INSERT INTO local_jobs
           (id,business_id,access_scope,job_number,title,requested_work,
@@ -112,7 +122,8 @@ class OfflineJobAdminService {
           now.millisecondsSinceEpoch ~/ 1000,
         ],
       );
-      await LocalJobWorkDate(_database).save(businessId, id, jobDate ?? LocalJobWorkDate.today());
+      await LocalJobWorkDate(_database)
+          .save(businessId, id, jobDate ?? LocalJobWorkDate.today());
       await _database.customStatement(
         """INSERT INTO sync_outbox
           (business_id,entity_type,entity_id,operation,payload_json,
@@ -123,7 +134,7 @@ class OfflineJobAdminService {
           id,
           jsonEncode({
             'operation_id': 'job-create-$id',
-            'local_job_number':jobNumber,
+            'local_job_number': jobNumber,
             'job_id': id,
             'customer_id': customerId,
             'vehicle_id': vehicleId,
@@ -161,7 +172,7 @@ class OfflineJobAdminService {
           businessId,
           outboxId: outboxId,
         );
-        if(data['local_job_number'] != null) continue;
+        if (data['local_job_number'] != null) continue;
         final customerId = data['customer_id']?.toString() ?? '';
         final vehicleId = data['vehicle_id']?.toString();
         if (customerId.startsWith('local-') ||
@@ -328,7 +339,8 @@ class OfflineJobAdminService {
         ],
       );
 
-      if (jobDate != null) await LocalJobWorkDate(_database).save(businessId, jobId, jobDate);
+      if (jobDate != null)
+        await LocalJobWorkDate(_database).save(businessId, jobId, jobDate);
       await _mergeOutbox(businessId, jobId, {
         'core_changed': true,
         'customer_id': nextCustomerId,
@@ -354,8 +366,13 @@ class OfflineJobAdminService {
     String? colorHex,
     String? iconKey,
     String? note,
+    bool fromTask = false,
+    bool notify = true,
   }) async {
+    await LocalJobWorkState(_database).prepare();
     await _database.transaction(() async {
+      await LocalJobWorkState(_database)
+          .saveIntent(businessId, jobId, code, fromTask: fromTask);
       await _database.customUpdate(
         '''
         UPDATE local_jobs
@@ -393,30 +410,172 @@ class OfflineJobAdminService {
     });
     // The persisted local row and retry-safe outbox are committed.
     // Repaint retained Jobs immediately; network sync is independent.
-    LocalJobStatusEvents.committed(LocalJobStatusChanged(
-      businessId: businessId,
-      jobId: jobId,
-      code: code,
-      name: name,
-      colorHex: colorHex,
-      iconKey: iconKey,
-    ));
+    if (notify && !LocalJobWorkState.observed(_database))
+      LocalJobStatusEvents.committed(
+        LocalJobStatusChanged(
+          businessId: businessId,
+          jobId: jobId,
+          code: code,
+          name: name,
+          colorHex: colorHex,
+          iconKey: iconKey,
+        ),
+      );
+  }
+
+  Future<void> queueTaskProgress(
+    String businessId,
+    String jobId,
+    String allocation,
+    int revision,
+    String state, {
+    required String previousState,
+    bool history = false,
+  }) async {
+    await LocalJobWorkState(_database).prepare();
+    jobId = await LocalJobIdentity(_database).canonicalId(businessId, jobId);
+    if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId))
+      return;
+    await _database.transaction(() async {
+      final row = await _database
+          .customSelect(
+            'SELECT status,completed_at FROM local_jobs WHERE business_id=? AND id=?',
+            variables: [Variable(businessId), Variable(jobId)],
+          )
+          .getSingleOrNull();
+      final started = await LocalJobWorkState(_database).record(
+        businessId,
+        jobId,
+        allocation,
+        revision,
+        state,
+        previousState: previousState,
+        history: history,
+      );
+      if (row == null) return;
+      final code = row.read<String>('status').toLowerCase();
+      if (!started ||
+          LocalJobWorkState.terminal.contains(code) ||
+          row.data['completed_at'] != null ||
+          code == 'in_progress')
+        return;
+      if (history && !const {'open', 'not_started'}.contains(code)) return;
+      await queueStatus(
+        businessId,
+        jobId,
+        code: 'in_progress',
+        name: 'In Progress',
+        colorHex: '#1674DB',
+        iconKey: 'sync',
+        fromTask: true,
+        notify: false,
+        note: 'Saved service task activity started this job.',
+      );
+    });
+  }
+
+  Future<void> reconcileWorkStatus(String businessId) async {
+    await LocalJobWorkState(_database).prepare();
+    final activity = await _database
+        .customSelect(
+          '''SELECT a.* FROM local_job_task_activity_v1 a
+      JOIN local_jobs j ON j.business_id=a.business_id AND j.id=a.job_id
+      WHERE a.business_id=? AND a.started=1 AND lower(j.status) IN ('open','not_started') AND j.completed_at IS NULL''',
+          variables: [Variable(businessId)],
+        )
+        .get();
+    for (final row in activity) {
+      await queueTaskProgress(
+        businessId,
+        row.read<String>('job_id'),
+        row.read<String>('allocation_id'),
+        row.read<int>('revision'),
+        row.read<String>('state'),
+        previousState: row.read<String>('state'),
+        history: true,
+      );
+    }
+    final tables = await _database
+        .customSelect(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('regular_payroll_portions','regular_payroll_tasks','local_mechanic_work_credits_v1')",
+        )
+        .get();
+    if (tables.length != 3) return;
+    final rows = await _database
+        .customSelect(
+          """SELECT t.job_id,p.id,p.state,c.revision
+      FROM regular_payroll_tasks t JOIN regular_payroll_portions p ON p.business_id=t.business_id AND p.task_id=t.id
+      JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id AND c.job_id=t.job_id
+      JOIN local_jobs j ON j.business_id=t.business_id AND j.id=t.job_id
+      WHERE t.business_id=? AND lower(j.status) IN ('open','not_started') AND j.completed_at IS NULL
+      AND (p.state='In Progress' OR (p.state='Done' AND c.completed=1 AND c.actual_minutes>0
+        AND date(p.completed_date)=p.completed_date AND p.completed_date>='2026-11-09'))""",
+          variables: [Variable(businessId)],
+        )
+        .get();
+    for (final row in rows) {
+      await queueTaskProgress(
+        businessId,
+        row.read<String>('job_id'),
+        row.read<String>('id'),
+        row.read<int>('revision'),
+        row.read<String>('state'),
+        previousState: row.read<String>('state'),
+        history: true,
+      );
+    }
   }
 
   /// Main-mechanic changes preserve every separate task mechanic assignment.
-  Future<void> queueMainMechanic(String businessId, String jobId, {
-    required String? employeeId, String? employeeName,
+  Future<void> queueMainMechanic(
+    String businessId,
+    String jobId, {
+    required String? employeeId,
+    String? employeeName,
   }) async {
     await _database.transaction(() async {
-      await _database.customStatement('UPDATE local_jobs SET assigned_employee_id=?,assigned_employee_name=?,'
+      await _database.customStatement(
+        'UPDATE local_jobs SET assigned_employee_id=?,assigned_employee_name=?,'
         'is_unassigned=?,sync_state=? WHERE business_id=? AND id=?',
-        [employeeId,employeeName,employeeId==null?1:0,'pending',businessId,jobId]);
-      if(employeeId!=null && (await _database.customSelect('SELECT assignment_id FROM local_job_assignments WHERE business_id=? AND job_id=? AND employee_id=? AND active=1',variables:[Variable(businessId),Variable(jobId),Variable(employeeId)]).get()).isEmpty) {
-        await _database.customStatement('INSERT OR IGNORE INTO local_job_assignments '
+        [
+          employeeId,
+          employeeName,
+          employeeId == null ? 1 : 0,
+          'pending',
+          businessId,
+          jobId,
+        ],
+      );
+      if (employeeId != null &&
+          (await _database
+                  .customSelect(
+                    'SELECT assignment_id FROM local_job_assignments WHERE business_id=? AND job_id=? AND employee_id=? AND active=1',
+                    variables: [
+                      Variable(businessId),
+                      Variable(jobId),
+                      Variable(employeeId),
+                    ],
+                  )
+                  .get())
+              .isEmpty) {
+        await _database.customStatement(
+          'INSERT OR IGNORE INTO local_job_assignments '
           '(assignment_id,business_id,job_id,employee_id,employee_name,active,source) VALUES(?,?,?,?,?,1,?)',
-          ['payroll-main-$businessId-$jobId-$employeeId',businessId,jobId,employeeId,employeeName,'payroll_main']);
+          [
+            'payroll-main-$businessId-$jobId-$employeeId',
+            businessId,
+            jobId,
+            employeeId,
+            employeeName,
+            'payroll_main',
+          ],
+        );
       }
-      await _mergeOutbox(businessId,jobId,{'assignment_changed':true,'employee_id':employeeId,'employee_name':employeeName});
+      await _mergeOutbox(businessId, jobId, {
+        'assignment_changed': true,
+        'employee_id': employeeId,
+        'employee_name': employeeName,
+      });
     });
   }
 
@@ -427,18 +586,41 @@ class OfflineJobAdminService {
     String? employeeName,
     String? position,
   }) async {
-    final payroll=await _database.customSelect("SELECT name FROM sqlite_master WHERE type='table' AND name='regular_payroll_job_lead'").get();
-    if(payroll.isNotEmpty){
-      await _database.transaction(()async{
-        await queueMainMechanic(businessId,jobId,employeeId:employeeId,employeeName:employeeName);
-        await _database.customStatement('INSERT INTO regular_payroll_job_lead(business_id,job_id,employee_id,employee_name) VALUES(?,?,?,?) '
+    final payroll = await _database
+        .customSelect(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='regular_payroll_job_lead'",
+        )
+        .get();
+    if (payroll.isNotEmpty) {
+      await _database.transaction(() async {
+        await queueMainMechanic(
+          businessId,
+          jobId,
+          employeeId: employeeId,
+          employeeName: employeeName,
+        );
+        await _database.customStatement(
+          'INSERT INTO regular_payroll_job_lead(business_id,job_id,employee_id,employee_name) VALUES(?,?,?,?) '
           'ON CONFLICT(business_id,job_id) DO UPDATE SET employee_id=excluded.employee_id,employee_name=excluded.employee_name,revision=revision+1 '
-          'WHERE employee_id IS NOT excluded.employee_id OR employee_name IS NOT excluded.employee_name',[businessId,jobId,employeeId,employeeName]);
-        final assignments=LocalTaskAssignmentStore(_database);
-        if(employeeId!=null){await assignments.inherit(businessId,jobId);}
-        else{
-          final tasks=await _database.customSelect('SELECT id FROM regular_payroll_tasks WHERE business_id=? AND job_id=?',variables:[Variable(businessId),Variable(jobId)]).get();
-          for(final task in tasks){await assignments.retireInherited(businessId,task.read<String>('id'));}
+          'WHERE employee_id IS NOT excluded.employee_id OR employee_name IS NOT excluded.employee_name',
+          [businessId, jobId, employeeId, employeeName],
+        );
+        final assignments = LocalTaskAssignmentStore(_database);
+        if (employeeId != null) {
+          await assignments.inherit(businessId, jobId);
+        } else {
+          final tasks = await _database
+              .customSelect(
+                'SELECT id FROM regular_payroll_tasks WHERE business_id=? AND job_id=?',
+                variables: [Variable(businessId), Variable(jobId)],
+              )
+              .get();
+          for (final task in tasks) {
+            await assignments.retireInherited(
+              businessId,
+              task.read<String>('id'),
+            );
+          }
         }
       });
       return;
@@ -693,15 +875,17 @@ class OfflineJobAdminService {
           // The user may have changed mechanic/hours again while the RPC
           // was in flight. Never delete that newer merged local operation or
           // mark the Job synced for a payload the server has NOT received.
-          final current = await _database.customSelect(
-            'SELECT payload_json FROM sync_outbox '
-            'WHERE business_id=? AND id=? AND entity_type=\'job_admin\' '
-            'AND state=\'pending\' LIMIT 1',
-            variables: [
-              Variable<String>(businessId),
-              Variable<int>(outboxId),
-            ],
-          ).get();
+          final current = await _database
+              .customSelect(
+                'SELECT payload_json FROM sync_outbox '
+                'WHERE business_id=? AND id=? AND entity_type=\'job_admin\' '
+                'AND state=\'pending\' LIMIT 1',
+                variables: [
+                  Variable<String>(businessId),
+                  Variable<int>(outboxId),
+                ],
+              )
+              .get();
           if (current.isEmpty ||
               current.single.read<String>('payload_json') !=
                   row.read<String>('payload_json')) {

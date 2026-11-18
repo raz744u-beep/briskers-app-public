@@ -1,3 +1,4 @@
+import '../services/local_job_work_state.dart';
 import 'package:flutter/foundation.dart';
 import 'briskers_local_database.dart';
 
@@ -12,4 +13,5 @@ void debugUseLocalDatabase(BriskersLocalDatabase? database) {
 
 Future<void> initializeLocalDatabase() async {
   await localDatabase.customSelect('SELECT 1').get();
+  await LocalJobWorkState.observe(localDatabase);
 }

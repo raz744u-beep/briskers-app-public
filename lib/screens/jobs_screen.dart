@@ -800,6 +800,7 @@ class _JobsScreenState extends State<JobsScreen>
 
     final child = ApprovedListStatusBadge(label:label,color:color,icon:switch(job['status']?.toString()) {
       'in_progress'=>Icons.sync,
+      'open'=>Icons.work_outline,
       'completed' || 'closed'=>Icons.check,
       'awaiting_parts' || 'waiting_parts'=>Icons.inventory_2_outlined,
       'awaiting_payment'=>Icons.credit_card,

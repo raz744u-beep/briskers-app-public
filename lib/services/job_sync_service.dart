@@ -1,3 +1,4 @@
+import 'local_job_work_state.dart';
 import 'local_job_identity.dart';
 import 'local_job_core_projection.dart';
 import 'dart:async';
@@ -60,7 +61,7 @@ class JobSyncService {
       _database,
       businessId,
     );
-    final retained = await LocalJobIdentity(_database).retainedJobIds(businessId);
+    final retained = {...await LocalJobIdentity(_database).retainedJobIds(businessId), ...await LocalJobWorkState(_database).retainedJobIds(businessId)};
     final obsolete = rows
         .where(
           (row) =>
@@ -475,7 +476,7 @@ class JobSyncService {
     Map<String, String> beforeSnapshot,
   ) async {
     final absent = <String>{};
-    final retained = await LocalJobIdentity(_database).retainedJobIds(businessId);
+    final retained = {...await LocalJobIdentity(_database).retainedJobIds(businessId), ...await LocalJobWorkState(_database).retainedJobIds(businessId)};
     final retired = await LocalJobRetirement.blockedJobIds(
       _database,
       businessId,
@@ -513,6 +514,8 @@ class JobSyncService {
     return absent;
   }
 
+  static String _retainedSql(String business,String id) => '(${LocalJobIdentity.retainedSql(business,id)} OR ${LocalJobWorkState.retainedSql(business,id)})';
+
   Future<void> _clearBusinessJobCache(String businessId) async {
     // The first-page bootstrap precheck alone is insufficient: pending work
     // can arrive while the network request runs, or be missing its queue row.
@@ -539,6 +542,7 @@ class JobSyncService {
       );
     }
     await LocalJobIdentity(_database).prepare();
+    await LocalJobWorkState(_database).prepare();
     for (final table in const [
       'local_pre_inspection_photos',
       'local_pre_inspections',
@@ -565,12 +569,12 @@ class JobSyncService {
       }
       final identityLink = switch (table) {
         'local_pre_inspection_photos' =>
-          'EXISTS (SELECT 1 FROM local_pre_inspections i WHERE i.business_id=$table.business_id AND i.id=$table.inspection_id AND ${LocalJobIdentity.retainedSql('i.business_id', 'i.job_id')})',
+          'EXISTS (SELECT 1 FROM local_pre_inspections i WHERE i.business_id=$table.business_id AND i.id=$table.inspection_id AND ${_retainedSql('i.business_id', 'i.job_id')})',
         'local_finding_photos' =>
-          'EXISTS (SELECT 1 FROM local_findings f WHERE f.business_id=$table.business_id AND f.id=$table.finding_id AND (${LocalJobIdentity.retainedSql('f.business_id', 'f.found_job_id')} OR ${LocalJobIdentity.retainedSql('f.business_id', 'f.repair_job_id')}))',
+          'EXISTS (SELECT 1 FROM local_findings f WHERE f.business_id=$table.business_id AND f.id=$table.finding_id AND (${_retainedSql('f.business_id', 'f.found_job_id')} OR ${_retainedSql('f.business_id', 'f.repair_job_id')}))',
         'local_findings' =>
-          '(${LocalJobIdentity.retainedSql('$table.business_id', '$table.found_job_id')} OR ${LocalJobIdentity.retainedSql('$table.business_id', '$table.repair_job_id')})',
-        _ => LocalJobIdentity.retainedSql('$table.business_id', '$table.$retained'),
+          '(${_retainedSql('$table.business_id', '$table.found_job_id')} OR ${_retainedSql('$table.business_id', '$table.repair_job_id')})',
+        _ => _retainedSql('$table.business_id', '$table.$retained'),
       };
       await _database.customStatement(
         'DELETE FROM $table WHERE business_id = ? AND NOT ($identityLink)${retained == null ? '' : " AND NOT EXISTS(SELECT 1 FROM local_job_retirement_entities e WHERE e.business_id=$table.business_id "
@@ -615,7 +619,7 @@ class JobSyncService {
     final pendingAdmin = await _database
         .customSelect(
           "SELECT payload_json FROM sync_outbox WHERE business_id = ? "
-          "AND entity_id = ? AND entity_type = 'job_admin' AND state = 'pending'",
+          "AND entity_id = ? AND entity_type = 'job_admin' AND state IN ('pending','conflict','inflight')",
           variables: [Variable<String>(businessId), Variable<String>(jobId)],
         )
         .get();
@@ -710,7 +714,7 @@ class JobSyncService {
         completed_at=${preserveStatus ? 'local_jobs.completed_at' : 'excluded.completed_at'},
         server_updated_at=excluded.server_updated_at,
         row_version=excluded.row_version,
-        sync_state=${job['_local_core_pending'] == true ? 'local_jobs.sync_state' : "'${preserveStatus ? 'pending' : 'synced'}'"}
+        sync_state=${job['_local_core_pending'] == true || job['_local_status_pending'] == true ? 'local_jobs.sync_state' : "'${preserveStatus ? 'pending' : 'synced'}'"}
       ''',
       [
         jobId,
@@ -986,7 +990,7 @@ class JobSyncService {
   }
 
   Future<void> _removeJob(String businessId, String jobId) async {
-    if ((await LocalJobIdentity(_database).retainedJobIds(businessId)).contains(jobId)) return;
+    if ((await LocalJobIdentity(_database).retainedJobIds(businessId)).contains(jobId) || (await LocalJobWorkState(_database).retainedJobIds(businessId)).contains(jobId)) return;
     final rows = await _database
         .customSelect(
           '''

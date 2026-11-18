@@ -1,3 +1,6 @@
+import 'local_job_work_state.dart';
+import 'owner_job_work_status_repair.dart';
+import 'offline_job_admin_service.dart';
 import 'local_job_identity.dart';
 import 'job_task_bulk_completion.dart';
 import 'local_payroll_repository.dart';
@@ -42,7 +45,10 @@ class LocalJobRepository {
   }) => JobTaskBulkCompletion(LocalPayrollRepository(
     _database, business: business, owner: true, assertOwnerGrant: assertOwner,
   ));
-  Future<void> reconcileNov12OwnerCompletion(String business,{required bool isOwner})=>Nov12JobCompletion(_database).reconcile(business,isOwner:isOwner);
+  Future<void> reconcileNov12OwnerCompletion(String business,{required bool isOwner}) async {
+    await Nov12JobCompletion(_database).reconcile(business,isOwner:isOwner);
+    await OwnerJobWorkStatusRepair(_database).reconcile(business,isOwner:isOwner);
+  }
 
   Future<Map<String,Map<String,int>>> allocationHours(String business,List<String> jobs) =>
       JobTaskSummary(_database).hours(business,jobs);
@@ -99,9 +105,10 @@ class LocalJobRepository {
     return rows.isNotEmpty && rows.first.read<int>('bootstrapped') == 1;
   }
 
-  Future<void> _prepareVisibility() async {
+  Future<void> _prepareVisibility(String business) async {
     await LocalJobRetirement.ensureSchema(_database);
     await LocalJobIdentity(_database).prepare();
+    await OfflineJobAdminService(database:_database).reconcileWorkStatus(business);
   }
 
   // Retirement is a durable visibility decision. Keep the retained rows for
@@ -302,7 +309,7 @@ class LocalJobRepository {
     int offset = 0,
   }) async {
     // Retirements are checked each time; the DDL indexes are installed once.
-    await _prepareVisibility();
+    await _prepareVisibility(businessId);
     await _ensureListReadIndexes();
     await LocalDocumentSqlStore.ensure(_database);
     final filters = _filters(
@@ -401,7 +408,7 @@ class LocalJobRepository {
   Future<List<Map<String, dynamic>>> forCustomer(
     String businessId, String customerId,
   ) async {
-    await _prepareVisibility();
+    await _prepareVisibility(businessId);
     final rows = await _database.customSelect(
       "SELECT j.*, 0 AS open_findings, j.server_updated_at AS activity_at, "
       "j.created_at AS job_date_at, NULL AS last_accessed_at "
@@ -417,6 +424,7 @@ class LocalJobRepository {
   }
 
   Future<String?> jobNumberForJob(String businessId, String jobId) async {
+    await OfflineJobAdminService(database:_database).reconcileWorkStatus(businessId);
     jobId = await LocalJobIdentity(_database).canonicalId(businessId, jobId);
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return null;
@@ -510,6 +518,16 @@ class LocalJobRepository {
             .write(LocalJobsCompanion(jobNumber: Value<String?>(number)));
       }
       if (provisionalJobId != serverJobId) {
+        final work=LocalJobWorkState(_database);
+        final tracked=await work.retainedJobIds(businessId);
+        if(source!=null && (tracked.contains(provisionalJobId) || LocalJobWorkState.terminal.contains(source.status)) &&
+          !LocalJobWorkState.terminal.contains(real.status) &&
+          (real.status=='open' || source.status=='open')) {
+          await (_database.update(_database.localJobs)..where((r)=>r.businessId.equals(businessId)&r.id.equals(serverJobId)))
+            .write(LocalJobsCompanion(status:Value(source.status),statusName:Value(source.statusName),
+              statusColor:Value(source.statusColor),statusIcon:Value(source.statusIcon),completedAt:Value(source.completedAt),syncState:const Value('pending')));
+        }
+        await work.remap(businessId,provisionalJobId,serverJobId);
         // The blank visit made with a Quick Invoice has no server identity.
         // Preserve actual work and its outbox instead of deleting user edits.
         await _database.customStatement(
@@ -594,7 +612,7 @@ class LocalJobRepository {
     String? search,
     JobListView view = JobListView.all,
   }) async {
-    await _prepareVisibility();
+    await _prepareVisibility(businessId);
     await LocalDocumentSqlStore.ensure(_database);
     final filters = _filters(
       businessId,
@@ -612,7 +630,7 @@ class LocalJobRepository {
   }
 
   Stream<int> watchJobCount(String businessId, {String? status}) async* {
-    await _prepareVisibility();
+    await _prepareVisibility(businessId);
     final where = <String>['j.business_id = ?', _visibleJobSql('j')];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
     if (status != null && status.isNotEmpty) {
@@ -634,7 +652,7 @@ class LocalJobRepository {
     String businessId, {
     int limit = 25,
   }) async {
-    await _prepareVisibility();
+    await _prepareVisibility(businessId);
     final rows = await _database
         .customSelect(
           '''
@@ -668,7 +686,7 @@ class LocalJobRepository {
   }
 
   Future<int> unassignedOpenJobCount(String businessId) async {
-    await _prepareVisibility();
+    await _prepareVisibility(businessId);
     final row = await _database
         .customSelect(
           '''
@@ -686,7 +704,7 @@ class LocalJobRepository {
   }
 
   Future<int> activeJobCount(String businessId) async {
-    await _prepareVisibility();
+    await _prepareVisibility(businessId);
     final row = await _database
         .customSelect(
           '''
@@ -703,7 +721,7 @@ class LocalJobRepository {
   }
 
   Stream<int> watchActiveJobCount(String businessId) async* {
-    await _prepareVisibility();
+    await _prepareVisibility(businessId);
     yield* _database
         .customSelect(
           '''
@@ -724,7 +742,7 @@ class LocalJobRepository {
     String businessId, {
     JobListView view = JobListView.all,
   }) async {
-    await _prepareVisibility();
+    await _prepareVisibility(businessId);
     final rows = await _database
         .customSelect(
           '''
@@ -856,6 +874,7 @@ class LocalJobRepository {
     String jobId, {
     bool coreOnly = false,
   }) async {
+    await OfflineJobAdminService(database:_database).reconcileWorkStatus(businessId);
     jobId = await LocalJobIdentity(_database).canonicalId(businessId, jobId);
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return null;

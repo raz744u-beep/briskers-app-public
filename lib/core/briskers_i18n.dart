@@ -62,7 +62,11 @@ String roleLabel(String roleCode) {
 }
 
 String jobStatusLabel(String? code, String fallback) {
-  switch (code) {
+  switch ((code ?? '').trim().toLowerCase().replaceAll(' ', '_')) {
+    case 'open':
+      return tr('jobOpen');
+    case 'closed':
+      return tr('jobClosed');
     case 'in_progress':
       return tr('inProgress');
     case 'pending_approval':
@@ -478,7 +482,9 @@ const Map<String, Map<String, String>> _translations = {
     'checkedIn': 'Checked in',
     'finished': 'Finished',
     'changeStatus': 'Change status',
-    'inProgress': 'In Progress',
+    'jobOpen': 'Open',
+    'jobClosed': 'Closed',
+    'inProgress': 'In progress',
     'pendingApproval': 'Pending approval',
     'waitingParts': 'Waiting parts',
     'needsRecheck': 'Needs Recheck',
@@ -1003,6 +1009,8 @@ const Map<String, Map<String, String>> _translations = {
     'checkedIn': 'Registrada',
     'finished': 'Finalizada',
     'changeStatus': 'Cambiar estado',
+    'jobOpen': 'Abierto',
+    'jobClosed': 'Cerrado',
     'inProgress': 'En progreso',
     'pendingApproval': 'Pendiente de aprobación',
     'waitingParts': 'Esperando piezas',

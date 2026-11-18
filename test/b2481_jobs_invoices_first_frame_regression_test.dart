@@ -20,9 +20,9 @@ void main() {
     expect(begin, greaterThan(0));
     expect(end, greaterThan(begin));
     final queryPath = jobs.substring(begin, end);
-    expect(queryPath, contains('await _prepareVisibility();'));
+    expect(queryPath, contains('await _prepareVisibility(businessId);'));
     final visibility = jobs.substring(
-      jobs.indexOf('Future<void> _prepareVisibility()'),
+      jobs.indexOf('Future<void> _prepareVisibility('),
       jobs.indexOf('// Retirement is a durable visibility decision.'),
     );
     expect(visibility, contains('await LocalJobRetirement.ensureSchema(_database);'));

@@ -29,6 +29,8 @@ IconData jobStatusIcon(String? key) {
   switch ((key ?? '').trim()) {
     case 'work_outline':
       return Icons.work_outline;
+    case 'sync':
+      return Icons.sync;
     case 'build_circle':
       return Icons.build_circle_outlined;
     case 'approval':
@@ -88,5 +90,5 @@ const jobStatusColorChoices = <String>[
 /// is left intact; this only controls choices for a new explicit change.
 List<Map<String,dynamic>> ownerJobStatuses(List<Map<String,dynamic>> saved) => [
   for(final item in const [('open','Open','#D97706'),('in_progress','In Progress','#1674DB'),('completed','Completed','#0A8F53'),('closed','Closed','#777777')])
-    {...?saved.where((s)=>s['code']==item.$1).firstOrNull,'code':item.$1,'name':item.$2,'color_hex':item.$3,'icon_key':item.$1=='completed'?'task_alt':item.$1=='in_progress'?'build_circle':'work_outline'},
+    {...?saved.where((s)=>s['code']==item.$1).firstOrNull,'code':item.$1,'name':item.$2,'color_hex':item.$3,'icon_key':item.$1=='completed'?'task_alt':item.$1=='in_progress'?'sync':'work_outline'},
 ];

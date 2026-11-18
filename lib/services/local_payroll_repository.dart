@@ -1134,6 +1134,8 @@ class LocalPayrollRepository {
           jsonEncode({'date': date, 'minutes': minutes}),
         ],
       );
+      await OfflineJobAdminService(database:db).queueTaskProgress(business,row['job_id'] as String,
+        id,(row['version'] as int)+1,'Done',previousState:'In Progress');
       _authorize();
     });
   }
@@ -1694,6 +1696,8 @@ class LocalPayrollRepository {
       [state,value['completed_date'],revision,business,id]);
     await db.customStatement('INSERT INTO regular_payroll_actual_time VALUES(?,?,?,?) ON CONFLICT(business_id,credit_id) DO UPDATE SET minutes=excluded.minutes,revision=excluded.revision',
       [business,id,actual,revision]);
+    await OfflineJobAdminService(database:db).queueTaskProgress(business,row['job_id'] as String,
+      id,revision,state as String,previousState:row['state'] as String);
   }
 
   /// Editing or reopening an unpaid portion increments its version. Paid
@@ -1789,6 +1793,8 @@ class LocalPayrollRepository {
         'UPDATE regular_payroll_portions SET state=?,version=version+1,completed_date=? WHERE business_id=? AND id=?',
         [state, state == 'Done' ? date : null, business, id],
       );
+      await OfflineJobAdminService(database:db).queueTaskProgress(business,rows.single['job_id'] as String,
+        id,(rows.single['revision'] as int)+1,state,previousState:rows.single['state'] as String);
       authorize();
     });
   }

@@ -1,3 +1,4 @@
+import '../../services/job_status_local_events.dart';
 import '../../services/local_job_identity.dart';
 import '../../services/local_recent_records.dart';
 import '../../widgets/recent_record_view.dart';
@@ -138,6 +139,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
   final ScrollController _scrollController = ScrollController();
   StreamSubscription<String>? _findingChanges;
+  StreamSubscription<LocalJobStatusChanged>? _statusChanges;
 
   bool _loading = true;
   bool _busy = false;
@@ -346,6 +348,12 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       _loading = false;
       _showingLocal = true;
     }
+    _statusChanges=LocalJobStatusEvents.changes.listen((event) {
+      if(!mounted || _contentBlocked || event.businessId!=widget.businessId || event.jobId!=_jobId) return;
+      if(_job!=null) setState(() => _job={..._job!, 'status':event.code,'status_name':event.name,
+        'status_color':event.colorHex,'status_icon':event.iconKey});
+      unawaited(_readTaskProgress(_loadEpoch));
+    });
     _findingChanges = VehicleFindingActionsService.changes.listen((businessId) {
       if (businessId == widget.businessId && mounted && !_contentBlocked) {
         unawaited(_refreshLocalWorkFindings());
@@ -360,6 +368,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   @override
   void dispose() {
     _findingChanges?.cancel();
+    _statusChanges?.cancel();
     _scrollController.dispose();
     super.dispose();
   }

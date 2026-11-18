@@ -1,5 +1,9 @@
+import 'local_job_work_state.dart';
+
 import 'dart:convert';
+
 import 'package:drift/drift.dart' show Variable;
+
 import '../local/briskers_local_database.dart';
 
 /// A read/refresh is not an Owner edit. Pending or conflicted local core
@@ -14,7 +18,7 @@ class LocalJobCoreProjection {
     final pending = await db
         .customSelect(
           "SELECT payload_json FROM sync_outbox WHERE business_id=? AND entity_id=? "
-          "AND entity_type='job_admin' AND state IN ('pending','conflict')",
+          "AND entity_type='job_admin' AND state IN ('pending','conflict','inflight')",
           variables: [Variable(business), Variable(id)],
         )
         .get();
@@ -26,7 +30,14 @@ class LocalJobCoreProjection {
         return false;
       }
     });
-    if (!corePending) return remote;
+    final statusPending = pending.any((row) {
+      try {
+        final payload = jsonDecode(row.read<String>('payload_json'));
+        return payload is Map && payload['status_changed'] == true;
+      } catch (_) {
+        return false;
+      }
+    });
     final local = await db
         .customSelect(
           'SELECT * FROM local_jobs WHERE business_id=? AND id=?',
@@ -34,8 +45,11 @@ class LocalJobCoreProjection {
         )
         .getSingleOrNull();
     if (local == null) return remote;
+    final projected = await LocalJobWorkState(db)
+        .projectStatus(business, remote, local.data, pending: statusPending);
+    if (!corePending) return projected;
     return {
-      ...remote,
+      ...projected,
       for (final key in [
         'customer_id',
         'customer_name',
