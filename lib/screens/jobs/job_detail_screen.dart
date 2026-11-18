@@ -1,3 +1,4 @@
+import '../../services/local_job_identity.dart';
 import '../../services/local_recent_records.dart';
 import '../../widgets/recent_record_view.dart';
 import '../../services/offline_invoice_finalization.dart';
@@ -116,6 +117,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       OfflineInvoiceMileageService();
 
   final OwnerJobRetirementService _jobRetirement = OwnerJobRetirementService();
+  String? _resolvedJobId;
+  String get _jobId => _resolvedJobId ?? widget.jobId;
   Map<String, dynamic>? _job;
   Map<String, dynamic>? _profitability;
   DateTime? _profitabilityVerifiedAt;
@@ -150,7 +153,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   Future<void> _readTaskProgress(int epoch) async {
     JobTaskProgress? progress;
     try {
-      progress = await JobTaskSummary(localDatabase).progress(widget.businessId, widget.jobId);
+      progress = await JobTaskSummary(localDatabase).progress(widget.businessId, _jobId);
     } catch (_) {
       // Keep a failed local read distinct from an empty job.
     }
@@ -349,7 +352,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       }
     });
     unawaited(LocalJobAccessHistory().recordCurrentUserAccess(
-      widget.businessId, widget.jobId,
+      widget.businessId, _jobId,
     ));
     _load();
   }
@@ -366,7 +369,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   }) async {
     final direct = await _localDocuments.listByJob(
       widget.businessId,
-      widget.jobId,
+      _jobId,
     );
     // A new Job commonly has zero documents. Never scan the entire
     // 5,000+ historical invoice/estimate cache on its initial open.
@@ -386,7 +389,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
     final repaired = <Map<String, dynamic>>[];
     for (final row in candidates) {
-      if (row['job_id']?.toString() == widget.jobId) {
+      if (row['job_id']?.toString() == _jobId) {
         repaired.add(row);
         continue;
       }
@@ -397,7 +400,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         widget.businessId,
         id,
       );
-      if (detail?['job_id']?.toString() != widget.jobId) continue;
+      if (detail?['job_id']?.toString() != _jobId) continue;
 
       final merged = <String, dynamic>{
         ...row,
@@ -460,7 +463,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     List<Map<String, dynamic>> documents,
   ) async {
     if (!_canSeeFinancial || !_currentLoad(epoch)) return;
-    final jobId = widget.jobId;
+    final jobId = _jobId;
     final vehicleId = _job?['vehicle_id']?.toString() ?? '';
     if (vehicleId.isEmpty) return;
     num? departure;
@@ -548,7 +551,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         return;
       }
       if (cached == null || cached['kind'] != 'invoice' ||
-          cached['job_id']?.toString() != widget.jobId) {
+          cached['job_id']?.toString() != _jobId) {
         return;
       }
       try {
@@ -569,7 +572,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     }
     try {
       await _localJobs.saveVerifiedPaymentState(
-        widget.businessId, widget.jobId, state,
+        widget.businessId, _jobId, state,
       );
       if (!_currentLoad(epoch)) {
         return;
@@ -619,7 +622,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     try {
       final linked = await _linkedExpensesCache.loadLinkedExpenses(
         widget.businessId,
-        jobId: widget.jobId,
+        jobId: _jobId,
       );
       // An online refresh can complete while the disk read is in flight.
       // Never overwrite newer server data with an older local snapshot.
@@ -656,8 +659,16 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   Future<void> _load() async {
     final epoch = ++_loadEpoch;
     try {
-      if (await LocalJobQuarantine.isJobBlocked(localDatabase, widget.businessId, widget.jobId) ||
-          await LocalJobRetirement.isJobBlocked(localDatabase, widget.businessId, widget.jobId)) {
+      final canonical = await LocalJobIdentity(localDatabase)
+          .canonicalId(widget.businessId, widget.jobId);
+      if (!mounted || epoch != _loadEpoch) return;
+      if (canonical != _jobId) {
+        _job = null;
+        _taskProgress = null;
+      }
+      _resolvedJobId = canonical;
+      if (await LocalJobQuarantine.isJobBlocked(localDatabase, widget.businessId, _jobId) ||
+          await LocalJobRetirement.isJobBlocked(localDatabase, widget.businessId, _jobId)) {
         if (mounted && epoch == _loadEpoch) _blockJobContent();
         return;
       }
@@ -686,7 +697,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       // until the complete local detail snapshot replaces this preview.
       try {
         final core = await _localJobs.jobDetail(
-          widget.businessId, widget.jobId, coreOnly: true,
+          widget.businessId, _jobId, coreOnly: true,
         );
         if (core != null && _currentLoad(epoch)) {
           localShown = true;
@@ -710,11 +721,11 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       try {
       final snapshot = await _localJobs.jobDetail(
         widget.businessId,
-        widget.jobId,
+        _jobId,
       );
       unawaited(const JobPerformanceMetrics().record(
         widget.businessId,
-        jobId:widget.jobId,
+        jobId:_jobId,
         stage:'local_job_detail',
         milliseconds:loadWatch.elapsedMilliseconds,
       ));
@@ -724,7 +735,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         localShown = true;
         unawaited(const JobPerformanceMetrics().record(
           widget.businessId,
-          jobId:widget.jobId,
+          jobId:_jobId,
           stage:'offline_first_render',
           milliseconds:loadWatch.elapsedMilliseconds,
         ));
@@ -761,7 +772,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
     // Temporary jobs have no server-side ID until their offline create
     // operation is synchronized. Keep their local detail usable in Auto mode.
-    if (widget.jobId.startsWith('local-') && !forceOnline) {
+    if (_jobId.startsWith('local-') && !forceOnline) {
       if (localShown) {
         if (_job?['_first_frame_only'] != true) {
           _scheduleInitialAction();
@@ -788,7 +799,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
     try {
       final job = await LocalJobCoreProjection.merge(localDatabase, widget.businessId,
-        await _api.jobDetail(widget.businessId, widget.jobId));
+        await _api.jobDetail(widget.businessId, _jobId));
       if (!_currentLoad(epoch)) return;
       final statuses = await _api.jobStatuses(widget.businessId);
       final rawCapabilities = job['capabilities'];
@@ -819,7 +830,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         try {
           documents = await _api.jobDocuments(
             widget.businessId,
-            widget.jobId,
+            _jobId,
           );
           documentsVerified = true;
         } catch (_) {
@@ -829,7 +840,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         try {
           jobExpenses = await _api.jobLinkedExpenses(
             widget.businessId,
-            widget.jobId,
+            _jobId,
           );
         } catch (_) {
           jobExpenses = const [];
@@ -840,7 +851,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         try {
           profitability = await _api.jobProfitability(
             widget.businessId,
-            widget.jobId,
+            _jobId,
           );
           if (JobProfitabilitySummary.fromRpc(profitability) != null) {
             _saveVerifiedProfitability(profitability);
@@ -854,14 +865,14 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       try {
         final serverCurrentVisit = await _api.currentVisitSync(
           widget.businessId,
-          widget.jobId,
+          _jobId,
         );
         if (!_currentLoad(epoch)) return;
         if (serverCurrentVisit != null) {
           try {
             await _offlineWorkFindings.seedCurrentVisitIfClean(
               widget.businessId,
-              widget.jobId,
+              _jobId,
               serverCurrentVisit,
             );
           } catch (_) {
@@ -872,7 +883,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         final localCurrentVisit =
             await _offlineWorkFindings.loadLocalCurrentVisit(
           widget.businessId,
-          widget.jobId,
+          _jobId,
         );
 
         if (localCurrentVisit != null) {
@@ -901,7 +912,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           final localCurrentVisit =
               await _offlineWorkFindings.loadLocalCurrentVisit(
             widget.businessId,
-            widget.jobId,
+            _jobId,
           );
           if (localCurrentVisit != null) {
             final visits = List<dynamic>.from(
@@ -929,13 +940,13 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
       try {
         final serverPreInspection =
-            await _api.jobPreInspection(widget.businessId, widget.jobId);
+            await _api.jobPreInspection(widget.businessId, _jobId);
         if (!_currentLoad(epoch)) return;
         if (serverPreInspection != null) {
           try {
             await _offlineInspection.seedServerInspectionIfMissing(
               widget.businessId,
-              widget.jobId,
+              _jobId,
               serverPreInspection,
             );
           } catch (_) {
@@ -947,7 +958,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         try {
           localPreInspection = await _offlineInspection.loadLocalInspection(
             widget.businessId,
-            widget.jobId,
+            _jobId,
           );
         } catch (_) {
           localPreInspection = null;
@@ -974,7 +985,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         try {
           preInspection = await _offlineInspection.loadLocalInspection(
             widget.businessId,
-            widget.jobId,
+            _jobId,
           );
         } catch (_) {
           preInspection = null;
@@ -1018,8 +1029,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         }
       }
 
-      if (await LocalJobQuarantine.isJobBlocked(localDatabase, widget.businessId, widget.jobId) ||
-          await LocalJobRetirement.isJobBlocked(localDatabase, widget.businessId, widget.jobId)) {
+      if (await LocalJobQuarantine.isJobBlocked(localDatabase, widget.businessId, _jobId) ||
+          await LocalJobRetirement.isJobBlocked(localDatabase, widget.businessId, _jobId)) {
         if (mounted && epoch == _loadEpoch) _blockJobContent();
         return;
       }
@@ -1079,7 +1090,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   }
 
   Future<void> _cacheDeletionPreview() async {
-    if (!_owner || _contentBlocked || widget.jobId.startsWith('local-')) return;
+    if (!_owner || _contentBlocked || _jobId.startsWith('local-')) return;
     final actorId = supabase.auth.currentUser?.id;
     if (actorId == null) return;
     try {
@@ -1087,7 +1098,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       // can queue this exact graph, subject to revalidation on reconnect.
       await _jobRetirement.preview(
         widget.businessId,
-        widget.jobId,
+        _jobId,
         actorId: actorId,
         isOwner: true,
       );
@@ -1159,7 +1170,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       final localVisit =
           await _offlineWorkFindings.loadLocalCurrentVisit(
         widget.businessId,
-        widget.jobId,
+        _jobId,
       );
       if (localVisit != null && _currentLoad(epoch)) {
         final visits = List<dynamic>.from(
@@ -1243,7 +1254,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     try {
       final local = await _offlineInspection.loadLocalInspection(
         widget.businessId,
-        widget.jobId,
+        _jobId,
       );
       if (local != null) _applyLocalPreInspection(local, expectedEpoch: epoch);
     } catch (_) {
@@ -1308,7 +1319,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     if (_job == null) return;
     await _api.updateJob(
       widget.businessId,
-      widget.jobId,
+      _jobId,
       customerId: customerId,
       vehicleId: vehicleId,
       title: _job!['title']?.toString() ?? 'Job',
@@ -1359,7 +1370,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     await _run(() async {
       await _api.updateJob(
         widget.businessId,
-        widget.jobId,
+        _jobId,
         customerId: job['customer_id'].toString(),
         vehicleId: job['vehicle_id']?.toString(),
         title: value,
@@ -1583,7 +1594,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       setState(() => _busy = true);
       try {
         await _offlineJobAdmin.queueCore(
-          widget.businessId, widget.jobId,
+          widget.businessId, _jobId,
           customerId: customerId,
           vehicleId: vehicleId,
           replaceVehicle: true,
@@ -1737,7 +1748,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     try {
       await _offlineJobAdmin.queuePlannedHours(
         widget.businessId,
-        widget.jobId,
+        _jobId,
         value,
       );
       if (!mounted || _contentBlocked) return;
@@ -1891,7 +1902,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     try {
       await _offlineJobAdmin.queueStatus(
         widget.businessId,
-        widget.jobId,
+        _jobId,
         code: code,
         name: nextName,
         colorHex: nextColor,
@@ -1909,7 +1920,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
             if (code == 'completed' && widget.roleCode == 'owner') {
               await OwnerInvoiceAutoCloseService().closeEligible(
                 businessId: widget.businessId,
-                jobId: widget.jobId,
+                jobId: _jobId,
                 isOwner: true,
               );
             }
@@ -2071,7 +2082,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     try {
       await _offlineJobAdmin.queueAssignment(
         widget.businessId,
-        widget.jobId,
+        _jobId,
         employeeId: selected.isEmpty ? null : selected,
         employeeName: employee?['name']?.toString(),
         position: employee?['position_name']?.toString(),
@@ -2112,7 +2123,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   Future<void> _requestJob() async {
     if (!_canRequestJob) return;
     await _run(() async {
-      await _api.requestJobAssignment(widget.businessId, widget.jobId);
+      await _api.requestJobAssignment(widget.businessId, _jobId);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -2161,7 +2172,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   Future<void> _editMileageIn() async {
     if (_job == null || _busy || !_canEditInspection) return;
     final businessId = widget.businessId;
-    final jobId = widget.jobId;
+    final jobId = _jobId;
     final vehicleId = _job?['vehicle_id']?.toString();
     final initial = JobMileageSummary.mileageIn(_job, _preInspection);
     final controller = TextEditingController(
@@ -2200,7 +2211,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     await mileageInDialogRoute?.completed;
     controller.dispose();
     if (save != true || !mounted || _contentBlocked || !_canEditInspection ||
-        _job == null || widget.businessId != businessId || widget.jobId != jobId ||
+        _job == null || widget.businessId != businessId || _jobId != jobId ||
         _job?['vehicle_id']?.toString() != vehicleId) {
       return;
     }
@@ -2254,7 +2265,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       final translated = await _jobTextForStorage(value);
       await _offlineJobAdmin.queueCore(
         widget.businessId,
-        widget.jobId,
+        _jobId,
         requestedWork: translated.isEmpty ? null : translated,
         replaceRequestedWork: true,
       );
@@ -2304,7 +2315,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     try {
       await _offlineWorkFindings.saveLocalWorkSummary(
         widget.businessId,
-        widget.jobId,
+        _jobId,
         workSummary: await _jobTextForStorage(value),
       );
       await _refreshLocalWorkFindings();
@@ -2332,7 +2343,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     if (!_canSeeFinancial || _contentBlocked) return null;
     final mode = BriskersConnectionModeController.instance;
     final documents = await readInvoiceLaborSource(
-      onlineRead: () => _api.jobDocuments(widget.businessId, widget.jobId),
+      onlineRead: () => _api.jobDocuments(widget.businessId, _jobId),
       cachedRead: _localDocumentsForJob,
       forceOffline: mode.forceOffline,
       forceOnline: mode.forceOnline,
@@ -2370,7 +2381,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       forceOnline: mode.forceOnline,
     );
     if (!mounted || !editorContext.mounted || !editorActive()) return null;
-    if (detail == null || detail['job_id']?.toString() != widget.jobId ||
+    if (detail == null || detail['job_id']?.toString() != _jobId ||
         detail['kind'] != 'invoice' ||
         const {'void', 'voided', 'cancelled', 'canceled'}.contains(detail['status']?.toString().toLowerCase())) {
       throw StateError(
@@ -2473,7 +2484,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     try {
       final local = await _offlineInspection.saveLocalInspection(
         widget.businessId,
-        widget.jobId,
+        _jobId,
         vehicleId: _job?['vehicle_id']?.toString(),
         notes: noteValue,
         odometer: odometerValue,
@@ -2560,7 +2571,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       for (final photo in photos) {
         local = await _offlineInspection.stagePhoto(
           widget.businessId,
-          widget.jobId,
+          _jobId,
           vehicleId: _job?['vehicle_id']?.toString(),
           fallbackOdometer: fallbackOdometer,
           filename: photo.name,
@@ -2634,7 +2645,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       try {
         final local = await _offlineInspection.updatePendingPhotoNote(
           widget.businessId,
-          widget.jobId,
+          _jobId,
           photo['id'].toString(),
           note,
         );
@@ -2829,7 +2840,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       final localFinding =
           await _offlineWorkFindings.createLocalFinding(
         widget.businessId,
-        widget.jobId,
+        _jobId,
         vehicleId: vehicleId,
         body: await _jobTextForStorage(body),
         includeOnInvoice: includeOnInvoice,
@@ -2839,7 +2850,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       for (final photo in photos) {
         await _offlineWorkFindings.stageFindingPhoto(
           widget.businessId,
-          widget.jobId,
+          _jobId,
           localFindingId,
           filename: photo.name,
           mimeType: _imageMime(photo.name),
@@ -2935,7 +2946,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     try {
       await _offlineWorkFindings.updateLocalFinding(
         widget.businessId,
-        widget.jobId,
+        _jobId,
         finding['id'].toString(),
         body: await _jobTextForStorage(body),
       );
@@ -3006,7 +3017,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       for (final photo in photos) {
         await _offlineWorkFindings.stageFindingPhoto(
           widget.businessId,
-          widget.jobId,
+          _jobId,
           finding['id'].toString(),
           filename: photo.name,
           mimeType: _imageMime(photo.name),
@@ -3164,13 +3175,13 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   Future<void> _addFindingToJob(Map<String, dynamic> finding) async {
     if (!_canQuickAdmin && !_canManage) return;
     await _changeFindingLocally(() => _findingActions.addToJob(
-      widget.businessId, finding, widget.jobId));
+      widget.businessId, finding, _jobId));
   }
 
   Future<void> _removeFindingFromJob(Map<String, dynamic> finding) async {
     if (!_canQuickAdmin && !_canManage) return;
     await _changeFindingLocally(() => _findingActions.removeFromJob(
-      widget.businessId, finding, widget.jobId));
+      widget.businessId, finding, _jobId));
   }
 
   // Resolve is a historical repair record, not an implicit assignment to
@@ -3212,8 +3223,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           row.data['id'].toString(): Map<String, dynamic>.from(row.data),
     };
     // Keep the currently viewed Job usable if the local list hasn't hydrated.
-    eligible[widget.jobId] = {
-      ...job, 'id': widget.jobId,
+    eligible[_jobId] = {
+      ...job, 'id': _jobId,
       'vehicle_id': vehicleId, 'customer_id': customerId,
     };
     if (!BriskersConnectionModeController.instance.forceOffline) {
@@ -3403,7 +3414,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     await _run(() async {
       id = await _offlineDocumentDraft.createEstimate(
               widget.businessId,
-              widget.jobId,
+              _jobId,
             );
     });
     if (!mounted || id == null) return;
@@ -3422,7 +3433,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       MaterialPageRoute(
         builder: (_) => IdentifixEstimateImportScreen(
           businessId: widget.businessId,
-          jobId: widget.jobId,
+          jobId: _jobId,
           customerName: customerName,
           vehicle: vehicle,
         ),
@@ -3445,12 +3456,12 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     try {
       id = BriskersConnectionModeController.instance.forceOffline
           ? await _offlineDocumentDraft.createQuickInvoice(widget.businessId,
-              existingJobId:widget.jobId,
+              existingJobId:_jobId,
               customerId:_job?['customer_id']?.toString() ?? '',
               customerName:_job?['customer_name']?.toString() ?? 'Customer',
               vehicleId:_job?['vehicle_id']?.toString(),
               vehicleLabel:(_job?['vehicle_label'] ?? _job?['vehicle'])?.toString())
-          : await _api.createInvoice(widget.businessId, widget.jobId);
+          : await _api.createInvoice(widget.businessId, _jobId);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
       return;
@@ -3471,7 +3482,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       final opened = await openJobInvoicePayment(
         context,
         businessId: widget.businessId,
-        jobId: widget.jobId,
+        jobId: _jobId,
         roleCode: widget.roleCode,
         documents: _onlineReady ? _documents : null,
       );
@@ -3894,7 +3905,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                       ? Align(alignment:Alignment.centerLeft,child:invoiceChip(linkedInvoices.first))
                       : InkWell(onTap:_canManage && !_busy?_changeJobTitle:null,child:Text(jobTitle.isEmpty?'No linked invoice saved':jobTitle));
                     if(!(OwnerPayrollScreen.enabled && _owner))return invoice;
-                    final mechanic=JobTasksAccess(business:widget.businessId,job:widget.jobId,selectorOnly:true,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);});
+                    final mechanic=JobTasksAccess(business:widget.businessId,job:_jobId,selectorOnly:true,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);});
                     if(constraints.maxWidth*.6<180*MediaQuery.textScalerOf(context).scale(1)) {
                       return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[invoice,const SizedBox(height:6),mechanic]);
                     }
@@ -4166,7 +4177,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     color: Colors.deepOrange,
     child: VehicleFindings(
       findings: _findings,
-      jobId: widget.jobId,
+      jobId: _jobId,
       busy: _busy,
       canEdit: _canEditFindings,
       canManage: _canQuickAdmin || _canManage,
@@ -4193,7 +4204,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       MaterialPageRoute(
         builder: (_) => ExpenseEntryScreen(
           businessId: widget.businessId,
-          jobId: widget.jobId,
+          jobId: _jobId,
           contextLabel: number.isEmpty ? 'This job' : 'Job $number',
           initialDirection: 'expense',
           autoScanReceipt: true,
@@ -4212,7 +4223,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       MaterialPageRoute(
         builder: (_) => ExpenseEntryScreen(
           businessId: widget.businessId,
-          jobId: widget.jobId,
+          jobId: _jobId,
           contextLabel: number.isEmpty ? 'This job' : 'Job $number',
         ),
       ),
@@ -4287,7 +4298,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         MaterialPageRoute(
           builder: (_) => ExpenseEntryScreen(
             businessId: widget.businessId,
-            jobId: widget.jobId,
+            jobId: _jobId,
             contextLabel: number.isEmpty ? 'This job' : 'Job $number',
             initialDirection: 'expense',
             quickTemplate: selected,
@@ -4305,7 +4316,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     setState(() { _busy=true; _error=null; });
     try {
       final deleted=await deleteOwnerLocalJob(context,businessId:widget.businessId,
-        jobId:widget.jobId,label:_job?['job_number']?.toString() ?? 'Job');
+        jobId:_jobId,label:_job?['job_number']?.toString() ?? 'Job');
       if(deleted && mounted) Navigator.pop(context,true);
     } catch(error) {
       if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Unable to delete Job: $error')));
@@ -5482,7 +5493,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     final userId = LocalJobAccessHistory.currentUserId;
     if (userId == null) return;
     unawaited(_profitabilityCache.save(
-      widget.businessId, userId, widget.jobId, data,
+      widget.businessId, userId, _jobId, data,
     ));
   }
 
@@ -5492,7 +5503,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     if (userId == null) return;
     try {
       final saved = await _profitabilityCache.load(
-        widget.businessId, userId, widget.jobId,
+        widget.businessId, userId, _jobId,
       );
       if (!_currentLoad(epoch) || saved == null || _profitability != null) {
         return;
@@ -5519,7 +5530,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     try {
       final data = await _api.jobProfitability(
         widget.businessId,
-        widget.jobId,
+        _jobId,
       );
       if (!mounted) return;
       final valid = JobProfitabilitySummary.fromRpc(data) != null;
@@ -5805,7 +5816,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   Future<void> _openJobLaborTasks() async {
     if (!_owner || !OwnerPayrollScreen.enabled) return;
     await Navigator.of(context).push<void>(MaterialPageRoute(
-      builder: (_) => OwnerPayrollScreen(businessId: widget.businessId, jobId: widget.jobId,
+      builder: (_) => OwnerPayrollScreen(businessId: widget.businessId, jobId: _jobId,
         sharedBottomNavigationBar: widget.bottomNavigationBar),
     ));
     if (mounted) await _load();
@@ -5814,7 +5825,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   @override
   Widget build(BuildContext context) => JobQuarantineViewGuard(
     businessId: widget.businessId,
-    jobId: widget.jobId,
+    jobId: _jobId,
     onBlocked: _blockJobContent,
     onRestored: () { unawaited(_load()); },
     child: _buildContent(context),
@@ -5864,7 +5875,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         _job!['customer_name']?.toString() ?? '',
       ].where((value) => value.isNotEmpty).join(' · ');
       recordRecentView(widget.businessId, (
-        kind: RecentRecordKind.job, id: widget.jobId, label: label,
+        kind: RecentRecordKind.job, id: _jobId, label: label,
       ));
     }
 
@@ -5890,7 +5901,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       if (status == 'resolved' || status=='not_applicable') return false;
 
       final repairJobId = finding['repair_job_id']?.toString() ?? '';
-      if (status == 'in_job' && repairJobId == widget.jobId) {
+      if (status == 'in_job' && repairJobId == _jobId) {
         return false;
       }
 
@@ -5938,7 +5949,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   context,
                   MaterialPageRoute(builder: (_) => MechanicLaborScreen(
                     sharedBottomNavigationBar: widget.bottomNavigationBar,
-                    businessId: widget.businessId, jobId: widget.jobId,
+                    businessId: widget.businessId, jobId: _jobId,
                   )),
                 );
               }
@@ -6020,7 +6031,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       floatingActionButton: (_canEditFindings || _canManage) &&
               MediaQuery.viewInsetsOf(context).bottom == 0
           ? FloatingActionButton.extended(
-              heroTag: 'job-detail-new-${widget.jobId}',
+              heroTag: 'job-detail-new-${_jobId}',
               onPressed: _busy ? null : _showNewMenu,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),

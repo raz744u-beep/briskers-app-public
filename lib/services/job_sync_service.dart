@@ -1,3 +1,4 @@
+import 'local_job_identity.dart';
 import 'local_job_core_projection.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -59,11 +60,13 @@ class JobSyncService {
       _database,
       businessId,
     );
+    final retained = await LocalJobIdentity(_database).retainedJobIds(businessId);
     final obsolete = rows
         .where(
           (row) =>
               !serverJobIds.contains(row.read<String>('id')) &&
-              !blocked.contains(row.read<String>('id')),
+              !blocked.contains(row.read<String>('id')) &&
+              !retained.contains(row.read<String>('id')),
         )
         .toList();
 
@@ -472,6 +475,7 @@ class JobSyncService {
     Map<String, String> beforeSnapshot,
   ) async {
     final absent = <String>{};
+    final retained = await LocalJobIdentity(_database).retainedJobIds(businessId);
     final retired = await LocalJobRetirement.blockedJobIds(
       _database,
       businessId,
@@ -487,7 +491,7 @@ class JobSyncService {
         .get();
     for (final row in rows) {
       final id = row.read<String>('id');
-      if (serverIds.contains(id) || retired.contains(id)) continue;
+      if (serverIds.contains(id) || retired.contains(id) || retained.contains(id)) continue;
       // Keyset pages are not one transaction. A newly synced identity may
       // sort before an already-read page; absence cannot revoke its work.
       final provenance =
@@ -534,6 +538,7 @@ class JobSyncService {
         'They have been preserved for reconciliation.',
       );
     }
+    await LocalJobIdentity(_database).prepare();
     for (final table in const [
       'local_pre_inspection_photos',
       'local_pre_inspections',
@@ -558,8 +563,17 @@ class JobSyncService {
           )).isNotEmpty) {
         continue;
       }
+      final identityLink = switch (table) {
+        'local_pre_inspection_photos' =>
+          'EXISTS (SELECT 1 FROM local_pre_inspections i WHERE i.business_id=$table.business_id AND i.id=$table.inspection_id AND ${LocalJobIdentity.retainedSql('i.business_id', 'i.job_id')})',
+        'local_finding_photos' =>
+          'EXISTS (SELECT 1 FROM local_findings f WHERE f.business_id=$table.business_id AND f.id=$table.finding_id AND (${LocalJobIdentity.retainedSql('f.business_id', 'f.found_job_id')} OR ${LocalJobIdentity.retainedSql('f.business_id', 'f.repair_job_id')}))',
+        'local_findings' =>
+          '(${LocalJobIdentity.retainedSql('$table.business_id', '$table.found_job_id')} OR ${LocalJobIdentity.retainedSql('$table.business_id', '$table.repair_job_id')})',
+        _ => LocalJobIdentity.retainedSql('$table.business_id', '$table.$retained'),
+      };
       await _database.customStatement(
-        'DELETE FROM $table WHERE business_id = ?${retained == null ? '' : " AND NOT EXISTS(SELECT 1 FROM local_job_retirement_entities e WHERE e.business_id=$table.business_id "
+        'DELETE FROM $table WHERE business_id = ? AND NOT ($identityLink)${retained == null ? '' : " AND NOT EXISTS(SELECT 1 FROM local_job_retirement_entities e WHERE e.business_id=$table.business_id "
                   "AND e.entity_kind='job' AND e.entity_id=$table.$retained AND e.state IN ${LocalJobRetirement.blockedStates})"}',
         [businessId],
       );
@@ -578,6 +592,9 @@ class JobSyncService {
       _database, businessId, Map<String, dynamic>.from(rawJob));
     final jobId = job['id']?.toString() ?? '';
     if (jobId.isEmpty) return;
+    // A stale server copy cannot replace the complete Closed local identity
+    // or refresh away the duplicate's retained work and attachment evidence.
+    if (await LocalJobIdentity(_database).canonicalId(businessId, jobId) != jobId) return;
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return;
     }
@@ -969,6 +986,7 @@ class JobSyncService {
   }
 
   Future<void> _removeJob(String businessId, String jobId) async {
+    if ((await LocalJobIdentity(_database).retainedJobIds(businessId)).contains(jobId)) return;
     final rows = await _database
         .customSelect(
           '''

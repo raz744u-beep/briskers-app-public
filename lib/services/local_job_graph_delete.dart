@@ -1,3 +1,4 @@
+import 'local_job_identity.dart';
 import 'local_job_retirement.dart';
 import 'dart:convert';
 import 'dart:math';
@@ -80,6 +81,11 @@ class LocalJobGraphDelete {
   }
 
   Future<List<Map<String, dynamic>>> _inventory(String business, String job) async {
+    final canonical = await LocalJobIdentity(db).canonicalId(business, job);
+    if (canonical != job) {
+      throw StateError('This is an extra listing of the saved Closed job. '
+          'Refresh Jobs and open the Closed entry. Its records have been retained.');
+    }
     final found = <Map<String, dynamic>>[];
     final root = await _rows('local_jobs', business, 'id', job);
     if (root.length != 1) throw StateError('Job is not present locally.');

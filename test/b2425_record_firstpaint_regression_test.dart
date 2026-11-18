@@ -92,7 +92,7 @@ void main() {
     expect(code, contains('repairJobId'));
     expect(code, contains('_chooseFindingResolutionJob(finding)'));
     expect(code, isNot(contains(
-      'widget.businessId, finding, widget.jobId));')));
+      'widget.businessId, finding, _jobId));')));
   });
 
   test('Invoice first-open overlaps independent local reads without changing payment order', () {

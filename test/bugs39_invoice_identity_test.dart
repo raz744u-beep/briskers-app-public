@@ -1,3 +1,13 @@
+import 'support/empty_retirement_gateway.dart';
+
+import 'package:briskers_app/core/job_list_options.dart';
+import 'package:briskers_app/services/briskers_api.dart';
+import 'package:briskers_app/services/job_sync_service.dart';
+import 'package:briskers_app/services/local_job_identity.dart';
+import 'package:briskers_app/services/local_job_repository.dart';
+import 'package:briskers_app/services/local_job_graph_delete.dart';
+import 'package:briskers_app/services/local_payroll_repository.dart';
+import 'package:briskers_app/services/test_job_cleanup_gateway.dart';
 import 'package:briskers_app/services/customer_document_summary_service.dart';
 import 'dart:convert';
 import 'dart:io';
@@ -17,6 +27,48 @@ class _Store implements OwnerEnrollmentStore {
   @override Future<String?> read() async => null;
   @override Future<void> write(String value) async {}
   @override Future<void> clear() async {}
+}
+
+class _EmptyCleanup extends TestJobCleanupGateway {
+  @override
+  Future<Map<String, dynamic>> tombstones(String businessId) async => {
+    'schema_version': 1,
+    'business_id': businessId,
+    'deleted_job_ids': <String>[],
+    'deleted_document_ids': <String>[],
+  };
+}
+
+class _GloriaJobsApi extends BriskersApi {
+  @override
+  Future<Map<String, dynamic>> syncPullJobsBootstrap(
+    String businessId, {
+    String? afterJobId,
+    int limit = 25,
+  }) async => {
+    'mode': 'bootstrap',
+    'bootstrap_cursor': 10,
+    'has_more': false,
+    'next_job_id': 'c6a23164-c09a-490d-8b00-c3e84e7282fb',
+    'bundles': [
+      {
+        'job': {
+          'id': 'c6a23164-c09a-490d-8b00-c3e84e7282fb',
+          'business_id': businessId,
+          'job_number': 'J-40',
+          'title': 'Repair',
+          'status': 'open',
+          'customer_id': 'remote-customer',
+          'customer_name': 'Gloria Johnson',
+          'vehicle': '2016 Audi A8L',
+          'created_at': '2026-11-03T12:00:00Z',
+          'updated_at': '2026-11-03T12:00:00Z',
+          'row_version': 1,
+        },
+        'findings': <dynamic>[],
+      },
+    ],
+  };
 }
 
 void main() {
@@ -121,4 +173,184 @@ void main() {
     expect(await LocalDocumentIdentity(db).canonicalId(business,remote),remote);
     expect((await LocalDocumentRepository(database:db).listByKind(business,kind:'invoice')).length,2);
   });
+  Future<void> seedExtraJob() async {
+    await db.customStatement(
+      "INSERT INTO local_jobs(id,business_id,access_scope,title,status,job_number,customer_id,customer_name,vehicle_label) VALUES (?,?,'owner','Repair','open','J-40','remote-customer','Gloria Johnson','2016 Audi A8L')",
+      [server['job_id'], business],
+    );
+    await db.customStatement(
+      "UPDATE local_jobs SET customer_id='original-customer',payment_state='closed' WHERE id=?",
+      [job],
+    );
+  }
+
+  test('Gloria J-40 has one Closed listing, correct counts and customer links; physical records survive restart', () async {
+    await seedExtraJob();
+    await LocalPayrollRepository(db, business: business, owner: true).prepare();
+    await db.customStatement(
+      "INSERT INTO regular_payroll_tasks(business_id,id,job_id,labor_id,description,planned) VALUES (?,'task-extra',?,'labor-extra','Saved labor',360)",
+      [business, server['job_id']],
+    );
+    await db.customStatement(
+      "INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id,employee_name) VALUES ('payroll-main',?,?,'chris','Chris')",
+      [business, server['job_id']],
+    );
+    await db.customStatement(
+      "INSERT INTO local_financial_cache(business_id,cache_key,payload_json) VALUES (?,'transactions_snapshot',?)",
+      [
+        business,
+        jsonEncode([
+          {'id': 'income-gloria', 'amount': 7882.11, 'document_id': original},
+        ]),
+      ],
+    );
+    Future<Map<String, List<Map<String, dynamic>>>> retained() async => {
+      for (final table in [
+        'local_jobs',
+        'local_documents',
+        'local_document_details',
+        'regular_payroll_tasks',
+        'local_job_assignments',
+        'local_financial_cache',
+      ])
+        table: [
+          for (final row in await db.customSelect('SELECT * FROM $table').get())
+            row.data,
+        ],
+    };
+    final before = await retained();
+    var jobs = LocalJobRepository(database: db);
+    expect((await jobs.listJobs(business)).map((r) => r['id']), [job]);
+    expect(await jobs.activeJobCount(business), 0);
+    expect(await jobs.jobCount(business, view: JobListView.active), 0);
+    expect(await jobs.watchActiveJobCount(business).first, 0);
+    expect(await jobs.jobStatusCounts(business), {'closed': 1});
+    for (final customer in ['original-customer', 'remote-customer']) {
+      expect((await jobs.forCustomer(business, customer)).map((r) => r['id']), [
+        job,
+      ]);
+    }
+    final detail = await jobs.jobDetail(business, server['job_id'] as String);
+    expect(detail!.job['id'], job);
+    expect(detail.job['status'], 'closed');
+    expect(await retained(), before);
+    expect(
+      await jobs.remapProvisionalJob(
+        business,
+        job,
+        server['job_id'] as String,
+        jobNumber: 'J-40',
+      ),
+      'J-40',
+    );
+    expect(await retained(), before);
+    await db.close();
+    db = BriskersLocalDatabase(NativeDatabase(File('${dir.path}/db.sqlite')));
+    jobs = LocalJobRepository(database: db);
+    expect((await jobs.listJobs(business)).map((r) => r['id']), [job]);
+    expect(await retained(), before);
+    expect(
+      await JobSyncService(database: db)
+          .pruneObsoleteCache(business, {server['job_id'] as String}),
+      0,
+    );
+    expect(await retained(), before);
+    final deletion = LocalJobGraphDelete.ownerDirected(
+      db,
+      ownerGrant: await grant(),
+    );
+    await expectLater(
+      deletion.preview(
+        businessId: business,
+        jobId: server['job_id'] as String,
+        actorId: 'owner',
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (e) => e.message,
+          'message',
+          contains('extra listing'),
+        ),
+      ),
+    );
+    expect(await retained(), before);
+  });
+
+  test('Gloria job identity survives a full future synchronization without posting Income', () async {
+    await seedExtraJob();
+    final identity = LocalJobIdentity(db);
+    expect(
+      await identity.canonicalId(business, server['job_id'] as String),
+      job,
+    );
+    final sync = JobSyncService(
+      database: db,
+      api: _GloriaJobsApi(),
+      cleanupGateway: _EmptyCleanup(),
+      retirementGateway: const EmptyRetirementGateway(),
+    );
+    await sync.pull(business);
+    expect(
+      (await LocalJobRepository(database: db).listJobs(business))
+          .map((r) => r['id']),
+      [job],
+    );
+    expect(
+      (await LocalJobRepository(
+        database: db,
+      ).jobDetail(business, job))!.job['status'],
+      'closed',
+    );
+    expect(
+      await LocalDocumentSqlStore.read(
+        db,
+        LocalDocumentDetailCache.key(business, original),
+      ),
+      saved,
+    );
+    expect((await db.customSelect('SELECT * FROM local_jobs').get()).length, 2);
+    expect((await db.customSelect('SELECT * FROM sync_outbox').get()), isEmpty);
+    await LocalDocumentRepository(database: db)
+        .upsertFromServer(business, [server]);
+    expect(
+      (await LocalJobRepository(database: db).listJobs(business)).length,
+      1,
+    );
+  });
+
+  test(
+    'equal Job numbers without invoice creation proof remain visible',
+    () async {
+      await seedExtraJob();
+      await db.customStatement('DELETE FROM local_document_identity_aliases');
+      await db.customStatement(
+        "UPDATE local_documents SET total=1 WHERE id=?",
+        [original],
+      );
+      expect(
+        (await LocalJobRepository(database: db).listJobs(business)).length,
+        2,
+      );
+      expect(
+        await LocalJobIdentity(db)
+            .canonicalId(business, server['job_id'] as String),
+        server['job_id'],
+      );
+    },
+  );
+
+  test(
+    'extra linked document prevents collapsing a Job with separate work',
+    () async {
+      await seedExtraJob();
+      await db.customStatement(
+        "INSERT INTO local_documents(id,business_id,job_id,kind,status) VALUES ('other',?,?,'estimate','draft')",
+        [business, server['job_id']],
+      );
+      expect(
+        (await LocalJobRepository(database: db).listJobs(business)).length,
+        2,
+      );
+    },
+  );
 }

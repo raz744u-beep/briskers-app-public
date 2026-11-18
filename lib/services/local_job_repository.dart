@@ -1,3 +1,4 @@
+import 'local_job_identity.dart';
 import 'job_task_bulk_completion.dart';
 import 'local_payroll_repository.dart';
 import 'nov12_job_completion.dart';
@@ -98,11 +99,17 @@ class LocalJobRepository {
     return rows.isNotEmpty && rows.first.read<int>('bootstrapped') == 1;
   }
 
+  Future<void> _prepareVisibility() async {
+    await LocalJobRetirement.ensureSchema(_database);
+    await LocalJobIdentity(_database).prepare();
+  }
+
   // Retirement is a durable visibility decision. Keep the retained rows for
   // reconciliation, but exclude them before sorting, paging, or aggregating.
   static String _visibleJobSql(String alias) =>
       """
-    NOT EXISTS (SELECT 1 FROM local_job_retirement_entities r
+    ${LocalJobIdentity.visibleSql(alias)}
+    AND NOT EXISTS (SELECT 1 FROM local_job_retirement_entities r
       WHERE r.business_id = $alias.business_id AND r.entity_kind = 'job'
         AND r.entity_id = $alias.id
         AND r.state IN ('pending','accepted','locally_cancelled'))
@@ -295,7 +302,7 @@ class LocalJobRepository {
     int offset = 0,
   }) async {
     // Retirements are checked each time; the DDL indexes are installed once.
-    await LocalJobRetirement.ensureSchema(_database);
+    await _prepareVisibility();
     await _ensureListReadIndexes();
     await LocalDocumentSqlStore.ensure(_database);
     final filters = _filters(
@@ -394,18 +401,23 @@ class LocalJobRepository {
   Future<List<Map<String, dynamic>>> forCustomer(
     String businessId, String customerId,
   ) async {
-    await LocalJobRetirement.ensureSchema(_database);
+    await _prepareVisibility();
     final rows = await _database.customSelect(
       "SELECT j.*, 0 AS open_findings, j.server_updated_at AS activity_at, "
       "j.created_at AS job_date_at, NULL AS last_accessed_at "
-      "FROM local_jobs j WHERE j.business_id=? AND j.customer_id=? "
+      "FROM local_jobs j WHERE j.business_id=? AND (j.customer_id=? OR EXISTS ("
+      "SELECT 1 FROM local_job_identity_aliases a JOIN local_jobs remote "
+      "ON remote.business_id=a.business_id AND remote.id=a.alias_id "
+      "WHERE a.business_id=j.business_id AND a.canonical_id=j.id AND remote.customer_id=?)) "
       "AND ${_visibleJobSql('j')}",
-      variables: [Variable<String>(businessId), Variable<String>(customerId)],
+      variables: [Variable<String>(businessId), Variable<String>(customerId),
+        Variable<String>(customerId)],
     ).get();
     return rows.map(_jobListMap).toList();
   }
 
   Future<String?> jobNumberForJob(String businessId, String jobId) async {
+    jobId = await LocalJobIdentity(_database).canonicalId(businessId, jobId);
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return null;
     }
@@ -432,6 +444,9 @@ class LocalJobRepository {
   }) async {
     if (serverJobId.trim().isEmpty || serverJobId.startsWith('local-')) {
       throw StateError('The synced invoice did not return its linked Job.');
+    }
+    if (await LocalJobIdentity(_database).canonicalId(businessId, serverJobId) == provisionalJobId) {
+      return jobNumberForJob(businessId, provisionalJobId);
     }
     final number = jobNumber?.trim();
     return _database.transaction(() async {
@@ -579,7 +594,7 @@ class LocalJobRepository {
     String? search,
     JobListView view = JobListView.all,
   }) async {
-    await LocalJobRetirement.ensureSchema(_database);
+    await _prepareVisibility();
     await LocalDocumentSqlStore.ensure(_database);
     final filters = _filters(
       businessId,
@@ -597,7 +612,7 @@ class LocalJobRepository {
   }
 
   Stream<int> watchJobCount(String businessId, {String? status}) async* {
-    await LocalJobRetirement.ensureSchema(_database);
+    await _prepareVisibility();
     final where = <String>['j.business_id = ?', _visibleJobSql('j')];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
     if (status != null && status.isNotEmpty) {
@@ -619,7 +634,7 @@ class LocalJobRepository {
     String businessId, {
     int limit = 25,
   }) async {
-    await LocalJobRetirement.ensureSchema(_database);
+    await _prepareVisibility();
     final rows = await _database
         .customSelect(
           '''
@@ -653,7 +668,7 @@ class LocalJobRepository {
   }
 
   Future<int> unassignedOpenJobCount(String businessId) async {
-    await LocalJobRetirement.ensureSchema(_database);
+    await _prepareVisibility();
     final row = await _database
         .customSelect(
           '''
@@ -671,7 +686,7 @@ class LocalJobRepository {
   }
 
   Future<int> activeJobCount(String businessId) async {
-    await LocalJobRetirement.ensureSchema(_database);
+    await _prepareVisibility();
     final row = await _database
         .customSelect(
           '''
@@ -688,7 +703,7 @@ class LocalJobRepository {
   }
 
   Stream<int> watchActiveJobCount(String businessId) async* {
-    await LocalJobRetirement.ensureSchema(_database);
+    await _prepareVisibility();
     yield* _database
         .customSelect(
           '''
@@ -709,7 +724,7 @@ class LocalJobRepository {
     String businessId, {
     JobListView view = JobListView.all,
   }) async {
-    await LocalJobRetirement.ensureSchema(_database);
+    await _prepareVisibility();
     final rows = await _database
         .customSelect(
           '''
@@ -841,6 +856,7 @@ class LocalJobRepository {
     String jobId, {
     bool coreOnly = false,
   }) async {
+    jobId = await LocalJobIdentity(_database).canonicalId(businessId, jobId);
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return null;
     }
