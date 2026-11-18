@@ -91,6 +91,10 @@ void main() {
     expect(admin, contains('LocalJobStatusEvents.committed('));
     expect(event, contains('StreamController<LocalJobStatusChanged>.broadcast(sync: true)'));
     expect(detail, contains('++_loadEpoch;'));
+    final taskStatusListener=detail.substring(detail.indexOf('_statusChanges=LocalJobStatusEvents.changes.listen('),
+      detail.indexOf('_findingChanges = VehicleFindingActionsService.changes.listen'));
+    expect(taskStatusListener,contains('event.businessId!=widget.businessId || event.jobId!=_jobId'));
+    expect(taskStatusListener.indexOf('++_loadEpoch;'),lessThan(taskStatusListener.indexOf('unawaited(_load())')));
     expect(detail, contains("setState(() => _busy = false);"));
     expect(detail, contains('await _offlineJobAdmin.queueStatus('));
     expect(detail, contains('unawaited(() async {'));

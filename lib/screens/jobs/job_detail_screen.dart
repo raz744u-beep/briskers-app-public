@@ -354,7 +354,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         setState(() => _job={..._job!, 'status':event.code,'status_name':event.name,
           'status_color':event.colorHex,'status_icon':event.iconKey});
       }
-      unawaited(_readTaskProgress(_loadEpoch));
+      // Discard any older graph already being hydrated. The replacement load
+      // paints SQLite first and exits locally in Force Offline.
+      ++_loadEpoch;
+      unawaited(_load());
     });
     _findingChanges = VehicleFindingActionsService.changes.listen((businessId) {
       if (businessId == widget.businessId && mounted && !_contentBlocked) {
