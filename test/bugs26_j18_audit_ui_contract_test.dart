@@ -41,6 +41,12 @@ void main() {
   });
 
   testWidgets('non-Owner cannot access invoice audit controls', (tester) async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    debugUseLocalDatabase(db);
+    addTearDown(() async {
+      debugUseLocalDatabase(null);
+      await db.close();
+    });
     await tester.pumpWidget(const MaterialApp(home: DiagnosticsScreen(businessId:'shop',roleCode:'mechanic')));
     expect(find.byType(TextField),findsNothing);
     expect(find.text('Inspect saved invoice links'),findsNothing);
