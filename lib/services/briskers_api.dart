@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/supabase_config.dart';
 import '../local/local_database_provider.dart';
 import 'sync_replay_fence.dart';
+import 'local_server_invoice_allocation_guard.dart';
 
 /// A queued replay can checkpoint each mutation within a multi-stage upload.
 /// Keeping the actual response inside the guard also preserves late receipts.
@@ -3386,6 +3387,7 @@ class BriskersApi {
     String businessId,
     String jobId,
   ) async {
+    await LocalServerInvoiceAllocationGuard.assertSafe(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_create_invoice',
       params: {
@@ -3400,6 +3402,7 @@ class BriskersApi {
     String businessId,
     String estimateId,
   ) async {
+    await LocalServerInvoiceAllocationGuard.assertSafe(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_convert_estimate',
       params: {
@@ -3757,6 +3760,7 @@ class BriskersApi {
     String? vehicleId,
     DateTime? documentDate,
   }) async {
+    await LocalServerInvoiceAllocationGuard.assertSafe(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_create_quick_invoice',
       params: {
