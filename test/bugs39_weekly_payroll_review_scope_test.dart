@@ -172,6 +172,26 @@ void main() {
       'archived_labor': 0,
     };
     expect(review([carried], week), [carried]);
+    final historicalCarry = {
+      ...carried,
+      'completed_date': '2026-11-03',
+      'date_mode': 'inherited',
+      'work_start_date': '2026-11-02',
+      'work_end_date': '2026-11-06',
+    };
+    expect(review([historicalCarry], week), [historicalCarry]);
+    expect(
+      review([
+        {...historicalCarry, 'source_active': 0},
+      ], week),
+      isEmpty,
+    );
+    expect(
+      review([
+        {...carried, 'carry_week': '2026-11-23'},
+      ], week),
+      isEmpty,
+    );
   });
 
   Widget screen(

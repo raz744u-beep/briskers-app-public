@@ -142,7 +142,8 @@ class EmployeeWorkReview extends StatelessWidget {
     List<Map<String, dynamic>> rows, DateTime week, {
     required int Function(Map<String, dynamic>) rate, DateTime? now,
   }) => rows.where((row) {
-    if (row['recordkeeping_only'] == true || row['paid'] == 1 ||
+    if (row['source_active'] == 0 || row['duplicate_of_task_id'] != null ||
+        row['recordkeeping_only'] == true || row['paid'] == 1 ||
         row['owner_prior_paid'] == 1 ||
         ((row['paid_minutes'] as int? ?? 0) > 0 && row['remaining_minutes'] == 0)) {
       return false;
@@ -150,8 +151,12 @@ class EmployeeWorkReview extends StatelessWidget {
     final needsReview = row['payroll_treatment'] == 'review' ||
         row['assignment_conflict'] == 1 || row['archived_labor'] == 1 ||
         (row['state'] == 'Done' && rate(row) <= 0);
-    return needsReview && weeklyReason(row, week, now: now,
-        includeAssignmentConflicts: true).startsWith('Included:');
+    final carry = LocalTaskSchedule.parse(row['carry_week']);
+    if (carry != null && monday(carry).isAfter(monday(week))) return false;
+    final reviewedCarry = row['archived_labor'] != 1 && carry != null &&
+        monday(carry) == monday(week);
+    return needsReview && (reviewedCarry || weeklyReason(row, week, now: now,
+        includeAssignmentConflicts: true).startsWith('Included:'));
   }).toList();
 
   String _auditLine(Map<String, dynamic> row) => [
