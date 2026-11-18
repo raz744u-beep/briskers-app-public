@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
+import 'local_number_evidence.dart';
 
 /// Device-local numbering. Call from the same transaction as record creation or
 /// deletion. A released old number is available only by explicit assignment.
@@ -44,6 +45,20 @@ class LocalNumberAllocator {
     for(final row in rows) {
       final number=_parse(row.data['number'],kind);
       if(number!=null) (used[number] ??= <String>{}).add(row.read<String>('id'));
+    }
+    // A server list can omit a complete saved invoice. Its printed invoice
+    // and job numbers are still occupied until an explicit local deletion.
+    for (final detail in await LocalNumberEvidence.documents(db, business)) {
+      if (kind == 'job') {
+        final id = detail['job_id']?.toString() ?? '';
+        final number = _parse(detail['job_number'], kind);
+        if (id.isNotEmpty && number != null) {
+          (used[number] ??= <String>{}).add(id);
+        }
+      } else if (detail['kind'] == kind) {
+        final number = _parse(detail['document_number'], kind);
+        if (number != null) (used[number] ??= <String>{}).add(detail['id'].toString());
+      }
     }
     return used;
   }

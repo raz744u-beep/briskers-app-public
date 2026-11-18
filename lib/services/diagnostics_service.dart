@@ -17,6 +17,7 @@ import 'invoice_performance_metrics.dart';
 import 'job_performance_metrics.dart';
 import 'local_invoice_status_styles_cache.dart';
 import 'local_tax_settings_cache.dart';
+import 'local_number_evidence.dart';
 
 enum BriskersDiagnosticLevel {
   pass,
@@ -993,6 +994,7 @@ class BriskersDiagnosticsService {
     final records = await _database.customSelect(
       '''
       SELECT id, document_number, document_date, closed_at, sync_state
+             ,customer_id, job_id
       FROM local_documents
       WHERE business_id = ? AND kind = 'invoice'
       ''',
@@ -1008,6 +1010,8 @@ class BriskersDiagnosticsService {
         'document_date': row.readNullable<String>('document_date'),
         'closed': row.readNullable<int>('closed_at') != null,
         'sync_state': row.read<String>('sync_state'),
+        'customer_id': row.readNullable<String>('customer_id'),
+        'job_id': row.readNullable<String>('job_id'),
       };
       invoices.add(invoice);
       final number = normalizedDocumentNumber(invoice['document_number']);
@@ -1015,10 +1019,30 @@ class BriskersDiagnosticsService {
       byNumber.putIfAbsent(number, () => []).add(invoice);
     }
 
+    // Include complete invoices retained outside the refreshed list index.
+    // Deduplicate proven local/server aliases by their saved server identity.
+    final indexedIds = invoices.map((row) => row['id']).toSet();
+    for (final detail in await LocalNumberEvidence.documents(_database, businessId)) {
+      if (detail['kind'] != 'invoice' || !indexedIds.add(detail['id'])) continue;
+      final number = normalizedDocumentNumber(detail['document_number']);
+      final invoice = <String, dynamic>{
+        ...detail,
+        'closed': detail['closed_at'] != null,
+        'sync_state': detail['sync_state'] ?? 'unverified',
+      };
+      invoices.add(invoice);
+      if (number != null) byNumber.putIfAbsent(number, () => []).add(invoice);
+    }
+
     final historicalCollisions = <String>[];
     final unsafeCollisions = <String>[];
+    final collisionIdentities = <String>[];
     for (final entry in byNumber.entries) {
       if (entry.value.length < 2) continue;
+      for (final invoice in entry.value) {
+        collisionIdentities.add('#${entry.key}: invoice ${invoice['id']}; '
+            'customer ${invoice['customer_id'] ?? '?'}; job ${invoice['job_id'] ?? '?'}');
+      }
       final allClosedAndSynced = entry.value.every(
         (row) => row['closed'] == true && row['sync_state'] == 'synced',
       );
@@ -1071,6 +1095,7 @@ class BriskersDiagnosticsService {
           'Active/unsynced collisions: ${unsafeCollisions.take(10).join('; ')}',
         if (unexpected.isNotEmpty)
           'Unexpected matches for: ${unexpected.take(10).join(', ')}',
+        ...collisionIdentities.take(20),
         'Only invoice numbers may match an all-digit invoice search.',
         'Preserve original historical documents; new invoices must have unique numbers.',
       ],
