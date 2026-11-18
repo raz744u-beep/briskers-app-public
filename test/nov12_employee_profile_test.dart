@@ -174,6 +174,9 @@ void main() {
       await tester.tap(find.text('Save (Draft)'));
       await tester.pumpAndSettle();
       expect(draft, {'warranty': 10.0});
+      // Let the saved-draft snackbar dismiss before exercising bottom actions.
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Adjustments & repayment'));
       await tester.tap(find.text('Adjustments & repayment'));
       await tester.pumpAndSettle();
