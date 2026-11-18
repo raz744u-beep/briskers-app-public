@@ -92,7 +92,7 @@ void main(){
     expect(await repo.history('a'),isEmpty);expect(await repo.history('b'),hasLength(1));
     final document=await LocalDocumentDetailCache(database:db).load('shop','invoice');
     expect(document!['total_amount'],700);expect((document['lines'] as List).first['quantity'],7);
-    expect((await db.customSelect("SELECT status FROM local_jobs WHERE id='job'").getSingle()).data['status'],'open');
+    expect((await db.customSelect("SELECT status FROM local_jobs WHERE id='job'").getSingle()).data['status'],'in_progress');
     await repo.addShopTask('a','Clean desk','General');
     expect(await CompletedTaskHistory(db).read('shop',job:'job'),hasLength(1));
     await expectLater(LocalPayrollRepository(db,business:'shop',owner:false).setMainMechanic('job','b','B'),throwsStateError);

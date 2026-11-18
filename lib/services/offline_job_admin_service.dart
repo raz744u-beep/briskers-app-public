@@ -339,8 +339,9 @@ class OfflineJobAdminService {
         ],
       );
 
-      if (jobDate != null)
+      if (jobDate != null) {
         await LocalJobWorkDate(_database).save(businessId, jobId, jobDate);
+      }
       await _mergeOutbox(businessId, jobId, {
         'core_changed': true,
         'customer_id': nextCustomerId,
@@ -410,7 +411,7 @@ class OfflineJobAdminService {
     });
     // The persisted local row and retry-safe outbox are committed.
     // Repaint retained Jobs immediately; network sync is independent.
-    if (notify && !LocalJobWorkState.observed(_database))
+    if (notify && !LocalJobWorkState.observed(_database)) {
       LocalJobStatusEvents.committed(
         LocalJobStatusChanged(
           businessId: businessId,
@@ -421,6 +422,7 @@ class OfflineJobAdminService {
           iconKey: iconKey,
         ),
       );
+    }
   }
 
   Future<void> queueTaskProgress(
@@ -434,8 +436,9 @@ class OfflineJobAdminService {
   }) async {
     await LocalJobWorkState(_database).prepare();
     jobId = await LocalJobIdentity(_database).canonicalId(businessId, jobId);
-    if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId))
+    if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return;
+    }
     await _database.transaction(() async {
       final row = await _database
           .customSelect(
@@ -457,8 +460,9 @@ class OfflineJobAdminService {
       if (!started ||
           LocalJobWorkState.terminal.contains(code) ||
           row.data['completed_at'] != null ||
-          code == 'in_progress')
+          code == 'in_progress') {
         return;
+      }
       if (history && !const {'open', 'not_started'}.contains(code)) return;
       await queueStatus(
         businessId,

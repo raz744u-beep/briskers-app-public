@@ -350,8 +350,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     }
     _statusChanges=LocalJobStatusEvents.changes.listen((event) {
       if(!mounted || _contentBlocked || event.businessId!=widget.businessId || event.jobId!=_jobId) return;
-      if(_job!=null) setState(() => _job={..._job!, 'status':event.code,'status_name':event.name,
-        'status_color':event.colorHex,'status_icon':event.iconKey});
+      if(_job!=null) {
+        setState(() => _job={..._job!, 'status':event.code,'status_name':event.name,
+          'status_color':event.colorHex,'status_icon':event.iconKey});
+      }
       unawaited(_readTaskProgress(_loadEpoch));
     });
     _findingChanges = VehicleFindingActionsService.changes.listen((businessId) {

@@ -23,6 +23,7 @@ class _Api extends BriskersApi {
   String status = 'open';
   String? completedAt;
   int version = 1;
+  String updatedAt='2026-10-14T00:00:00Z';
 
   Map<String, dynamic> bundle() => {
     'job': {
@@ -33,7 +34,7 @@ class _Api extends BriskersApi {
       'status_name': status,
       'completed_at': completedAt,
       'created_at': '2026-01-01T00:00:00Z',
-      'updated_at': '2026-10-14T00:00:00Z',
+      'updated_at': updatedAt,
       'row_version': version,
       'assignments': <dynamic>[],
       'visits': <dynamic>[],
@@ -148,6 +149,14 @@ void main() {
         "UPDATE sync_outbox SET business_id='other-00000000-0000-4000-8000-000000000001'",
       );
       api.version = 5;
+      await sync.pull('00000000-0000-4000-8000-000000000001');
+      row = (await jobs.listJobs('00000000-0000-4000-8000-000000000001')).single;
+      expect(row['status'], 'open');
+      expect(row['completed_at'], isNull);
+      // Newer row versions alone do not prove a newer lifecycle decision.
+      // A later server version with a later timestamp can carry that decision.
+      api.version = 6;
+      api.updatedAt=DateTime.now().toUtc().add(const Duration(seconds:1)).toIso8601String();
       await sync.pull('00000000-0000-4000-8000-000000000001');
       row = (await jobs.listJobs('00000000-0000-4000-8000-000000000001')).single;
       expect(row['status'], 'completed');

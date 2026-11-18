@@ -233,7 +233,7 @@ void main() {
     expect(unpaid['paid'], 0);
     expect(unpaid['gross_cents'], 4000);
     final jobs = await db.customSelect("SELECT status FROM local_jobs WHERE id='job-a'").get();
-    expect(jobs.single.data['status'], 'open');
+    expect(jobs.single.data['status'], 'in_progress');
     loseResponse = false;
     expect(await payroll.reconcile(send: server), 1);
     expect(await payroll.reconcile(send: server), 0);

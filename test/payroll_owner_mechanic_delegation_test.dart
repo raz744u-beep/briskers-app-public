@@ -169,7 +169,7 @@ void main() {
     await expectLater(resumed.repository.mechanicReport('b', authorize), throwsStateError);
     await expectLater(resumed.pay(operation: 'forbidden', week: '2026-11-02', date: '2026-11-04',
       method: 'Cash', selected: [], net: 0, reason: ''), throwsStateError);
-    expect((await databases[1].customSelect("SELECT status FROM local_jobs WHERE id='job'").getSingle()).data['status'], 'open');
+    expect((await databases[1].customSelect("SELECT status FROM local_jobs WHERE id='job'").getSingle()).data['status'], 'in_progress');
     final exported = await ownerB.ledger.export();
     expect(exported, isNot(contains('briskers-payroll-pair-v1')));
     expect(jsonDecode(exported)['business'], 'shop');

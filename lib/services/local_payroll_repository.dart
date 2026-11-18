@@ -1696,8 +1696,12 @@ class LocalPayrollRepository {
       [state,value['completed_date'],revision,business,id]);
     await db.customStatement('INSERT INTO regular_payroll_actual_time VALUES(?,?,?,?) ON CONFLICT(business_id,credit_id) DO UPDATE SET minutes=excluded.minutes,revision=excluded.revision',
       [business,id,actual,revision]);
-    await OfflineJobAdminService(database:db).queueTaskProgress(business,row['job_id'] as String,
-      id,revision,state as String,previousState:row['state'] as String);
+    final completedDate=value['completed_date'];
+    if(state=='In Progress' || row['state']=='In Progress' ||
+      (state=='Done' && value['prior_paid_at']==null && completedDate is String)) {
+      await OfflineJobAdminService(database:db).queueTaskProgress(business,row['job_id'] as String,
+        id,revision,state as String,previousState:row['state'] as String);
+    }
   }
 
   /// Editing or reopening an unpaid portion increments its version. Paid

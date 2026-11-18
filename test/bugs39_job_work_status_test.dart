@@ -1,3 +1,9 @@
+import 'support/empty_retirement_gateway.dart';
+
+import 'package:briskers_app/services/briskers_api.dart';
+import 'package:briskers_app/services/job_sync_service.dart';
+import 'package:briskers_app/services/test_job_cleanup_gateway.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -16,6 +22,49 @@ import 'package:drift/drift.dart' show QueryRow, Variable;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+class _NoCleanup extends TestJobCleanupGateway {
+  @override
+  Future<Map<String, dynamic>> tombstones(String business) async => {
+    'schema_version': 1,
+    'business_id': business,
+    'deleted_job_ids': <String>[],
+    'deleted_document_ids': <String>[],
+  };
+}
+
+class _StaleJobs extends BriskersApi {
+  @override
+  Future<Map<String, dynamic>> syncPullJobsBootstrap(
+    String business, {
+    String? afterJobId,
+    int limit = 25,
+  }) async => {
+    'mode': 'bootstrap',
+    'bootstrap_cursor': 10,
+    'has_more': false,
+    'next_job_id': 'sync',
+    'bundles': [
+      {
+        'job': {
+          'id': 'sync',
+          'business_id': business,
+          'job_number': 'sync',
+          'title': 'Server description',
+          'status': 'open',
+          'status_name': 'Open',
+          'row_version': 8,
+          'updated_at': '2020-01-01T00:00:00Z',
+          'assignments': <dynamic>[],
+          'visits': <dynamic>[],
+          'capabilities': {'manage_job': true},
+        },
+        'pre_inspection': null,
+        'findings': <dynamic>[],
+      },
+    ],
+  };
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -52,11 +101,12 @@ void main() {
       VALUES(?,?,'owner','Repair',?,?,?,7)''',
       [id, business, status, number ?? id, customer],
     );
-    if (invoice != null)
+    if (invoice != null) {
       await db.customStatement(
         "INSERT INTO local_documents(id,business_id,job_id,kind,document_number,status,document_date) VALUES(?,?,?,'invoice',?,'closed','2026-11-17')",
         ['invoice-$id', business, id, invoice],
       );
+    }
     await payroll.setMainMechanic(id, 'kam', 'Kam');
   }
 
@@ -79,7 +129,7 @@ void main() {
       (await db
               .customSelect(
                 'SELECT status FROM local_jobs WHERE business_id=? AND id=?',
-                variables: [Variable(business), Variable(id)],
+                variables: [const Variable(business), Variable(id)],
               )
               .getSingle())
           .read<String>('status');
@@ -167,10 +217,9 @@ void main() {
     await restart();
     expect(await status('bulk'), 'in_progress');
     expect(
-      await bulk.complete(
-        await JobTaskBulkCompletion(payroll).plan('bulk', now),
-        now,
-      ),
+      await JobTaskBulkCompletion(
+        payroll,
+      ).complete(await JobTaskBulkCompletion(payroll).plan('bulk', now), now),
       0,
     );
   });
@@ -345,5 +394,77 @@ void main() {
     await repository.jobCount(business);
     await repository.jobCount(business);
     expect(await status('active'), 'in_progress');
+  });
+  test(
+    'mechanic Start and Finish update job locally without paying wages',
+    () async {
+      await job('mechanic');
+      final id = await labor('mechanic', 'one');
+      final mechanic = LocalPayrollRepository(
+        db,
+        business: business,
+        owner: false,
+      );
+      var sessionChecks = 0;
+      for (final state in ['In Progress', 'Done']) {
+        final row = (await payroll.work(job: 'mechanic')).single;
+        await mechanic.updateMechanicWork(
+          job: 'mechanic',
+          employee: 'kam',
+          id: id,
+          state: state,
+          minutes: state == 'Done' ? 120 : 0,
+          date: '2026-11-17',
+          expectedRevision: row['version'] as int,
+          assertSession: () => sessionChecks++,
+        );
+        expect(await status('mechanic'), 'in_progress');
+      }
+      expect(sessionChecks, greaterThan(0));
+      expect((await payroll.work(job: 'mechanic')).single['paid_minutes'], 0);
+    },
+  );
+
+  test('acknowledged task status survives actual full sync cache rebuild and restart', () async {
+    await job('sync');
+    final id = await labor('sync', 'one');
+    await payroll.recordAllocatedTime(id, 'In Progress', 0, 0, '2026-11-17');
+    await db.customStatement('DELETE FROM sync_outbox');
+    await db.customStatement("UPDATE local_jobs SET sync_state='synced'");
+    final saved = await financial();
+    await JobSyncService(
+      database: db,
+      api: _StaleJobs(),
+      cleanupGateway: _NoCleanup(),
+      retirementGateway: const EmptyRetirementGateway(),
+    ).pull(business);
+    expect(await status('sync'), 'in_progress');
+    expect(await financial(), saved);
+    await restart();
+    expect(await status('sync'), 'in_progress');
+    expect((await payroll.work(job: 'sync')).single['state'], 'In Progress');
+  });
+
+  test('same creation remap preserves durable status evidence and pending status operation', () async {
+    await job('local-job');
+    await job('server-job');
+    final id = await labor('local-job', 'one');
+    await payroll.recordAllocatedTime(id, 'In Progress', 0, 0, '2026-11-17');
+    await LocalJobRepository(database: db)
+        .remapProvisionalJob(business, 'local-job', 'server-job');
+    expect(await status('server-job'), 'in_progress');
+    expect(await LocalJobWorkState(db).retainedJobIds(business), {
+      'server-job',
+    });
+    final remote = {
+      'id': 'server-job',
+      'status': 'open',
+      'row_version': 8,
+      'updated_at': '2020-01-01T00:00:00Z',
+    };
+    expect(
+      (await LocalJobCoreProjection.merge(db, business, remote))['status'],
+      'in_progress',
+    );
   });
 }

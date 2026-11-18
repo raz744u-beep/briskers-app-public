@@ -180,7 +180,7 @@ void main() {
       net: paidMinutes * 4000 ~/ 60, reason: '',
     ), isTrue);
     expect((await owner.customSelect("SELECT status FROM local_jobs WHERE id='job'")
-        .getSingle()).data['status'], 'open');
+        .getSingle()).data['status'], 'in_progress');
 
     final port = await mechanicLinks[0].listen(loopback);
     final relay = await HttpServer.bind(loopback, 0);

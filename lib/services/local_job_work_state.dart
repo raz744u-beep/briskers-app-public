@@ -249,6 +249,16 @@ class LocalJobWorkState {
         remoteTime != null &&
         localTime != null &&
         remoteTime > localTime;
+    // An acknowledged matching completion may normalize its server date. It
+    // cannot regress the lifecycle, and a missing date cannot erase history.
+    if (!pending &&
+        code == incoming &&
+        const {'completed', 'closed'}.contains(code) &&
+        remoteVersion != null &&
+        localVersion != null &&
+        remoteVersion > localVersion &&
+        DateTime.tryParse('${remote['completed_at']}') != null)
+      return remote;
     final protect =
         pending ||
         intent != null && !newer ||

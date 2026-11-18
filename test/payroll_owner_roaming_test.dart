@@ -159,7 +159,7 @@ void main() {
       expect(await other.history('mechanic-a'), hasLength(1));
       expect((await root.work(employee: 'mechanic-b')).single['remaining_cents'], 4000);
       expect((await other.work(employee: 'mechanic-b')).single['remaining_cents'], 4000);
-      expect((await a.customSelect("SELECT status FROM local_jobs WHERE id='job'").getSingle()).data['status'], 'open');
+      expect((await a.customSelect("SELECT status FROM local_jobs WHERE id='job'").getSingle()).data['status'], 'in_progress');
       // Restart both app databases and re-open the independent secure identities.
       final pa = na.port, pb = nb.port;
       await na.close(); await nb.close(); await a.close(); await b.close();

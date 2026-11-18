@@ -54,8 +54,9 @@ class OwnerJobWorkStatusRepair {
         if (await LocalJobRetirement.isJobBlocked(db, business, id)) return;
         final code = row.read<String>('status').toLowerCase();
         if (LocalJobWorkState.terminal.contains(code) ||
-            row.data['completed_at'] != null)
+            row.data['completed_at'] != null) {
           return;
+        }
         final intent = await db
             .customSelect(
               'SELECT 1 FROM local_job_status_intent_v1 WHERE business_id=? AND job_id=?',
@@ -65,6 +66,24 @@ class OwnerJobWorkStatusRepair {
         // A new explicit decision or a task action after installing this fix
         // supersedes the older report. Never reapply a correction every read.
         if (intent.isNotEmpty) return;
+        final queued = await db
+            .customSelect(
+              "SELECT payload_json FROM sync_outbox WHERE business_id=? AND entity_id=? AND entity_type='job_admin' AND state IN ('pending','conflict','inflight')",
+              variables: [Variable(business), Variable(id)],
+            )
+            .get();
+        for (final entry in queued) {
+          try {
+            final payload = jsonDecode(entry.read<String>('payload_json'));
+            if (payload is Map &&
+                payload['status_changed'] == true &&
+                payload['status_code'] != target.$4) {
+              return;
+            }
+          } catch (_) {
+            return;
+          }
+        }
         if (target.$4 == 'open') {
           final activity = await db
               .customSelect(
