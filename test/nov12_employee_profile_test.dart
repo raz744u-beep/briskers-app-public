@@ -193,8 +193,11 @@ void main() {
       expect(find.text(r'Payment Total: $370.00'), findsOneWidget);
       await tester.tap(find.text('Apply'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Verify Weekly Payment'));
-      await tester.tap(find.text('Verify Weekly Payment'));
+      final verify = find.byKey(const Key('verify-weekly-payment'));
+      await tester.ensureVisible(verify);
+      await tester.pumpAndSettle();
+      expect(verify.hitTestable(), findsOneWidget);
+      await tester.tap(verify);
       await tester.pumpAndSettle();
       expect(find.text(r'Calculated labor: $400.00'), findsOneWidget);
       expect(recorded, 0);

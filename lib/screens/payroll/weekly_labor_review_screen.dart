@@ -984,7 +984,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       Card(child:_compactWeekSelector()),
       Row(children:[metric(
               'Unpaid Hours',total.toStringAsFixed(2),const Color(0xFFEAF3FF),),metric(
-              'Current Rate / Hr',widget.savedRateCents==null?'Not saved':money(widget.savedRateCents!),const Color(0xFFEAF8EF),),metric('Paid Total',RecordedWeeklyPaymentCard.money(recorded.netCents),const Color(0xFFF2ECFF)),],),
+              'Rate / Hr',widget.savedRateCents==null?'Not saved':money(widget.savedRateCents!),const Color(0xFFEAF8EF),),metric('Paid Total',RecordedWeeklyPaymentCard.money(recorded.netCents),const Color(0xFFF2ECFF)),],),
       const SizedBox(height:10),
       RecordedWeeklyPaymentCard(recorded:recorded),
       if(recorded.hasPayments) Card(

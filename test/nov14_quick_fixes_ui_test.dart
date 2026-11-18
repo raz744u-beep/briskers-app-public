@@ -25,7 +25,12 @@ void main(){
       Expanded(child:WeeklyLaborReview(employeeId:'kam',employeeName:'Kam',week:DateTime(2026,11,9),profileLayout:true,savedRateCents:3500,tasks:rows,advanceBalance:()async=>0,recordPayment:(a,b,c,d,e,f,g,h,i)async{},
         onOpenTask:(r)async{openedTask=r['task_id'];await open('Existing Task Details · $openedTask');},onOpenJob:(id){openedJob=id;open('Job Details · $id');},saveDraft:(w,s,a,r,reason)async{draft=s;})),
     ]))))));
-    await t.pumpAndSettle();expect(find.text(r'$490.00'),findsWidgets);expect(find.text('Deselect All'),findsOneWidget);
+    await t.pumpAndSettle();
+    // Unpaid preparation is separate from the read-only recorded-week snapshot.
+    await t.scrollUntilVisible(find.text('New Payment'),250,scrollable:find.byType(Scrollable).last);
+    expect(find.text(r'$490.00'),findsWidgets);
+    await t.scrollUntilVisible(find.text('Deselect All'),-250,scrollable:find.byType(Scrollable).last);
+    expect(find.text('Deselect All'),findsOneWidget);
     final cards=[for(var i=0;i<3;i++)find.byKey(ValueKey('payable-allocation-$i'))];
     expect(cards.map((f)=>t.getSize(f).height).toSet(),hasLength(1));expect(t.getSize(cards.first).height,lessThan(110));
     final description=t.widget<Text>(find.text(long));expect(description.maxLines,1);expect(description.overflow,TextOverflow.ellipsis);
