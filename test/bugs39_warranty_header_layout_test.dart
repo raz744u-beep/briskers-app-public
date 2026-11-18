@@ -39,9 +39,14 @@ void main() {
       await tester.pumpAndSettle();
       final title=find.text('Warranty Job');
       final paragraph=tester.renderObject<RenderParagraph>(title);
-      final firstLine=paragraph.getLineBoundary(const TextPosition(offset:0));
-      expect(firstLine.end,greaterThanOrEqualTo(8),reason:'Warranty must not break mid-word');
-      if(config.$2==1) expect(firstLine.end,'Warranty Job'.length);
+      final wordLines=paragraph.getBoxesForSelection(
+        const TextSelection(baseOffset:0,extentOffset:8)).map((box)=>box.top).toSet();
+      expect(wordLines,hasLength(1),reason:'Warranty must not break mid-word');
+      if(config.$2==1) {
+        final titleLines=paragraph.getBoxesForSelection(
+          const TextSelection(baseOffset:0,extentOffset:12)).map((box)=>box.top).toSet();
+        expect(titleLines,hasLength(1));
+      }
       final mechanic=tester.getRect(find.byKey(const Key('mechanic-control')));
       if(config.$1<520) {
         expect(mechanic.top,greaterThanOrEqualTo(tester.getBottomLeft(find.text('Assurant')).dy));

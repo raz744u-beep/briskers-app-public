@@ -34,7 +34,9 @@ class RecentRecordsCard extends StatelessWidget {
     if (!numbered) {
       // Old shortcuts can retain an internal draft identifier after repair.
       // Keep opening the exact record, without displaying that identifier.
-      if (first.startsWith('#') || first.startsWith('local-')) {
+      final old = first.toLowerCase();
+      if (old.startsWith('#e-est-') || old.startsWith('#local-') ||
+          old.startsWith('local-') || old.contains('pending sync')) {
         return (type,customer == null || customer.isEmpty ? null : customer);
       }
       return (label,type);

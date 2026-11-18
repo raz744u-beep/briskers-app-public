@@ -68,6 +68,10 @@ void main() {
     expect(find.text('Estimate'),findsOneWidget);
     expect(find.textContaining('E-EST'),findsNothing);
     expect(find.text('Tyra Legard'),findsOneWidget);
+    await tester.pumpWidget(page(const [
+      (kind:RecentRecordKind.invoice,id:'historical',label:'#INV-2019-A · Saved Customer'),
+    ]));
+    expect(find.text('#INV-2019-A · Saved Customer'),findsOneWidget);
     expect(tester.takeException(),isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
