@@ -644,6 +644,8 @@ class LocalFinancialCache {
     String businessId, {
     String? jobId,
     String? documentId,
+    Set<String> documentIds = const {},
+    bool failOnUnreadable = false,
   }) async {
     final raw = await _load(businessId, _linkedExpensesKey);
     List<Map<String, dynamic>> rows;
@@ -656,23 +658,49 @@ class LocalFinancialCache {
             .map((value) => Map<String, dynamic>.from(value))
             .toList();
       } catch (_) {
+        if (failOnUnreadable) throw const FormatException('Saved expense allocations are unreadable.');
         return null;
       }
     }
 
-    // Preserve newly created offline expenses alongside the last full
-    // server snapshot. Do not replace pending outbox records during sync.
-    final pending = await loadTransactions(businessId, direction: 'expense');
-    rows.addAll(pending.where((row) =>
-        row['sync_state']?.toString() == 'pending' &&
-        (row['id']?.toString().startsWith('local-') ?? false) &&
-        (row['job_id'] != null || row['document_id'] != null)));
-
-    if (raw == null && rows.isEmpty) return null;
+    // Preserve allocation amounts: one vendor transaction can be split across
+    // jobs. A whole-transaction cache row must not replace every allocated share.
+    final allocations = <String, Map<String, dynamic>>{};
+    for (var i = 0; i < rows.length; i++) {
+      final row = rows[i];
+      if (row['business_id'] != null && row['business_id'] != businessId) continue;
+      final id = (row['transaction_id'] ?? row['id'] ?? row['allocation_id'])?.toString() ?? '';
+      final key = row['allocation_id']?.toString() ?? id;
+      if (key.isEmpty) continue;
+      allocations[key] = {...row, 'id': id};
+    }
+    final local = await loadTransactions(
+      businessId, direction: 'expense', includeCachedDetails: true,
+    );
+    for (final row in local) {
+      final id = row['id']?.toString() ?? '';
+      if (!matchesTransaction(row, businessId, id)) continue;
+      final matches = allocations.entries.where((e) => e.value['id'] == id).toList();
+      final linked = row['job_id'] != null || row['document_id'] != null;
+      final explicitEdit = row['sync_state'] == 'pending' &&
+          (row.containsKey('job_id') || row.containsKey('document_id'));
+      if (explicitEdit) {
+        // The expense editor explicitly saves the complete new linkage/amount.
+        for (final entry in matches) { allocations.remove(entry.key); }
+        if (linked) allocations['local:$id'] = row;
+      } else if (matches.isEmpty && linked) {
+        allocations['local:$id'] = row;
+      }
+    }
+    if (raw == null && allocations.isEmpty) return null;
     final voided = await locallyVoidedExpenseIds(businessId);
-    return rows.where((row) =>
-        !voided.contains(row['id']) &&
-        (jobId == null || row['job_id']?.toString() == jobId) &&
+    final reversed = await reversedPayrollExpenseIds(businessId);
+    return allocations.values.where((row) =>
+        !voided.contains(row['id']) && !reversed.contains(row['id']) &&
+        !const ['void', 'voided', 'deleted'].contains(row['status']) &&
+        row['sync_state'] != 'reversed' && row['direction'] != 'income' &&
+        (jobId == null || row['job_id']?.toString() == jobId ||
+          (row['job_id'] == null && documentIds.contains(row['document_id']?.toString()))) &&
         (documentId == null ||
             row['document_id']?.toString() == documentId)).toList();
   }
