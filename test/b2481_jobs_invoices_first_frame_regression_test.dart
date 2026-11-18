@@ -20,7 +20,13 @@ void main() {
     expect(begin, greaterThan(0));
     expect(end, greaterThan(begin));
     final queryPath = jobs.substring(begin, end);
-    expect(queryPath, contains('await LocalJobRetirement.ensureSchema(_database);'));
+    expect(queryPath, contains('await _prepareVisibility();'));
+    final visibility = jobs.substring(
+      jobs.indexOf('Future<void> _prepareVisibility()'),
+      jobs.indexOf('// Retirement is a durable visibility decision.'),
+    );
+    expect(visibility, contains('await LocalJobRetirement.ensureSchema(_database);'));
+    expect(visibility, contains('await LocalJobIdentity(_database).prepare();'));
     expect(queryPath, contains('await _ensureListReadIndexes();'));
     expect(queryPath, isNot(contains('CREATE INDEX IF NOT EXISTS')));
     expect(jobs, contains("Expando<Future<void>>('job_list_read_indexes')"));

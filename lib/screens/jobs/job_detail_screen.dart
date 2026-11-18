@@ -6033,7 +6033,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       floatingActionButton: (_canEditFindings || _canManage) &&
               MediaQuery.viewInsetsOf(context).bottom == 0
           ? FloatingActionButton.extended(
-              heroTag: 'job-detail-new-${_jobId}',
+              heroTag: 'job-detail-new-$_jobId',
               onPressed: _busy ? null : _showNewMenu,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
