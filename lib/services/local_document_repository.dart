@@ -1,4 +1,5 @@
 import 'local_document_identity.dart';
+import 'local_estimate_conversion.dart';
 import 'local_document_sql_store.dart';
 import 'local_estimate_number.dart';
 import 'local_invoice_closure.dart';
@@ -432,6 +433,9 @@ class LocalDocumentRepository {
           },
         )
         .toList();
+    if (kind == 'estimate') {
+      await LocalEstimateConversion(_database).projectRows(businessId, result);
+    }
     if (kind == 'estimate' &&
         (await LocalJobRetirement.blockedDocumentIds(
           _database,
@@ -452,6 +456,7 @@ class LocalDocumentRepository {
                 detailVersion == null ||
                 detailVersion >= indexVersion)) {
           document['converted'] = false;
+          document['display_status'] = DocumentPresentation(document).statusLabel;
         }
       }
     }

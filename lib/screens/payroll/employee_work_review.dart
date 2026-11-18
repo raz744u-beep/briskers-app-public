@@ -1,8 +1,11 @@
 import 'approved_tasks_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../../core/work_status_colors.dart';
 import '../../services/local_task_schedule.dart';
+import '../../services/local_invoice_task_store.dart';
+import '../../widgets/briskers_dialog.dart';
 
 /// Read-only projection of saved allocations. No task or payment mutations.
 class EmployeeWorkReview extends StatelessWidget {
@@ -84,18 +87,94 @@ class EmployeeWorkReview extends StatelessWidget {
           r['source_active'] != 0;
   }
 
+  /// A schedule/import date must not move historical or previously completed
+  /// labor into a new week. This projection never changes a task or payment.
+  static String weeklyReason(Map<String, dynamic> row, DateTime week, {DateTime? now}) {
+    final start = monday(week), end = start.add(const Duration(days: 5));
+    if (row['source_active'] == 0) return 'Excluded: inactive source';
+    if (row['assignment_conflict'] == 1) return 'Excluded: assignment needs review';
+    if (row['archived_labor'] == 1 || row['recordkeeping_only'] == true) {
+      final originalDate = LocalTaskSchedule.parse(row['invoice_date']) ??
+          LocalTaskSchedule.parse(row['job_document_date']);
+      if (originalDate != null && originalDate.isBefore(DateTime.parse(LocalInvoiceTaskStore.payrollCutover)) &&
+          !originalDate.isBefore(start) && originalDate.isBefore(end)) {
+        return 'Included: historical invoice date';
+      }
+      return 'Excluded: historical labor';
+    }
+    if (row['state'] == 'Done') {
+      final completed = LocalTaskSchedule.parse(row['completed_date']);
+      if (completed != null) {
+        return !completed.isBefore(start) && completed.isBefore(end)
+            ? 'Included: completed this week'
+            : 'Excluded: completed outside this week';
+      }
+      if (row['paid'] == 1 || row['owner_prior_paid'] == 1 ||
+          (row['paid_minutes'] as int? ?? 0) > 0) {
+        return 'Excluded: paid labor without a completion date';
+      }
+    }
+    if (fallsInWeek(row, week)) return 'Included: saved work dates';
+    final scheduledEnd = LocalTaskSchedule.parse(row['work_end_date']) ?? date(row);
+    if (start == monday(now ?? DateTime.now()) && row['state'] == 'In Progress' &&
+        scheduledEnd != null && scheduledEnd.isBefore(start)) {
+      return 'Included: work still in progress';
+    }
+    return 'Excluded: outside this week';
+  }
+
+  static List<Map<String, dynamic>> weeklyRows(
+    List<Map<String, dynamic>> rows, DateTime week, {DateTime? now}
+  ) => rows.where((row) => weeklyReason(row, week, now: now).startsWith('Included:')).toList();
+
+  String _auditLine(Map<String, dynamic> row) => [
+    '${row['job_number'] ?? 'Job'} · ${row['customer_name'] ?? ''}',
+    '${row['description'] ?? 'Labor'} · ${row['state'] ?? ''}',
+    'Assigned: ${((row['estimated_minutes'] as int? ?? 0) / 60).toStringAsFixed(2)} h; '
+      'recorded: ${(minutes(row) / 60).toStringAsFixed(2)} h; '
+      'paid: ${((row['paid_minutes'] as int? ?? 0) / 60).toStringAsFixed(2)} h; '
+      'remaining: ${((row['remaining_minutes'] as int? ?? 0) / 60).toStringAsFixed(2)} h',
+    'Payment state: ${paymentState(row)}; archived: ${row['archived_labor'] ?? 0}',
+    'Work dates: ${row['work_start_date'] ?? 'unknown'} – ${row['work_end_date'] ?? 'unknown'}; '
+      'completed: ${row['completed_date'] ?? 'unknown'}; invoice date: ${row['invoice_date'] ?? 'unknown'}',
+    weeklyReason(row, week),
+    'Allocation ID: ${row['id']}; task ID: ${row['task_id']}; '
+      'Job ID: ${row['job_id']}; invoice ID: ${row['invoice_id']}; line ID: ${row['source_line_id']}',
+  ].join('\n');
+
+  Future<void> _showBreakdown(BuildContext context) async {
+    final report = [
+      'Weekly labor — ${employeeName ?? 'Employee'} — ${weekLabel(week)}',
+      'Read only: task and payment records unchanged.',
+      for (final row in rows) _auditLine(row),
+    ].join('\n\n');
+    await showDialog<void>(context: context, builder: (dialogContext) => BriskersDialog(
+      title: 'Weekly hours breakdown', icon: Icons.fact_check_outlined,
+      content: SizedBox(
+        width: double.maxFinite,
+        height: MediaQuery.sizeOf(context).height * 0.48,
+        child: rows.isEmpty ? const Text('No saved labor records.') : ListView.separated(
+          itemCount: rows.length,
+          separatorBuilder: (_, _) => const Divider(height: 24),
+          itemBuilder: (_, index) => SelectableText(_auditLine(rows[index])),
+        ),
+      ),
+      actions: [
+        OutlinedButton(onPressed: () => Navigator.pop(dialogContext),
+          style: BriskersDialog.cancelStyle, child: const Text('Close')),
+        FilledButton.icon(onPressed: () async {
+          await Clipboard.setData(ClipboardData(text: report));
+          if (dialogContext.mounted) Navigator.pop(dialogContext);
+        }, style: BriskersDialog.confirmStyle(), icon: const Icon(Icons.copy),
+          label: const Text('Copy breakdown')),
+      ],
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final start = monday(week);
-    final currentWeek = start == monday(DateTime.now());
-    final visible = rows.where((row) {
-      if (fallsInWeek(row, week)) return true;
-      // An active task can carry into the current week after its planned end.
-      final scheduledEnd = LocalTaskSchedule.parse(row['work_end_date']) ?? date(row);
-      return currentWeek && row['state'] == 'In Progress' &&
-          row['source_active'] != 0 && row['assignment_conflict'] != 1 &&
-          scheduledEnd != null && scheduledEnd.isBefore(start);
-    }).toList();
+    final visible = weeklyRows(rows, week);
     int unpaidAssignment(Map<String, dynamic> row) {
       final assigned = row['estimated_minutes'] as int? ?? 0;
       final paid = row['paid_minutes'] as int? ?? 0;
@@ -400,6 +479,12 @@ class EmployeeWorkReview extends StatelessWidget {
                         ),
                       ),
                     ],
+                  ),
+                  TextButton.icon(
+                    key: const Key('weekly-hours-breakdown'),
+                    onPressed: () => _showBreakdown(context),
+                    icon: const Icon(Icons.fact_check_outlined, size: 18),
+                    label: const Text('View hours breakdown'),
                   ),
                 ],
               ),

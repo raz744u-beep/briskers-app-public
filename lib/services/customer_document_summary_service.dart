@@ -1,4 +1,5 @@
 import 'local_document_identity.dart';
+import 'local_estimate_conversion.dart';
 import 'local_document_repository.dart';
 import 'package:drift/drift.dart';
 
@@ -92,6 +93,7 @@ class CustomerDocumentSummaryService {
       if (!pendingKnown) document.remove('pending_payment');
     }
     if (document['kind'] == 'estimate') {
+      document = await LocalEstimateConversion(_database).project(businessId, document);
       final invoiceId = document['converted_invoice_id']?.toString() ?? '';
       final retiredConversion = invoiceId.isNotEmpty
           ? await LocalJobRetirement.isDocumentBlocked(

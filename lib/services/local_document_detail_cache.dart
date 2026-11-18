@@ -6,6 +6,7 @@ import 'recovery_commit_store.dart';
 import 'local_document_sql_store.dart';
 import 'local_estimate_number.dart';
 import 'local_number_allocator.dart';
+import 'local_estimate_conversion.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -112,6 +113,11 @@ class LocalDocumentDetailCache {
     };
   }
 
+  Future<Map<String, dynamic>> projectEstimate(
+    String businessId, Map<String, dynamic> detail,
+  ) async => _projectRetiredConversion(businessId,
+      await LocalEstimateConversion(_database).project(businessId, detail));
+
   // Serialize every read/write/invalidation for an identity, including across
   // different service instances. A newer edit queued behind cleanup is saved
   // afterwards, rather than disappearing in a check/remove race.
@@ -147,7 +153,8 @@ class LocalDocumentDetailCache {
       () => _serialized(key, () async {
         if (await _blocked(businessId, documentId, detail)) return;
         await _estimateNumber(businessId, documentId, detail);
-        final encoded = jsonEncode(detail);
+        final converted = await LocalEstimateConversion(_database).project(businessId, detail);
+        final encoded = jsonEncode(converted);
         if (await RecoveryCommitStore.isOriginal(_database,businessId,documentId)) return;
         if (await RecoveryCommitStore.snapshot(_database,businessId,documentId) != null) {
           await _database.customStatement(
@@ -193,7 +200,8 @@ class LocalDocumentDetailCache {
           await LocalInvoiceTaskStore(_database).reconcileCached(businessId,documentId,detail);
         }
         final numbered = await _estimateNumber(businessId, documentId, detail);
-        return LocalInvoiceClosureStore(_database).project(businessId, await _projectRetiredConversion(businessId, numbered));
+        return LocalInvoiceClosureStore(_database).project(businessId,
+            await projectEstimate(businessId, numbered));
       }),
     );
   }
@@ -225,7 +233,7 @@ class LocalDocumentDetailCache {
         final rows=await _database.customSelect('SELECT payload_json FROM local_document_details WHERE cache_key=?',variables:[Variable(key)]).get();
         final detail=rows.isEmpty ? null : _decode(rows.single.readNullable<String>('payload_json'));
         if(detail==null || await _blocked(businessId,documentId,detail)) return null;
-        final projected = await _projectRetiredConversion(businessId,detail);
+        final projected = await projectEstimate(businessId,detail);
         return projectLifecycle
             ? LocalInvoiceClosureStore(_database).project(businessId, projected)
             : projected;
@@ -237,7 +245,7 @@ class LocalDocumentDetailCache {
               : prefs.getString(key))
           : _decode(durable.readNullable<String>('payload_json'));
       if(detail==null || await _blocked(businessId,documentId,detail))return null;
-      final projected = await _projectRetiredConversion(businessId,detail);
+      final projected = await projectEstimate(businessId,detail);
       return projectLifecycle
           ? LocalInvoiceClosureStore(_database).project(businessId, projected)
           : projected;

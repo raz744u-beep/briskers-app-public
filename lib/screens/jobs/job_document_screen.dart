@@ -466,7 +466,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     final id = detail['id']?.toString() ?? widget.documentId;
     final saved = await LocalEstimateNumber.stored(localDatabase, widget.businessId, id);
     final number = saved ?? LocalEstimateNumber.existing(detail['document_number']);
-    return {...detail, 'document_number': number};
+    return _detailCache.projectEstimate(widget.businessId, {...detail, 'document_number': number});
   }
 
   Future<void> _confirmEstimateNumberCorrection() async {
@@ -5017,7 +5017,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     'total_amount': total,
     'paid_amount': finalizedPaid,
     'pending_payment': pendingPaid,
-    if (_readOnly && _estimate) 'converted': true,
+    if (_estimate) 'converted': _converted,
   }).statusLabel;
 
   Color _statusColor(String label, {String? code}) {
