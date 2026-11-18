@@ -33,6 +33,19 @@ void main() {
       expect(find.text('Recently Viewed'),findsOneWidget);
       expect(find.byType(BriskersSectionCard),findsOneWidget);
       expect(tester.widget<Card>(find.byType(Card)).color,BriskersColors.surface);
+      expect(find.text('Invoice #6360'),findsNothing);
+      expect(find.byIcon(Icons.expand_more),findsOneWidget);
+      final title=find.text('Recently Viewed');
+      final clear=find.text('Clear History');
+      expect(tester.getCenter(title).dy,closeTo(tester.getCenter(clear).dy,2));
+      expect(tester.getSize(find.byType(BriskersSectionCard)).height,lessThan(80));
+      await tester.tap(clear);
+      await tester.pump();
+      expect(cleared,1);
+      expect(find.text('Invoice #6360'),findsNothing,
+        reason:'Clear History must not also expand the header');
+      await tester.tap(find.byIcon(Icons.expand_more));
+      await tester.pump();
       expect(find.text('Invoice #6360'),findsOneWidget);
       expect(find.text('Estimate E-1995'),findsOneWidget);
       expect(find.text('Job J-40'),findsOneWidget);
@@ -49,7 +62,12 @@ void main() {
       }
       expect(opened,entries);
       await tester.tap(find.text('Clear History'));
-      expect(cleared,1);
+      expect(cleared,2);
+      expect(find.byIcon(Icons.expand_less),findsOneWidget);
+      await tester.tap(find.text('Recently Viewed'));
+      await tester.pump();
+      expect(find.text('Invoice #6360'),findsNothing);
+      expect(find.byIcon(Icons.expand_more),findsOneWidget);
       expect(entries.length,8,reason:'The view must not modify business records or history itself');
       expect(tester.takeException(),isNull);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -60,6 +78,9 @@ void main() {
       records:records,onOpen:(_){},onClear:(){fail('Empty history cannot be cleared');},
     )));
     await tester.pumpWidget(page(const []));
+    expect(find.text('No records viewed yet.'),findsNothing);
+    await tester.tap(find.text('Recently Viewed'));
+    await tester.pump();
     expect(find.text('No records viewed yet.'),findsOneWidget);
     expect(find.text('Clear History'),findsNothing);
     await tester.pumpWidget(page(const [

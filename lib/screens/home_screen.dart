@@ -157,6 +157,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return const SizedBox.shrink();
     }
     return RecentRecordsCard(
+      key: ValueKey((store.business, store.user)),
       records: _recent,
       onOpen: (record) => unawaited(_openRecent(record)),
       onClear: () => unawaited(_clearRecent()),

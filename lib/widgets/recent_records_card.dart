@@ -4,12 +4,19 @@ import '../services/local_recent_records.dart';
 import 'briskers_section_card.dart';
 
 /// Presentation only: the account-scoped local store owns ordering and clearing.
-class RecentRecordsCard extends StatelessWidget {
+class RecentRecordsCard extends StatefulWidget {
   const RecentRecordsCard({super.key,required this.records,required this.onOpen,
     required this.onClear});
   final List<RecentRecord> records;
   final ValueChanged<RecentRecord> onOpen;
   final VoidCallback onClear;
+
+  @override
+  State<RecentRecordsCard> createState() => _RecentRecordsCardState();
+}
+
+class _RecentRecordsCardState extends State<RecentRecordsCard> {
+  bool _expanded = false;
 
   static (String,IconData,Color) _style(RecentRecordKind kind) => switch(kind) {
     RecentRecordKind.invoice => ('Invoice',Icons.receipt_long_outlined,BriskersColors.invoices),
@@ -51,7 +58,7 @@ class RecentRecordsCard extends StatelessWidget {
     final (title,subtitle) = _caption(record,type);
     return InkWell(
       key: ValueKey('recent-${record.kind.name}-${record.id}'),
-      onTap: () => onOpen(record),
+      onTap: () => widget.onOpen(record),
       child: ConstrainedBox(constraints: const BoxConstraints(minHeight: 76),
         child: Padding(padding: const EdgeInsets.symmetric(horizontal: 14,vertical: 12),
           child: Row(children: [
@@ -79,18 +86,19 @@ class RecentRecordsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final shown = records.take(10).toList();
+    final shown = widget.records.take(10).toList();
     return BriskersSectionCard(
       margin: const EdgeInsets.fromLTRB(12,0,12,12),
       title: 'Recently Viewed',icon: Icons.history,
-      action: shown.isEmpty ? null : OutlinedButton(
-        onPressed: onClear,
-        style: OutlinedButton.styleFrom(foregroundColor: Colors.white,
-          side: const BorderSide(color: Colors.white),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          padding: const EdgeInsets.symmetric(horizontal: 12,vertical: 8),
-          textStyle: const TextStyle(fontSize: 13,fontWeight: FontWeight.w600)),
-        child: const Text('Clear History')),
+      expanded: _expanded,
+      onToggle: () => setState(() => _expanded = !_expanded),
+      action: shown.isEmpty ? null : TextButton(
+        onPressed: widget.onClear,
+        style: TextButton.styleFrom(foregroundColor: Colors.white,
+          minimumSize: const Size(0, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 6,vertical: 4),
+          textStyle: const TextStyle(fontSize: 12,fontWeight: FontWeight.w600)),
+        child: const Text('Clear History', maxLines: 1)),
       child: shown.isEmpty
         ? const Padding(padding: EdgeInsets.all(20),child: Text('No records viewed yet.',
             style: TextStyle(color: BriskersColors.secondaryText)))
