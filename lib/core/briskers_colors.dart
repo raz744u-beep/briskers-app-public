@@ -8,6 +8,11 @@ class BriskersColors {
     end: Alignment.centerRight,
     colors: [Color(0xFF31A9D9), Color(0xFF2075BC), Color(0xFF174B92)],
   );
+  static const surface = Color(0xFFFFFFFF);
+  static const text = Color(0xFF17202A);
+  static const secondaryText = Color(0xFF667085);
+  static const divider = Color(0xFFE2E8F0);
+
   static const confirm = Color(0xFF008F83);
   static const destructive = Color(0xFFB91C1C);
 

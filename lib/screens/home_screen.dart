@@ -1,3 +1,4 @@
+import '../widgets/recent_records_card.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -155,39 +156,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (store == null || _recentScope != (store.business, store.user)) {
       return const SizedBox.shrink();
     }
-    return Card(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-      child: Column(
-        children: [
-          ListTile(
-            title: const Text('Recently Viewed', style: TextStyle(fontWeight: FontWeight.w800)),
-            trailing: _recent.isEmpty ? null : TextButton(
-              onPressed: _clearRecent, child: const Text('Clear History'),
-            ),
-            subtitle: _recent.isEmpty ? const Text('No records viewed yet.') : null,
-          ),
-          for (final record in _recent)
-            ListTile(
-              dense: true,
-              leading: Icon(switch (record.kind) {
-                RecentRecordKind.customer => Icons.person_outline,
-                RecentRecordKind.job => Icons.build_outlined,
-                RecentRecordKind.invoice => Icons.receipt_long_outlined,
-                RecentRecordKind.estimate => Icons.description_outlined,
-              }),
-              title: Text(record.label.isEmpty ? record.kind.name : record.label,
-                maxLines: 1, overflow: TextOverflow.ellipsis),
-              subtitle: Text(switch (record.kind) {
-                RecentRecordKind.customer => 'Customer',
-                RecentRecordKind.job => 'Job',
-                RecentRecordKind.invoice => 'Invoice',
-                RecentRecordKind.estimate => 'Estimate',
-              }),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _openRecent(record),
-            ),
-        ],
-      ),
+    return RecentRecordsCard(
+      records: _recent,
+      onOpen: (record) => unawaited(_openRecent(record)),
+      onClear: () => unawaited(_clearRecent()),
     );
   }
 

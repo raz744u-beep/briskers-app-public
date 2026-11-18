@@ -1079,11 +1079,25 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
   @override
   Widget build(BuildContext context) {
     final header = Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-      if(widget.mainMechanic==null) _warrantyToggle() else
-        Padding(padding:const EdgeInsets.fromLTRB(0,6,12,6),child:Row(children:[
-          Expanded(child:_warrantyToggle()),
-          Expanded(child:widget.mainMechanic!),
-        ])),
+      if (widget.mainMechanic == null) _warrantyToggle() else
+        LayoutBuilder(builder: (context, constraints) {
+          final scale = MediaQuery.textScalerOf(context).scale(16) / 16;
+          // A phone cannot fit the checkbox, complete warranty label, expand
+          // control and mechanic dropdown into two equal-width columns.
+          if (constraints.maxWidth < 520 * scale) {
+            return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              _warrantyToggle(),
+              Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: widget.mainMechanic!),
+            ]);
+          }
+          return Padding(padding: const EdgeInsets.fromLTRB(0, 6, 16, 6),
+            child: Row(children: [
+              Expanded(child: _warrantyToggle()),
+              const SizedBox(width: 12),
+              Expanded(child: widget.mainMechanic!),
+            ]));
+        }),
       if(widget.laborSummary!=null) widget.laborSummary!,
     ]);
     if (!_enabled) return header;
