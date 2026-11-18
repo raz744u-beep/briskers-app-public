@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_job_number_service.dart';
 import 'package:briskers_app/services/local_numbered_document_overlay.dart';
@@ -17,6 +18,8 @@ class _Store implements OwnerEnrollmentStore {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   late BriskersLocalDatabase db;
   late Directory dir;
   late LocalOwnerAuthorization authority;

@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/offline_job_admin_service.dart';
 import 'package:briskers_app/services/local_payroll_repository.dart';
@@ -8,6 +9,7 @@ import 'package:briskers_app/services/local_task_assignment_store.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => SharedPreferences.setMockInitialValues({}));
 
   test('TEST Service Task creates on an existing Job with no financial write',
       () async {

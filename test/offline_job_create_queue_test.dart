@@ -4,11 +4,14 @@ import 'dart:convert';
 import 'package:drift/native.dart';
 import 'package:drift/drift.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/offline_job_admin_service.dart';
 import 'package:briskers_app/services/briskers_api.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   test('offline new Job persists with one queued stable-ID creation', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     try {
