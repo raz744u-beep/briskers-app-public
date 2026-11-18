@@ -2299,7 +2299,7 @@ class LocalPayrollRepository {
       final result = <Map<String, dynamic>>[];
       for (final payment in payments) {
         final rows = await _read(
-          'SELECT credit_id, snapshot FROM regular_payroll_work_coverage '
+          'SELECT credit_id, minutes, amount, snapshot FROM regular_payroll_work_coverage '
           'WHERE business_id=? AND operation_id=? ORDER BY credit_id',
           [business, payment['operation_id'] as String],
         );
@@ -2341,6 +2341,10 @@ class LocalPayrollRepository {
               : null;
           work.add({
             ...snapshot,
+            // This settlement's immutable paid portion, not the current task
+            // total or a display field absent from an older snapshot.
+            'actual_minutes': row['minutes'],
+            'gross_cents': row['amount'],
             'job_id': job?['id'],
             'job_number': job?['job_number'] ?? snapshot['job_number'],
             'customer_name': job?['customer_name'] ?? snapshot['customer_name'],

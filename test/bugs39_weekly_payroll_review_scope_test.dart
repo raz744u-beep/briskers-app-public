@@ -235,11 +235,11 @@ void main() {
       expect(find.textContaining('Needs Review'), findsNothing);
       expect(find.text('Historical carry review'), findsNothing);
       expect(find.text('Unpaid Labor (0)'), findsOneWidget);
-      expect(find.text('Previously Paid Work'), findsNothing);
+      expect(find.text('View paid work details'), findsNothing);
       await tester.pumpWidget(screen(rows, priorWeek));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Previously Paid Work'));
-      await tester.tap(find.text('Previously Paid Work'));
+      await tester.ensureVisible(find.text('View paid work details'));
+      await tester.tap(find.text('View paid work details'));
       await tester.pumpAndSettle();
       expect(
         find.textContaining('J-40 · Replace oil separator'),

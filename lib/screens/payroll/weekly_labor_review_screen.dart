@@ -1,3 +1,5 @@
+import '../../services/recorded_payroll_week.dart';
+import 'recorded_weekly_payment_card.dart';
 import '../../core/briskers_colors.dart';
 import 'approved_tasks_ui.dart' show taskBlue, taskCanvas, taskGreen, taskNavy;
 import 'payroll_review_widgets.dart';
@@ -923,7 +925,10 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     final tasks=_eligible.where((r)=>_available(r)>0 && _rate(r)>0).toList();
     final start=_start(_week);
     final review=EmployeeWorkReview.weeklyReviewRows(widget.tasks,_week,rate:_rate);
-    final paid=widget.paymentHistory.where((p)=>p['week']==start.toIso8601String().substring(0,10)).expand((p)=>(p['work'] as List? ?? []).whereType<Map>().map(Map<String,dynamic>.from,),).toList();
+    final recorded=RecordedPayrollWeek.fromHistory(widget.paymentHistory,employeeId:widget.employeeId,week:start);
+    final paid=recorded.work;
+    final preparing=tasks.isNotEmpty || (!recorded.hasPayments && widget.weeklyBaseCents>0) ||
+        _preparedAdjustment!=0 || _preparedRepayment!=0;
     final labor=tasks.fold<int>(widget.weeklyBaseCents,(n,r)=>n+_amount(r,_selected[_id(r)]??0),);
     final adjustment=widget.weeklyAdjustmentCents+_preparedAdjustment,gross=labor+widget.weeklyAdjustmentCents+_preparedAdjustment;
     final net=gross-_preparedRepayment;
@@ -946,7 +951,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
               child:Text(value,textAlign:TextAlign.center,style: TextStyle(fontSize: 21,fontWeight:FontWeight.w800,
                   color: label == 'Unpaid Hours'
                       ? taskBlue
-                      : label == 'Gross Pay'
+                      : label == 'Paid Total'
                       ? const Color(0xFF7134B4)
                       : taskGreen,
                   fontFeatures: const [FontFeature.tabularFigures()],),),
@@ -979,7 +984,32 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       Card(child:_compactWeekSelector()),
       Row(children:[metric(
               'Unpaid Hours',total.toStringAsFixed(2),const Color(0xFFEAF3FF),),metric(
-              'Rate / Hr',widget.savedRateCents==null?'Not saved':money(widget.savedRateCents!),const Color(0xFFEAF8EF),),metric('Gross Pay',money(gross),const Color(0xFFF2ECFF)),],),
+              'Current Rate / Hr',widget.savedRateCents==null?'Not saved':money(widget.savedRateCents!),const Color(0xFFEAF8EF),),metric('Paid Total',RecordedWeeklyPaymentCard.money(recorded.netCents),const Color(0xFFF2ECFF)),],),
+      const SizedBox(height:10),
+      RecordedWeeklyPaymentCard(recorded:recorded),
+      if(recorded.hasPayments) Card(
+        shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(12),
+          side:BorderSide(color:BriskersColors.confirm.withValues(alpha:0.4))),
+        child:ExpansionTile(
+          key:PageStorageKey('payroll-paid-${widget.employeeId}-${_week.toIso8601String()}'),
+          leading:const Icon(Icons.receipt_long_outlined,color:BriskersColors.confirm),
+          textColor:BriskersColors.confirm,collapsedTextColor:BriskersColors.confirm,
+          iconColor:BriskersColors.confirm,collapsedIconColor:BriskersColors.confirm,
+          title:const Text('View paid work details',style:TextStyle(fontWeight:FontWeight.w700)),
+          subtitle:Text(EmployeeWorkReview.weekLabel(_week)),
+          children:[
+            if(paid.isEmpty) const ListTile(title:Text('No labor task details are saved on these payments.')),
+            for(final r in paid) ListTile(
+              title:Text('${r['job_number'] ?? 'Job'} · ${r['description'] ?? 'Paid labor'}'),
+              subtitle:Text('${r['actual_minutes'] is int ? ((r['actual_minutes'] as int)/60).toStringAsFixed(2) : 'Not saved'} hrs paid'
+                '${r['verified_date']==null?'':' · ${r['verified_date']}'}'
+                '${r['method']==null?'':' · ${r['method']}'}'),
+              trailing:Text(RecordedWeeklyPaymentCard.money(r['gross_cents'] is int ? r['gross_cents'] as int : null),
+                style:const TextStyle(fontWeight:FontWeight.w700)),
+            ),
+          ],
+        ),
+      ),
       if(_error!=null)Text(_error!,style:const TextStyle(color:Colors.red)),
       Padding(padding:const EdgeInsets.fromLTRB(8,12,8,2),child:Row(children:[
         Expanded(child:Text('Unpaid Labor (${tasks.length})',style:const TextStyle(fontSize:17,fontWeight:FontWeight.w800))),
@@ -993,8 +1023,8 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       if(review.isNotEmpty)Card(child:ExpansionTile(key:PageStorageKey('payroll-review-${widget.employeeId}-${_week.toIso8601String()}',),title:Text('Needs Review (${review.length})'),children:[
         if(widget.reviewMessage!=null)ListTile(title:Text(widget.reviewMessage!)),
         for(final r in review)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:const Text('Pay status or compensation requires review; excluded from payment.',),),],),),
-      if(paid.isNotEmpty)Card(child:ExpansionTile(key:PageStorageKey('payroll-paid-${widget.employeeId}-${_week.toIso8601String()}',),title:const Text('Previously Paid Work'),children:[for(final r in paid)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:Text('${((r['actual_minutes'] as int? ?? 0)/60).toStringAsFixed(2)} hrs · Paid · selected week',),),],),),
-      Card(
+      if(preparing) Card(
+          key:const Key('new-weekly-payment-preparation'),
           clipBehavior: Clip.antiAlias,
           child: Column(
             children: [
@@ -1011,7 +1041,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Weekly Payment Summary',
+                        'New Payment',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 18,
@@ -1038,7 +1068,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
             ],
           ),),
       if(widget.extra!=null)widget.extra!,
-      Wrap(spacing:10,runSpacing:8,alignment:WrapAlignment.spaceBetween,children:[OutlinedButton(onPressed:_saving||widget.saveDraft==null?null:()async {await widget.saveDraft!(_start(_week),Map<String,double>.from(_selected),_preparedAdjustment,_preparedRepayment,_preparedReason,);if(mounted) {ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Payroll draft saved locally.'),),);
+      if(preparing) Wrap(spacing:10,runSpacing:8,alignment:WrapAlignment.spaceBetween,children:[OutlinedButton(onPressed:_saving||widget.saveDraft==null?null:()async {await widget.saveDraft!(_start(_week),Map<String,double>.from(_selected),_preparedAdjustment,_preparedRepayment,_preparedReason,);if(mounted) {ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Payroll draft saved locally.'),),);
                       }},child:const Text('Save (Draft)'),),
         FilledButton.icon(key:const Key('verify-weekly-payment'),style:FilledButton.styleFrom(backgroundColor:const Color(0xFF0A8F53),),onPressed:_saving||_future||gross<=0||net<0||(_totalHours<=0&&widget.weeklyBaseCents<=0)?null:_verifyPayment,icon:const Icon(Icons.check),label:const Text('Verify Weekly Payment'),),
     ],

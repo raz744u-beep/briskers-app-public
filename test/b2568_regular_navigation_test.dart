@@ -308,8 +308,8 @@ void main(){
     await until(find.textContaining('Currently Assigned Tasks'));
     await click(find.text('Payroll'));
     await until(find.text('No verified unpaid labor for this week.'));
-    await tester.scrollUntilVisible(find.byKey(const Key('verify-weekly-payment')),150,scrollable:find.descendant(of:find.byKey(const Key('employee-payroll-preparation')),matching:find.byType(Scrollable)).first);
-    expect(tester.widget<FilledButton>(find.byKey(const Key('verify-weekly-payment'))).onPressed,isNull);
+    expect(find.byKey(const Key('verify-weekly-payment')),findsNothing);
+    expect(find.text('Weekly Payment Summary'),findsOneWidget);
     await capture('bugs30-employee-paid-tasks');
     await click(find.text('Reports'));await until(find.text('Payroll History'));
     navigator.currentState!.pop();await tester.pumpAndSettle();

@@ -409,7 +409,7 @@ void main() {
       await t.pumpAndSettle();
       await capture(t, key, 'next-payroll-tiles');
       await t.scrollUntilVisible(
-        find.text('Weekly Payment Summary'),
+        find.text('New Payment'),
         250,
         scrollable: find.byType(Scrollable).last,
       );

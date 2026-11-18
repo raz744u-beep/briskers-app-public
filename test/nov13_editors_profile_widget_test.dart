@@ -42,7 +42,7 @@ void main(){
     size(t);final key=GlobalKey();String? opened;Map<String,double>? draft;
     await t.pumpWidget(MaterialApp(home:Scaffold(body:RepaintBoundary(key:key,child:WeeklyLaborReview(employeeId:'chris',employeeName:'Chris',week:DateTime(2026,11,9),profileLayout:true,savedRateCents:4000,tasks:[labor('oil','Oil Separator',600),labor('change','Oil Change',60),labor('brake','Brake Flush',60),labor('filter','Replace filters',60,state:'Open'),labor('paid48','Water pump',450,paid:true,start:'2026-11-02',end:'2026-11-06')],advanceBalance:()async=>5000,onOpenJob:(id)=>opened=id,saveDraft:(week,selected,a,r,reason)async{draft=selected;},recordPayment:(a,b,c,d,e,f,g,h,i)async{})))));
     await t.pumpAndSettle();expect(find.text('Unpaid Labor (3)'),findsOneWidget);expect(find.text('12.00'),findsNWidgets(2));expect(find.text(r'$480.00'),findsWidgets);
-    final heights=['Unpaid Hours','Rate / Hr','Gross Pay'].map((label)=>t.getTopLeft(find.text(label).first).dy).toSet();expect(heights,hasLength(1));
+    final heights=['Unpaid Hours','Current Rate / Hr','Paid Total'].map((label)=>t.getTopLeft(find.text(label).first).dy).toSet();expect(heights,hasLength(1));
     await t.tap(find.text('J-40 · Gloria Johnson'));await t.pumpAndSettle();expect(opened,'j40');expect(t.widget<Checkbox>(find.byType(Checkbox).first).value,isTrue);
     await capture(t,key,'nov13-payroll-480');
     await t.scrollUntilVisible(find.text('Payment Total'), 180,

@@ -167,7 +167,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Unpaid Labor (1)'), findsOneWidget);
       expect(find.text(r'$40.00'), findsOneWidget);
-      expect(find.text('Previously Paid Work'), findsNothing);
+      expect(find.text('View paid work details'), findsNothing);
       expect(find.textContaining('Needs Review'), findsNothing);
       await capture(tester, key, 'nov12-payroll-preparation');
       await tester.ensureVisible(find.text('Save (Draft)'));
@@ -207,7 +207,7 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
-  testWidgets('Previously Paid Work contains only the selected payroll week', (
+  testWidgets('View paid work details contains only the selected payroll week', (
     tester,
   ) async {
     final row = task('this-week', 'Done', 60);
@@ -253,20 +253,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Previously Paid Work'));
-    await tester.tap(find.text('Previously Paid Work'));
+    await tester.ensureVisible(find.text('View paid work details'));
+    await tester.tap(find.text('View paid work details'));
     await tester.pumpAndSettle();
     expect(find.text('J-54 · Repair this-week'), findsOneWidget);
     expect(find.textContaining('Already paid last week'), findsNothing);
-    await tester.scrollUntilVisible(find.byKey(const Key('verify-weekly-payment')),150,scrollable:find.descendant(of:find.byKey(const Key('employee-payroll-preparation')),matching:find.byType(Scrollable)).first);
-    expect(
-      tester
-          .widget<FilledButton>(
-            find.byKey(const Key('verify-weekly-payment')),
-          )
-          .onPressed,
-      isNull,
-    );
+    expect(find.byKey(const Key('verify-weekly-payment')), findsNothing);
+    expect(find.text('Weekly Payment Summary'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
