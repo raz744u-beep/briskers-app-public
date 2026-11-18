@@ -35,6 +35,8 @@ void main() {
       expect(tester.widget<Card>(find.byType(Card)).color,BriskersColors.surface);
       expect(find.text('Invoice #6360'),findsNothing);
       expect(find.byIcon(Icons.expand_more),findsOneWidget);
+      expect(tester.getRect(find.byIcon(Icons.expand_more)).right,
+        lessThanOrEqualTo(config.$1 - 12));
       final title=find.text('Recently Viewed');
       final clear=find.text('Clear History');
       expect(tester.getCenter(title).dy,closeTo(tester.getCenter(clear).dy,2));

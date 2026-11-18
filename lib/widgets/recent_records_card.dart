@@ -98,7 +98,7 @@ class _RecentRecordsCardState extends State<RecentRecordsCard> {
           minimumSize: const Size(0, 40),
           padding: const EdgeInsets.symmetric(horizontal: 6,vertical: 4),
           textStyle: const TextStyle(fontSize: 12,fontWeight: FontWeight.w600)),
-        child: const Text('Clear History', maxLines: 1)),
+        child: const Text('Clear History', maxLines: 1, overflow: TextOverflow.ellipsis)),
       child: shown.isEmpty
         ? const Padding(padding: EdgeInsets.all(20),child: Text('No records viewed yet.',
             style: TextStyle(color: BriskersColors.secondaryText)))

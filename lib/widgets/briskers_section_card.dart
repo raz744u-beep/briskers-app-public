@@ -53,36 +53,44 @@ class BriskersSectionCard extends StatelessWidget {
                     horizontal: 12,
                     vertical: 4,
                   ),
-                  child: Row(
-                    children: [
-                      Icon(icon, color: Colors.white, size: 22),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) => Row(
+                      children: [
+                        Icon(icon, color: Colors.white, size: 22),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (action != null) ...[
+                          const SizedBox(width: 4),
+                          ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: constraints.maxWidth / 2,
+                            ),
+                            child: action!,
+                          ),
+                        ],
+                        if (onToggle != null)
+                          IconButton(
+                            onPressed: onToggle,
+                            tooltip:
+                                '${expanded ? 'Collapse' : 'Expand'} $title',
                             color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
+                            icon: Icon(
+                              expanded ? Icons.expand_less : Icons.expand_more,
+                            ),
                           ),
-                        ),
-                      ),
-                      if (action != null) ...[
-                        const SizedBox(width: 4),
-                        action!,
                       ],
-                      if (onToggle != null)
-                        IconButton(
-                          onPressed: onToggle,
-                          tooltip: '${expanded ? 'Collapse' : 'Expand'} $title',
-                          color: Colors.white,
-                          icon: Icon(
-                            expanded ? Icons.expand_less : Icons.expand_more,
-                          ),
-                        ),
-                    ],
+                    ),
                   ),
                 ),
               ),
