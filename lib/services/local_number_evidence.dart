@@ -78,7 +78,9 @@ class LocalNumberEvidence {
       if (deleted.contains(id)) continue;
       if (detail['kind'] == 'invoice' &&
           (retiredInvoices.contains(entry.key) || retiredInvoices.contains(id) ||
-           retiredJobs.contains(detail['job_id']?.toString()))) continue;
+           retiredJobs.contains(detail['job_id']?.toString()))) {
+        continue;
+      }
       result.add({...detail, 'id': id});
     }
     return result;
