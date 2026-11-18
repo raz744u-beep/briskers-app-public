@@ -10,6 +10,7 @@ void main() {
     'estimated_minutes': minutes, 'actual_minutes': minutes,
     'remaining_minutes': 0, 'paid_minutes': minutes, 'paid': 1,
     'state': 'Done', 'source_active': 1, 'archived_labor': historical ? 1 : 0,
+    'date_mode': 'inherited',
     'work_start_date': '2026-11-16', 'work_end_date': '2026-11-20',
     'completed_date': '2026-11-13',
   };
@@ -37,6 +38,8 @@ void main() {
   test('genuine current completed work and explicit unpaid work remain visible', () {
     final current = {...labor('current', 90), 'completed_date': '2026-11-17'};
     expect(EmployeeWorkReview.weeklyRows([current], week), [current]);
+    final manual = {...labor('manual', 90), 'date_mode': 'manual'};
+    expect(EmployeeWorkReview.weeklyRows([manual], week), [manual]);
     final unpaid = {...labor('unpaid', 90), 'completed_date': null,
       'paid_minutes': 0, 'paid': 0, 'remaining_minutes': 90};
     expect(EmployeeWorkReview.weeklyRows([unpaid], week), [unpaid]);

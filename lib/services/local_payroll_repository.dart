@@ -1845,7 +1845,7 @@ class LocalPayrollRepository {
       "CASE WHEN s.source_kind='invoice' AND (date(d.document_date) IS NULL OR date(d.document_date)!=d.document_date OR d.document_date < '${LocalInvoiceTaskStore.payrollCutover}') AND NOT EXISTS "
       "(SELECT 1 FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id "
       "AND a.event='owner_reviewed_unpaid_carry') THEN 1 ELSE 0 END AS archived_labor,"
-      "COALESCE(cw.week,(SELECT json_extract(a.payload,'\$.week') FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id AND a.event='owner_reviewed_unpaid_carry' ORDER BY a.id DESC LIMIT 1)) AS carry_week,cw.reason AS carry_reason,e.rate AS saved_rate,e.base_enabled,p.state,p.completed_date,c.revision AS version,COALESCE(tm.description,t.description) AS description,tm.task_name,t.job_id,"
+      "COALESCE(cw.week,(SELECT json_extract(a.payload,'\$.week') FROM regular_payroll_audit a WHERE a.business_id=p.business_id AND a.operation_id=p.id AND a.event='owner_reviewed_unpaid_carry' ORDER BY a.id DESC LIMIT 1)) AS carry_week,cw.reason AS carry_reason,e.rate AS saved_rate,e.base_enabled,p.state,p.completed_date,c.revision AS version,COALESCE(tm.description,t.description) AS description,tm.task_name,tm.date_mode,t.job_id,"
       "j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,"
       "(SELECT MIN(document_date) FROM local_documents jd WHERE jd.business_id=t.business_id AND jd.job_id=t.job_id) AS job_document_date,"
       "d.document_number AS invoice_number,d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,c.completed AS credit_completed,"

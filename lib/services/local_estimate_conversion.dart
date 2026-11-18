@@ -24,7 +24,9 @@ class LocalEstimateConversion {
       try {
         final value = jsonDecode(row.readNullable<String>('payload_json') ?? 'null');
         if (value is! Map || value['kind'] != 'estimate' ||
-            (value['business_id'] != null && value['business_id'] != business)) continue;
+            (value['business_id'] != null && value['business_id'] != business)) {
+          continue;
+        }
         final target = value['_server_document_id']?.toString() ?? '';
         final invoice = value['converted_invoice_id']?.toString() ?? '';
         if (target.isEmpty || (value['converted'] != true && invoice.isEmpty)) continue;
@@ -58,7 +60,13 @@ class LocalEstimateConversion {
   Future<void> projectRows(String business, List<Map<String, dynamic>> rows) async {
     await LocalDocumentSqlStore.ensure(db);
     final records = await db.customSelect(
-      "SELECT d.id,d.kind,d.converted,d.document_number,d.document_date,c.payload_json "
+      "SELECT d.id,d.kind,d.converted,d.document_number,d.document_date,"
+      "CASE WHEN d.kind='estimate' THEN c.payload_json END AS payload_json,"
+      "CASE WHEN d.kind='invoice' AND json_valid(c.payload_json) THEN "
+      "CASE WHEN json_extract(c.payload_json,'\$.id')=d.id "
+      "AND json_extract(c.payload_json,'\$.kind')='invoice' "
+      "AND (json_extract(c.payload_json,'\$.business_id') IS NULL OR json_extract(c.payload_json,'\$.business_id')=d.business_id) "
+      "THEN json_extract(c.payload_json,'\$.converted_from_estimate_id') END END AS source_estimate_id "
       "FROM local_documents d LEFT JOIN local_document_details c "
       "ON c.cache_key='briskers_document_detail_' || d.business_id || '_' || d.id "
       "WHERE d.business_id=? AND NOT EXISTS(SELECT 1 FROM local_document_detail_deleted x "
@@ -70,17 +78,20 @@ class LocalEstimateConversion {
     final saved = <String, Map<String, dynamic>>{};
     final reverse = <String, List<String>>{};
     for (final record in records) {
+      final source = record.data['source_estimate_id'];
+      if (source is String && source.isNotEmpty) {
+        reverse.putIfAbsent(source, () => []).add(record.read<String>('id'));
+      }
       final raw = record.readNullable<String>('payload_json');
       if (raw == null) continue;
       try {
         final value = jsonDecode(raw);
         final id = record.read<String>('id');
         if (value is! Map || value['id'] != id || value['kind'] != record.data['kind'] ||
-            (value['business_id'] != null && value['business_id'] != business)) continue;
-        saved[id] = Map<String, dynamic>.from(value);
-        if (value['kind'] == 'invoice' && value['converted_from_estimate_id'] is String) {
-          reverse.putIfAbsent(value['converted_from_estimate_id'] as String, () => []).add(id);
+            (value['business_id'] != null && value['business_id'] != business)) {
+          continue;
         }
+        saved[id] = Map<String, dynamic>.from(value);
       } on FormatException {
         // Invalid snapshots never establish a link.
       }
@@ -93,7 +104,9 @@ class LocalEstimateConversion {
       var target = (row['converted_invoice_id'] ?? prior['converted_invoice_id'])?.toString() ?? '';
       if (target.isEmpty && links.length == 1) target = links.single;
       if (row['converted'] != true && prior['converted'] != true &&
-          indexes[id]?['converted'] != 1 && target.isEmpty && links.isEmpty) continue;
+          indexes[id]?['converted'] != 1 && target.isEmpty && links.isEmpty) {
+        continue;
+      }
       row['converted'] = true;
       row['display_status'] = 'Converted';
       if (target.isNotEmpty) {

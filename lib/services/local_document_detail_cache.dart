@@ -153,7 +153,10 @@ class LocalDocumentDetailCache {
       () => _serialized(key, () async {
         if (await _blocked(businessId, documentId, detail)) return;
         await _estimateNumber(businessId, documentId, detail);
-        final converted = await LocalEstimateConversion(_database).project(businessId, detail);
+        final completeConversion = detail['converted'] == true &&
+            (detail['converted_invoice_id']?.toString().isNotEmpty ?? false);
+        final converted = completeConversion ? detail :
+            await LocalEstimateConversion(_database).project(businessId, detail);
         final encoded = jsonEncode(converted);
         if (await RecoveryCommitStore.isOriginal(_database,businessId,documentId)) return;
         if (await RecoveryCommitStore.snapshot(_database,businessId,documentId) != null) {

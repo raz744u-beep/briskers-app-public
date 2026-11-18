@@ -104,15 +104,20 @@ class EmployeeWorkReview extends StatelessWidget {
       return 'Excluded: historical labor';
     }
     if (row['state'] == 'Done') {
+      final hasWorkDates = LocalTaskSchedule.parse(row['work_start_date']) != null &&
+          LocalTaskSchedule.parse(row['work_end_date']) != null;
+      final inheritedDates = row['date_mode'] == 'inherited';
       final completed = LocalTaskSchedule.parse(row['completed_date']);
-      if (completed != null) {
+      if (completed != null && (inheritedDates || !hasWorkDates)) {
         return !completed.isBefore(start) && completed.isBefore(end)
             ? 'Included: completed this week'
             : 'Excluded: completed outside this week';
       }
       if (row['paid'] == 1 || row['owner_prior_paid'] == 1 ||
           (row['paid_minutes'] as int? ?? 0) > 0) {
-        return 'Excluded: paid labor without a completion date';
+        if (completed == null && (inheritedDates || !hasWorkDates)) {
+          return 'Excluded: paid labor without a completion date';
+        }
       }
     }
     if (fallsInWeek(row, week)) return 'Included: saved work dates';
@@ -139,7 +144,7 @@ class EmployeeWorkReview extends StatelessWidget {
     'Original task ID: ${row['duplicate_of_task_id'] ?? 'this task'}; source: ${row['source_kind'] ?? 'unknown'}; '
       'last paid week: ${row['last_paid_week'] ?? 'unknown'}; prior-paid flag: ${row['owner_prior_paid'] ?? 0}',
     'Work dates: ${row['work_start_date'] ?? 'unknown'} – ${row['work_end_date'] ?? 'unknown'}; '
-      'completed: ${row['completed_date'] ?? 'unknown'}; invoice date: ${row['invoice_date'] ?? 'unknown'}',
+      'date mode: ${row['date_mode'] ?? 'not recorded'}; completed: ${row['completed_date'] ?? 'unknown'}; invoice date: ${row['invoice_date'] ?? 'unknown'}',
     weeklyReason(row, week),
     'Allocation ID: ${row['id']}; task ID: ${row['task_id']}; '
       'Job ID: ${row['job_id']}; invoice ID: ${row['invoice_id']}; line ID: ${row['source_line_id']}',

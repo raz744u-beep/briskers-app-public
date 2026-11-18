@@ -95,6 +95,7 @@ void main() {
     for (final raw in ['{invalid', jsonEncode({...target,'business_id':'another-shop'})]) {
       await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','invoice-6377'),raw);
       expect((await LocalDocumentDetailCache(database:db).load('shop','estimate-2007'))!['converted'],false);
+      expect((await LocalDocumentRepository(database:db).listByKind('shop',kind:'estimate')).single['converted'],false);
     }
   });
 

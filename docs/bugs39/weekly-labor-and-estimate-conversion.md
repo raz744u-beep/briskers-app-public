@@ -13,8 +13,9 @@ Owner evidence from build 4720:
 Corrections:
 
 1. Weekly projections exclude archived work from a later week. Historical work
-   remains visible in its original known invoice week. Genuine Done work uses
-   its saved completion date before scheduling dates; undated paid work does
+   remains visible in its original known invoice week. Done work uses
+   its saved completion date before inherited scheduling dates; manual work
+   dates remain authoritative. Undated paid work with inherited dates does
    not become new weekly activity merely because it has an inherited date.
 2. Task aliases require a verified invoice creation alias, equal ordered labor
    position, description, assigned employee set and assigned minutes. They are
