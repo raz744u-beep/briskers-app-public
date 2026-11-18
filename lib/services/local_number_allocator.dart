@@ -48,7 +48,10 @@ class LocalNumberAllocator {
     }
     // A server list can omit a complete saved invoice. Its printed invoice
     // and job numbers are still occupied until an explicit local deletion.
-    for (final detail in await LocalNumberEvidence.documents(db, business)) {
+    final snapshots = kind == 'estimate'
+        ? const <Map<String, dynamic>>[]
+        : await LocalNumberEvidence.documents(db, business);
+    for (final detail in snapshots) {
       if (kind == 'job') {
         final id = detail['job_id']?.toString() ?? '';
         final number = _parse(detail['job_number'], kind);
@@ -62,11 +65,11 @@ class LocalNumberAllocator {
     }
     return used;
   }
-  Future<int> _next(String business,String kind) async {
+  Future<int> _next(String business,String kind, {Map<int,Set<String>>? usedNumbers}) async {
     final rows=await db.customSelect('SELECT next_number FROM local_number_counters '
       'WHERE business_id=? AND kind=?',variables:[Variable<String>(business),Variable<String>(kind)]).get();
     if (rows.isNotEmpty && kind != 'estimate') return rows.single.read<int>('next_number');
-    final used=await _used(business,kind);
+    final used=usedNumbers ?? await _used(business,kind);
     var next=rows.singleOrNull?.read<int>('next_number') ?? 1;
     for(final number in used.keys) { if(number>=next) next=number+1; }
     if (kind == 'estimate') {
@@ -101,8 +104,9 @@ class LocalNumberAllocator {
 
   Future<int> nextNumber(String business,String kind) async => db.transaction(() async {
     await ensureSchema();
-    var value=await _next(business,kind);
-    while(await _occupied(business,kind,value,'')) { value++; }
+    final used = await _used(business,kind);
+    var value=await _next(business,kind,usedNumbers:used);
+    while(await _occupied(business,kind,value,'',usedNumbers:used)) { value++; }
     return value;
   });
   Future<void> setNextNumber(String business,String kind,int value) async {
@@ -114,8 +118,9 @@ class LocalNumberAllocator {
         'ON CONFLICT(business_id,kind) DO UPDATE SET next_number=excluded.next_number',[business,kind,value]);
     });
   }
-  Future<bool> _occupied(String business,String kind,int number,String entity) async {
-    final used=await _used(business,kind);
+  Future<bool> _occupied(String business,String kind,int number,String entity,
+      {Map<int,Set<String>>? usedNumbers}) async {
+    final used=usedNumbers ?? await _used(business,kind);
     if(used[number]?.any((id)=>id!=entity) == true) return true;
     final rows=await db.customSelect('SELECT entity_id FROM local_number_reservations '
       'WHERE business_id=? AND kind=? AND number=? AND active=1',variables:[
@@ -133,13 +138,14 @@ class LocalNumberAllocator {
         ).getSingleOrNull();
         if (saved != null) return saved.read<int>('number');
       }
-      var next=await _next(business,kind);
+      final used = await _used(business,kind);
+      var next=await _next(business,kind,usedNumbers:used);
       var number=requested ?? next;
       if(number<1 || number>999999999) throw StateError('Enter a number from 1 to 999,999,999.');
-      if(requested!=null && await _occupied(business,kind,number,entity)) {
+      if(requested!=null && await _occupied(business,kind,number,entity,usedNumbers:used)) {
         throw StateError('That number is already used by another $kind.');
       }
-      while(await _occupied(business,kind,number,entity)) { number++; }
+      while(await _occupied(business,kind,number,entity,usedNumbers:used)) { number++; }
       if(number>999999999) throw StateError('No invoice numbers remain in the supported range.');
       await db.customStatement('INSERT INTO local_number_reservations '
         '(business_id,kind,number,entity_id,active) VALUES (?,?,?,?,1) '

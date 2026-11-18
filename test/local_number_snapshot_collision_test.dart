@@ -9,6 +9,7 @@ import 'package:briskers_app/services/diagnostics_service.dart';
 import 'package:briskers_app/services/local_document_sql_store.dart';
 import 'package:briskers_app/services/local_document_repository.dart';
 import 'package:briskers_app/services/local_number_allocator.dart';
+import 'package:briskers_app/services/recovery_commit_store.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -87,6 +88,35 @@ void main() {
     await LocalDocumentSqlStore.write(db, key, jsonEncode(snapshot));
     await db.customStatement("INSERT INTO local_documents(id,business_id,kind,document_number,status,total,sync_state) "
       "VALUES('dakota-invoice','shop','invoice','6360','closed',554.24,'synced')");
+    final report = await BriskersDiagnosticsService(database: db).run('shop');
+    expect(report.checks.firstWhere((c) => c.id == 'DOC-005').level, BriskersDiagnosticLevel.pass);
+  });
+
+  test('recovered snapshot protects its numbers and payment history', () async {
+    await RecoveryCommitStore.ensure(db);
+    final raw = jsonEncode(snapshot);
+    await db.customStatement('INSERT INTO recovery_document_cache VALUES (?,?,?)',
+      ['shop', 'dakota-invoice', raw]);
+    await staleCounters();
+    expect(await LocalNumberAllocator(db).allocate('shop', 'invoice', 'tyra'), 6361);
+    expect((await RecoveryCommitStore.snapshot(db, 'shop', 'dakota-invoice'))!
+      .read<String>('payload_json'), raw);
+  });
+
+  test('durable snapshot supersedes retained legacy preference evidence', () async {
+    SharedPreferences.setMockInitialValues({key: jsonEncode(snapshot)});
+    await LocalDocumentSqlStore.write(db, key,
+      jsonEncode({...snapshot, 'document_number': '6362'}));
+    final numbers = LocalNumberAllocator(db);
+    expect(await numbers.allocate('shop', 'invoice', 'new', requested: 6360), 6360);
+    await expectLater(numbers.allocate('shop', 'invoice', 'another', requested: 6362), throwsStateError);
+  });
+
+  test('saved server identity does not create a false duplicate', () async {
+    await LocalDocumentSqlStore.write(db, key,
+      jsonEncode({...snapshot, '_server_document_id': 'remote-dakota'}));
+    await db.customStatement("INSERT INTO local_documents(id,business_id,kind,document_number,status,total,sync_state) "
+      "VALUES('remote-dakota','shop','invoice','6360','closed',554.24,'synced')");
     final report = await BriskersDiagnosticsService(database: db).run('shop');
     expect(report.checks.firstWhere((c) => c.id == 'DOC-005').level, BriskersDiagnosticLevel.pass);
   });
