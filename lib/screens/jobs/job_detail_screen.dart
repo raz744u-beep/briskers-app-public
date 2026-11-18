@@ -686,6 +686,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       if (!mounted || epoch != _loadEpoch) return;
       if (canonical != _jobId) {
         _job = null;
+        _localProfitability = null;
+        _profitabilityReadRevision++;
         _taskProgress = null;
       }
       _resolvedJobId = canonical;
@@ -707,8 +709,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     final forceOffline =
         BriskersConnectionModeController.instance.forceOffline;
 
-    if (!forceOnline && _owner) {
-      // Read saved local accounting without delaying the Job's first paint.
+    if (!forceOnline && _owner && _localProfitability != null && _modalRefresh != null) {
+      // Refresh an open report after a saved expense; do not scan accounting
+      // history before the Job's verified local detail and actions are ready.
       unawaited(_loadLocalProfitability(epoch));
     }
 
@@ -1066,7 +1069,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       if (canSeeFinancial) unawaited(_hydrateMileageOut(epoch, documents));
       _modalRefresh?.call();
       _scheduleInitialAction();
-      if (_owner) unawaited(_loadLocalProfitability(epoch));
+      if (_owner && _localProfitability != null && _modalRefresh != null) {
+        unawaited(_loadLocalProfitability(epoch));
+      }
       unawaited(_prefetchFindingPhotos(findings));
       unawaited(_cacheDeletionPreview());
 
@@ -5339,14 +5344,24 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       final report = await LocalJobProfitabilityRepository(localDatabase).load(
         widget.businessId, _jobId, isOwner: _owner,
       );
-      if (!_currentLoad(epoch) || revision != _profitabilityReadRevision) return;
+      if (!_currentLoad(epoch) || revision != _profitabilityReadRevision) {
+        if (mounted && revision == _profitabilityReadRevision) {
+          setState(() => _profitabilityLoading = false);
+        }
+        return;
+      }
       setState(() {
         _localProfitability = report;
         _profitabilityLoading = false;
         _profitabilityError = null;
       });
     } catch (_) {
-      if (!_currentLoad(epoch) || revision != _profitabilityReadRevision) return;
+      if (!_currentLoad(epoch) || revision != _profitabilityReadRevision) {
+        if (mounted && revision == _profitabilityReadRevision) {
+          setState(() => _profitabilityLoading = false);
+        }
+        return;
+      }
       setState(() {
         _localProfitability = null;
         _profitabilityLoading = false;
@@ -5356,7 +5371,15 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     _modalRefresh?.call();
   }
 
-  Future<void> _reloadProfitability() => _loadLocalProfitability(_loadEpoch);
+  Future<void> _reloadProfitability() async {
+    final epoch = _loadEpoch;
+    await _loadLocalProfitability(epoch);
+    // A job refresh can finish while the report is being read. Retry the
+    // current local snapshot once; no remote request or retry worker exists.
+    if (mounted && !_contentBlocked && epoch != _loadEpoch) {
+      await _loadLocalProfitability(_loadEpoch);
+    }
+  }
 
   Future<void> _openSectionModal(String key) async {
     if (_job == null) return;
@@ -5823,7 +5846,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       // The navigation dock is the only bottom bar. Keep the New action
       // floating above it so the surrounding area remains transparent.
       bottomNavigationBar: widget.bottomNavigationBar,
-      floatingActionButton: (_canEditFindings || _canManage) &&
+      floatingActionButton: (_canEditFindings || _canManage || _canRecordJobExpense) &&
               MediaQuery.viewInsetsOf(context).bottom == 0
           ? FloatingActionButton.extended(
               heroTag: 'job-detail-new-$_jobId',

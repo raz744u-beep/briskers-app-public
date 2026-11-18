@@ -91,11 +91,21 @@ void main() {
         {...expense('other-shop', 1000), 'business_id': 'other'}],
       labor: [labor(paid: 14000, paidMinutes: 240, rate: 9999),
         {...labor(paid: 0, paidMinutes: 0), 'id': 'duplicate', 'duplicate_of_task_id': 'original'},
-        {...labor(paid: 0, paidMinutes: 0), 'id': 'inactive', 'source_active': 0}],
+        {...labor(paid: 0, paidMinutes: 0), 'id': 'inactive', 'source_active': 0, 'duplicate_of_task_id': 'original'}],
     );
     expect(report.directCents, 0);
     expect(report.laborCents, 14000);
     expect(report.profitCents, 86000);
+  });
+
+  test('genuine completed labor with a conflicting source cannot become a zero cost', () {
+    final report = LocalJobProfitability.fromRecords(
+      business:'shop',job:'job-41',invoices:[invoice()],expenses:[],
+      labor:[{...labor(paid:0,paidMinutes:0),'source_active':0}],
+    );
+    expect(report.laborCents,isNull);
+    expect(report.profitCents,isNull);
+    expect(report.issues.join(' '),contains('inactive source'));
   });
 
   test('split allocations keep their job shares through acknowledgment and stale history', () async {

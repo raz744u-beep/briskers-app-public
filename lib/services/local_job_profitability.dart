@@ -103,11 +103,17 @@ class LocalJobProfitability {
       final paidMinutes = row['paid_minutes'] as int? ?? 0;
       final active = row['source_active'] != 0 &&
           row['duplicate_of_task_id'] == null;
-      if (!active && paidMinutes == 0) { continue; }
-      credits++;
       final minutes = row['actual_minutes'] as int? ?? 0;
       final rate = row['rate_cents'] as int? ?? 0;
       final completed = row['completed'] == 1;
+      if (!active && paidMinutes == 0) {
+        if (row['duplicate_of_task_id'] == null && completed && minutes > 0) {
+          wages = null;
+          issues.add('Completed labor has an inactive source and needs cost review.');
+        }
+        continue;
+      }
+      if (completed || paidMinutes > 0) credits++;
       if ((row['paid_operation_id'] != null && paidMinutes == 0) ||
           (completed && paidMinutes > minutes)) {
         wages = null;

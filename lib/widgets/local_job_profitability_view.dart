@@ -53,7 +53,8 @@ class LocalJobProfitabilityView extends StatelessWidget {
           const SizedBox(height: 8),
           const Text(
             'Recalculated from invoices, expenses and labor saved on this device. '
-            'Historical records not saved here and weekly base pay or adjustments '
+            'Labor includes completed work and recorded paid portions. Unfinished unpaid work, '
+            'historical records not saved here, and weekly base pay or adjustments '
             'without a job allocation are not included.',
             style: TextStyle(fontSize: 12, color: BriskersColors.secondaryText),
           ),
