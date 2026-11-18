@@ -1,6 +1,6 @@
 import 'package:drift/drift.dart';
 
-import '../local/briskers_local_database.dart';
+import '../local/briskers_local_database.dart' show BriskersLocalDatabase;
 import 'local_document_repository.dart';
 import 'local_document_detail_cache.dart';
 import 'local_financial_cache.dart';
@@ -54,9 +54,9 @@ class LocalJobProfitability {
     for (final row in invoices) {
       if (!scope(row) || row['job_id'] != job || row['kind'] != 'invoice' ||
           const ['void', 'voided', 'cancelled', 'canceled', 'deleted']
-              .contains(row['status']?.toString().toLowerCase())) continue;
+              .contains(row['status']?.toString().toLowerCase())) { continue; }
       final id = row['id']?.toString() ?? '';
-      if (id.isEmpty || !seenInvoices.add(id)) continue;
+      if (id.isEmpty || !seenInvoices.add(id)) { continue; }
       final gross = cents(row['total_amount']);
       final salesTax = cents(row['tax_amount']);
       if (gross == null || salesTax == null) {
@@ -73,16 +73,16 @@ class LocalJobProfitability {
     for (final row in expenses) {
       if (!scope(row) || row['direction'] == 'income' ||
           row['sync_state'] == 'reversed' ||
-          const ['void', 'voided', 'deleted'].contains(row['status'])) continue;
+          const ['void', 'voided', 'deleted'].contains(row['status'])) { continue; }
       final linked = row['job_id'] == job ||
           (row['job_id'] == null && documentIds.contains(row['document_id']));
-      if (!linked) continue;
+      if (!linked) { continue; }
       final id = row['id']?.toString() ?? '';
       final key = row['allocation_id']?.toString() ?? id;
-      if (id.isEmpty || !seenExpenses.add(key)) continue;
+      if (id.isEmpty || !seenExpenses.add(key)) { continue; }
       // A weekly payroll expense is not a second job cost. Its immutable
       // work allocations below establish this job's actual paid portions.
-      if (row['payroll_operation_id'] != null) continue;
+      if (row['payroll_operation_id'] != null) { continue; }
       included.add(Map<String, dynamic>.from(row));
       final minor = row['amount_minor'];
       final amount = minor is int ? minor : cents(row['amount']);
@@ -96,14 +96,14 @@ class LocalJobProfitability {
     final seenCredits = <String>{};
     var credits = 0;
     for (final row in labor) {
-      if (!scope(row) || row['job_id'] != job) continue;
+      if (!scope(row) || row['job_id'] != job) { continue; }
       final id = row['id']?.toString() ?? '';
-      if (id.isEmpty || !seenCredits.add(id)) continue;
+      if (id.isEmpty || !seenCredits.add(id)) { continue; }
       final paid = row['paid_cents'] as int? ?? 0;
       final paidMinutes = row['paid_minutes'] as int? ?? 0;
       final active = row['source_active'] != 0 &&
           row['duplicate_of_task_id'] == null;
-      if (!active && paidMinutes == 0) continue;
+      if (!active && paidMinutes == 0) { continue; }
       credits++;
       final minutes = row['actual_minutes'] as int? ?? 0;
       final rate = row['rate_cents'] as int? ?? 0;
@@ -154,7 +154,7 @@ class LocalJobProfitabilityRepository {
       var invoiceReadable = true, laborExpected = false;
       for (final row in documents.where((r) => r['kind'] == 'invoice')) {
         if (const ['void', 'voided', 'deleted', 'cancelled', 'canceled']
-            .contains(row['status']?.toString().toLowerCase())) continue;
+            .contains(row['status']?.toString().toLowerCase())) { continue; }
         final detail = await LocalDocumentDetailCache(database: db)
             .loadReadOnly(business, row['id'].toString());
         invoices.add({...row, ...?detail});
