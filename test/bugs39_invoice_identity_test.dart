@@ -200,7 +200,8 @@ void main() {
       [
         business,
         jsonEncode([
-          {'id': 'income-gloria', 'amount': 7882.11, 'document_id': original},
+          {'id': 'income-gloria-1', 'amount': 3000.0, 'document_id': original},
+          {'id': 'income-gloria-2', 'amount': 4882.11, 'document_id': original},
         ]),
       ],
     );
@@ -353,4 +354,11 @@ void main() {
       );
     },
   );
+  test('stale Job deletion keeps the selected identity after read redirection', () {
+    final source=File('lib/screens/jobs/job_detail_screen.dart').readAsStringSync();
+    final start=source.indexOf('Future<void> _deleteUnusedJob()');
+    final end=source.indexOf('Future<void> _showNewMenu()',start);
+    expect(source.substring(start,end),contains('jobId:widget.jobId'));
+  });
+
 }

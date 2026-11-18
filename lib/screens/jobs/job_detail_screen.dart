@@ -4315,8 +4315,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     if (!_owner || _busy) return;
     setState(() { _busy=true; _error=null; });
     try {
+      // Deletion keeps the originally selected identity. A stale alias route
+      // must never turn an attempted duplicate deletion into original deletion.
       final deleted=await deleteOwnerLocalJob(context,businessId:widget.businessId,
-        jobId:_jobId,label:_job?['job_number']?.toString() ?? 'Job');
+        jobId:widget.jobId,label:_job?['job_number']?.toString() ?? 'Job');
       if(deleted && mounted) Navigator.pop(context,true);
     } catch(error) {
       if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Unable to delete Job: $error')));
