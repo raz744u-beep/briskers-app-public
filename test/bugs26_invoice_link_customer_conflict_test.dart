@@ -2,8 +2,11 @@ import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_invoice_link_audit.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   test('J18 investigation reports actual linked invoices and conflicting customers without repair', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     addTearDown(db.close);
