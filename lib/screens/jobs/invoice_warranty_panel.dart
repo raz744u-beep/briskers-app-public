@@ -1084,7 +1084,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
           final scale = MediaQuery.textScalerOf(context).scale(16) / 16;
           // A phone cannot fit the checkbox, complete warranty label, expand
           // control and mechanic dropdown into two equal-width columns.
-          if (constraints.maxWidth < 520 * scale) {
+          final minimumWidth = _enabled ? 520 : 360;
+          if (constraints.maxWidth < minimumWidth * scale) {
             return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               _warrantyToggle(),
               Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),

@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:briskers_app/core/briskers_i18n.dart';
 import 'package:briskers_app/core/connection_mode.dart';
 import 'package:briskers_app/screens/jobs/invoice_warranty_panel.dart';
@@ -9,6 +11,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() async {
+    // Use normal phone text metrics rather than the test-only Ahem font.
+    final font = File('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf');
+    if (await font.exists()) {
+      await (FontLoader('Roboto')..addFont(
+        Future.value(ByteData.sublistView(await font.readAsBytes())))).load();
+    }
     SharedPreferences.setMockInitialValues({});
     await BriskersLanguageController.instance.setLanguage('en');
     await BriskersConnectionModeController.instance.setMode(BriskersConnectionMode.offline);
