@@ -476,7 +476,9 @@ class JobSyncService {
     Map<String, String> beforeSnapshot,
   ) async {
     final absent = <String>{};
-    final retained = {...await LocalJobIdentity(_database).retainedJobIds(businessId), ...await LocalJobWorkState(_database).retainedJobIds(businessId)};
+    // Task status protects data from replacement, but cannot grant access to
+    // a job omitted from a complete, verified authorization snapshot.
+    final retained = await LocalJobIdentity(_database).retainedJobIds(businessId);
     final retired = await LocalJobRetirement.blockedJobIds(
       _database,
       businessId,

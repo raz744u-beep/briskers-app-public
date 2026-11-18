@@ -1,3 +1,4 @@
+import 'package:briskers_app/services/local_job_work_state.dart';
 import 'support/empty_retirement_gateway.dart';
 
 import 'dart:convert';
@@ -329,6 +330,10 @@ void main() {
         "VALUES ('job-2','00000000-0000-4000-8000-000000000001','full','On next page','open'),"
         "('omitted','00000000-0000-4000-8000-000000000001','full','No longer authorized','open')",
       );
+      // Durable local work must survive stale field values, while a verified
+      // final authorization snapshot still hides inaccessible jobs safely.
+      await LocalJobWorkState(db).saveIntent('00000000-0000-4000-8000-000000000001',
+        'omitted','in_progress',fromTask:true);
       api.beforePage = (afterId) async {
         if (afterId != null) {
           final ids = (await db.customSelect('SELECT id FROM local_jobs').get())

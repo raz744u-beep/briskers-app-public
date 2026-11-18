@@ -257,8 +257,9 @@ class LocalJobWorkState {
         remoteVersion != null &&
         localVersion != null &&
         remoteVersion > localVersion &&
-        DateTime.tryParse('${remote['completed_at']}') != null)
+        DateTime.tryParse('${remote['completed_at']}') != null) {
       return remote;
+    }
     final protect =
         pending ||
         intent != null && !newer ||
