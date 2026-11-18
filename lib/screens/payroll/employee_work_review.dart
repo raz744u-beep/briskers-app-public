@@ -89,11 +89,13 @@ class EmployeeWorkReview extends StatelessWidget {
 
   /// A schedule/import date must not move historical or previously completed
   /// labor into a new week. This projection never changes a task or payment.
-  static String weeklyReason(Map<String, dynamic> row, DateTime week, {DateTime? now}) {
+  static String weeklyReason(Map<String, dynamic> row, DateTime week, {
+    DateTime? now, bool includeAssignmentConflicts = false,
+  }) {
     final start = monday(week), end = start.add(const Duration(days: 5));
     if (row['duplicate_of_task_id'] != null) return 'Excluded: verified duplicate listing';
     if (row['source_active'] == 0) return 'Excluded: inactive source';
-    if (row['assignment_conflict'] == 1) return 'Excluded: assignment needs review';
+    if (row['assignment_conflict'] == 1 && !includeAssignmentConflicts) return 'Excluded: assignment needs review';
     if (row['archived_labor'] == 1 || row['recordkeeping_only'] == true) {
       final originalDate = LocalTaskSchedule.parse(row['invoice_date']) ??
           LocalTaskSchedule.parse(row['job_document_date']);
@@ -132,6 +134,25 @@ class EmployeeWorkReview extends StatelessWidget {
   static List<Map<String, dynamic>> weeklyRows(
     List<Map<String, dynamic>> rows, DateTime week, {DateTime? now}
   ) => rows.where((row) => weeklyReason(row, week, now: now).startsWith('Included:')).toList();
+
+  /// Weekly payroll review shares the Work tab's date and history rules.
+  /// A real assignment conflict remains reviewable, but settled, inactive,
+  /// recordkeeping-only and proven duplicate allocations cannot request pay.
+  static List<Map<String, dynamic>> weeklyReviewRows(
+    List<Map<String, dynamic>> rows, DateTime week, {
+    required int Function(Map<String, dynamic>) rate, DateTime? now,
+  }) => rows.where((row) {
+    if (row['recordkeeping_only'] == true || row['paid'] == 1 ||
+        row['owner_prior_paid'] == 1 ||
+        ((row['paid_minutes'] as int? ?? 0) > 0 && row['remaining_minutes'] == 0)) {
+      return false;
+    }
+    final needsReview = row['payroll_treatment'] == 'review' ||
+        row['assignment_conflict'] == 1 || row['archived_labor'] == 1 ||
+        (row['state'] == 'Done' && rate(row) <= 0);
+    return needsReview && weeklyReason(row, week, now: now,
+        includeAssignmentConflicts: true).startsWith('Included:');
+  }).toList();
 
   String _auditLine(Map<String, dynamic> row) => [
     '${row['job_number'] ?? 'Job'} · ${row['customer_name'] ?? ''}',

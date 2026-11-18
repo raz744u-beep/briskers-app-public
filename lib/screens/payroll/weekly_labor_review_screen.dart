@@ -1,6 +1,7 @@
 import '../../core/briskers_colors.dart';
 import 'approved_tasks_ui.dart' show taskBlue, taskCanvas, taskGreen, taskNavy;
 import 'payroll_review_widgets.dart';
+import 'employee_work_review.dart';
 import '../../services/payroll_owner_lease.dart';
 // ignore_for_file: prefer_interpolation_to_compose_strings
 import 'dart:async';
@@ -920,10 +921,8 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   }
   Widget _profileBody() {
     final tasks=_eligible.where((r)=>_available(r)>0 && _rate(r)>0).toList();
-    final start=_start(_week),end=_end(_week);
-    final dated=widget.tasks.where((r){final d=DateTime.tryParse((r['work_end_date']??r['completed_date']??r['invoice_date'])?.toString()??'',);return d!=null&&!d.isBefore(start)&&d.isBefore(end);}).toList();
-    final review=dated.where((r)=>r['payroll_treatment'] == 'review' ||
-              r['assignment_conflict']==1 || r['archived_labor']==1 || (r['state']=='Done'&&r['paid']!=1&&_rate(r)<=0),).toList();
+    final start=_start(_week);
+    final review=EmployeeWorkReview.weeklyReviewRows(widget.tasks,_week,rate:_rate);
     final paid=widget.paymentHistory.where((p)=>p['week']==start.toIso8601String().substring(0,10)).expand((p)=>(p['work'] as List? ?? []).whereType<Map>().map(Map<String,dynamic>.from,),).toList();
     final labor=tasks.fold<int>(widget.weeklyBaseCents,(n,r)=>n+_amount(r,_selected[_id(r)]??0),);
     final adjustment=widget.weeklyAdjustmentCents+_preparedAdjustment,gross=labor+widget.weeklyAdjustmentCents+_preparedAdjustment;
@@ -991,7 +990,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       ])),
       if(tasks.isEmpty)const ListTile(title:Text('No verified unpaid labor for this week.')),
       for(final task in tasks)_payableCard(task),
-      if(review.isNotEmpty || widget.reviewMessage!=null)Card(child:ExpansionTile(key:PageStorageKey('payroll-review-${widget.employeeId}-${_week.toIso8601String()}',),title:Text('Needs Review (${review.length})'),children:[
+      if(review.isNotEmpty)Card(child:ExpansionTile(key:PageStorageKey('payroll-review-${widget.employeeId}-${_week.toIso8601String()}',),title:Text('Needs Review (${review.length})'),children:[
         if(widget.reviewMessage!=null)ListTile(title:Text(widget.reviewMessage!)),
         for(final r in review)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:const Text('Pay status or compensation requires review; excluded from payment.',),),],),),
       if(paid.isNotEmpty)Card(child:ExpansionTile(key:PageStorageKey('payroll-paid-${widget.employeeId}-${_week.toIso8601String()}',),title:const Text('Previously Paid Work'),children:[for(final r in paid)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:Text('${((r['actual_minutes'] as int? ?? 0)/60).toStringAsFixed(2)} hrs · Paid · selected week',),),],),),
