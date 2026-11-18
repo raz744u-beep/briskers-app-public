@@ -1,10 +1,41 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_invoice_link_audit.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+  test('invoice-only audit exposes both customers and saved link disagreement without writes', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    await db.customStatement("INSERT INTO local_customers(id,business_id,display_name) "
+      "VALUES('dakota','shop','Dakota Spinder'),('tyra','shop','Tyra Legard')");
+    await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,job_number,title,status,customer_id) "
+      "VALUES('dakota-job','shop','full','J-41','Original','completed','dakota'),"
+      "('tyra-job','shop','full','J-41','Newer','open','tyra')");
+    await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,customer_id,kind,document_number,total) "
+      "VALUES('dakota-invoice','shop','dakota-job','dakota','invoice','6360',554.24),"
+      "('tyra-invoice','shop','tyra-job','tyra','invoice','6360',4894.21)");
+    final raw = jsonEncode({'id':'dakota-invoice','customer_id':'dakota',
+      'job_id':'different-saved-job','paid_amount':554.24,'closed_at':'2026-11-02'});
+    SharedPreferences.setMockInitialValues({'briskers_document_detail_shop_dakota-invoice':raw});
+    final before = (await db.customSelect("SELECT name,sql FROM sqlite_master ORDER BY name").get()).map((r)=>r.data).toList();
+    final audit = await LocalInvoiceLinkAudit(database:db).inspect(businessId:'shop',invoiceNumber:'6360');
+    final refs = List<Map<String,dynamic>>.from(audit['references'] as List);
+    expect(audit['has_duplicate_invoice_number'],true);
+    expect(refs.map((r)=>r['customer_name']),containsAll(['Dakota Spinder','Tyra Legard']));
+    final dakota = refs.firstWhere((r)=>r['document_id']=='dakota-invoice');
+    expect(dakota['job_id'],'dakota-job');
+    expect((dakota['saved'] as Map)['job_id'],'different-saved-job');
+    expect((dakota['saved'] as Map)['paid_amount'],554.24);
+    expect((await SharedPreferences.getInstance()).getString('briskers_document_detail_shop_dakota-invoice'),raw);
+    expect((await db.customSelect("SELECT name,sql FROM sqlite_master ORDER BY name").get()).map((r)=>r.data).toList(),before);
+    expect((await db.customSelect("SELECT job_id FROM local_documents WHERE id='dakota-invoice'").getSingle()).data['job_id'],'dakota-job');
+  });
   test('invoice number 6346 linked to J-19 is not silently assigned to J-18',
       () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());

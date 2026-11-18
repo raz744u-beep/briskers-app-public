@@ -1,4 +1,6 @@
 import 'package:drift/drift.dart' show Variable;
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
@@ -16,13 +18,12 @@ class LocalInvoiceLinkAudit {
 
   Future<Map<String, dynamic>> inspect({
     required String businessId,
-    required String jobNumber,
+    String jobNumber = '',
     required String invoiceNumber,
   }) async {
     if (businessId.trim().isEmpty ||
-        jobNumber.trim().isEmpty ||
         invoiceNumber.trim().isEmpty) {
-      throw ArgumentError('Business, Job and invoice numbers are required.');
+      throw ArgumentError('Business and invoice numbers are required.');
     }
 
     // IDs, not numbers, determine authoritative local relationships.
@@ -30,21 +31,31 @@ class LocalInvoiceLinkAudit {
     final jobs = await _database.customSelect(
       '''SELECT id,job_number,customer_id,customer_name
          FROM local_jobs
-         WHERE business_id=? AND lower(trim(job_number))=lower(trim(?))
+         WHERE business_id=? AND (lower(trim(job_number))=lower(trim(?))
+           OR (?='' AND id IN (SELECT job_id FROM local_documents
+             WHERE business_id=? AND kind='invoice'
+               AND lower(trim(document_number))=lower(trim(?)))))
          ORDER BY id''',
       variables: [
         Variable<String>(businessId),
         Variable<String>(jobNumber),
+        Variable<String>(jobNumber.trim()),
+        Variable<String>(businessId),
+        Variable<String>(invoiceNumber),
       ],
     ).get();
 
     final documents = await _database.customSelect(
       '''SELECT d.id,d.job_id,d.document_number,d.kind,d.customer_id,
+                d.document_date,d.total,d.status,d.closed_at,d.sync_state,
+                c.display_name AS customer_name,
                 j.job_number AS linked_job_number,
                 j.customer_id AS linked_job_customer_id
          FROM local_documents d
          LEFT JOIN local_jobs j
            ON j.business_id=d.business_id AND j.id=d.job_id
+         LEFT JOIN local_customers c
+           ON c.business_id=d.business_id AND c.id=d.customer_id
          WHERE d.business_id=? AND lower(trim(d.document_number))=lower(trim(?))
            AND d.kind='invoice'
          ORDER BY d.id''',
@@ -60,9 +71,14 @@ class LocalInvoiceLinkAudit {
          FROM local_documents d
          JOIN local_jobs j ON j.business_id=d.business_id AND j.id=d.job_id
          WHERE d.business_id=? AND d.kind='invoice'
-           AND lower(trim(j.job_number))=lower(trim(?))
+           AND (lower(trim(j.job_number))=lower(trim(?))
+             OR (?='' AND j.id IN (SELECT job_id FROM local_documents
+               WHERE business_id=? AND kind='invoice'
+                 AND lower(trim(document_number))=lower(trim(?)))))
          ORDER BY d.id''',
-      variables: [Variable<String>(businessId), Variable<String>(jobNumber)],
+      variables: [Variable<String>(businessId), Variable<String>(jobNumber),
+        Variable<String>(jobNumber.trim()), Variable<String>(businessId),
+        Variable<String>(invoiceNumber)],
     ).get();
     final references = [
       for (final doc in documents)
@@ -72,6 +88,12 @@ class LocalInvoiceLinkAudit {
           'job_id': doc.readNullable<String>('job_id'),
           'linked_job_number': doc.readNullable<String>('linked_job_number'),
           'customer_id': doc.readNullable<String>('customer_id'),
+          'customer_name': doc.readNullable<String>('customer_name'),
+          'document_date': doc.readNullable<String>('document_date'),
+          'total': doc.read<double>('total'),
+          'status': doc.readNullable<String>('status'),
+          'closed_at': doc.data['closed_at'],
+          'sync_state': doc.read<String>('sync_state'),
           'linked_job_customer_id':
               doc.readNullable<String>('linked_job_customer_id'),
           'matches_target_job':
@@ -83,6 +105,46 @@ class LocalInvoiceLinkAudit {
                   doc.readNullable<String>('linked_job_customer_id'),
         },
     ];
+
+    // Read only the selected invoices' raw snapshots. Calling the ordinary
+    // detail cache would project tasks and migrate caches during inspection.
+    final tables = (await _database.customSelect(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+      "('local_document_details','recovery_document_cache')",
+    ).get()).map((r) => r.read<String>('name')).toSet();
+    final prefs = await SharedPreferences.getInstance();
+    for (final reference in references) {
+      final id = reference['document_id'] as String;
+      final key = 'briskers_document_detail_${businessId}_$id';
+      String? raw;
+      if (tables.contains('recovery_document_cache')) {
+        final row = await _database.customSelect(
+          'SELECT payload_json FROM recovery_document_cache WHERE business_id=? AND document_id=?',
+          variables: [Variable(businessId), Variable(id)],
+        ).getSingleOrNull();
+        raw = row?.readNullable<String>('payload_json');
+      }
+      if (raw == null && tables.contains('local_document_details')) {
+        final row = await _database.customSelect(
+          'SELECT payload_json FROM local_document_details WHERE cache_key=?',
+          variables: [Variable(key)],
+        ).getSingleOrNull();
+        raw = row?.readNullable<String>('payload_json');
+      }
+      raw ??= prefs.getString(key);
+      Object? decoded;
+      try { decoded = raw == null ? null : jsonDecode(raw); }
+      on FormatException { reference['snapshot_error'] = 'Invalid saved JSON'; }
+      reference['snapshot_found'] = decoded is Map;
+      if (decoded is Map) {
+        reference['saved'] = {
+          for (final field in ['id','document_number','customer_id','customer_name',
+            'job_id','job_number','document_date','status','closed_at',
+            'total_amount','paid_amount','pending_payment','_server_document_id'])
+            if (decoded.containsKey(field)) field: decoded[field],
+        };
+      }
+    }
 
     final unmatched = references.where((row) =>
         row['matches_target_job'] != true ||

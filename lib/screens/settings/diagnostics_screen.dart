@@ -37,6 +37,15 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
   Map<String, dynamic>? _invoiceLinkReport;
   String? _invoiceLinkError;
   bool _invoiceLinkRunning = false;
+  final _invoiceNumberInput = TextEditingController();
+  final _jobNumberInput = TextEditingController();
+
+  @override
+  void dispose() {
+    _invoiceNumberInput.dispose();
+    _jobNumberInput.dispose();
+    super.dispose();
+  }
 
   Future<void> _run({required bool full}) async {
     if (_running || _functionalRunning || widget.roleCode != 'owner') return;
@@ -65,7 +74,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     }
   }
 
-  Future<void> _inspectJ18Invoice() async {
+  Future<void> _inspectInvoice() async {
     if (widget.roleCode != 'owner' ||
         _invoiceLinkRunning || _running || _functionalRunning) {
       return;
@@ -78,8 +87,8 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     try {
       final report = await _invoiceLinkAudit.inspect(
         businessId: widget.businessId,
-        jobNumber: 'J-18',
-        invoiceNumber: '6346',
+        jobNumber: _jobNumberInput.text.trim(),
+        invoiceNumber: _invoiceNumberInput.text.trim(),
       );
       if (mounted) setState(() => _invoiceLinkReport = report);
     } catch (error) {
@@ -100,7 +109,8 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
       report['target_job_invoices'] as List? ?? const [],
     );
     return [
-      'READ ONLY — J-18 / Invoice #6346',
+      'READ ONLY — Invoice #${report['invoice_number']}',
+      'Job filter: ${(report['job_number']?.toString() ?? '').isEmpty ? 'All linked jobs' : report['job_number']}',
       'Matching local Jobs: ${jobs.length}',
       'Matching invoice-number references: ${refs.length}',
       'Ambiguous: ${report['ambiguous'] == true ? 'YES' : 'NO'}',
@@ -109,8 +119,13 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
       for (final row in refs)
         'Document ID: ${row['document_id']}; linked Job ID: '
         '${row['job_id']}; linked Job number: ${row['linked_job_number']}; '
-        'matches J-18: ${row['matches_target_job']}; '
-        'customer identity conflict: ${row['customer_identity_conflict']}',
+        'customer ${row['customer_name']} (${row['customer_id']}); '
+        'date ${row['document_date']}; total ${row['total']}; '
+        'status ${row['status']}; closed ${row['closed_at']}; '
+        'sync ${row['sync_state']}; '
+        'customer identity conflict: ${row['customer_identity_conflict']}; '
+        'saved snapshot found: ${row['snapshot_found']}; '
+        'saved snapshot fields: ${row['saved'] ?? row['snapshot_error'] ?? 'Unavailable'}',
       'Invoices actually linked to the selected Job: ${targetInvoices.length}',
       for (final row in targetInvoices)
         'Invoice ${row['invoice_number']}; document ID: ${row['document_id']}; '
@@ -315,7 +330,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                       Icon(Icons.manage_search, color: BriskersColors.settings),
                       SizedBox(width: 8),
                       Expanded(child: Text(
-                        'J-18 / Invoice #6346 Link Audit',
+                        'Invoice Link Audit',
                         style: TextStyle(
                           fontSize: 17,
                           fontWeight: FontWeight.w800,
@@ -330,11 +345,29 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                     'invoices. No online request is made.',
                   ),
                   const SizedBox(height: 10),
+                  TextField(
+                    controller: _invoiceNumberInput,
+                    enabled: !_invoiceLinkRunning && !_running && !_functionalRunning,
+                    decoration: const InputDecoration(
+                      labelText: 'Invoice number', hintText: '6360',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _jobNumberInput,
+                    enabled: !_invoiceLinkRunning && !_running && !_functionalRunning,
+                    decoration: const InputDecoration(
+                      labelText: 'Job number (optional)', hintText: 'J-41',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
                   OutlinedButton.icon(
                     onPressed: _invoiceLinkRunning || _running ||
-                            _functionalRunning ? null : _inspectJ18Invoice,
+                            _functionalRunning ? null : _inspectInvoice,
                     icon: const Icon(Icons.fact_check_outlined),
-                    label: const Text('Inspect local J-18 link'),
+                    label: const Text('Inspect saved invoice links'),
                   ),
                   if (_invoiceLinkRunning) ...[
                     const SizedBox(height: 8),
