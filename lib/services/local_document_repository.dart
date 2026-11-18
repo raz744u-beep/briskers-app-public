@@ -444,18 +444,12 @@ class LocalDocumentRepository {
       final cache = LocalDocumentDetailCache(database: _database);
       for (final document in result) {
         if (document['converted'] != true) continue;
-        final detail = await cache.load(businessId, document['id'].toString());
-        final indexVersion = num.tryParse(
-          document['row_version']?.toString() ?? '',
-        );
-        final detailVersion = num.tryParse(
-          detail?['row_version']?.toString() ?? '',
-        );
-        if (detail?['_retired_conversion'] == true &&
-            (indexVersion == null ||
-                detailVersion == null ||
-                detailVersion >= indexVersion)) {
+        final detail = await cache.projectEstimate(businessId, document);
+        if (detail['_retired_conversion'] == true) {
           document['converted'] = false;
+          document['converted_invoice_id'] = null;
+          document['converted_invoice_number'] = null;
+          document['converted_invoice_date'] = null;
           document['display_status'] = DocumentPresentation(document).statusLabel;
         }
       }

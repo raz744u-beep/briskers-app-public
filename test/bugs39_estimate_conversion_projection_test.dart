@@ -7,6 +7,7 @@ import 'package:briskers_app/services/customer_document_summary_service.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_document_repository.dart';
 import 'package:briskers_app/services/local_document_sql_store.dart';
+import 'package:briskers_app/services/local_job_retirement.dart';
 import 'package:briskers_app/services/offline_document_edit_service.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -78,5 +79,36 @@ void main() {
     await cache.save('shop','estimate-2007', source);
     expect((await cache.load('shop','estimate-2007'))!['converted_invoice_id'],'invoice-6377');
     expect((await cache.load('shop','estimate-2007'))!['converted'],true);
+  });
+
+  test('retired conversion remains editable and cannot be resurrected by presentation repair', () async {
+    await LocalJobRetirement.ensureSchema(db);
+    await db.customStatement("INSERT INTO local_job_retirement_entities VALUES('shop','retired-job','invoice','invoice-6377','retirement','accepted')");
+    final cache=LocalDocumentDetailCache(database:db);
+    final detail=(await cache.load('shop','estimate-2007'))!;
+    expect(detail['converted'],false);
+    expect(detail['converted_invoice_id'],isNull);
+    expect((await LocalDocumentRepository(database:db).listByKind('shop',kind:'estimate')).single['converted'],false);
+  });
+
+  test('corrupt or cross-business invoice cache supplies no conversion evidence', () async {
+    for (final raw in ['{invalid', jsonEncode({...target,'business_id':'another-shop'})]) {
+      await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','invoice-6377'),raw);
+      expect((await LocalDocumentDetailCache(database:db).load('shop','estimate-2007'))!['converted'],false);
+    }
+  });
+
+  test('legacy local cache redirect restores conversion on the visible server estimate', () async {
+    await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','invoice-6377'),
+      jsonEncode({...target,'converted_from_estimate_id':null}));
+    await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','local-estimate-original'),
+      jsonEncode({...source,'_server_document_id':'estimate-2007','converted':true,
+        'converted_invoice_id':'invoice-6377'}));
+    final cache=LocalDocumentDetailCache(database:db);
+    expect((await cache.load('shop','estimate-2007'))!['converted'],true);
+    expect((await cache.load('shop','estimate-2007'))!['converted_invoice_number'],'6377');
+    expect((await LocalDocumentRepository(database:db).listByKind('shop',kind:'estimate')).single['converted'],true);
+    await cache.save('shop','estimate-2007',source);
+    expect((await cache.load('shop','estimate-2007'))!['converted_invoice_id'],'invoice-6377');
   });
 }

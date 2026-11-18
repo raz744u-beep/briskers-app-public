@@ -7,6 +7,7 @@ import 'package:briskers_app/services/local_job_identity.dart';
 import 'package:briskers_app/services/local_job_repository.dart';
 import 'package:briskers_app/services/local_job_graph_delete.dart';
 import 'package:briskers_app/services/local_payroll_repository.dart';
+import 'package:briskers_app/services/local_payroll_task_identity.dart';
 import 'package:briskers_app/services/test_job_cleanup_gateway.dart';
 import 'package:briskers_app/services/customer_document_summary_service.dart';
 import 'dart:convert';
@@ -354,6 +355,52 @@ void main() {
       );
     },
   );
+  test('verified invoice aliases project duplicate labor without rewriting work or payments', () async {
+    await seedExtraJob();
+    final payroll = LocalPayrollRepository(db, business: business, owner: true);
+    await payroll.prepare();
+    for (final (task, document, jobId) in [
+      ('original-struts',original,job), ('extra-struts',remote,server['job_id'] as String),
+    ]) {
+      await db.customStatement("INSERT INTO regular_payroll_tasks VALUES(?,?,?,?,?,?)",
+        [business,task,jobId,'labor-$task','Replace front air struts',360]);
+      await db.customStatement("INSERT INTO regular_payroll_task_sources VALUES(?,?,?,?,'invoice',1)",
+        [business,task,document,'line-$task']);
+      await db.customStatement("INSERT INTO regular_payroll_task_order VALUES(?,?,0)",[business,task]);
+      await db.customStatement("INSERT INTO regular_payroll_portions(business_id,id,task_id,employee_id,state) VALUES(?,?,?,'chris','Done')",
+        [business,'portion-$task',task]);
+      await db.customStatement("INSERT INTO regular_payroll_estimates VALUES(?,?,'chris',216)",[business,task]);
+    }
+    await db.customStatement("INSERT INTO regular_payroll_payments VALUES(?,'paid-struts','chris','2026-11-09','{}',14400,0,14400,'Cash','2026-11-15')",[business]);
+    await db.customStatement("INSERT INTO regular_payroll_work_coverage VALUES(?,'portion-original-struts','paid-struts',216,14400,?)",
+      [business,jsonEncode({'id':'portion-original-struts','employee_id':'chris','task_id':'original-struts','minutes':216,'rate':4000})]);
+    Future<Map<String, dynamic>> evidence() async => {
+      for(final table in ['regular_payroll_tasks','regular_payroll_task_sources','regular_payroll_portions','regular_payroll_estimates','regular_payroll_payments','regular_payroll_work_coverage'])
+        table:(await db.customSelect('SELECT * FROM $table').get()).map((r)=>r.data).toList(),
+      'invoice':await LocalDocumentSqlStore.read(db,LocalDocumentDetailCache.key(business,original)),
+    };
+    final before = await evidence();
+    for (var pass=0;pass<2;pass++) {
+      final aliases=await LocalPayrollTaskIdentity(db).aliases(business);
+      expect(aliases,{'extra-struts':'original-struts'});
+      final tasks=await LocalPayrollRepository(db,business:business,owner:true).tasks();
+      expect(tasks.singleWhere((r)=>r['id']=='original-struts')['source_active'],1);
+      expect(tasks.singleWhere((r)=>r['id']=='extra-struts')['duplicate_of_task_id'],'original-struts');
+      expect(tasks.singleWhere((r)=>r['id']=='extra-struts')['source_active'],0);
+      expect(await evidence(),before);
+      if(pass==0) {await db.close();db=BriskersLocalDatabase(NativeDatabase(File('${dir.path}/db.sqlite')));}
+    }
+    await db.customStatement("UPDATE regular_payroll_estimates SET minutes=300 WHERE task_id='extra-struts'");
+    expect(await LocalPayrollTaskIdentity(db).aliases(business),isEmpty);
+    await db.customStatement("UPDATE regular_payroll_estimates SET minutes=216 WHERE task_id='extra-struts'");
+    await db.customStatement("UPDATE regular_payroll_task_order SET line_position=1 WHERE task_id='extra-struts'");
+    expect(await LocalPayrollTaskIdentity(db).aliases(business),isEmpty);
+    await db.customStatement("UPDATE regular_payroll_task_order SET line_position=0 WHERE task_id='extra-struts'");
+    await db.customStatement('DELETE FROM local_document_identity_aliases');
+    await db.customStatement("UPDATE local_documents SET total=1 WHERE id=?",[original]);
+    expect(await LocalPayrollTaskIdentity(db).aliases(business),isEmpty);
+  });
+
   test('stale Job deletion keeps the selected identity after read redirection', () {
     final source=File('lib/screens/jobs/job_detail_screen.dart').readAsStringSync();
     final start=source.indexOf('Future<void> _deleteUnusedJob()');

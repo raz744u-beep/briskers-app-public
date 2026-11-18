@@ -91,6 +91,7 @@ class EmployeeWorkReview extends StatelessWidget {
   /// labor into a new week. This projection never changes a task or payment.
   static String weeklyReason(Map<String, dynamic> row, DateTime week, {DateTime? now}) {
     final start = monday(week), end = start.add(const Duration(days: 5));
+    if (row['duplicate_of_task_id'] != null) return 'Excluded: verified duplicate listing';
     if (row['source_active'] == 0) return 'Excluded: inactive source';
     if (row['assignment_conflict'] == 1) return 'Excluded: assignment needs review';
     if (row['archived_labor'] == 1 || row['recordkeeping_only'] == true) {
@@ -135,6 +136,8 @@ class EmployeeWorkReview extends StatelessWidget {
       'paid: ${((row['paid_minutes'] as int? ?? 0) / 60).toStringAsFixed(2)} h; '
       'remaining: ${((row['remaining_minutes'] as int? ?? 0) / 60).toStringAsFixed(2)} h',
     'Payment state: ${paymentState(row)}; archived: ${row['archived_labor'] ?? 0}',
+    'Original task ID: ${row['duplicate_of_task_id'] ?? 'this task'}; source: ${row['source_kind'] ?? 'unknown'}; '
+      'last paid week: ${row['last_paid_week'] ?? 'unknown'}; prior-paid flag: ${row['owner_prior_paid'] ?? 0}',
     'Work dates: ${row['work_start_date'] ?? 'unknown'} – ${row['work_end_date'] ?? 'unknown'}; '
       'completed: ${row['completed_date'] ?? 'unknown'}; invoice date: ${row['invoice_date'] ?? 'unknown'}',
     weeklyReason(row, week),

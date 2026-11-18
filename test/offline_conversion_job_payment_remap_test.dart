@@ -100,6 +100,11 @@ void main() {
       await drafts.flush('shop');
 
       await payroll.refreshInvoiceTasks();
+      final convertedEstimate = await cache.load('shop', 'estimate');
+      expect(convertedEstimate?['converted'], true);
+      expect(convertedEstimate?['converted_invoice_id'], 'server-invoice');
+      expect(convertedEstimate?['converted_invoice_number'], '501');
+      expect((await cache.load('shop','server-invoice'))?['converted_from_estimate_id'],'estimate');
       expect(await payroll.tasks(), hasLength(1));
       expect((await payroll.tasks()).single['id'], originalTask);
       expect((await payroll.work()).single['id'], allocation);

@@ -1489,6 +1489,7 @@ class OfflineDocumentDraftService {
 
         late final String serverId;
         late Map<String, dynamic> serverDetail;
+        String? convertedEstimateId;
         if (payload['kind'] == 'convert_invoice') {
           final localEstimateId = payload['estimate_id']?.toString() ?? '';
           final cachedEstimate = await _cache.load(businessId, localEstimateId);
@@ -1497,6 +1498,7 @@ class OfflineDocumentDraftService {
           if (estimateServerId.isEmpty) {
             throw StateError('Source estimate needs to synchronize first.');
           }
+          convertedEstimateId = estimateServerId;
           final currentEstimate = await _api.documentDetail(businessId, estimateServerId);
           final alreadyConverted = currentEstimate['converted'] == true;
           if (alreadyConverted) {
@@ -1694,6 +1696,17 @@ class OfflineDocumentDraftService {
           serverDetail = await _applyPendingInvoiceWarranty(
             businessId, serverId, localDetail, outboxId);
         }
+        if (payload['kind'] == 'convert_invoice') {
+          serverDetail = {...serverDetail,
+            'converted_from_estimate_id': convertedEstimateId,
+            'converted_from_estimate_number': localDetail['converted_from_estimate_number']};
+        }
+        if (payload['kind'] == 'estimate' && localDetail['converted'] == true) {
+          serverDetail = {...serverDetail, 'converted': true,
+            'converted_invoice_id': localDetail['converted_invoice_id'],
+            'converted_invoice_number': localDetail['converted_invoice_number'],
+            'converted_invoice_date': localDetail['converted_invoice_date']};
+        }
         await _database.transaction(() async {
           await LocalJobQuarantine.assertReplayAllowed(
             _database,
@@ -1745,6 +1758,17 @@ class OfflineDocumentDraftService {
                 ...original,
                 'converted': true,
                 'converted_invoice_id': serverId,
+                'sync_state': 'synced',
+              });
+              final estimateId = convertedEstimateId!;
+              await _database.customStatement(
+                "UPDATE local_documents SET converted=1 WHERE business_id=? AND id=? AND kind='estimate'",
+                [businessId, estimateId]);
+              await _cache.save(businessId, estimateId, {
+                ...original, 'id': estimateId, 'converted': true,
+                'converted_invoice_id': serverId,
+                'converted_invoice_number': serverDetail['document_number'],
+                'converted_invoice_date': serverDetail['document_date'],
                 'sync_state': 'synced',
               });
             }

@@ -1855,6 +1855,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final byTask=_taskAllocations;
     final service = [
       for (final entry in byTask.entries)
+        if (!entry.value.every((row) => row['duplicate_of_task_id'] != null))
         {...entry.value.first,
           // Grouped task status must use ALL mechanic allocations. Paid
           // history is not active work, and an unpaid completed split must

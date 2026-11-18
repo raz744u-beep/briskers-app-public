@@ -20,6 +20,7 @@ import 'local_document_detail_cache.dart';
 import 'verified_paid_labor.dart';
 import 'secure_employee_details_cache.dart';
 import 'local_owner_authorization.dart';
+import 'local_payroll_task_identity.dart';
 
 typedef VerifiedPayrollWeek = ({int minutes, int netCents});
 
@@ -1817,7 +1818,7 @@ class LocalPayrollRepository {
   Future<List<Map<String, dynamic>>> tasks() async {
     _authorize();
     await prepare();
-    return _read(
+    final rows = await _read(
       'SELECT t.business_id,t.id,t.job_id,t.labor_id,t.planned,COALESCE(tm.description,t.description) AS description,tm.task_name,sch.start_date AS work_start_date,sch.end_date AS work_end_date,COALESCE((SELECT po.priority FROM task_priority_overrides_v1 po WHERE po.business_id=t.business_id AND po.task_kind=\'labor\' AND po.task_id=t.id),sch.priority) AS priority,sch.payroll_treatment,j.job_number,j.customer_name,j.vehicle_label,j.created_at AS job_created_at,'
       '(SELECT MIN(document_date) FROM local_documents jd WHERE jd.business_id=t.business_id AND jd.job_id=t.job_id) AS job_document_date,'
       "d.document_number AS invoice_number,d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,s.source_kind,CASE WHEN d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,"
@@ -1830,6 +1831,9 @@ class LocalPayrollRepository {
       'LEFT JOIN regular_payroll_task_order o ON o.business_id=t.business_id AND o.task_id=t.id '
       'WHERE t.business_id=? ORDER BY t.id', [business],
     );
+    final aliases = await LocalPayrollTaskIdentity(db).aliases(business);
+    _authorize();
+    return rows.map((row) => LocalPayrollTaskIdentity.project(row, aliases, task: true)).toList();
   }
 
   Future<List<Map<String, dynamic>>> work({String? employee, String? job}) async {
@@ -1880,6 +1884,7 @@ class LocalPayrollRepository {
       [business, ?job],
     );
     _authorize();
+    final taskAliases = await LocalPayrollTaskIdentity(db).aliases(business);
     final verifiedPaid=await VerifiedPaidLabor(db).allocations(business);
     final notes=await HistoricalTaskRecordkeeping(db).read(business);
     return rows.map((row) {
@@ -1896,7 +1901,7 @@ class LocalPayrollRepository {
           }
           final remaining = total - paid;
       return {
-        ...row,
+        ...LocalPayrollTaskIdentity.project(row, taskAliases),
         if(rate==0 && paymentRate>0) 'payment_rate_cents':paymentRate,
         if(verifiedPaid.contains(row['id']) || row['archived_labor']==1) 'state':'Done',
         if(row['archived_labor']==1 && notes[row['id']]!=null) ...{
@@ -2736,7 +2741,7 @@ class LocalPayrollRepository {
       );
       if (staff.length != 1 || (base > 0 && staff.single['base_enabled'] != 1))
         { throw StateError('Base not allowed for employee'); }
-      final current = (await work(employee: employee)).where((r)=>r['archived_labor']!=1 && r['payroll_treatment']!='review').toList();
+      final current = (await work(employee: employee)).where((r)=>r['archived_labor']!=1 && r['payroll_treatment']!='review' && r['duplicate_of_task_id']==null).toList();
       if (base > 0 && selected.isEmpty) {
         final nextWeek = DateTime.parse(week).add(const Duration(days: 7));
         final unpaidWork = current.any((row) {

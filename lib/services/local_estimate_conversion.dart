@@ -11,6 +11,50 @@ class LocalEstimateConversion {
   const LocalEstimateConversion(this.db);
   final BriskersLocalDatabase db;
 
+  Future<Map<String, Map<String, dynamic>>> _legacyConversions(String business) async {
+    final prefix = 'briskers_document_detail_${business}_local-estimate-';
+    final rows = await db.customSelect(
+      'SELECT c.cache_key,c.payload_json FROM local_document_details c '
+      'WHERE substr(c.cache_key,1,?)=? AND NOT EXISTS('
+      'SELECT 1 FROM local_document_detail_deleted x WHERE x.cache_key=c.cache_key)',
+      variables: [Variable(prefix.length), Variable(prefix)],
+    ).get();
+    final result = <String, Map<String, dynamic>>{};
+    for (final row in rows) {
+      try {
+        final value = jsonDecode(row.readNullable<String>('payload_json') ?? 'null');
+        if (value is! Map || value['kind'] != 'estimate' ||
+            (value['business_id'] != null && value['business_id'] != business)) continue;
+        final target = value['_server_document_id']?.toString() ?? '';
+        final invoice = value['converted_invoice_id']?.toString() ?? '';
+        if (target.isEmpty || (value['converted'] != true && invoice.isEmpty)) continue;
+        final fullPrefix = 'briskers_document_detail_${business}_';
+        final localId = row.read<String>('cache_key').substring(fullPrefix.length);
+        if (value['id'] != target && value['id'] != localId) continue;
+        final prior = result[target];
+        if (prior?['_ambiguous_conversion'] == true ||
+            (prior != null && prior['converted_invoice_id'] != value['converted_invoice_id'])) {
+          result[target] = {'converted': true, '_ambiguous_conversion': true};
+        } else {
+          result[target] = {...Map<String, dynamic>.from(value), 'converted': true};
+        }
+      } on FormatException {
+        // An unreadable former cache key cannot supply identity evidence.
+      }
+    }
+    return result;
+  }
+
+  Map<String, dynamic> _withLegacy(Map<String, dynamic> saved, Map<String, dynamic>? legacy) {
+    if (legacy == null) return saved;
+    return {
+      ...legacy, ...saved,
+      'converted': saved['converted'] == true || legacy['converted'] == true,
+      'converted_invoice_id': (saved['converted_invoice_id']?.toString().isNotEmpty ?? false)
+          ? saved['converted_invoice_id'] : legacy['converted_invoice_id'],
+    };
+  }
+
   Future<void> projectRows(String business, List<Map<String, dynamic>> rows) async {
     await LocalDocumentSqlStore.ensure(db);
     final records = await db.customSelect(
@@ -22,6 +66,7 @@ class LocalEstimateConversion {
       variables: [Variable(business)],
     ).get();
     final indexes = {for (final record in records) record.read<String>('id'): record.data};
+    final legacy = await _legacyConversions(business);
     final saved = <String, Map<String, dynamic>>{};
     final reverse = <String, List<String>>{};
     for (final record in records) {
@@ -43,7 +88,7 @@ class LocalEstimateConversion {
     for (final row in rows) {
       if (row['kind'] != 'estimate') continue;
       final id = row['id']?.toString() ?? '';
-      final prior = saved[id] ?? const <String, dynamic>{};
+      final prior = _withLegacy(saved[id] ?? const <String, dynamic>{}, legacy[id]);
       final links = reverse[id] ?? const <String>[];
       var target = (row['converted_invoice_id'] ?? prior['converted_invoice_id'])?.toString() ?? '';
       if (target.isEmpty && links.length == 1) target = links.single;
@@ -88,6 +133,7 @@ class LocalEstimateConversion {
       "SELECT converted FROM local_documents WHERE business_id=? AND id=? AND kind='estimate'",
       variables: [Variable(business), Variable(id)],
     ).getSingleOrNull();
+    if (index != null) saved = _withLegacy(saved, (await _legacyConversions(business))[id]);
     var converted = detail['converted'] == true || saved['converted'] == true ||
         index?.data['converted'] == 1;
     var invoiceId = (detail['converted_invoice_id'] ??
@@ -95,14 +141,15 @@ class LocalEstimateConversion {
     // Reverse links survive a stale estimate cache/index. Require an exact
     // internal source ID in a saved invoice belonging to this business.
     if (invoiceId.isEmpty) {
+      const snapshot = "CASE WHEN json_valid(c.payload_json) THEN c.payload_json ELSE '{}' END";
       final links = await db.customSelect(
         "SELECT d.id FROM local_documents d JOIN local_document_details c "
         "ON c.cache_key='briskers_document_detail_' || d.business_id || '_' || d.id "
         "WHERE d.business_id=? AND d.kind='invoice' AND json_valid(c.payload_json) "
-        "AND json_extract(c.payload_json,'$.id')=d.id "
-        "AND json_extract(c.payload_json,'$.kind')='invoice' "
-        "AND (json_extract(c.payload_json,'$.business_id') IS NULL OR json_extract(c.payload_json,'$.business_id')=d.business_id) "
-        "AND json_extract(c.payload_json,'$.converted_from_estimate_id')=? "
+        "AND json_extract($snapshot,'\$.id')=d.id "
+        "AND json_extract($snapshot,'\$.kind')='invoice' "
+        "AND (json_extract($snapshot,'\$.business_id') IS NULL OR json_extract($snapshot,'\$.business_id')=d.business_id) "
+        "AND json_extract($snapshot,'\$.converted_from_estimate_id')=? "
         "AND NOT EXISTS(SELECT 1 FROM local_document_detail_deleted x WHERE x.cache_key=c.cache_key)",
         variables: [Variable(business), Variable(id)],
       ).get();
