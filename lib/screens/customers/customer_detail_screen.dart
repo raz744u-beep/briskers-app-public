@@ -764,7 +764,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
   );
 
   String get _detailCacheKey =>
-      'briskers_customer_detail_${widget.businessId}_${_customerId}';
+      'briskers_customer_detail_${widget.businessId}_$_customerId';
 
   Future<Map<String, dynamic>?> _cachedFullDetail() async {
     final prefs = await SharedPreferences.getInstance();
@@ -773,7 +773,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     try {
       final decoded = jsonDecode(raw);
       return decoded is Map
-          ? LocalCustomerNavigationIdentity(localDatabase).detail(
+          ? await LocalCustomerNavigationIdentity(localDatabase).detail(
               widget.businessId, _customerId, Map<String, dynamic>.from(decoded))
           : null;
     } catch (_) {
