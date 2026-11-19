@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../local/briskers_local_database.dart';
@@ -14,6 +15,50 @@ class LocalDocumentSqlStore {
       'BEFORE INSERT ON local_document_details WHEN EXISTS '
       '(SELECT 1 FROM local_document_detail_deleted WHERE cache_key=NEW.cache_key) '
       "BEGIN SELECT RAISE(ABORT,'Document was deleted locally'); END");
+  }
+  /// Upgrade-era conversion proof may still live only in preferences. Copy
+  /// explicit, scope-checked evidence once at startup so reverse-link queries
+  /// do not depend on opening the target invoice first. Never overwrite SQL.
+  static Future<void> importLegacyConversionEvidence(BriskersLocalDatabase db) async {
+    await ensure(db);
+    final prefs=await SharedPreferences.getInstance();
+    final businesses=(await db.customSelect('SELECT DISTINCT business_id FROM local_documents').get())
+        .map((r)=>r.read<String>('business_id')).toSet();
+    final occupied=(await db.customSelect('SELECT cache_key FROM local_document_details '
+      'UNION SELECT cache_key FROM local_document_detail_deleted').get())
+        .map((r)=>r.read<String>('cache_key')).toSet();
+    final imports=<String,String>{};
+    for(final business in businesses){
+      final prefix='briskers_document_detail_${business}_';
+      for(final key in prefs.getKeys().where((key)=>key.startsWith(prefix) && !occupied.contains(key))){
+        final raw=prefs.get(key);
+        if(raw is! String)continue;
+        try{
+          final value=jsonDecode(raw);
+          if(value is! Map || (value['business_id']!=null && value['business_id']!=business))continue;
+          final id=key.substring(prefix.length);
+          final validAlias=id.startsWith('local-estimate-') &&
+              value['_server_document_id']!=null && value['id']==value['_server_document_id'];
+          if(value['id']!=id && !validAlias){continue;}
+          final kind=value['kind'];
+          final evidence=kind=='invoice'
+              ? ((value['converted_from_estimate_id'] ?? value['source_estimate_id'])?.toString().isNotEmpty ?? false)
+              : kind=='estimate' && (value['converted']==true ||
+                (value['converted_invoice_id']?.toString().isNotEmpty ?? false));
+          if(evidence)imports[key]=raw;
+        }on FormatException{
+          // Leave unreadable legacy evidence untouched for review.
+        }
+      }
+    }
+    if(imports.isEmpty)return;
+    await db.transaction(()async{
+      for(final entry in imports.entries){
+        await db.customStatement('INSERT INTO local_document_details(cache_key,payload_json) '
+          'SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM local_document_detail_deleted WHERE cache_key=?) '
+          'ON CONFLICT(cache_key) DO NOTHING',[entry.key,entry.value,entry.key]);
+      }
+    });
   }
   static Future<bool> deleted(BriskersLocalDatabase db,String key) async {
     await ensure(db);

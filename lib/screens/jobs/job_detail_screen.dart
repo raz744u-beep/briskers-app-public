@@ -1,3 +1,4 @@
+import '../../widgets/customer_identity_marker.dart';
 import '../../services/local_customer_navigation_identity.dart';
 import '../../services/job_status_local_events.dart';
 import '../../services/local_job_identity.dart';
@@ -3706,10 +3707,13 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           padding: const EdgeInsets.fromLTRB(7, 5, 5, 5),
           child: Row(
             children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: color.withValues(alpha: 0.13),
-                child: Icon(icon, color: color, size: 21),
+              CustomerIdentityMarker(
+                flagged: problemFlag,
+                icon: CircleAvatar(
+                  radius: 18,
+                  backgroundColor: color.withValues(alpha: 0.13),
+                  child: Icon(icon, color: color, size: 21),
+                ),
               ),
               const SizedBox(width: 9),
               Expanded(
@@ -3746,10 +3750,6 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   ],
                 ),
               ),
-              if (problemFlag) ...[
-                const SizedBox(width: 5),
-                const Icon(Icons.flag, color: Colors.red, size: 19),
-              ],
               if (enabled || showChevron)
                 const Icon(Icons.chevron_right, size: 22),
             ],
@@ -3915,7 +3915,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                       ? Align(alignment:Alignment.centerLeft,child:invoiceChip(linkedInvoices.first))
                       : InkWell(onTap:_canManage && !_busy?_changeJobTitle:null,child:Text(jobTitle.isEmpty?'No linked invoice saved':jobTitle));
                     if(!(OwnerPayrollScreen.enabled && _owner))return invoice;
-                    final mechanic=JobTasksAccess(business:widget.businessId,job:_jobId,selectorOnly:true,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);});
+                    final mechanic=JobTasksAccess(business:widget.businessId,job:_jobId,initialJob:_job,selectorOnly:true,revision:_loadEpoch,onChanged:()=>unawaited(_load()),onHours:(estimated,actual){if(mounted && _taskEstimatedMinutes!=estimated)setState(()=>_taskEstimatedMinutes=estimated);});
                     if(constraints.maxWidth*.6<180*MediaQuery.textScalerOf(context).scale(1)) {
                       return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[invoice,const SizedBox(height:6),mechanic]);
                     }

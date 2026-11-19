@@ -476,11 +476,13 @@ class LocalFinancialCache {
         }
       }
       rows = byId.values.toList();
-      if (!scoped) rows.sort((a,b) {
+      if (!scoped) {
+        rows.sort((a,b) {
         final date = (b['transaction_date']?.toString() ?? '')
             .compareTo(a['transaction_date']?.toString() ?? '');
         return date != 0 ? date : (a['id']?.toString() ?? '').compareTo(b['id']?.toString() ?? '');
-      });
+        });
+      }
     }
 
     final voided = await locallyVoidedExpenseIds(businessId);
@@ -492,7 +494,9 @@ class LocalFinancialCache {
       if (linkedTransactionIds != null &&
           !linkedTransactionIds.contains(row['id']?.toString()) &&
           !(linkedJobId != null && row['job_id']?.toString() == linkedJobId) &&
-          !linkedDocumentIds.contains(row['document_id']?.toString())) return false;
+          !linkedDocumentIds.contains(row['document_id']?.toString())) {
+        return false;
+      }
       if (direction != null &&
           row['direction']?.toString() != direction) {
         return false;
@@ -716,7 +720,7 @@ class LocalFinancialCache {
           if (inScope(row)) row['id'] as String,
       } : null,
       linkedJobId: relatedJobId ?? jobId,
-      linkedDocumentIds: {if (documentId != null) documentId, ...documentIds},
+      linkedDocumentIds: {?documentId, ...documentIds},
     );
     for (final row in local) {
       final id = row['id']?.toString() ?? '';

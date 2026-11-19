@@ -23,6 +23,7 @@ class LocalDocumentDetailCache {
   static Future<void> initialize(BriskersLocalDatabase db) async {
     await LocalDocumentSqlStore.ensure(db);
     sqliteWritesEnabled=true;
+    await LocalDocumentSqlStore.importLegacyConversionEvidence(db);
     final pending = await db.customSelect(
       "SELECT id,business_id,document_number FROM local_documents WHERE kind='estimate' "
       "ORDER BY coalesce(document_date,''),created_at,id",

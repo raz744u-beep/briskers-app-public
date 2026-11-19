@@ -112,4 +112,44 @@ void main() {
     await cache.save('shop','estimate-2007',source);
     expect((await cache.load('shop','estimate-2007'))!['converted_invoice_id'],'invoice-6377');
   });
+  test('server source_estimate_id also proves conversion across detail and list', () async {
+    await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','invoice-6377'),
+      jsonEncode({...target,'converted_from_estimate_id':null,'source_estimate_id':'estimate-2007'}));
+    final detail=(await LocalDocumentDetailCache(database:db).load('shop','estimate-2007'))!;
+    expect(detail['converted'],true);
+    expect(detail['converted_invoice_id'],'invoice-6377');
+    final list=await LocalDocumentRepository(database:db).listByKind('shop',kind:'estimate');
+    expect(list.single['display_status'],'Converted');
+  });
+
+  test('startup imports legacy conversion proof before either invoice is opened', () async {
+    final invoiceKey=LocalDocumentDetailCache.key('shop','invoice-6377');
+    await db.customStatement('DELETE FROM local_document_details WHERE cache_key=?',[invoiceKey]);
+    final prefs=await SharedPreferences.getInstance();
+    final legacy=jsonEncode({...target,'converted_from_estimate_id':null,'source_estimate_id':'estimate-2007'});
+    await prefs.setString(invoiceKey,legacy);
+    await LocalDocumentDetailCache.initialize(db);
+    final cache=LocalDocumentDetailCache(database:db);
+    expect((await cache.load('shop','estimate-2007'))!['converted_invoice_id'],'invoice-6377');
+    expect((await LocalDocumentRepository(database:db).listByKind('shop',kind:'estimate')).single['converted'],true);
+    expect(prefs.getString(invoiceKey),legacy,reason:'Original recovery evidence stays intact');
+    expect(await LocalDocumentSqlStore.read(db,invoiceKey),legacy);
+    await cache.save('shop','estimate-2007',source);
+    expect((await cache.load('shop','estimate-2007'))!['converted'],true);
+  });
+
+  test('legacy startup import never overwrites current SQL or revives deleted evidence', () async {
+    final invoiceKey=LocalDocumentDetailCache.key('shop','invoice-6377');
+    final prefs=await SharedPreferences.getInstance();
+    await prefs.setString(invoiceKey,jsonEncode({...target,'source_estimate_id':'unrelated'}));
+    final before=await LocalDocumentSqlStore.read(db,invoiceKey);
+    await LocalDocumentDetailCache.initialize(db);
+    expect(await LocalDocumentSqlStore.read(db,invoiceKey),before);
+    await db.customStatement('INSERT INTO local_document_detail_deleted(cache_key) VALUES(?)',[invoiceKey]);
+    await db.customStatement('DELETE FROM local_document_details WHERE cache_key=?',[invoiceKey]);
+    await LocalDocumentDetailCache.initialize(db);
+    expect(await LocalDocumentSqlStore.read(db,invoiceKey),isNull);
+    expect((await LocalDocumentDetailCache(database:db).load('shop','estimate-2007'))!['converted'],false);
+  });
+
 }

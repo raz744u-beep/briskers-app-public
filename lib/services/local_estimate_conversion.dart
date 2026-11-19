@@ -66,7 +66,8 @@ class LocalEstimateConversion {
       "CASE WHEN json_extract(c.payload_json,'\$.id')=d.id "
       "AND json_extract(c.payload_json,'\$.kind')='invoice' "
       "AND (json_extract(c.payload_json,'\$.business_id') IS NULL OR json_extract(c.payload_json,'\$.business_id')=d.business_id) "
-      "THEN json_extract(c.payload_json,'\$.converted_from_estimate_id') END END AS source_estimate_id "
+      "THEN COALESCE(NULLIF(json_extract(c.payload_json,'\$.converted_from_estimate_id'),''), "
+      "NULLIF(json_extract(c.payload_json,'\$.source_estimate_id'),'')) END END AS source_estimate_id "
       "FROM local_documents d LEFT JOIN local_document_details c "
       "ON c.cache_key='briskers_document_detail_' || d.business_id || '_' || d.id "
       "WHERE d.business_id=? AND NOT EXISTS(SELECT 1 FROM local_document_detail_deleted x "
@@ -162,9 +163,10 @@ class LocalEstimateConversion {
         "AND json_extract($snapshot,'\$.id')=d.id "
         "AND json_extract($snapshot,'\$.kind')='invoice' "
         "AND (json_extract($snapshot,'\$.business_id') IS NULL OR json_extract($snapshot,'\$.business_id')=d.business_id) "
-        "AND json_extract($snapshot,'\$.converted_from_estimate_id')=? "
+        "AND (json_extract($snapshot,'\$.converted_from_estimate_id')=? "
+        "OR json_extract($snapshot,'\$.source_estimate_id')=?) "
         "AND NOT EXISTS(SELECT 1 FROM local_document_detail_deleted x WHERE x.cache_key=c.cache_key)",
-        variables: [Variable(business), Variable(id)],
+        variables: [Variable(business), Variable(id), Variable(id)],
       ).get();
       if (links.length == 1) invoiceId = links.single.read<String>('id');
       if (links.isNotEmpty) converted = true;

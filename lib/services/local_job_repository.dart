@@ -982,6 +982,8 @@ class LocalJobRepository {
       'vehicle': row.readNullable<String>('vehicle_label'),
       'vehicle_vin': row.readNullable<String>('vehicle_vin'),
       'vehicle_plate': row.readNullable<String>('vehicle_plate'),
+      'assigned_employee_id': row.readNullable<String>('assigned_employee_id'),
+      'assigned_employee': row.readNullable<String>('assigned_employee_name'),
       'is_unassigned': row.read<int>('is_unassigned') == 1,
       'capabilities': capabilities,
       'assignments': assignments,

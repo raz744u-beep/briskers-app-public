@@ -13,7 +13,8 @@ import 'payroll_ui_scope.dart';
 
 /// The same task identity is used by the invoice, Job and employee screens.
 class JobTasksAccess extends StatefulWidget {
-  const JobTasksAccess({super.key,required this.business,required this.job,this.invoice,this.line,this.database,this.onChanged,this.onHours,this.revision=0,this.selectorOnly=false});
+  const JobTasksAccess({super.key,required this.business,required this.job,this.invoice,this.line,this.database,this.onChanged,this.onHours,this.revision=0,this.selectorOnly=false,this.initialJob});
+  final Map<String,dynamic>? initialJob;
   final String business,job;
   final int revision;
   /// Render just the same job-level Main Mechanic selector on Invoice Details.
@@ -30,11 +31,35 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
   String? main;
   String? warning;
   bool busy=false;
+  bool mainLoaded=false;
+  int readEpoch=0;
   int? estimated,actual;
   String? lineAssignment;
   List<Map<String,dynamic>> linePeople=[];
-  @override void initState(){super.initState();unawaited(widget.line==null?load():loadLine());}
-  @override void didUpdateWidget(covariant JobTasksAccess old){super.didUpdateWidget(old);if(old.job!=widget.job || old.line!=widget.line || old.invoice!=widget.invoice || old.revision!=widget.revision){unawaited(widget.line==null?load():loadLine());}}
+  void seedMain() {
+    final saved=widget.initialJob;
+    if(saved==null || saved['id']?.toString()!=widget.job ||
+        (saved['business_id']!=null && saved['business_id']!=widget.business)){return;}
+    final assignments=(saved['assignments'] as List? ?? const []).whereType<Map>();
+    final first=assignments.firstOrNull;
+    final id=(saved['assigned_employee_id'] ?? first?['employee_id'])?.toString();
+    if((id==null || id.isEmpty) && !saved.containsKey('assigned_employee_id') &&
+        saved['is_unassigned']!=true){return;}
+    main=id==null || id.isEmpty?null:id;
+    staff=main==null?[]:[{'id':main,'name':saved['assigned_employee'] ??
+      saved['assigned_employee_name'] ?? first?['employee_name'] ?? 'Saved mechanic'}];
+    mainLoaded=true;
+  }
+  @override void initState(){super.initState();seedMain();unawaited(widget.line==null?load():loadLine());}
+  @override void didUpdateWidget(covariant JobTasksAccess old){
+    super.didUpdateWidget(old);
+    if(old.business!=widget.business || old.job!=widget.job || old.line!=widget.line || old.invoice!=widget.invoice || old.revision!=widget.revision){
+      if(old.business!=widget.business || old.job!=widget.job){
+        readEpoch++;staff=[];main=null;mainLoaded=false;warning=null;seedMain();
+      }
+      unawaited(widget.line==null?load():loadLine());
+    }
+  }
   /// Snapshot the *same* durable invoice-labor allocation IDs used by Payroll.
   /// Customer billed quantity is never read or changed by this presentation.
   Future<void> loadLine() async {
@@ -181,12 +206,36 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
   }
 
   Future<void> load()async{
-    try{
-      await LocalPayrollRepository(db,business:widget.business,owner:true)
-          .recoverJobAssignments(widget.job);
-      final roster=await OfflineJobAdminService(database:db).cachedEmployees(widget.business).timeout(const Duration(seconds:3));
+    final epoch=++readEpoch;
+    final business=widget.business,job=widget.job;
+    bool current()=>mounted && epoch==readEpoch && widget.business==business && widget.job==job;
+    Future<void> readMain()async{
       final row=await db.customSelect('SELECT assigned_employee_id,assigned_employee_name FROM local_jobs WHERE business_id=? AND id=?',
-        variables:[Variable(widget.business),Variable(widget.job)]).getSingleOrNull();
+        variables:[Variable(business),Variable(job)]).getSingleOrNull();
+      if(!current() || row==null)return;
+      setState((){
+        main=row.data['assigned_employee_id'] as String?;
+        mainLoaded=true;
+        if(main!=null && !staff.any((r)=>r['id']==main)){
+          staff=[...staff,{'id':main,'name':row.data['assigned_employee_name']??'Saved mechanic'}];
+        }
+      });
+    }
+    try{
+      // Render the durable job core before any payroll repair or roster work.
+      await readMain();
+      if(!current())return;
+      await LocalPayrollRepository(db,business:business,owner:true).recoverJobAssignments(job);
+      if(!current())return;
+      await readMain();
+      final roster=await OfflineJobAdminService(database:db).cachedEmployees(business).timeout(const Duration(seconds:3));
+      if(!current())return;
+      setState((){
+        final saved=staff.where((r)=>r['id']==main).firstOrNull;
+        staff=[...roster,if(main!=null && !roster.any((r)=>r['id']==main))
+          saved??{'id':main,'name':'Saved mechanic'}];
+        warning=null;
+      });
       final tables=await db.customSelect("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('regular_payroll_portions','regular_payroll_estimates','local_mechanic_work_credits_v1','regular_payroll_actual_time','regular_payroll_assignment_meta')").get();
       if(tables.length==5){
         final totals=await db.customSelect('SELECT COALESCE(SUM(e.minutes),0) AS estimated,COALESCE(SUM(COALESCE(a.minutes,c.actual_minutes)),0) AS actual '
@@ -195,14 +244,12 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
           'LEFT JOIN regular_payroll_actual_time a ON a.business_id=p.business_id AND a.credit_id=p.id '
           'LEFT JOIN regular_payroll_assignment_meta m ON m.business_id=p.business_id AND m.task_id=p.task_id AND m.employee_id=p.employee_id '
           'WHERE p.business_id=? AND c.job_id=? AND (COALESCE(m.active,1)=1 OR c.actual_minutes>0)',
-          variables:[Variable(widget.business),Variable(widget.job)]).getSingle();
+          variables:[Variable(business),Variable(job)]).getSingle();
+        if(!current())return;
         estimated=totals.read<int>('estimated');actual=totals.read<int>('actual');
-        if(mounted){widget.onHours?.call(estimated!,actual!);}
+        widget.onHours?.call(estimated!,actual!);
       }
-      if(mounted){setState((){staff=roster;main=row?.data['assigned_employee_id'] as String?;
-        if(main!=null && !staff.any((r)=>r['id']==main)){staff=[...staff,{'id':main,'name':row?.data['assigned_employee_name']??'Saved mechanic'}];}
-        warning=null;});}
-    }catch(_){if(mounted)setState(()=>warning='Saved mechanic list is not available yet. Retry.');}
+    }catch(_){if(current())setState(()=>warning='Saved mechanic list is not available yet. Retry.');}
   }
   Future<LocalPayrollRepository> unlock()async{
     final scope=PayrollUiScope.of(context);
@@ -225,6 +272,8 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
         if(prior==null)await repo.saveEmployeeCompensation(employee:id,name:(person['name']??id).toString(),rate:0,weeklyBase:false);
       }
       await repo.setMainMechanic(widget.job,id,person?['name']?.toString());
+      if(!mounted)return;
+      setState((){main=id;mainLoaded=true;});
       await load();
       if(mounted)widget.onChanged?.call();
     }catch(e){if(mounted)setState(()=>warning='$e');}
@@ -319,7 +368,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
               isExpanded:true,isDense:true,
               style:Theme.of(context).textTheme.bodyMedium!.copyWith(fontSize:14,color:const Color(0xFF153E38),fontWeight:FontWeight.w800),
               icon:const Icon(Icons.arrow_drop_down,color:Color(0xFF076B56)),
-              hint:const Text('Unassigned'),
+              hint:Text(mainLoaded?'Unassigned':'Loading…'),
               items:[
                 const DropdownMenuItem<String>(value:null,
                   child:Text('Unassigned')),
@@ -329,7 +378,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
                     child:Text(EmployeeNicknameStore.displayLabel(entry.value,staff),
                       maxLines:1,overflow:TextOverflow.ellipsis)),
               ],
-              onChanged:busy?null:chooseMain,
+              onChanged:busy || !mainLoaded?null:chooseMain,
             )),
             ],
           ),

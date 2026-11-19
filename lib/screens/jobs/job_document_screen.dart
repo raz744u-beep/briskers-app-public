@@ -1,3 +1,4 @@
+import '../../widgets/customer_identity_marker.dart';
 import '../../services/local_document_party_identity.dart';
 import '../../services/local_document_identity.dart';
 import '../../services/local_recent_records.dart';
@@ -51,7 +52,6 @@ import '../../core/standard_note_rules.dart';
 import '../../services/briskers_api.dart';
 import '../../services/invoice_tax_proposal.dart';
 import '../../widgets/briskers_dialog.dart';
-import '../../services/local_financial_cache.dart';
 import '../../services/invoice_expense_reader.dart';
 import '../../services/document_pdf_service.dart';
 import '../../services/invoice_performance_metrics.dart';
@@ -5508,7 +5508,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       final line = Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 20, color: const Color(0xFF26354D)),
+          CustomerIdentityMarker(
+            icon: Icon(icon, size: 20, color: const Color(0xFF26354D)),
+            flagged: problemFlag,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -5526,10 +5529,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ),
             ),
           ),
-          if (problemFlag) ...[
-            const SizedBox(width: 5),
-            const Icon(Icons.flag, color: Colors.red, size: 19),
-          ],
           if (onTap != null) ...[
             const SizedBox(width: 4),
             Icon(

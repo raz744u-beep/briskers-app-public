@@ -31,6 +31,8 @@ class JobDetailFirstFrame {
       'payment_state': row['payment_state'],
       'planned_hours': row['planned_hours'],
       'odometer_in': row['odometer_in'],
+      'assigned_employee_id': employeeId.isEmpty ? null : employeeId,
+      'assigned_employee': employee,
       'is_unassigned': employee.isEmpty,
       'assignments': employee.isEmpty ? const <Map<String, dynamic>>[] : [
         <String, dynamic>{
