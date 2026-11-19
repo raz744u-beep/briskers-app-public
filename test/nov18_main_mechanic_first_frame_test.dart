@@ -17,6 +17,7 @@ void main() {
             'id': id,
             'assigned_employee_id': name.toLowerCase(),
             'assigned_employee': name,
+            'assigned_employee_nickname': name,
           }, expectedJobId: id)!;
       Widget screen(String job, String name) => MaterialApp(
         home: Scaffold(

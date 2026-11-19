@@ -45,9 +45,13 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
     final id=(saved['assigned_employee_id'] ?? first?['employee_id'])?.toString();
     if((id==null || id.isEmpty) && !saved.containsKey('assigned_employee_id') &&
         saved['is_unassigned']!=true){return;}
+    final nicknameKnown=saved.containsKey('assigned_employee_nickname') ||
+        (first?.containsKey('nickname') ?? false);
     main=id==null || id.isEmpty?null:id;
     staff=main==null?[]:[{'id':main,'name':saved['assigned_employee'] ??
-      saved['assigned_employee_name'] ?? first?['employee_name'] ?? 'Saved mechanic'}];
+      saved['assigned_employee_name'] ?? first?['employee_name'] ?? 'Saved mechanic',
+      'nickname':saved['assigned_employee_nickname'] ?? first?['nickname'],
+      '_nickname_pending':!nicknameKnown}];
     mainLoaded=true;
   }
   @override void initState(){super.initState();seedMain();unawaited(widget.line==null?load():loadLine());}
@@ -213,12 +217,21 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
       final row=await db.customSelect('SELECT assigned_employee_id,assigned_employee_name FROM local_jobs WHERE business_id=? AND id=?',
         variables:[Variable(business),Variable(job)]).getSingleOrNull();
       if(!current() || row==null)return;
+      final id=row.data['assigned_employee_id'] as String?;
+      final nickname=id==null?null:await EmployeeNicknameStore(database:db).get(business,id);
+      if(!current())return;
       setState((){
-        main=row.data['assigned_employee_id'] as String?;
+        main=id;
         mainLoaded=true;
-        if(main!=null && !staff.any((r)=>r['id']==main)){
-          staff=[...staff,{'id':main,'name':row.data['assigned_employee_name']??'Saved mechanic'}];
-        }
+        final saved=staff.where((r)=>r['id']==id).firstOrNull;
+        staff=[
+          for(final person in staff) if(person['id']!=id)person,
+          if(id!=null){
+            ...?saved,'id':id,
+            'name':row.data['assigned_employee_name']??saved?['name']??'Saved mechanic',
+            'nickname':nickname,'_nickname_pending':false,
+          },
+        ];
       });
     }
     try{
@@ -375,7 +388,8 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
                 for(final entry in values.entries)
                   DropdownMenuItem<String>(
                     value:entry.key as String,
-                    child:Text(EmployeeNicknameStore.displayLabel(entry.value,staff),
+                    child:Text(entry.value['_nickname_pending']==true
+                        ? 'Loading…' : EmployeeNicknameStore.displayLabel(entry.value,staff),
                       maxLines:1,overflow:TextOverflow.ellipsis)),
               ],
               onChanged:busy || !mainLoaded?null:chooseMain,

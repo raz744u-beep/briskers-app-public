@@ -33,11 +33,15 @@ class JobDetailFirstFrame {
       'odometer_in': row['odometer_in'],
       'assigned_employee_id': employeeId.isEmpty ? null : employeeId,
       'assigned_employee': employee,
+      if (row.containsKey('assigned_employee_nickname'))
+        'assigned_employee_nickname': row['assigned_employee_nickname'],
       'is_unassigned': employee.isEmpty,
       'assignments': employee.isEmpty ? const <Map<String, dynamic>>[] : [
         <String, dynamic>{
           'employee_id': employeeId,
           'employee_name': employee,
+          if (row.containsKey('assigned_employee_nickname'))
+            'nickname': row['assigned_employee_nickname'],
           'position': position,
         },
       ],
