@@ -41,7 +41,7 @@ void main() {
     SharedPreferences.setMockInitialValues(disk);
     await tester.pumpWidget(screen);
     await drain();
-    expect(find.text('Last 30 days'), findsOneWidget);
+    expect(find.text('30 days'), findsOneWidget);
     expect(find.text('All Time'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());

@@ -1276,6 +1276,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
 
   Future<void> _chooseDirection() async {
     if (_restoringFilters) return;
+    final filterScope = (widget.businessId, widget.roleCode);
     FocusManager.instance.primaryFocus?.unfocus();
     final selected = await showModalBottomSheet<String>(
       context: context,
@@ -1299,7 +1300,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ),
       ),
     );
-    if (selected == null || selected == _filter) return;
+    if (!mounted || filterScope != (widget.businessId, widget.roleCode) ||
+        selected == null || selected == _filter) return;
     if (!mounted) return;
     setState(() => _filter = selected);
     await _saveFilters();
@@ -1308,6 +1310,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
 
   Future<void> _chooseDateRange() async {
     if (_restoringFilters) return;
+    final filterScope = (widget.businessId, widget.roleCode);
     FocusManager.instance.primaryFocus?.unfocus();
     final now = DateTime.now();
     final business = widget.businessId;
@@ -1365,7 +1368,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ),
       ),
     );
-    if (selected == null) return;
+    if (!mounted || filterScope != (widget.businessId, widget.roleCode) ||
+        selected == null) return;
 
     if (selected == 'custom') {
       if (!mounted) return;
@@ -1382,7 +1386,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                 end: now,
               ),
       );
-      if (picked == null) return;
+      if (!mounted || filterScope != (widget.businessId, widget.roleCode) ||
+          picked == null) return;
       _customStartDate = _dateOnly(picked.start);
       _customEndDate = _dateOnly(picked.end);
     }
@@ -1395,6 +1400,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
 
   Future<void> _showAdvancedFilters() async {
     if (_restoringFilters) return;
+    final filterScope = (widget.businessId, widget.roleCode);
     FocusManager.instance.primaryFocus?.unfocus();
     var accountId = _accountFilterId;
     var categoryId = _categoryFilterId;
@@ -1432,6 +1438,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       value: null,
                       child: Text('All accounts'),
                     ),
+                    if (accountId != null && !_accounts.any(
+                      (item) => item['id']?.toString() == accountId))
+                      DropdownMenuItem<String?>(
+                        value: accountId,
+                        child: const Text('Saved account (unavailable)'),
+                      ),
                     ..._accounts.map(
                       (item) => DropdownMenuItem<String?>(
                         value: item['id']?.toString(),
@@ -1453,6 +1465,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       value: null,
                       child: Text('All categories'),
                     ),
+                    if (categoryId != null && !_categories.any(
+                      (item) => item['id']?.toString() == categoryId))
+                      DropdownMenuItem<String?>(
+                        value: categoryId,
+                        child: const Text('Saved category (unavailable)'),
+                      ),
                     ..._categories.map(
                       (item) => DropdownMenuItem<String?>(
                         value: item['id']?.toString(),
@@ -1474,6 +1492,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       value: null,
                       child: Text('All payees'),
                     ),
+                    if (counterpartyId != null && !_counterparties.any(
+                      (item) => item['id']?.toString() == counterpartyId))
+                      DropdownMenuItem<String?>(
+                        value: counterpartyId,
+                        child: const Text('Saved payee (unavailable)'),
+                      ),
                     ..._counterparties.map(
                       (item) => DropdownMenuItem<String?>(
                         value: item['id']?.toString(),
@@ -1519,7 +1543,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       ),
     );
 
-    if (applied != true || !mounted) return;
+    if (applied != true || !mounted ||
+        filterScope != (widget.businessId, widget.roleCode)) return;
     setState(() {
       _accountFilterId = accountId;
       _categoryFilterId = categoryId;
