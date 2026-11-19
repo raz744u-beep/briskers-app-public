@@ -2,7 +2,7 @@ name: Briskers Diagnostics
 
 on:
   push:
-    branches: [fix/bugs38-round1-historical-edit-guard, fix/bugs38-consolidated, fix/payroll-link-invoice-expenses-20261118]
+    branches: [fix/bugs38-round1-historical-edit-guard, fix/bugs38-consolidated, fix/payroll-link-invoice-expenses-20261118, fix/4742-expense-filter-integration-20261119]
   workflow_dispatch:
   pull_request:
     paths:
@@ -95,6 +95,8 @@ jobs:
         working-directory: generated
         run: >-
           flutter test --reporter expanded --timeout 45s
+          test/expense_filter_preferences_test.dart
+          test/expenses_filter_restart_test.dart
           test/invoice_expense_reader_test.dart
           test/bugs39_weekly_labor_provenance_test.dart
           test/nov18_main_mechanic_first_frame_test.dart

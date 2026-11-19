@@ -22,6 +22,7 @@ import '../services/offline_financial_write_service.dart';
 import '../services/financial_history_recovery.dart';
 import '../services/invoice_payment_feed.dart';
 import '../services/expenses_period_totals.dart';
+import '../services/expense_filter_preferences.dart';
 import '../services/local_expense_subtotal.dart';
 import '../services/local_transaction_search.dart';
 import '../services/verified_expense_totals_cache.dart';
@@ -91,6 +92,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   String? _photoQueueError;
   int _indexProcessed = 0;
   int _indexExpected = 0;
+  bool _restoringFilters = true;
+  int _filterRestoreEpoch = 0;
   String _filter = 'all';
   String _dateRange = 'all';
   ({DateTime? start, DateTime end})? _postedHistoryCoverage;
@@ -153,7 +156,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     // appear unresponsive, particularly after returning from another module.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      unawaited(_load());
+      unawaited(_restoreFiltersAndLoad());
       unawaited(_refreshPhotoCounts());
     });
     if (_owner && Platform.isAndroid) {
@@ -179,6 +182,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         oldWidget.roleCode != widget.roleCode) {
       // Never reuse an Owner's financial totals or server ID proofs for a
       // different business/role. Even a transient role swap must fail closed.
+      ++_loadEpoch;
+      ++_receiptEpoch;
+      _restoringFilters = true;
       ++_periodEpoch;
       _pendingPeriodScope = null;
       _periodTotals = null;
@@ -207,7 +213,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       _transactions = const [];
       _invoiceReceipts = const [];
       _visibleCount = _pageSize;
-      unawaited(_load());
+      unawaited(_restoreFiltersAndLoad());
       return;
     }
     if (oldWidget.dockResetToken != widget.dockResetToken) {
@@ -226,6 +232,53 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     // Refresh the scope automatically without clearing the visible list.
     // Force Offline is handled by _load and never invokes remote requests.
     unawaited(_load(showLoading: false));
+  }
+
+  Future<void> _restoreFiltersAndLoad() async {
+    final epoch = ++_filterRestoreEpoch;
+    final business = widget.businessId;
+    final role = widget.roleCode;
+    ExpenseFilterPreferences saved;
+    try {
+      saved = await ExpenseFilterPreferences.load(business, role);
+    } catch (_) {
+      saved = const ExpenseFilterPreferences();
+    }
+    if (!mounted || epoch != _filterRestoreEpoch ||
+        business != widget.businessId || role != widget.roleCode) {
+      return;
+    }
+    setState(() {
+      _filter = saved.direction;
+      _dateRange = saved.dateRange;
+      _customStartDate = saved.customStart;
+      _customEndDate = saved.customEnd;
+      _accountFilterId = saved.accountId;
+      _categoryFilterId = saved.categoryId;
+      _counterpartyFilterId = saved.counterpartyId;
+      _restoringFilters = false;
+    });
+    await _load();
+  }
+
+  Future<void> _saveFilters() async {
+    final selection = ExpenseFilterPreferences(
+      direction: _filter,
+      dateRange: _dateRange,
+      customStart: _customStartDate,
+      customEnd: _customEndDate,
+      accountId: _accountFilterId,
+      categoryId: _categoryFilterId,
+      counterpartyId: _counterpartyFilterId,
+    );
+    try {
+      await selection.save(widget.businessId, widget.roleCode);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Filters could not be saved. Please select them again.'),
+      ));
+    }
   }
 
   @override
@@ -425,6 +478,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     bool refreshReceipts = false,
     bool forceTotals = false,
   }) async {
+    if (_restoringFilters) return;
     _appliedSearch = _searchController.text.trim();
     _offlineScopeRows = null;
     _offlineMatches = null;
@@ -1223,6 +1277,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
   Future<void> _chooseDirection() async {
+    if (_restoringFilters) return;
+    final filterScope = (widget.businessId, widget.roleCode);
     FocusManager.instance.primaryFocus?.unfocus();
     final selected = await showModalBottomSheet<String>(
       context: context,
@@ -1246,12 +1302,19 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ),
       ),
     );
-    if (selected == null || selected == _filter) return;
+    if (!mounted || filterScope != (widget.businessId, widget.roleCode) ||
+        selected == null || selected == _filter) {
+      return;
+    }
+    if (!mounted) return;
     setState(() => _filter = selected);
-    await _load();
+    await _saveFilters();
+    if (mounted) await _load();
   }
 
   Future<void> _chooseDateRange() async {
+    if (_restoringFilters) return;
+    final filterScope = (widget.businessId, widget.roleCode);
     FocusManager.instance.primaryFocus?.unfocus();
     final now = DateTime.now();
     final business = widget.businessId;
@@ -1309,7 +1372,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ),
       ),
     );
-    if (selected == null) return;
+    if (!mounted || filterScope != (widget.businessId, widget.roleCode) ||
+        selected == null) {
+      return;
+    }
 
     if (selected == 'custom') {
       if (!mounted) return;
@@ -1326,17 +1392,23 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                 end: now,
               ),
       );
-      if (picked == null) return;
+      if (!mounted || filterScope != (widget.businessId, widget.roleCode) ||
+          picked == null) {
+        return;
+      }
       _customStartDate = _dateOnly(picked.start);
       _customEndDate = _dateOnly(picked.end);
     }
 
     if (!mounted) return;
     setState(() => _dateRange = selected);
-    await _load();
+    await _saveFilters();
+    if (mounted) await _load();
   }
 
   Future<void> _showAdvancedFilters() async {
+    if (_restoringFilters) return;
+    final filterScope = (widget.businessId, widget.roleCode);
     FocusManager.instance.primaryFocus?.unfocus();
     var accountId = _accountFilterId;
     var categoryId = _categoryFilterId;
@@ -1374,6 +1446,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       value: null,
                       child: Text('All accounts'),
                     ),
+                    if (accountId != null && !_accounts.any(
+                      (item) => item['id']?.toString() == accountId))
+                      DropdownMenuItem<String?>(
+                        value: accountId,
+                        child: const Text('Saved account (unavailable)'),
+                      ),
                     ..._accounts.map(
                       (item) => DropdownMenuItem<String?>(
                         value: item['id']?.toString(),
@@ -1395,6 +1473,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       value: null,
                       child: Text('All categories'),
                     ),
+                    if (categoryId != null && !_categories.any(
+                      (item) => item['id']?.toString() == categoryId))
+                      DropdownMenuItem<String?>(
+                        value: categoryId,
+                        child: const Text('Saved category (unavailable)'),
+                      ),
                     ..._categories.map(
                       (item) => DropdownMenuItem<String?>(
                         value: item['id']?.toString(),
@@ -1416,6 +1500,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       value: null,
                       child: Text('All payees'),
                     ),
+                    if (counterpartyId != null && !_counterparties.any(
+                      (item) => item['id']?.toString() == counterpartyId))
+                      DropdownMenuItem<String?>(
+                        value: counterpartyId,
+                        child: const Text('Saved payee (unavailable)'),
+                      ),
                     ..._counterparties.map(
                       (item) => DropdownMenuItem<String?>(
                         value: item['id']?.toString(),
@@ -1461,13 +1551,17 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       ),
     );
 
-    if (applied != true) return;
+    if (applied != true || !mounted ||
+        filterScope != (widget.businessId, widget.roleCode)) {
+      return;
+    }
     setState(() {
       _accountFilterId = accountId;
       _categoryFilterId = categoryId;
       _counterpartyFilterId = counterpartyId;
     });
-    await _load();
+    await _saveFilters();
+    if (mounted) await _load();
   }
 
   Future<void> _addTransaction(
