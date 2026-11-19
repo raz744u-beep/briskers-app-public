@@ -12,11 +12,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  for (final localAlias in [true, false]) {
   for (final nicknameInPreview in [true, false, null]) {
-    testWidgets('saved nickname never flashes legal name, preview alias=$nicknameInPreview', (tester) async {
+    testWidgets('saved nickname never flashes legal name, preview alias=$nicknameInPreview, local alias=$localAlias', (tester) async {
       SharedPreferences.setMockInitialValues({
         'briskers_job_employees_shop': jsonEncode([
-          {'id': 'mechanic', 'name': 'Chris Rideaux'},
+          {'id': 'mechanic', 'name': 'Chris Rideaux', 'nickname': 'Chris'},
         ]),
       });
       final db = BriskersLocalDatabase(NativeDatabase.memory());
@@ -25,7 +26,9 @@ void main() {
         await db.customStatement(
           "INSERT INTO local_jobs(id,business_id,access_scope,title,status,assigned_employee_id,assigned_employee_name,is_unassigned) VALUES('job','shop','owner','Repair','open','mechanic','Chris Rideaux',0)",
         );
-        await EmployeeNicknameStore(database: db).save('shop', 'mechanic', 'Chris');
+        if (localAlias) {
+          await EmployeeNicknameStore(database: db).save('shop', 'mechanic', 'Chris');
+        }
       });
       final preview = JobDetailFirstFrame.fromSelectedRow({
         'id': 'job',
@@ -64,5 +67,6 @@ void main() {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
       await tester.pump(const Duration(seconds: 4));
     });
+  }
   }
 }

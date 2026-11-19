@@ -219,7 +219,15 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
         variables:[Variable(business),Variable(job)]).getSingleOrNull();
       if(!current() || row==null)return;
       final id=row.data['assigned_employee_id'] as String?;
-      final nickname=id==null?null:await EmployeeNicknameStore(database:db).get(business,id);
+      // Use the same saved nickname sources as the eventual dropdown roster.
+      // This is local-only and precedes payroll recovery, including when a
+      // synchronized nickname is present in the saved roster before SQLite.
+      final cached=id==null?const <Map<String,dynamic>>[]:
+          await OfflineJobAdminService(database:db).cachedEmployees(business)
+              .timeout(const Duration(seconds:3));
+      final person=cached.where((row)=>row['id']==id).firstOrNull;
+      final nickname=person?['nickname'] ??
+          (id==null?null:await EmployeeNicknameStore(database:db).get(business,id));
       if(!current())return;
       setState((){
         main=id;
