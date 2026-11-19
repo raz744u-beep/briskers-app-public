@@ -422,6 +422,11 @@ class LocalFinancialCache {
     String? categoryId,
     String? counterpartyId,
     bool includeCachedDetails = false,
+    // Internal linked-expense reads avoid decoding unrelated detail blobs and
+    // sorting the entire ledger. IDs retain pending unlink/reassignment edits.
+    Set<String>? linkedTransactionIds,
+    String? linkedJobId,
+    Set<String> linkedDocumentIds = const {},
   }) async {
     final raw = await _load(businessId, _transactionsKey);
     var rows = <Map<String, dynamic>>[];
@@ -435,10 +440,21 @@ class LocalFinancialCache {
     }
     if (includeCachedDetails) {
       final byId = {for (final row in rows) row['id']?.toString(): row};
+      final scoped = linkedTransactionIds != null;
+      final ids = jsonEncode(linkedTransactionIds?.toList() ?? []);
+      final documents = jsonEncode(linkedDocumentIds.toList());
       final details = await _database.customSelect(
         "SELECT cache_key,payload_json FROM local_financial_cache "
-        "WHERE business_id=? AND cache_key GLOB 'transaction_detail_*'",
-        variables: [Variable(businessId)],
+        "WHERE business_id=? AND cache_key GLOB 'transaction_detail_*' "
+        // CASE prevents corrupt unrelated cache blobs from failing the query.
+        "${scoped ? "AND (substr(cache_key,20) IN (SELECT value FROM json_each(?)) "
+          "OR CASE WHEN json_valid(payload_json) THEN "
+          "(json_extract(payload_json,'\$.job_id') = ? OR "
+          "json_extract(payload_json,'\$.document_id') IN (SELECT value FROM json_each(?))) "
+          "ELSE 0 END)" : ''}",
+        variables: [Variable(businessId), if (scoped) ...[
+          Variable(ids), Variable(linkedJobId), Variable(documents),
+        ]],
       ).get();
       for (final saved in details) {
         final id = saved.read<String>('cache_key').substring('transaction_detail_'.length);
@@ -459,7 +475,8 @@ class LocalFinancialCache {
           // A corrupt cache item is left intact for later recovery.
         }
       }
-      rows = byId.values.toList()..sort((a,b) {
+      rows = byId.values.toList();
+      if (!scoped) rows.sort((a,b) {
         final date = (b['transaction_date']?.toString() ?? '')
             .compareTo(a['transaction_date']?.toString() ?? '');
         return date != 0 ? date : (a['id']?.toString() ?? '').compareTo(b['id']?.toString() ?? '');
@@ -472,6 +489,10 @@ class LocalFinancialCache {
           row['sync_state'] == 'reversed') {
         return false;
       }
+      if (linkedTransactionIds != null &&
+          !linkedTransactionIds.contains(row['id']?.toString()) &&
+          !(linkedJobId != null && row['job_id']?.toString() == linkedJobId) &&
+          !linkedDocumentIds.contains(row['document_id']?.toString())) return false;
       if (direction != null &&
           row['direction']?.toString() != direction) {
         return false;
@@ -645,6 +666,8 @@ class LocalFinancialCache {
     String? jobId,
     String? documentId,
     Set<String> documentIds = const {},
+    // Invoice routes include expenses linked to either this invoice or its job.
+    String? relatedJobId,
     bool failOnUnreadable = false,
   }) async {
     final raw = await _load(businessId, _linkedExpensesKey);
@@ -663,6 +686,14 @@ class LocalFinancialCache {
       }
     }
 
+    bool inScope(Map<String, dynamic> row) =>
+        (relatedJobId == null || row['job_id']?.toString() == relatedJobId ||
+          row['document_id']?.toString() == documentId) &&
+        (jobId == null || row['job_id']?.toString() == jobId ||
+          (row['job_id'] == null && documentIds.contains(row['document_id']?.toString()))) &&
+        (documentId == null || relatedJobId != null ||
+            row['document_id']?.toString() == documentId);
+    final scoped = jobId != null || documentId != null || relatedJobId != null;
     // Preserve allocation amounts: one vendor transaction can be split across
     // jobs. A whole-transaction cache row must not replace every allocated share.
     final allocations = <String, Map<String, dynamic>>{};
@@ -674,19 +705,29 @@ class LocalFinancialCache {
       if (key.isEmpty) continue;
       allocations[key] = {...row, 'id': id};
     }
+    final byTransaction = <String, List<String>>{};
+    for (final entry in allocations.entries) {
+      (byTransaction[entry.value['id'] as String] ??= []).add(entry.key);
+    }
     final local = await loadTransactions(
       businessId, direction: 'expense', includeCachedDetails: true,
+      linkedTransactionIds: scoped ? {
+        for (final row in allocations.values)
+          if (inScope(row)) row['id'] as String,
+      } : null,
+      linkedJobId: relatedJobId ?? jobId,
+      linkedDocumentIds: {if (documentId != null) documentId, ...documentIds},
     );
     for (final row in local) {
       final id = row['id']?.toString() ?? '';
       if (!matchesTransaction(row, businessId, id)) continue;
-      final matches = allocations.entries.where((e) => e.value['id'] == id).toList();
+      final matches = byTransaction[id] ?? const <String>[];
       final linked = row['job_id'] != null || row['document_id'] != null;
       final explicitEdit = row['sync_state'] == 'pending' &&
           (row.containsKey('job_id') || row.containsKey('document_id'));
       if (explicitEdit) {
         // The expense editor explicitly saves the complete new linkage/amount.
-        for (final entry in matches) { allocations.remove(entry.key); }
+        for (final key in matches) { allocations.remove(key); }
         if (linked) allocations['local:$id'] = row;
       } else if (matches.isEmpty && linked) {
         allocations['local:$id'] = row;
@@ -699,10 +740,7 @@ class LocalFinancialCache {
         !voided.contains(row['id']) && !reversed.contains(row['id']) &&
         !const ['void', 'voided', 'deleted'].contains(row['status']) &&
         row['sync_state'] != 'reversed' && row['direction'] != 'income' &&
-        (jobId == null || row['job_id']?.toString() == jobId ||
-          (row['job_id'] == null && documentIds.contains(row['document_id']?.toString()))) &&
-        (documentId == null ||
-            row['document_id']?.toString() == documentId)).toList();
+        inScope(row)).toList();
   }
 
   Future<void> saveTransactionDetail(

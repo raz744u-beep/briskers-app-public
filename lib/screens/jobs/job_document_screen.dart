@@ -52,6 +52,7 @@ import '../../services/briskers_api.dart';
 import '../../services/invoice_tax_proposal.dart';
 import '../../widgets/briskers_dialog.dart';
 import '../../services/local_financial_cache.dart';
+import '../../services/invoice_expense_reader.dart';
 import '../../services/document_pdf_service.dart';
 import '../../services/invoice_performance_metrics.dart';
 import '../../services/invoice_labor_work_summary.dart';
@@ -1541,24 +1542,18 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   Future<List<Map<String, dynamic>>>? _invoiceExpensesTabFuture;
 
   Future<List<Map<String, dynamic>>> _invoiceTabExpenses() async {
-    if (BriskersConnectionModeController.instance.forceOffline) {
-      final cached = await LocalFinancialCache().loadLinkedExpenses(
-        widget.businessId,
-      );
-      if (cached == null) {
-        throw StateError('Linked expenses are not available offline yet.');
-      }
-      final jobId = _detail?['job_id']?.toString() ?? '';
-      final seen = <String>{};
-      return cached.where((row) {
-        final linked = row['document_id']?.toString() == widget.documentId ||
-            (jobId.isNotEmpty && row['job_id']?.toString() == jobId);
-        if (!linked) return false;
-        final key = row['id']?.toString() ?? '';
-        return key.isEmpty || seen.add(key);
-      }).toList();
+    final rows = await InvoiceExpenseReader().load(
+      businessId: widget.businessId,
+      documentId: widget.documentId,
+      jobId: _detail?['job_id']?.toString(),
+      offline: BriskersConnectionModeController.instance.forceOffline ||
+          _offlineDocumentDraft.isLocalDraftId(widget.documentId),
+      fetchRemote: () => _api.documentExpenses(widget.businessId, widget.documentId),
+    );
+    if (rows == null) {
+      throw StateError('Linked expenses are not available offline yet.');
     }
-    return _api.documentExpenses(widget.businessId, widget.documentId);
+    return rows;
   }
 
   Widget _invoiceExpensesTab() {
@@ -1677,20 +1672,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     try {
       final offline = BriskersConnectionModeController.instance.forceOffline ||
           _offlineDocumentDraft.isLocalDraftId(widget.documentId);
-      final cached = await LocalFinancialCache().loadLinkedExpenses(
-        widget.businessId,
+      final cached = await InvoiceExpenseReader().load(
+        businessId: widget.businessId,
+        documentId: widget.documentId,
+        jobId: _detail?['job_id']?.toString(),
+        offline: offline,
+        fetchRemote: () => _api.documentExpenses(widget.businessId, widget.documentId),
       );
-      final related = cached?.where((item) =>
-        item['document_id']?.toString() == widget.documentId ||
-        (_detail?['job_id']?.toString() != null &&
-          item['job_id']?.toString() == _detail?['job_id']?.toString())
-      ).toList() ?? const <Map<String, dynamic>>[];
-      final expenses = offline
-          ? related
-          : await _api.documentExpenses(
-              widget.businessId,
-              widget.documentId,
-            );
+      final expenses = cached ?? const <Map<String, dynamic>>[];
       if (!mounted) return;
 
       if (offline && cached == null) {

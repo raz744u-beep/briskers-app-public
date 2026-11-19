@@ -52,20 +52,19 @@ void main() {
     expect(EmployeeWorkReview.weeklyRows([historical], week), isEmpty);
   });
 
-  testWidgets('read-only breakdown exposes included and excluded internal identities', (tester) async {
+  testWidgets('Work omits diagnostic link and preserves the supplied payroll section', (tester) async {
     final rows = [labor('struts', 216, historical: true), engine];
+    final before = rows.map((row) => Map<String, dynamic>.from(row)).toList();
+    const summary = Text('Payroll details for this week', key: Key('existing-summary'));
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: EmployeeWorkReview(
       week: week, rows: rows, jobs: const [], employeeName: 'Chris',
-      onWeekChanged: (_) {}, onJob: (_) {},
+      onWeekChanged: (_) {}, onJob: (_) {}, payrollSummary: summary,
     ))));
-    await tester.ensureVisible(find.byKey(const Key('weekly-hours-breakdown')));
-    await tester.tap(find.byKey(const Key('weekly-hours-breakdown')));
-    await tester.pumpAndSettle();
-    expect(find.text('Weekly hours breakdown'), findsOneWidget);
-    expect(find.textContaining('Allocation ID: struts'), findsOneWidget);
-    expect(find.textContaining('Excluded: historical labor'), findsOneWidget);
-    expect(find.textContaining('invoice-6359'), findsOneWidget);
-    expect(rows.first['paid_minutes'], 216);
+    expect(find.byKey(const Key('weekly-hours-breakdown')), findsNothing);
+    expect(find.text('View hours breakdown'), findsNothing);
+    expect(find.textContaining('Allocation ID:'), findsNothing);
+    expect(tester.widget(find.byKey(const Key('existing-summary'))), same(summary));
+    expect(rows, before);
     expect(tester.takeException(), isNull);
   });
 }

@@ -1,11 +1,9 @@
 import 'approved_tasks_ui.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../../core/work_status_colors.dart';
 import '../../services/local_task_schedule.dart';
 import '../../services/local_invoice_task_store.dart';
-import '../../widgets/briskers_dialog.dart';
 
 /// Read-only projection of saved allocations. No task or payment mutations.
 class EmployeeWorkReview extends StatelessWidget {
@@ -158,52 +156,6 @@ class EmployeeWorkReview extends StatelessWidget {
     return needsReview && (reviewedCarry || weeklyReason(row, week, now: now,
         includeAssignmentConflicts: true).startsWith('Included:'));
   }).toList();
-
-  String _auditLine(Map<String, dynamic> row) => [
-    '${row['job_number'] ?? 'Job'} · ${row['customer_name'] ?? ''}',
-    '${row['description'] ?? 'Labor'} · ${row['state'] ?? ''}',
-    'Assigned: ${((row['estimated_minutes'] as int? ?? 0) / 60).toStringAsFixed(2)} h; '
-      'recorded: ${(minutes(row) / 60).toStringAsFixed(2)} h; '
-      'paid: ${((row['paid_minutes'] as int? ?? 0) / 60).toStringAsFixed(2)} h; '
-      'remaining: ${((row['remaining_minutes'] as int? ?? 0) / 60).toStringAsFixed(2)} h',
-    'Payment state: ${paymentState(row)}; archived: ${row['archived_labor'] ?? 0}',
-    'Original task ID: ${row['duplicate_of_task_id'] ?? 'this task'}; source: ${row['source_kind'] ?? 'unknown'}; '
-      'last paid week: ${row['last_paid_week'] ?? 'unknown'}; prior-paid flag: ${row['owner_prior_paid'] ?? 0}',
-    'Work dates: ${row['work_start_date'] ?? 'unknown'} – ${row['work_end_date'] ?? 'unknown'}; '
-      'date mode: ${row['date_mode'] ?? 'not recorded'}; completed: ${row['completed_date'] ?? 'unknown'}; invoice date: ${row['invoice_date'] ?? 'unknown'}',
-    weeklyReason(row, week),
-    'Allocation ID: ${row['id']}; task ID: ${row['task_id']}; '
-      'Job ID: ${row['job_id']}; invoice ID: ${row['invoice_id']}; line ID: ${row['source_line_id']}',
-  ].join('\n');
-
-  Future<void> _showBreakdown(BuildContext context) async {
-    final report = [
-      'Weekly labor — ${employeeName ?? 'Employee'} — ${weekLabel(week)}',
-      'Read only: task and payment records unchanged.',
-      for (final row in rows) _auditLine(row),
-    ].join('\n\n');
-    await showDialog<void>(context: context, builder: (dialogContext) => BriskersDialog(
-      title: 'Weekly hours breakdown', icon: Icons.fact_check_outlined,
-      content: SizedBox(
-        width: double.maxFinite,
-        height: MediaQuery.sizeOf(context).height * 0.48,
-        child: rows.isEmpty ? const Text('No saved labor records.') : ListView.separated(
-          itemCount: rows.length,
-          separatorBuilder: (_, _) => const Divider(height: 24),
-          itemBuilder: (_, index) => SelectableText(_auditLine(rows[index])),
-        ),
-      ),
-      actions: [
-        OutlinedButton(onPressed: () => Navigator.pop(dialogContext),
-          style: BriskersDialog.cancelStyle, child: const Text('Close')),
-        FilledButton.icon(onPressed: () async {
-          await Clipboard.setData(ClipboardData(text: report));
-          if (dialogContext.mounted) Navigator.pop(dialogContext);
-        }, style: BriskersDialog.confirmStyle(), icon: const Icon(Icons.copy),
-          label: const Text('Copy breakdown')),
-      ],
-    ));
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -513,12 +465,6 @@ class EmployeeWorkReview extends StatelessWidget {
                         ),
                       ),
                     ],
-                  ),
-                  TextButton.icon(
-                    key: const Key('weekly-hours-breakdown'),
-                    onPressed: () => _showBreakdown(context),
-                    icon: const Icon(Icons.fact_check_outlined, size: 18),
-                    label: const Text('View hours breakdown'),
                   ),
                 ],
               ),

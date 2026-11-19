@@ -29,6 +29,7 @@ import '../services/job_task_summary.dart';
 import '../services/local_job_retirement.dart';
 import '../local/local_database_provider.dart';
 import '../services/local_financial_cache.dart';
+import '../services/invoice_expense_reader.dart';
 import '../services/local_document_repository.dart';
 import '../services/local_document_detail_cache.dart';
 import '../services/verified_invoice_close_events.dart';
@@ -1460,26 +1461,14 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   Future<void> _showExpensesFromList(Map<String, dynamic> row) async {
     try {
       final offline = BriskersConnectionModeController.instance.forceOffline;
-      final cached = await LocalFinancialCache().loadLinkedExpenses(
-        widget.businessId,
+      final cached = await InvoiceExpenseReader().load(
+        businessId: widget.businessId,
+        documentId: row['id'].toString(),
+        jobId: row['job_id']?.toString(),
+        offline: offline,
+        fetchRemote: () => _api.documentExpenses(widget.businessId, row['id'].toString()),
       );
-      final related =
-          cached
-              ?.where(
-                (item) =>
-                    item['document_id']?.toString() == row['id'].toString() ||
-                    (row['job_id']?.toString() != null &&
-                        item['job_id']?.toString() ==
-                            row['job_id']?.toString()),
-              )
-              .toList() ??
-          const <Map<String, dynamic>>[];
-      final expenses = offline
-          ? related
-          : await _api.documentExpenses(
-              widget.businessId,
-              row['id'].toString(),
-            );
+      final expenses = cached ?? const <Map<String, dynamic>>[];
       if (!mounted) return;
 
       if (offline && cached == null) {
