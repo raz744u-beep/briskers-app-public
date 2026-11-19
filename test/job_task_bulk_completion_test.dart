@@ -205,7 +205,7 @@ void main() {
     },
   );
   test(
-    'general future reminders and zero-hour allocations are excluded; split task counted once',
+    'Finish All completes zero-hour labor, preserves scheduled reminders and counts split tasks once',
     () async {
       await repo.assignExistingService(
         job: 'J-53',
@@ -236,9 +236,9 @@ void main() {
       );
       await repo.addShopTask('kam', 'Other job', 'General', job: 'other');
       final plan = await bulk.plan('J-53', now);
-      expect(plan.count, 6);
-      expect(plan.labor, hasLength(6));
-      expect(await bulk.complete(plan, now), 6);
+      expect(plan.count, 7);
+      expect(plan.labor, hasLength(7));
+      expect(await bulk.complete(plan, now), 7);
       final general = await repo.shopTasks();
       expect(
         general.singleWhere((r) => r['description'] == 'Due now')['status'],
@@ -258,7 +258,7 @@ void main() {
         (await repo.work(
           job: 'J-53',
         )).singleWhere((r) => r['id'] == row['id'])['state'],
-        'Open',
+        'Done',
       );
     },
   );
@@ -301,4 +301,44 @@ void main() {
       isTrue,
     );
   });
+  test('Glenn-shaped job finishes two positive labor tasks plus a zero-hour diagnostic atomically offline', () async {
+    final before=(await repo.work(job:'J-53'));
+    // Use three existing invoice labor identities, preserving their assignments.
+    for(final row in before.where((r)=>r['source_line_id']!='line-0' && r['source_line_id']!='line-1' && r['source_line_id']!='line-2')) {
+      await repo.recordAllocatedTime(row['id'] as String,'Done',row['estimated_minutes'] as int,row['estimated_minutes'] as int,'2026-11-12');
+    }
+    final diagnostic=before.singleWhere((r)=>r['source_line_id']=='line-0');
+    final pump=before.singleWhere((r)=>r['source_line_id']=='line-1');
+    final thermostat=before.singleWhere((r)=>r['source_line_id']=='line-2');
+    await repo.setEstimatedMinutes(diagnostic['task_id'] as String,'kam',0);
+    await repo.setEstimatedMinutes(pump['task_id'] as String,'kam',150);
+    await repo.setEstimatedMinutes(thermostat['task_id'] as String,'kam',120);
+    await repo.recordAllocatedTime(diagnostic['id'] as String,'In Progress',0,0,'2026-11-12');
+    final plan=await bulk.plan('J-53',now);
+    expect(plan.count,3);
+    expect(await bulk.complete(plan,now),3);
+    final done=await repo.work(job:'J-53');
+    expect(done.every((r)=>r['state']=='Done'),true);
+    expect(done.singleWhere((r)=>r['id']==diagnostic['id'])['actual_minutes'],0);
+    expect(done.singleWhere((r)=>r['id']==pump['id'])['actual_minutes'],150);
+    expect(done.singleWhere((r)=>r['id']==thermostat['id'])['actual_minutes'],120);
+    expect(done.every((r)=>r['paid_minutes']==0),true);
+    expect((await repo.historyWithWork('kam')),isEmpty);
+    final saved=await snapshot(); expect(await bulk.complete(plan,now),0);
+    expect(await snapshot(),saved);
+    await db.close(); db=BriskersLocalDatabase(NativeDatabase(file));
+    repo=LocalPayrollRepository(db,business:'shop',owner:true);
+    expect((await repo.work(job:'J-53')).every((r)=>r['state']=='Done'),true);
+  });
+
+  test('explicitly reviewed historical carry can Finish All just as it can finish individually', () async {
+    final old=(await repo.work(job:'old')).single;
+    await repo.reviewUnpaidCarry('kam',old['id'] as String);
+    final plan=await bulk.plan('old',now);
+    expect(plan.count,1);
+    expect(await bulk.complete(plan,now),1);
+    expect((await repo.work(job:'old')).single['state'],'Done');
+    expect((await repo.work(job:'old')).single['paid_minutes'],0);
+  });
+
 }

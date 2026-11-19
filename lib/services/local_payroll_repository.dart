@@ -1787,7 +1787,9 @@ class LocalPayrollRepository {
       if (state == 'Done' && rows.single['state'] == 'Open') {
         final estimate = await _read('SELECT minutes FROM regular_payroll_estimates WHERE business_id=? AND task_id=? AND employee_id=?',
           [business,rows.single['task_id'],rows.single['employee_id']]);
-        if (minutes<=0 || estimate.firstOrNull?['minutes']!=minutes) {
+        // Zero-hour work can be completed without creating payable hours.
+        // The saved assignment remains authoritative, including an explicit 0.
+        if (estimate.firstOrNull?['minutes']!=minutes) {
           throw StateError('Mark Done requires the saved assigned hours.');
         }
       }

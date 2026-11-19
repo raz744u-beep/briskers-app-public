@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'local_payroll_repository.dart';
-import 'local_invoice_task_store.dart';
 
 /// A confirmed snapshot, not a second work-credit or payment ledger.
 class JobTaskCompletionPlan {
@@ -55,16 +54,11 @@ class JobTaskCompletionPlan {
           unfinished.every(
             (r) =>
                 r['archived_labor'] != 1 &&
-                (r['source_kind'] != 'invoice' ||
-                    LocalInvoiceTaskStore.currentPayrollDate(
-                      r['invoice_date'],
-                    )) &&
                 r['source_active'] != 0 &&
                 r['assignment_conflict'] != 1 &&
                 r['owner_prior_paid'] != 1 &&
                 ((r['paid'] != 1 && (r['paid_minutes'] as int? ?? 0) == 0) ||
-                    (!starting && r['can_finish_paid_progress'] == true)) &&
-                (starting || (r['estimated_minutes'] as int? ?? 0) > 0),
+                    (!starting && r['can_finish_paid_progress'] == true)),
           )) {
         labor.addAll(unfinished.map(Map<String, dynamic>.of));
       }
