@@ -866,11 +866,18 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
         try { cached = await _cachedFullDetail(); } catch (_) {
           // An unreadable preference snapshot cannot hide the SQLite record.
         }
-        final local = cached ??
-            await _localCustomers.customerDetail(
-              widget.businessId,
-              _customerId,
-            );
+        final indexed = await _localCustomers.customerDetail(
+          widget.businessId, _customerId,
+        );
+        // The current SQLite relationships take precedence over an older
+        // full preference snapshot, which may still contain temporary IDs.
+        final cachedCustomer = cached?['customer'];
+        final local = indexed == null ? cached : <String,dynamic>{
+          ...?cached, ...indexed,
+          'customer': {
+            if (cachedCustomer is Map) ...Map<String,dynamic>.from(cachedCustomer),
+            ...Map<String,dynamic>.from(indexed['customer'] as Map)},
+        };
         final verified = local == null ? null : await identity.detail(
           widget.businessId, _customerId, local);
         if (verified != null && mounted && visibility.isCurrent(generation)) {

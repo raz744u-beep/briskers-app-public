@@ -129,7 +129,8 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
         'customer identity conflict: ${row['customer_identity_conflict']}; '
         'saved snapshot found: ${row['snapshot_found']}; '
         'saved snapshot fields: ${row['saved'] ?? row['snapshot_error'] ?? 'Unavailable'}; '
-        'number correction: ${row['number_correction'] ?? 'None'}',
+        'number correction: ${row['number_correction'] ?? 'None'}; '
+        'party identity evidence: ${row['party_identity_evidence'] ?? 'Unavailable'}',
       'Invoices actually linked to the selected Job: ${targetInvoices.length}',
       for (final row in targetInvoices)
         'Invoice ${row['invoice_number']}; document ID: ${row['document_id']}; '

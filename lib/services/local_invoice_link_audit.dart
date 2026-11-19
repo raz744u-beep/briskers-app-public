@@ -16,6 +16,15 @@ class LocalInvoiceLinkAudit {
 
   final BriskersLocalDatabase _database;
 
+  Map<String,dynamic> _creationIdentity(String raw) {
+    try {
+      final value=jsonDecode(raw);
+      if(value is Map) return {for(final key in ['operation_id','kind','customer_id','vehicle_id','provisional_job_id'])
+        if(value.containsKey(key)) key:value[key]};
+    } on FormatException { return {'error':'Invalid creation JSON'}; }
+    return {};
+  }
+
   Future<Map<String, dynamic>> inspect({
     required String businessId,
     String jobNumber = '',
@@ -50,10 +59,14 @@ class LocalInvoiceLinkAudit {
                 d.document_date,d.total,d.status,d.closed_at,d.sync_state,
                 c.display_name AS customer_name,
                 j.job_number AS linked_job_number,
-                j.customer_id AS linked_job_customer_id
+                j.customer_id AS linked_job_customer_id,
+                j.vehicle_id AS linked_job_vehicle_id,
+                v.id AS existing_vehicle_id,v.vin AS linked_vehicle_vin
          FROM local_documents d
          LEFT JOIN local_jobs j
            ON j.business_id=d.business_id AND j.id=d.job_id
+         LEFT JOIN local_vehicles v
+           ON v.business_id=j.business_id AND v.id=j.vehicle_id
          LEFT JOIN local_customers c
            ON c.business_id=d.business_id AND c.id=d.customer_id
          WHERE d.business_id=? AND lower(trim(d.document_number))=lower(trim(?))
@@ -96,6 +109,13 @@ class LocalInvoiceLinkAudit {
           'sync_state': doc.read<String>('sync_state'),
           'linked_job_customer_id':
               doc.readNullable<String>('linked_job_customer_id'),
+          'party_identity_evidence': {
+            'customer_record_found': doc.readNullable<String>('customer_name') != null,
+            'job_customer_id': doc.readNullable<String>('linked_job_customer_id'),
+            'job_vehicle_id': doc.readNullable<String>('linked_job_vehicle_id'),
+            'vehicle_record_found': doc.readNullable<String>('existing_vehicle_id') != null,
+            'job_vehicle_vin': doc.readNullable<String>('linked_vehicle_vin'),
+          },
           'matches_target_job':
               targetIds.contains(doc.readNullable<String>('job_id')),
           'customer_identity_conflict':
@@ -110,7 +130,7 @@ class LocalInvoiceLinkAudit {
     // detail cache would project tasks and migrate caches during inspection.
     final tables = (await _database.customSelect(
       "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
-      "('local_document_details','recovery_document_cache','local_invoice_number_corrections')",
+      "('local_document_details','recovery_document_cache','local_invoice_number_corrections','local_customer_vehicle_create_ids')",
     ).get()).map((r) => r.read<String>('name')).toSet();
     final prefs = await SharedPreferences.getInstance();
     for (final reference in references) {
@@ -136,6 +156,24 @@ class LocalInvoiceLinkAudit {
       try { decoded = raw == null ? null : jsonDecode(raw); }
       on FormatException { reference['snapshot_error'] = 'Invalid saved JSON'; }
       reference['snapshot_found'] = decoded is Map;
+      final evidence = reference['party_identity_evidence'] as Map<String,dynamic>;
+      final creates = await _database.customSelect(
+        "SELECT payload_json,attempt_count,state FROM sync_outbox WHERE business_id=? AND entity_id=? AND entity_type='document_draft_create'",
+        variables:[Variable(businessId),Variable(id)],
+      ).get();
+      evidence['creation_records'] = [for (final row in creates) {
+        'state':row.data['state'],'attempt_count':row.data['attempt_count'],
+        'saved_identity': _creationIdentity(row.read<String>('payload_json')),
+      }];
+      if (decoded is Map && tables.contains('local_customer_vehicle_create_ids')) {
+        final aliases = await _database.customSelect(
+          'SELECT local_id,server_id FROM local_customer_vehicle_create_ids WHERE business_id=? AND local_id IN (?,?)',
+          variables:[Variable(businessId),Variable(decoded['customer_id']?.toString() ?? ''),
+            Variable(decoded['vehicle_id']?.toString() ?? '')],
+        ).get();
+        evidence['saved_aliases'] = [for (final row in aliases) row.data];
+      }
+
       if (tables.contains('local_invoice_number_corrections')) {
         final correction = await _database.customSelect(
           'SELECT old_invoice_number,new_invoice_number,old_job_number,new_job_number,kept_invoice_id,created_at '
@@ -147,7 +185,7 @@ class LocalInvoiceLinkAudit {
       if (decoded is Map) {
         reference['saved'] = {
           for (final field in ['id','document_number','customer_id','customer_name',
-            'job_id','job_number','document_date','status','closed_at',
+            'job_id','job_number','vehicle_id','vehicle','vehicle_vin','vin','document_date','status','closed_at',
             'total_amount','paid_amount','pending_payment','_server_document_id'])
             if (decoded.containsKey(field)) field: decoded[field],
         };

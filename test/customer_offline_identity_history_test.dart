@@ -7,6 +7,8 @@ import 'package:briskers_app/core/vehicle_invoice_repair_search.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/local/local_database_provider.dart';
 import 'package:briskers_app/screens/customers/customer_detail_screen.dart';
+import 'package:briskers_app/screens/jobs/job_document_screen.dart';
+import 'package:briskers_app/services/local_document_party_identity.dart';
 import 'package:briskers_app/services/customer_document_summary_service.dart';
 import 'package:briskers_app/services/local_customer_navigation_identity.dart';
 import 'package:briskers_app/services/local_customer_vehicle_identity.dart';
@@ -25,13 +27,18 @@ class _NoNetwork extends HttpOverrides {
       throw StateError('Customer navigation/history must remain offline');
 }
 
-Future<void> _seed(BriskersLocalDatabase db) async {
+Future<void> _seed(BriskersLocalDatabase db, {bool aliases = true, String? creationVehicle = 'audi'}) async {
   await seedDuplicateNumbers(db);
   await db.customStatement("INSERT INTO local_vehicles(id,business_id,year,make,model,vin) VALUES"
       "('audi','shop',2015,'Audi','A5','TEST-VIN'),('porsche','shop',2018,'Porsche','Macan','OTHER-VIN')");
   await db.customStatement("INSERT INTO local_customer_vehicles(business_id,customer_id,vehicle_id) VALUES"
       "('shop','dakota','audi'),('shop','tyra','porsche')");
   await LocalCustomerVehicleIdentity(db).save('shop','local-vehicle-original','audi');
+  if (!aliases) await db.customStatement('DELETE FROM local_customer_vehicle_create_ids');
+  final createRow = await db.customSelect("SELECT id,payload_json FROM sync_outbox WHERE entity_type='document_draft_create'").getSingle();
+  final create = jsonDecode(createRow.read<String>('payload_json')) as Map;
+  await db.customStatement('UPDATE sync_outbox SET payload_json=? WHERE id=?',
+    [jsonEncode({...create,'vehicle_id':creationVehicle}),createRow.read<int>('id')]);
   await db.customStatement("UPDATE local_jobs SET vehicle_id='audi',vehicle_label='2015 Audi A5',job_number='J-62' WHERE id=?",[duplicateJob]);
   await db.customStatement("UPDATE local_jobs SET vehicle_id='porsche' WHERE id=?",[retainedJob]);
   await db.customStatement("UPDATE local_documents SET document_number='6382' WHERE id=?",[duplicateInvoice]);
@@ -115,6 +122,41 @@ void main() {
     expect((saved['customer'] as Map)['id'],'local-customer-original');
   });
 
+  test('missing alias table entries use exact document customer and original vehicle creation proof', () async {
+    await _seed(db,aliases:false);
+    final before = {for(final table in ['local_documents','local_jobs','sync_outbox',
+      'local_invoice_closures','local_invoice_closed_receipts','local_finalized_invoice_income']) table:await rows(table)};
+    final raw = (await LocalDocumentSqlStore.read(db,duplicateSnapshotKey))!;
+    final projected = await LocalDocumentPartyIdentity(db).project('shop',
+      Map<String,dynamic>.from(jsonDecode(raw) as Map));
+    expect(projected['customer_id'],'dakota');
+    expect(projected['vehicle_id'],'audi');
+    expect(projected['_vehicle_identity_source'],'original_creation');
+    final summaries=await CustomerDocumentSummaryService(database:db).forCustomer('shop','dakota',includeClosed:true);
+    expect(VehicleInvoiceRepairSearch.forVehicle(summaries,vehicleId:'audi'),hasLength(1));
+    expect(DocumentPresentation(summaries.single).finalizedCents,55424);
+    expect(await LocalDocumentSqlStore.read(db,duplicateSnapshotKey),raw);
+    for(final table in before.keys){expect(await rows(table),before[table],reason:table);}
+    final other=await LocalDocumentPartyIdentity(db).project('other-shop',
+      Map<String,dynamic>.from(jsonDecode(raw) as Map));
+    expect(other['customer_id'],'local-customer-original');
+    expect(other['vehicle_id'],'local-vehicle-original');
+  });
+
+  test('missing or conflicting creation evidence cannot reassign an unresolved vehicle', () async {
+    await _seed(db,aliases:false,creationVehicle:'porsche');
+    final saved=Map<String,dynamic>.from(jsonDecode((await LocalDocumentSqlStore.read(db,duplicateSnapshotKey))!) as Map);
+    final result=await LocalDocumentPartyIdentity(db).project('shop',saved);
+    expect(result['customer_id'],'dakota');
+    expect(result['vehicle_id'],'local-vehicle-original');
+    expect(result['_vehicle_identity_unresolved'],true);
+    final actual=await LocalDocumentPartyIdentity(db).project('shop',{...saved,'vehicle_id':'porsche'});
+    expect(actual['vehicle_id'],'porsche');
+    final conflicted=await LocalDocumentPartyIdentity(db).project('shop',{...saved,'customer_id':'tyra'});
+    expect(conflicted['customer_id'],'tyra');
+    expect(conflicted['vehicle_id'],'local-vehicle-original');
+  });
+
   Future<void> settle(WidgetTester tester) async {
     for (var i=0;i<12;i++) {
       await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:25)));
@@ -158,4 +200,62 @@ void main() {
     expect(tester.takeException(),isNull);
     await tester.pumpWidget(const SizedBox.shrink()); await settle(tester);
   });
+  testWidgets('invoice customer tap works without customer or vehicle alias entries', (tester) async {
+    tester.view.physicalSize=const Size(412,915);tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.reset);
+    await tester.runAsync(()=>_seed(db,aliases:false));
+    await tester.pumpWidget(const MaterialApp(home:JobDocumentScreen(
+      businessId:'shop',documentId:duplicateInvoice,isOwner:true,roleCode:'owner')));
+    await settle(tester);
+    final customer=find.text('Dakota Spinder').first;
+    await tester.ensureVisible(customer); await tester.pump();
+    await tester.tap(customer); await settle(tester);
+    expect(find.byType(CustomerDetailScreen),findsOneWidget);
+    expect(find.text('Customer details are not saved on this device.'),findsNothing);
+    expect(find.text('Dakota Spinder'),findsWidgets);
+    await tester.pumpWidget(const SizedBox.shrink()); await settle(tester);
+  });
+
+  testWidgets('unproven temporary vehicle keeps the saved invoice visible for review', (tester) async {
+    tester.view.physicalSize=const Size(412,915);tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.reset);
+    await tester.runAsync(()=>_seed(db,aliases:false,creationVehicle:null));
+    await tester.pumpWidget(const MaterialApp(home:CustomerDetailScreen(
+      businessId:'shop',customerId:'dakota',roleCode:'owner')));
+    await settle(tester);
+    await tester.tap(find.text('Vehicles').first); await settle(tester);
+    await tester.tap(find.text('2015 Audi A5').first); await settle(tester);
+    await tester.ensureVisible(find.text('Repair History')); await tester.pump();
+    await tester.tap(find.text('Repair History')); await settle(tester);
+    expect(find.text('Vehicle link needs review'),findsOneWidget);
+    expect(find.text('Unmatched customer invoices (1)'),findsOneWidget);
+    expect(find.textContaining('6382'),findsWidgets);
+    expect(find.text('No invoices for this vehicle.'),findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink()); await settle(tester);
+  });
+
+  testWidgets('current SQLite vehicle list wins over an old full customer snapshot without aliases', (tester) async {
+    tester.view.physicalSize=const Size(412,915);tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.reset);
+    await tester.runAsync(() async {
+      await _seed(db,aliases:false);
+      final prefs=await SharedPreferences.getInstance();
+      await prefs.setString('briskers_customer_detail_shop_dakota',jsonEncode({
+        'customer':{'id':'dakota','name':'Dakota Spinder'},
+        'vehicles':[{'id':'local-vehicle-original','year':2015,'make':'Audi','model':'A5'}],
+      }));
+    });
+    await tester.pumpWidget(const MaterialApp(home:CustomerDetailScreen(
+      businessId:'shop',customerId:'dakota',roleCode:'owner')));
+    await settle(tester);
+    await tester.tap(find.text('Vehicles').first); await settle(tester);
+    await tester.tap(find.text('2015 Audi A5').first); await settle(tester);
+    await tester.ensureVisible(find.text('Repair History')); await tester.pump();
+    await tester.tap(find.text('Repair History')); await settle(tester);
+    expect(find.text('Invoices (1)'),findsOneWidget);
+    expect(find.textContaining('6382'),findsWidgets);
+    expect(find.text('No invoices for this vehicle.'),findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink()); await settle(tester);
+  });
+
 }

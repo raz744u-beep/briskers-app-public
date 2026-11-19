@@ -9,7 +9,7 @@ import '../local/local_database_provider.dart';
 import 'local_document_detail_cache.dart';
 import 'local_job_retirement.dart';
 import 'offline_invoice_payment_ledger.dart';
-import 'local_customer_vehicle_identity.dart';
+import 'local_document_party_identity.dart';
 import 'local_invoice_closure.dart';
 
 /// Hydrates customer-facing summaries from saved authoritative payment detail
@@ -82,19 +82,7 @@ class CustomerDocumentSummaryService {
         index.containsKey('pending_payment')) {
       document.addAll(index);
     }
-    // A saved offline snapshot can retain temporary customer/vehicle IDs after
-    // the index was reconciled. Project only the exact, shop-scoped aliases.
-    final identities = LocalCustomerVehicleIdentity(_database);
-    for (final field in ['customer_id', 'vehicle_id']) {
-      final value = document[field]?.toString();
-      if (value != null && value.isNotEmpty) {
-        document[field] = await identities.resolve(businessId, value);
-      }
-    }
-    if ((document['vehicle_id']?.toString().isEmpty ?? true) &&
-        document['job_id'] == index['job_id']) {
-      document['vehicle_id'] = index['vehicle_id'];
-    }
+    document = await LocalDocumentPartyIdentity(_database).project(businessId, document);
     // An expanded history row can hydrate an already-projected summary.
     // Its financial snapshot already includes the queue and finalization proof.
     // A fresh customer reload builds unprojected indexes and reads the ledger

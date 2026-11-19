@@ -549,7 +549,8 @@ class _CustomerServiceHistorySectionState
 
   List<Map<String, dynamic>> get _unmatchedCustomerInvoices => _documents
       .where((row) => row['kind']?.toString() == 'invoice')
-      .where((row) => (row['vehicle_id']?.toString().trim() ?? '').isEmpty)
+      .where((row) => (row['vehicle_id']?.toString().trim() ?? '').isEmpty ||
+          row['_vehicle_identity_unresolved'] == true)
       .toList();
 
   List<Map<String, dynamic>> get _visibleExpenses =>
@@ -1062,10 +1063,15 @@ class _CustomerServiceHistorySectionState
         final unmatched = _unmatchedCustomerInvoices;
         return Column(
           children: [
-            _documentsList(_visibleInvoices, 'invoices'),
+            if (_selectedVehicleId != null && _visibleInvoices.isEmpty && unmatched.isNotEmpty)
+              const Padding(padding: EdgeInsets.all(16), child: Text(
+                'No confirmed vehicle link. Saved customer invoices are shown below.'))
+            else
+              _documentsList(_visibleInvoices, 'invoices'),
             if (_selectedVehicleId != null && unmatched.isNotEmpty)
               ExpansionTile(
                 leading: const Icon(Icons.help_outline),
+                initiallyExpanded: true,
                 title: Text('Unmatched customer invoices (${unmatched.length})'),
                 subtitle: const Text('Vehicle not confirmed — review separately'),
                 children: [
@@ -1098,7 +1104,10 @@ class _CustomerServiceHistorySectionState
         ),
         subtitle: _loading
             ? const Text('Loading service history...')
-            : Text(count == 1 ? '1 visit' : '$count visits'),
+            : _view == 'invoices' && _selectedVehicleId != null && count == 0 &&
+                _unmatchedCustomerInvoices.isNotEmpty
+              ? const Text('Vehicle link needs review')
+              : Text(count == 1 ? '1 visit' : '$count visits'),
         children: [
           const Divider(height: 1),
           if (_loading)

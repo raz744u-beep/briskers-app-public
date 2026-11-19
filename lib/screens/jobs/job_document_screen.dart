@@ -1,3 +1,4 @@
+import '../../services/local_document_party_identity.dart';
 import '../../services/local_document_identity.dart';
 import '../../services/local_recent_records.dart';
 import '../../widgets/recent_record_view.dart';
@@ -563,6 +564,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   Future<Map<String,dynamic>> _projectSavedInvoiceIdentity(
     Map<String,dynamic> detail,
   ) async {
+    detail = await LocalDocumentPartyIdentity(localDatabase).project(widget.businessId, detail);
+    if (detail['_customer_identity_conflict'] == true) return detail;
     final customerId=detail['customer_id']?.toString().trim() ?? '';
     if(customerId.isEmpty)return detail;
     try {
@@ -5323,7 +5326,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     );
   }
   Future<void> _openInvoiceCustomer() async {
-    final customerId = _detail?['customer_id']?.toString() ?? '';
+    final party = await LocalDocumentPartyIdentity(localDatabase).project(
+      widget.businessId, {...?_detail, 'id': widget.documentId},
+    );
+    if (!mounted) return;
+    if (party['_customer_identity_conflict'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(
+        'Saved customer links need review. Inspect this invoice in Diagnostics.')));
+      return;
+    }
+    final customerId = party['customer_id']?.toString() ?? '';
     if (customerId.isEmpty) return;
     await Navigator.push<void>(
       context,
