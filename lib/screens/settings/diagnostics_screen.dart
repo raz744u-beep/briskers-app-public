@@ -164,6 +164,8 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
       final service = LocalDuplicateNumberCorrection(localDatabase);
       final plan = await service.preview(widget.businessId,pair[0]['document_id'] as String,pair[1]['document_id'] as String);
       if (!mounted) return;
+      // Preview is ready. The modal owns interaction while the Owner reviews it.
+      setState(() => _invoiceLinkRunning = false);
       final confirmed = await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
         scrollable: true,
         title: Text('Correct ${plan.customer}’s numbers?'),
@@ -180,6 +182,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
         ],
       ));
       if (confirmed != true || !mounted) return;
+      setState(() => _invoiceLinkRunning = true);
       final grant = await DeviceOwnerAuthorization.instance.authority.authorizeSession(widget.businessId);
       if (!mounted) return;
       await service.apply(plan,grant);
