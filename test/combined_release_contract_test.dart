@@ -64,6 +64,7 @@ void main() {
     expect(source, contains('await _pendingMemoForPdf('));
     expect(source, contains('_localPdfSnapshot(localDetail)'));
     expect(source, contains('_localPdfSnapshot(cached)'));
-    expect(source, contains('return _withPdfUnits('));
+    expect(source, contains('await _withPdfUnits(await _pendingMemoForPdf('));
+    expect(source, contains('LocalInvoiceSignatureStore().project('));
   });
 }
