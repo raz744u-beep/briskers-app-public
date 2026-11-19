@@ -73,7 +73,9 @@ void main() {
     await tester.tap(find.text('Inspect saved invoice links'));
     await tester.pumpAndSettle();
     final review = find.text('Review Dakota Spinder’s number correction');
-    await tester.ensureVisible(review); await tester.tap(review); await tester.pumpAndSettle();
+    await tester.ensureVisible(review); await tester.pumpAndSettle();
+    expect(review.hitTestable(),findsOneWidget);
+    await tester.tap(review); await tester.pumpAndSettle();
     expect(find.text('Correct Dakota Spinder’s numbers?'),findsOneWidget);
     expect(find.textContaining('Invoice #6360 → #6382'),findsOneWidget);
     expect(find.textContaining('Tyra Legard keeps Invoice #6360 and J-41.'),findsOneWidget);

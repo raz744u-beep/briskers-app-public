@@ -165,6 +165,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
       final plan = await service.preview(widget.businessId,pair[0]['document_id'] as String,pair[1]['document_id'] as String);
       if (!mounted) return;
       final confirmed = await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
+        scrollable: true,
         title: Text('Correct ${plan.customer}’s numbers?'),
         content: Text('${plan.customer}\n'
           'Invoice #${plan.evidence['invoice_number']} → #${plan.invoiceNumber}\n'
@@ -430,12 +431,6 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                         )),
                   if (_invoiceLinkReport != null) ...[
                     const SizedBox(height: 10),
-                    SelectableText(_invoiceLinkSummary(_invoiceLinkReport!)),
-                    TextButton.icon(
-                      onPressed: _copyInvoiceLinkAudit,
-                      icon: const Icon(Icons.copy_outlined),
-                      label: const Text('Copy private report'),
-                    ),
                     if (_numberCorrectionPair.isNotEmpty)
                       FilledButton.icon(
                         style:FilledButton.styleFrom(backgroundColor:BriskersColors.confirm),
@@ -443,6 +438,13 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                         icon:const Icon(Icons.numbers),
                         label:Text('Review ${_numberCorrectionPair.first['customer_name'] ?? 'local invoice'}’s number correction'),
                       ),
+                    const SizedBox(height: 8),
+                    SelectableText(_invoiceLinkSummary(_invoiceLinkReport!)),
+                    TextButton.icon(
+                      onPressed: _copyInvoiceLinkAudit,
+                      icon: const Icon(Icons.copy_outlined),
+                      label: const Text('Copy private report'),
+                    ),
                   ],
                 ],
               ),
