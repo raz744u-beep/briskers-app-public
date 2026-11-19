@@ -235,7 +235,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       saved = const ExpenseFilterPreferences();
     }
     if (!mounted || epoch != _filterRestoreEpoch ||
-        business != widget.businessId || role != widget.roleCode) return;
+        business != widget.businessId || role != widget.roleCode) {
+      return;
+    }
     setState(() {
       _filter = saved.direction;
       _dateRange = saved.dateRange;
@@ -1301,7 +1303,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       ),
     );
     if (!mounted || filterScope != (widget.businessId, widget.roleCode) ||
-        selected == null || selected == _filter) return;
+        selected == null || selected == _filter) {
+      return;
+    }
     if (!mounted) return;
     setState(() => _filter = selected);
     await _saveFilters();
@@ -1369,7 +1373,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       ),
     );
     if (!mounted || filterScope != (widget.businessId, widget.roleCode) ||
-        selected == null) return;
+        selected == null) {
+      return;
+    }
 
     if (selected == 'custom') {
       if (!mounted) return;
@@ -1387,7 +1393,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
               ),
       );
       if (!mounted || filterScope != (widget.businessId, widget.roleCode) ||
-          picked == null) return;
+          picked == null) {
+        return;
+      }
       _customStartDate = _dateOnly(picked.start);
       _customEndDate = _dateOnly(picked.end);
     }
@@ -1544,7 +1552,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     );
 
     if (applied != true || !mounted ||
-        filterScope != (widget.businessId, widget.roleCode)) return;
+        filterScope != (widget.businessId, widget.roleCode)) {
+      return;
+    }
     setState(() {
       _accountFilterId = accountId;
       _categoryFilterId = categoryId;
