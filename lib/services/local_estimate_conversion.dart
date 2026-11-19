@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import 'local_document_sql_store.dart';
+import 'recovery_commit_store.dart';
 
 /// Projects explicit saved conversion evidence. Customer, amount and public
 /// number matches alone never establish an estimate/invoice relationship.
@@ -59,6 +60,7 @@ class LocalEstimateConversion {
 
   Future<void> projectRows(String business, List<Map<String, dynamic>> rows) async {
     await LocalDocumentSqlStore.ensure(db);
+    await RecoveryCommitStore.ensure(db);
     final records = await db.customSelect(
       "SELECT d.id,d.kind,d.converted,d.document_number,d.document_date,"
       "CASE WHEN d.kind='estimate' THEN c.payload_json END AS payload_json,"
@@ -68,7 +70,10 @@ class LocalEstimateConversion {
       "AND (json_extract(c.payload_json,'\$.business_id') IS NULL OR json_extract(c.payload_json,'\$.business_id')=d.business_id) "
       "THEN COALESCE(NULLIF(json_extract(c.payload_json,'\$.converted_from_estimate_id'),''), "
       "NULLIF(json_extract(c.payload_json,'\$.source_estimate_id'),'')) END END AS source_estimate_id "
-      "FROM local_documents d LEFT JOIN local_document_details c "
+      "FROM local_documents d LEFT JOIN ("
+      "SELECT cache_key,payload_json FROM local_document_details "
+      "UNION ALL SELECT 'briskers_document_detail_' || business_id || '_' || document_id,payload_json "
+      "FROM recovery_document_cache) c "
       "ON c.cache_key='briskers_document_detail_' || d.business_id || '_' || d.id "
       "WHERE d.business_id=? AND NOT EXISTS(SELECT 1 FROM local_document_detail_deleted x "
       "WHERE x.cache_key='briskers_document_detail_' || d.business_id || '_' || d.id)",
@@ -92,16 +97,26 @@ class LocalEstimateConversion {
             (value['business_id'] != null && value['business_id'] != business)) {
           continue;
         }
-        saved[id] = Map<String, dynamic>.from(value);
+        saved[id] = _withLegacy(Map<String, dynamic>.from(value), saved[id]);
       } on FormatException {
         // Invalid snapshots never establish a link.
       }
+    }
+    final receipts = await db.customSelect(
+      'SELECT estimate_id,invoice_id FROM local_estimate_conversion_evidence WHERE business_id=? '
+      'AND NOT EXISTS(SELECT 1 FROM local_document_detail_deleted x WHERE '
+      "x.cache_key='briskers_document_detail_' || ? || '_' || invoice_id)",
+      variables:[Variable(business),Variable(business)],
+    ).get();
+    for (final receipt in receipts) {
+      reverse.putIfAbsent(receipt.read<String>('estimate_id'), () => [])
+          .add(receipt.read<String>('invoice_id'));
     }
     for (final row in rows) {
       if (row['kind'] != 'estimate') continue;
       final id = row['id']?.toString() ?? '';
       final prior = _withLegacy(saved[id] ?? const <String, dynamic>{}, legacy[id]);
-      final links = reverse[id] ?? const <String>[];
+      final links = (reverse[id] ?? const <String>[]).toSet().toList();
       var target = (row['converted_invoice_id'] ?? prior['converted_invoice_id'])?.toString() ?? '';
       if (target.isEmpty && links.length == 1) target = links.single;
       if (row['converted'] != true && prior['converted'] != true &&
@@ -118,74 +133,22 @@ class LocalEstimateConversion {
     }
   }
 
+  Future<void> recordAcknowledged(String business, String estimate, String invoice) async {
+    if (business.isEmpty || estimate.isEmpty || invoice.isEmpty) {
+      throw ArgumentError('An acknowledged conversion requires exact identities.');
+    }
+    await LocalDocumentSqlStore.ensure(db);
+    await db.customStatement('INSERT OR IGNORE INTO local_estimate_conversion_evidence VALUES(?,?,?)',
+      [business,estimate,invoice]);
+  }
+
   Future<Map<String, dynamic>> project(
-    String business,
-    Map<String, dynamic> detail, {
+    String business, Map<String, dynamic> detail, {
     Map<String, dynamic>? previous,
   }) async {
-    if (detail['kind'] != 'estimate') return detail;
-    final id = detail['id']?.toString() ?? '';
-    if (id.isEmpty) return detail;
-    await LocalDocumentSqlStore.ensure(db);
-    final raw = await LocalDocumentSqlStore.read(
-      db, 'briskers_document_detail_${business}_$id',
-    );
-    Map<String, dynamic> saved = previous ?? const {};
-    if (previous == null && raw != null) {
-      try {
-        final value = jsonDecode(raw);
-        if (value is Map && value['id'] == id &&
-            value['kind'] == 'estimate' &&
-            (value['business_id'] == null || value['business_id'] == business)) {
-          saved = Map<String, dynamic>.from(value);
-        }
-      } on FormatException {
-        // An unreadable cache cannot supply conversion evidence.
-      }
-    }
-    final index = await db.customSelect(
-      "SELECT converted FROM local_documents WHERE business_id=? AND id=? AND kind='estimate'",
-      variables: [Variable(business), Variable(id)],
-    ).getSingleOrNull();
-    if (index != null) saved = _withLegacy(saved, (await _legacyConversions(business))[id]);
-    var converted = detail['converted'] == true || saved['converted'] == true ||
-        index?.data['converted'] == 1;
-    var invoiceId = (detail['converted_invoice_id'] ??
-        saved['converted_invoice_id'])?.toString() ?? '';
-    // Reverse links survive a stale estimate cache/index. Require an exact
-    // internal source ID in a saved invoice belonging to this business.
-    if (invoiceId.isEmpty) {
-      const snapshot = "CASE WHEN json_valid(c.payload_json) THEN c.payload_json ELSE '{}' END";
-      final links = await db.customSelect(
-        "SELECT d.id FROM local_documents d JOIN local_document_details c "
-        "ON c.cache_key='briskers_document_detail_' || d.business_id || '_' || d.id "
-        "WHERE d.business_id=? AND d.kind='invoice' AND json_valid(c.payload_json) "
-        "AND json_extract($snapshot,'\$.id')=d.id "
-        "AND json_extract($snapshot,'\$.kind')='invoice' "
-        "AND (json_extract($snapshot,'\$.business_id') IS NULL OR json_extract($snapshot,'\$.business_id')=d.business_id) "
-        "AND (json_extract($snapshot,'\$.converted_from_estimate_id')=? "
-        "OR json_extract($snapshot,'\$.source_estimate_id')=?) "
-        "AND NOT EXISTS(SELECT 1 FROM local_document_detail_deleted x WHERE x.cache_key=c.cache_key)",
-        variables: [Variable(business), Variable(id), Variable(id)],
-      ).get();
-      if (links.length == 1) invoiceId = links.single.read<String>('id');
-      if (links.isNotEmpty) converted = true;
-    }
-    if (invoiceId.isNotEmpty) converted = true;
-    if (!converted) return detail;
-    final invoice = invoiceId.isEmpty ? null : await db.customSelect(
-      "SELECT document_number,document_date FROM local_documents "
-      "WHERE business_id=? AND id=? AND kind='invoice'",
-      variables: [Variable(business), Variable(invoiceId)],
-    ).getSingleOrNull();
-    return {
-      ...detail,
-      'converted': true,
-      if (invoiceId.isNotEmpty) 'converted_invoice_id': invoiceId,
-      'converted_invoice_number': invoice?.data['document_number'] ??
-          detail['converted_invoice_number'] ?? saved['converted_invoice_number'],
-      'converted_invoice_date': invoice?.data['document_date'] ??
-          detail['converted_invoice_date'] ?? saved['converted_invoice_date'],
-    };
+    if (detail['kind'] != 'estimate' || (detail['id']?.toString() ?? '').isEmpty) return detail;
+    final row = _withLegacy({...detail}, previous);
+    await projectRows(business, [row]);
+    return row;
   }
 }

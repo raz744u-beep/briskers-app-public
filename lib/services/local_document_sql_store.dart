@@ -11,6 +11,9 @@ class LocalDocumentSqlStore {
       '(cache_key TEXT PRIMARY KEY NOT NULL,payload_json TEXT)');
     await db.customStatement('CREATE TABLE IF NOT EXISTS local_document_detail_deleted '
       '(cache_key TEXT PRIMARY KEY NOT NULL)');
+    await db.customStatement('CREATE TABLE IF NOT EXISTS local_estimate_conversion_evidence '
+      '(business_id TEXT NOT NULL,estimate_id TEXT NOT NULL,invoice_id TEXT NOT NULL, '
+      'PRIMARY KEY(business_id,estimate_id,invoice_id))');
     await db.customStatement('CREATE TRIGGER IF NOT EXISTS local_detail_no_resurrection '
       'BEFORE INSERT ON local_document_details WHEN EXISTS '
       '(SELECT 1 FROM local_document_detail_deleted WHERE cache_key=NEW.cache_key) '
@@ -30,7 +33,7 @@ class LocalDocumentSqlStore {
     final imports=<String,String>{};
     for(final business in businesses){
       final prefix='briskers_document_detail_${business}_';
-      for(final key in prefs.getKeys().where((key)=>key.startsWith(prefix) && !occupied.contains(key))){
+      for(final key in prefs.getKeys().where((key)=>key.startsWith(prefix))){
         final raw=prefs.get(key);
         if(raw is! String)continue;
         try{
@@ -45,7 +48,29 @@ class LocalDocumentSqlStore {
               ? ((value['converted_from_estimate_id'] ?? value['source_estimate_id'])?.toString().isNotEmpty ?? false)
               : kind=='estimate' && (value['converted']==true ||
                 (value['converted_invoice_id']?.toString().isNotEmpty ?? false));
-          if(evidence)imports[key]=raw;
+          if(evidence) {
+            if (!occupied.contains(key)) imports[key]=raw;
+            final invoice = kind=='invoice' ? value['id']?.toString() ?? '' :
+                value['converted_invoice_id']?.toString() ?? '';
+            final estimate = kind=='invoice' ?
+                (value['converted_from_estimate_id'] ?? value['source_estimate_id'])?.toString() ?? '' :
+                (value['_server_document_id'] ?? value['id'])?.toString() ?? '';
+            if (invoice.isEmpty || estimate.isEmpty) continue;
+            if (await deleted(db,key)) continue;
+            // A current explicit backlink beats contradictory legacy proof.
+            final current=(await db.customSelect('SELECT payload_json FROM local_document_details WHERE cache_key=?',
+                variables:[Variable(key)]).getSingleOrNull())?.readNullable<String>('payload_json');
+            if (current!=null) {
+              final latest=jsonDecode(current);
+              if (latest is! Map || latest['id']!=value['id'] || latest['kind']!=kind ||
+                  (latest['business_id']!=null && latest['business_id']!=business)) continue;
+              final known=kind=='invoice' ? latest['converted_from_estimate_id'] ?? latest['source_estimate_id'] :
+                  latest['converted_invoice_id'];
+              if (known!=null && known.toString().isNotEmpty && known!=(kind=='invoice' ? estimate : invoice)) continue;
+            }
+            await db.customStatement('INSERT OR IGNORE INTO local_estimate_conversion_evidence VALUES(?,?,?)',
+                [business,estimate,invoice]);
+          }
         }on FormatException{
           // Leave unreadable legacy evidence untouched for review.
         }

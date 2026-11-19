@@ -114,4 +114,25 @@ void main() {
     ).getSingle();
     expect(unchanged.read<int>('n'), 3001);
   });
+  test('scoped snapshots keep large unrelated payloads inside SQLite, including empty invoices', () async {
+    final largeNote=List.filled(24000,'x').join();
+    await cache.saveLinkedExpenses('shop',[
+      for(var i=0;i<1500;i++) {...expense('archive-$i',job:'other'),'description':largeNote},
+      {...expense('selected',document:'invoice'),'allocation_id':'share','amount':12.5},
+    ]);
+    await cache.saveTransactions('shop',[
+      for(var i=0;i<1500;i++) {...expense('archive-$i',job:'other'),'description':largeNote},
+      expense('selected',document:'invoice'),
+    ]);
+    final watch=Stopwatch()..start();
+    final rows=await cache.loadLinkedExpenses('shop',documentId:'invoice',relatedJobId:'job');
+    expect(rows!.single['amount'],12.5);
+    expect(await cache.loadLinkedExpenses('shop',documentId:'empty',relatedJobId:'empty-job'),isEmpty);
+    // Informational native read timing; do not claim a device latency guarantee.
+    // ignore: avoid_print
+    print('Scoped/empty invoice reads with 72MB archive: ${watch.elapsedMilliseconds}ms');
+    final original=await db.customSelect("SELECT length(payload_json) AS n FROM local_financial_cache WHERE business_id='shop' AND cache_key='transactions_snapshot'").getSingle();
+    expect(original.read<int>('n'),greaterThan(36000000));
+  });
+
 }

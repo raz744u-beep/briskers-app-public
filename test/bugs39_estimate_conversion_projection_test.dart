@@ -8,6 +8,8 @@ import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_document_repository.dart';
 import 'package:briskers_app/services/local_document_sql_store.dart';
 import 'package:briskers_app/services/local_job_retirement.dart';
+import 'package:briskers_app/services/local_estimate_conversion.dart';
+import 'package:briskers_app/services/recovery_commit_store.dart';
 import 'package:briskers_app/services/offline_document_edit_service.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -150,6 +152,43 @@ void main() {
     await LocalDocumentDetailCache.initialize(db);
     expect(await LocalDocumentSqlStore.read(db,invoiceKey),isNull);
     expect((await LocalDocumentDetailCache(database:db).load('shop','estimate-2007'))!['converted'],false);
+  });
+
+  test('legacy proof survives an occupied stale SQL snapshot without replacing financial fields', () async {
+    final key=LocalDocumentDetailCache.key('shop','invoice-6377');
+    final stale=jsonEncode({...target,'converted_from_estimate_id':null,'memo':'newer local edit'});
+    await LocalDocumentSqlStore.write(db,key,stale);
+    final prefs=await SharedPreferences.getInstance();
+    await prefs.setString(key,jsonEncode(target));
+    await LocalDocumentDetailCache.initialize(db);
+    expect((await LocalDocumentDetailCache(database:db).load('shop','estimate-2007'))!['converted_invoice_id'],'invoice-6377');
+    expect((await LocalDocumentRepository(database:db).listByKind('shop',kind:'estimate')).single['display_status'],'Converted');
+    expect(await LocalDocumentSqlStore.read(db,key),stale);
+  });
+
+  test('recovered invoice backlink participates in list and detail projection', () async {
+    final key=LocalDocumentDetailCache.key('shop','invoice-6377');
+    await LocalDocumentSqlStore.write(db,key,jsonEncode({...target,'converted_from_estimate_id':null}));
+    await RecoveryCommitStore.ensure(db);
+    final recovered=jsonEncode(target);
+    await db.customStatement('INSERT INTO recovery_document_cache VALUES(?,?,?)',['shop','invoice-6377',recovered]);
+    expect((await LocalDocumentDetailCache(database:db).load('shop','estimate-2007'))!['converted_invoice_id'],'invoice-6377');
+    expect((await LocalDocumentRepository(database:db).listByKind('shop',kind:'estimate')).single['converted'],true);
+    expect((await RecoveryCommitStore.snapshot(db,'shop','invoice-6377'))!.read<String>('payload_json'),recovered);
+  });
+
+  test('acknowledged conversion survives stale refresh, restart and retired target filtering', () async {
+    await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','invoice-6377'),
+      jsonEncode({...target,'converted_from_estimate_id':null}));
+    await LocalEstimateConversion(db).recordAcknowledged('shop','estimate-2007','invoice-6377');
+    await LocalDocumentDetailCache(database:db).save('shop','estimate-2007',source);
+    await db.close(); db=BriskersLocalDatabase(NativeDatabase(File('${dir.path}/db.sqlite')));
+    final cache=LocalDocumentDetailCache(database:db);
+    expect((await cache.load('shop','estimate-2007'))!['converted_invoice_id'],'invoice-6377');
+    expect((await LocalDocumentRepository(database:db).listByKind('shop',kind:'estimate')).single['converted'],true);
+    await LocalJobRetirement.ensureSchema(db);
+    await db.customStatement("INSERT INTO local_job_retirement_entities VALUES('shop','retired-job','invoice','invoice-6377','retirement','accepted')");
+    expect((await cache.load('shop','estimate-2007'))!['converted'],false);
   });
 
 }

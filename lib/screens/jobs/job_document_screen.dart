@@ -694,6 +694,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _detail = datedCached;
+        _primeInvoiceExpenses();
         if (!_notesDirty && !_notesFocusNode.hasFocus) {
           _notesController.text = datedCached['memo']?.toString() ?? '';
         }
@@ -741,6 +742,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           if (!mounted || generation != _loadGeneration) return;
           setState(() {
             _detail = recovered;
+        _primeInvoiceExpenses();
             if (!_notesDirty && !_notesFocusNode.hasFocus) {
               _notesController.text = recovered['memo']?.toString() ?? '';
             }
@@ -812,6 +814,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _detail = projected;
+        _primeInvoiceExpenses();
         if (!_notesDirty && !_notesFocusNode.hasFocus) {
           _notesController.text = projected['memo']?.toString() ?? '';
         }
@@ -826,6 +829,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         if (!mounted || generation != _loadGeneration) return;
         setState(() {
           _detail = projected;
+        _primeInvoiceExpenses();
           if (!_notesDirty && !_notesFocusNode.hasFocus) {
             _notesController.text = projected['memo']?.toString() ?? '';
           }
@@ -925,6 +929,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _detail = projected;
+        _primeInvoiceExpenses();
         if (!_notesDirty && !_notesFocusNode.hasFocus) {
           _notesController.text = projected['memo']?.toString() ?? '';
         }
@@ -958,6 +963,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         if (!mounted || generation != _loadGeneration) return;
         setState(() {
           _detail = datedCached;
+        _primeInvoiceExpenses();
           _warrantyDetail = _cachedWarrantyDetail(datedCached);
           if (!_notesDirty && !_notesFocusNode.hasFocus) {
             _notesController.text = datedCached['memo']?.toString() ?? '';
@@ -1541,6 +1547,18 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Future<List<Map<String, dynamic>>>? _invoiceExpensesTabFuture;
 
+  // Begin the local read with the invoice, while Items is already visible.
+  // Retain this same future on the first Expenses mount and subsequent visits.
+  void _primeInvoiceExpenses() {
+    if (_detail == null || _estimate || !_canManageInvoiceExpenses ||
+        _invoiceExpensesTabFuture != null) return;
+    final future = _invoiceTabExpenses();
+    _invoiceExpensesTabFuture = future;
+    // The tab owns error presentation; preloading must not emit an unhandled
+    // asynchronous error before a user selects that tab.
+    unawaited(future.then<void>((_) {}, onError: (Object error, StackTrace stack) {}));
+  }
+
   Future<List<Map<String, dynamic>>> _invoiceTabExpenses() async {
     final rows = await InvoiceExpenseReader().load(
       businessId: widget.businessId,
@@ -1575,8 +1593,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           ),
         ]),
       ),
-      // Start only when the tab is mounted. TabBarView constructs offstage
-      // children before their FutureBuilder can subscribe to failures.
+      // Reuse the local read started with the invoice; mounting a tab does
+      // not restart the archive lookup.
       Expanded(child: Builder(builder: (_) => FutureBuilder<List<Map<String, dynamic>>>(
         future: _invoiceExpensesTabFuture ??= _invoiceTabExpenses(),
         builder: (context, snapshot) {
@@ -2567,6 +2585,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         if (mounted) {
           setState(() {
             _detail = projected;
+        _primeInvoiceExpenses();
             _warrantyDetail = warranty;
             _signatureStatus = signature;
           });

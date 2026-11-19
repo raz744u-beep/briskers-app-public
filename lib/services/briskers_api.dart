@@ -1,3 +1,4 @@
+import 'local_estimate_conversion.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -3410,7 +3411,9 @@ class BriskersApi {
         'p_estimate_id': estimateId,
       },
     );
-    return result.toString();
+    final invoiceId=result.toString();
+    await LocalEstimateConversion(localDatabase).recordAcknowledged(businessId,estimateId,invoiceId);
+    return invoiceId;
   }
 
   Future<List<Map<String, dynamic>>> eligibleInvoicesForEstimate(

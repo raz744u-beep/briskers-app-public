@@ -428,7 +428,14 @@ class LocalFinancialCache {
     String? linkedJobId,
     Set<String> linkedDocumentIds = const {},
   }) async {
-    final raw = await _load(businessId, _transactionsKey);
+    // Keep unrelated history inside SQLite: transferring and decoding the
+    // complete archive blocks Android's UI isolate even for an empty invoice.
+    final scoped = linkedTransactionIds != null;
+    final raw = scoped ? await _loadScopedSnapshot(
+      businessId, _transactionsKey,
+      transactionIds: linkedTransactionIds,
+      jobIds: {?linkedJobId}, documentIds: linkedDocumentIds,
+    ) : await _load(businessId, _transactionsKey);
     var rows = <Map<String, dynamic>>[];
     try {
       if (raw != null && raw.isNotEmpty) {
@@ -674,7 +681,12 @@ class LocalFinancialCache {
     String? relatedJobId,
     bool failOnUnreadable = false,
   }) async {
-    final raw = await _load(businessId, _linkedExpensesKey);
+    final scoped = jobId != null || documentId != null || relatedJobId != null;
+    final raw = scoped ? await _loadScopedSnapshot(
+      businessId, _linkedExpensesKey,
+      jobIds: {?jobId, ?relatedJobId}, documentIds: {?documentId, ...documentIds},
+      includeSiblingAllocations: true,
+    ) : await _load(businessId, _linkedExpensesKey);
     List<Map<String, dynamic>> rows;
     if (raw == null) {
       rows = <Map<String, dynamic>>[];
@@ -697,7 +709,6 @@ class LocalFinancialCache {
           (row['job_id'] == null && documentIds.contains(row['document_id']?.toString()))) &&
         (documentId == null || relatedJobId != null ||
             row['document_id']?.toString() == documentId);
-    final scoped = jobId != null || documentId != null || relatedJobId != null;
     // Preserve allocation amounts: one vendor transaction can be split across
     // jobs. A whole-transaction cache row must not replace every allocated share.
     final allocations = <String, Map<String, dynamic>>{};
@@ -1020,6 +1031,40 @@ class LocalFinancialCache {
         DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
       ],
     );
+  }
+
+  /// Filter the saved JSON array before it crosses the database connection.
+  /// Null still means unavailable, rather than an invented empty inventory.
+  Future<String?> _loadScopedSnapshot(
+    String business, String key, {
+    Set<String> transactionIds = const {},
+    Set<String> jobIds = const {},
+    Set<String> documentIds = const {},
+    bool includeSiblingAllocations = false,
+  }) async {
+    final result = await _database.customSelect(
+      "WITH snapshot AS (SELECT payload_json FROM local_financial_cache "
+      "WHERE business_id=? AND cache_key=?), "
+      "entries AS (SELECT value FROM snapshot, json_each("
+      "CASE WHEN json_valid(payload_json) THEN "
+      "CASE WHEN json_type(payload_json)='array' THEN payload_json ELSE '[]' END "
+      "ELSE '[]' END)), "
+      "selected AS (SELECT value FROM entries WHERE "
+      "json_extract(value,'\$.id') IN (SELECT value FROM json_each(?)) OR "
+      "json_extract(value,'\$.job_id') IN (SELECT value FROM json_each(?)) OR "
+      "json_extract(value,'\$.document_id') IN (SELECT value FROM json_each(?))) "
+      "SELECT CASE WHEN json_valid(payload_json) THEN "
+      "CASE WHEN json_type(payload_json)='array' THEN "
+      "(SELECT json_group_array(json(value)) FROM ${includeSiblingAllocations ?
+        "entries WHERE coalesce(json_extract(value,'\$.transaction_id'),json_extract(value,'\$.id'),json_extract(value,'\$.allocation_id')) IN "
+        "(SELECT coalesce(json_extract(value,'\$.transaction_id'),json_extract(value,'\$.id'),json_extract(value,'\$.allocation_id')) FROM selected)" : 'selected'}) "
+      "ELSE payload_json END ELSE payload_json END AS payload_json FROM snapshot",
+      variables: [Variable(business), Variable(key),
+        Variable(jsonEncode(transactionIds.toList())),
+        Variable(jsonEncode(jobIds.toList())),
+        Variable(jsonEncode(documentIds.toList()))],
+    ).getSingleOrNull();
+    return result?.readNullable<String>('payload_json');
   }
 
   Future<String?> _load(String businessId, String key) async {
