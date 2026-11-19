@@ -1432,7 +1432,1414 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                     child: ListView.builder(
                       itemCount: visible.length,
                       itemBuilder: (context, index) {
-           …12154 tokens truncated…   _error = null;
+                        final customer = visible[index];
+                        return ListTile(
+                          leading: const CircleAvatar(child: Icon(Icons.person_outline)),
+                          title: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  customer['display_name']?.toString() ?? '',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (customer['problem_flag'] == true)
+                                const Icon(
+                                  Icons.flag,
+                                  color: Colors.red,
+                                  size: 18,
+                                ),
+                            ],
+                          ),
+                          subtitle: Text(
+                            '${customer['vehicle_count'] ?? 0} vehicle(s)',
+                          ),
+                          onTap: () => Navigator.pop(sheetContext, customer),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>?> _pickVehicleForCustomer(
+    String customerId,
+  ) async {
+    Map<String, dynamic>? detail;
+    if (!BriskersConnectionModeController.instance.forceOnline) {
+      detail = await LocalCustomerRepository().customerDetail(
+        widget.businessId, customerId,
+      );
+    }
+    if (detail == null &&
+        !BriskersConnectionModeController.instance.forceOffline) {
+      detail = await _api.customerDetail(widget.businessId, customerId);
+    }
+    if (detail == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Customer vehicles are not cached on this device.'),
+        ));
+      }
+      return null;
+    }
+    final vehicles = List<dynamic>.from(detail['vehicles'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+    if (!mounted) return null;
+
+    return showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: Text(
+                'Select vehicle',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.remove_circle_outline),
+              title: const Text('No vehicle'),
+              subtitle: vehicles.isEmpty
+                  ? const Text('This customer has no vehicles yet.')
+                  : null,
+              onTap: () => Navigator.pop(
+                sheetContext,
+                <String, dynamic>{'id': null},
+              ),
+            ),
+            if (vehicles.isNotEmpty) const Divider(),
+            ...vehicles.map((vehicle) {
+              final label = <String>[
+                if (vehicle['year'] != null) vehicle['year'].toString(),
+                if ((vehicle['make']?.toString() ?? '').isNotEmpty)
+                  vehicle['make'].toString(),
+                if ((vehicle['model']?.toString() ?? '').isNotEmpty)
+                  vehicle['model'].toString(),
+              ].join(' ');
+              return ListTile(
+                leading: const Icon(Icons.directions_car_outlined),
+                title: Text(label.isEmpty ? 'Vehicle' : label),
+                subtitle: (vehicle['vin']?.toString() ?? '').isEmpty
+                    ? null
+                    : Text('VIN: ${vehicle['vin']}'),
+                onTap: () => Navigator.pop(sheetContext, vehicle),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _changeCustomer() async {
+    if (!_canManage || _job == null || _busy) return;
+    final customer = await _pickCustomer();
+    if (customer == null || !mounted) return;
+
+    final customerId = customer['id']?.toString() ?? '';
+    if (customerId.isEmpty) return;
+    if (customerId == _job!['customer_id']?.toString()) return;
+
+    final detail = await _api.customerDetail(widget.businessId, customerId);
+    final vehicles = List<dynamic>.from(detail['vehicles'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+
+    Map<String, dynamic>? vehicle;
+    if (vehicles.length == 1) {
+      vehicle = vehicles.first;
+    } else if (vehicles.length > 1) {
+      vehicle = await _pickVehicleForCustomer(customerId);
+      if (vehicle == null) return;
+    }
+
+    await _run(() => _updateCore(
+          customerId: customerId,
+          vehicleId: vehicle?['id']?.toString(),
+          plannedHours:
+              num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
+          requestedWork: _job!['requested_work']?.toString() ?? '',
+        ));
+  }
+
+  Future<void> _changeVehicle() async {
+    if ((!_canManage && !_canEditVehicleLocally) ||
+        _job == null || _busy) {
+      return;
+    }
+    final customerId = _job!['customer_id']?.toString() ?? '';
+    if (customerId.isEmpty) {
+      return;
+    }
+    final vehicle = await _pickVehicleForCustomer(customerId);
+    if (vehicle == null || !mounted) {
+      return;
+    }
+    final vehicleId = vehicle['id']?.toString();
+    final label = [
+      if (vehicle['year'] != null) vehicle['year'].toString(),
+      if ((vehicle['make']?.toString() ?? '').isNotEmpty)
+        vehicle['make'].toString(),
+      if ((vehicle['model']?.toString() ?? '').isNotEmpty)
+        vehicle['model'].toString(),
+    ].join(' ');
+    if (_canEditVehicleLocally) {
+      setState(() => _busy = true);
+      try {
+        await _offlineJobAdmin.queueCore(
+          widget.businessId, _jobId,
+          customerId: customerId,
+          vehicleId: vehicleId,
+          replaceVehicle: true,
+          vehicleLabel: label,
+          vehicleVin: vehicle['vin']?.toString(),
+        );
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _job = {
+            ..._job!,
+            'vehicle_id': vehicleId,
+            'vehicle': label,
+            'vehicle_vin': vehicle['vin'],
+          };
+          _mileageOut = null;
+          _mileageOutVehicleId = null;
+          _mileageOutInvoiceId = null;
+          _busy = false;
+        });
+        if (!BriskersConnectionModeController.instance.forceOffline) {
+          unawaited(_offlineJobAdmin.flush(widget.businessId)
+              .catchError((Object _) {}));
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() {
+            _busy = false;
+            _error = error.toString();
+          });
+        }
+      }
+      return;
+    }
+    await _run(() => _updateCore(
+      customerId: customerId,
+      vehicleId: vehicleId,
+      plannedHours: num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
+      requestedWork: _job!['requested_work']?.toString() ?? '',
+    ));
+  }
+
+  // Job admin writes commit locally first. A remote refresh or outbox replay
+  // is optional background work and must never hold the editor busy.
+  bool _jobAdminSyncBusy = false;
+  bool _jobAdminSyncAgain = false;
+
+  void _scheduleJobAdminSync() {
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    _jobAdminSyncAgain = true;
+    if (_jobAdminSyncBusy) return;
+    _jobAdminSyncBusy = true;
+    unawaited(() async {
+      try {
+        while (_jobAdminSyncAgain &&
+            !BriskersConnectionModeController.instance.forceOffline) {
+          _jobAdminSyncAgain = false;
+          try {
+            await _offlineJobAdmin.flush(widget.businessId);
+          } catch (_) {
+            // Failed replay remains in the durable outbox. Do not undo a
+            // locally accepted mechanic/hours choice on network failure.
+            return;
+          }
+        }
+      } finally {
+        _jobAdminSyncBusy = false;
+      }
+    }());
+  }
+
+  Future<void> _changePlannedHours() async {
+    if (!_canQuickAdmin || _job == null || _busy) return;
+    final controller = TextEditingController(
+      text: _hours(_job!['planned_hours']),
+    );
+    controller.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: controller.text.length,
+    );
+    var clearedForEntry = false;
+    final value = await showDialog<num>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Planned time'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          onTap: () {
+            if (!clearedForEntry) {
+              if (controller.text.trim() == '0') {
+                controller.clear();
+              } else {
+                controller.selection = TextSelection(
+                  baseOffset: 0,
+                  extentOffset: controller.text.length,
+                );
+              }
+              clearedForEntry = true;
+            }
+          },
+          cursorColor: BriskersColors.jobs,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: 'Hours',
+            suffixText: 'hr',
+            focusedBorder: OutlineInputBorder(
+              borderSide: const BorderSide(
+                color: BriskersColors.jobs,
+                width: 2,
+              ),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: BriskersColors.jobs,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            onPressed: () {
+              final hours = num.tryParse(controller.text.trim().isEmpty ? '0' : controller.text.trim());
+              if (hours != null && hours >= 0) {
+                Navigator.pop(dialogContext, hours);
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null || _job == null) return;
+
+    // Cancel stale in-flight Job Detail responses before changing local data.
+    ++_loadEpoch;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _offlineJobAdmin.queuePlannedHours(
+        widget.businessId,
+        _jobId,
+        value,
+      );
+      if (!mounted || _contentBlocked) return;
+      setState(() {
+        _job = <String, dynamic>{..._job!, 'planned_hours': value};
+        _busy = false;
+      });
+      _modalRefresh?.call();
+      _scheduleJobAdminSync();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<String?> _editTextSheet({
+    required String title,
+    required String initialValue,
+    required String hint,
+  }) async {
+    final controller = TextEditingController(text: initialValue);
+    final value = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          0,
+          16,
+          MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  title,
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(height: 5),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                cursorColor: BriskersColors.jobs,
+                minLines: 4,
+                maxLines: 9,
+                decoration: InputDecoration(
+                  hintText: hint,
+                  focusedBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(
+                      color: BriskersColors.jobs,
+                      width: 2,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: BriskersColors.jobs,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () => Navigator.pop(sheetContext, controller.text.trim()),
+                  child: const Text('Save'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    controller.dispose();
+    return value;
+  }
+
+  Future<void> _changeStatus(String code) async {
+    if (!_canQuickAdmin || _job == null) return;
+    if (code == _job!['status']?.toString()) return;
+
+    String? note;
+    if (_job!['status']?.toString() == 'completed' &&
+        code == 'needs_recheck') {
+      var reason = '';
+      note = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Reopen job'),
+          content: TextFormField(
+            autofocus: true,
+            minLines: 2,
+            maxLines: 4,
+            onChanged: (value) => reason = value,
+            decoration: const InputDecoration(
+              labelText: 'Reason for recheck',
+              hintText: 'Example: Customer returned with the same noise',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, reason.trim()),
+              child: const Text('Reopen'),
+            ),
+          ],
+        ),
+      );
+      if (note == null) return;
+    }
+
+    Map<String, dynamic>? selectedStatus;
+    for (final status in _statuses) {
+      if (status['code']?.toString() == code) {
+        selectedStatus = status;
+        break;
+      }
+    }
+    if (selectedStatus == null) return;
+
+    final original = Map<String, dynamic>.from(_job!);
+    final nextName = selectedStatus['name']?.toString() ?? code;
+    final nextColor = selectedStatus['color_hex']?.toString();
+    final nextIcon = selectedStatus['icon_key']?.toString();
+
+    // Discard any older in-flight remote response that could repaint the
+    // just-changed status from a stale server Job graph.
+    ++_loadEpoch;
+    // The Job header reflects the owner's selection immediately, while
+    // SQLite/outbox durability is established before background replay.
+    setState(() {
+      _busy = true;
+      _error = null;
+      _job = <String, dynamic>{
+        ..._job!,
+        'status': code,
+        'status_name': nextName,
+        'status_color': nextColor,
+        'status_icon': nextIcon,
+      };
+    });
+    try {
+      await _offlineJobAdmin.queueStatus(
+        widget.businessId,
+        _jobId,
+        code: code,
+        name: nextName,
+        colorHex: nextColor,
+        iconKey: nextIcon,
+        note: note,
+      );
+      if (!mounted) return;
+      setState(() => _busy = false);
+      // Do not await HTTP, invoice closing or a full Job Detail graph to
+      // repaint the completed badge and remove this Job from Open.
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        unawaited(() async {
+          try {
+            await _offlineJobAdmin.flush(widget.businessId);
+            if (code == 'completed' && widget.roleCode == 'owner') {
+              await OwnerInvoiceAutoCloseService().closeEligible(
+                businessId: widget.businessId,
+                jobId: _jobId,
+                isOwner: true,
+              );
+            }
+            if (mounted && !_contentBlocked) unawaited(_load());
+          } catch (_) {
+            // The durable local status + outbox still own the UI.
+          }
+        }());
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _job = original;
+          _error = error.toString();
+          _busy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _editJob() async {
+    if (!_canQuickAdmin || _job == null || _busy) return;
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobEditScreen(
+          businessId: widget.businessId,
+          job: Map<String, dynamic>.from(_job!),
+        ),
+      ),
+    );
+    if (changed == true && mounted) {
+      await _load();
+    }
+  }
+
+  Future<void> _changeAssignment() async {
+    if (!_canQuickAdmin || _busy) return;
+
+    final assignments = List<dynamic>.from(
+      _job?['assignments'] ?? const [],
+    );
+    final currentId = assignments.isEmpty
+        ? (_job == null
+            ? null
+            : _job!['assigned_employee_id']?.toString())
+        : Map<String, dynamic>.from(assignments.first as Map)['employee_id']
+            ?.toString();
+
+    List<Map<String, dynamic>> employees;
+    if (_onlineReady && _employees.isNotEmpty) {
+      employees = _employees;
+      // Cached authorized employee options already exist. Refresh for next
+      // visit without holding this picker on HTTP.
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        unawaited(_offlineJobAdmin.refreshEmployees(widget.businessId)
+            .catchError((Object _) => <Map<String, dynamic>>[]));
+      }
+    } else {
+      employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
+    }
+
+    employees = await _nicknameStore.decorate(widget.businessId, employees);
+    if (!mounted) return;
+    if (employees.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No employee list is saved on this device yet. Open Jobs once while online, then mechanic changes will work offline.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final selected = await showModalBottomSheet<String?>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final maxHeight = MediaQuery.sizeOf(sheetContext).height * 0.72;
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              children: [
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
+                  child: Text(
+                    'Assign mechanic / employee',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                ListTile(
+                  leading: const CircleAvatar(
+                    child: Icon(Icons.person_off_outlined),
+                  ),
+                  title: const Text('Unassigned'),
+                  trailing: currentId == null || currentId.isEmpty
+                      ? const Icon(Icons.check, color: BriskersColors.jobs)
+                      : null,
+                  onTap: () => Navigator.pop(sheetContext, ''),
+                ),
+                const Divider(),
+                ...employees.map((employee) {
+                  final position =
+                      employee['position_name']?.toString() ?? 'Employee';
+                  final roleStyle = employeeRoleStyle(position);
+                  final id = employee['id']?.toString() ?? '';
+                  return ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor:
+                          roleStyle.color.withValues(alpha: 0.14),
+                      child: Icon(roleStyle.icon, color: roleStyle.color),
+                    ),
+                    title: Text(EmployeeNicknameStore.displayName(employee)),
+                    subtitle: Text(
+                      employee['nickname']?.toString().isNotEmpty == true
+                          ? '${employee['name']} • $position'
+                          : position,
+                    ),
+                    trailing: id == currentId
+                        ? const Icon(Icons.check, color: BriskersColors.jobs)
+                        : null,
+                    onTap: () => Navigator.pop(sheetContext, id),
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selected == null) return;
+
+    Map<String, dynamic>? employee;
+    if (selected.isNotEmpty) {
+      for (final row in employees) {
+        if (row['id']?.toString() == selected) {
+          employee = row;
+          break;
+        }
+      }
+    }
+
+    // Older remote reads cannot repaint this Job with an assignment that
+    // predates the new local SQLite/outbox commit.
+    ++_loadEpoch;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _offlineJobAdmin.queueAssignment(
+        widget.businessId,
+        _jobId,
+        employeeId: selected.isEmpty ? null : selected,
+        employeeName: employee?['name']?.toString(),
+        position: employee?['position_name']?.toString(),
+      );
+      if (!mounted || _contentBlocked) return;
+      final assigned = selected.isNotEmpty;
+      setState(() {
+        _job = <String, dynamic>{
+          ..._job!,
+          'assigned_employee_id': assigned ? selected : null,
+          'assigned_employee_name': employee?['name'],
+          'assigned_employee_nickname': employee?['nickname'],
+          'assigned_position': employee?['position_name'],
+          'is_unassigned': !assigned,
+          'assignments': assigned
+              ? <Map<String, dynamic>>[
+                  {
+                    'employee_id': selected,
+                    'employee_name': employee?['name'],
+                    'position': employee?['position_name'],
+                    'source': 'offline_admin',
+                    'active': true,
+                  },
+                ]
+              : <Map<String, dynamic>>[],
+        };
+        _busy = false;
+      });
+      _modalRefresh?.call();
+      _scheduleJobAdminSync();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _requestJob() async {
+    if (!_canRequestJob) return;
+    await _run(() async {
+      await _api.requestJobAssignment(widget.businessId, _jobId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Job request sent to the office.'),
+          ),
+        );
+      }
+    });
+  }
+
+  Future<void> _decideRequest(
+    Map<String, dynamic> request,
+    bool approve,
+  ) async {
+    if (!_canManage) return;
+    await _run(() async {
+      await _api.decideJobAssignmentRequest(
+        widget.businessId,
+        request['id'].toString(),
+        approve: approve,
+      );
+    });
+  }
+
+  Future<String> _jobTextForStorage(String original) async {
+    final text = original.trim();
+    if (text.isEmpty || !BriskersLanguageController.instance.isSpanish) {
+      return text;
+    }
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      // Do not claim that Spanish was converted while offline. The local
+      // text stays intact and needs translation on a later online sync.
+      return text;
+    }
+    final translated = await _api.translateManualDocumentText(
+      widget.businessId, [text],
+    );
+    if (translated.length != 1 || translated.first.trim().isEmpty) {
+      throw StateError('Spanish-to-English translation did not complete.');
+    }
+    return translated.first.trim();
+  }
+
+  /// Mileage In is shown beside Customer Complaint but stored in the same
+  /// existing pre-inspection odometer, so staff do not enter it twice.
+  Future<void> _editMileageIn() async {
+    if (_job == null || _busy || !_canEditInspection) return;
+    final businessId = widget.businessId;
+    final jobId = _jobId;
+    final vehicleId = _job?['vehicle_id']?.toString();
+    final initial = JobMileageSummary.mileageIn(_job, _preInspection);
+    final controller = TextEditingController(
+      text: initial?.toString() ?? '',
+    );
+    ModalRoute<dynamic>? mileageInDialogRoute;
+    final save = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        mileageInDialogRoute ??= ModalRoute.of(dialogContext);
+        return AlertDialog(
+          title: const Text('Miles In'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Odometer when vehicle arrived',
+              suffixText: 'mi',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+    final raw = controller.text.replaceAll(',', '').trim();
+    await mileageInDialogRoute?.completed;
+    controller.dispose();
+    if (save != true || !mounted || _contentBlocked || !_canEditInspection ||
+        _job == null || widget.businessId != businessId || _jobId != jobId ||
+        _job?['vehicle_id']?.toString() != vehicleId) {
+      return;
+    }
+    final parsed = num.tryParse(raw);
+    if (parsed == null || parsed < 0 || !parsed.isFinite ||
+        parsed > 9999999 || parsed != parsed.roundToDouble()) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Enter a valid whole-number Miles In.'),
+      ));
+      return;
+    }
+    final existingNotes = _preInspection?['notes']?.toString();
+    final epoch = _loadEpoch;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final local = await _offlineInspection.saveLocalInspection(
+        businessId,
+        jobId,
+        vehicleId: vehicleId,
+        notes: existingNotes,
+        odometer: parsed,
+      );
+      _applyLocalPreInspection(local, expectedEpoch: epoch);
+      unawaited(_flushPreInspectionQueue());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _editComplaint() async {
+    if (!_canQuickAdmin || _job == null || _busy) return;
+    final value = await _editTextSheet(
+      title: tr('customerComplaint'),
+      initialValue: _job!['requested_work']?.toString() ?? '',
+      hint: tr('complaintHint'),
+    );
+    if (value == null || _job == null) return;
+
+    // Keep previous server Job reads from restoring an outdated complaint.
+    ++_loadEpoch;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final translated = await _jobTextForStorage(value);
+      await _offlineJobAdmin.queueCore(
+        widget.businessId,
+        _jobId,
+        requestedWork: translated.isEmpty ? null : translated,
+        replaceRequestedWork: true,
+      );
+      if (!mounted || _contentBlocked) return;
+      setState(() {
+        _job = <String, dynamic>{
+          ..._job!,
+          'requested_work': translated,
+        };
+        _busy = false;
+      });
+      _modalRefresh?.call();
+      _scheduleJobAdminSync();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _editWorkSummary({bool fillFromInvoice = false}) async {
+    if (!_canEditWork) return;
+    final visits = List<dynamic>.from(_job?['visits'] ?? const []);
+    if (visits.isEmpty || _busy) return;
+    final current = Map<String, dynamic>.from(visits.first as Map);
+
+    if (current['sync_state'] == 'conflict') return;
+    final value = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (editorContext) => WorkPerformedEditorSheet(
+        initialValue: current['work_summary']?.toString() ?? '',
+        loadInvoiceLabor: _canSeeFinancial
+            ? () => _loadInvoiceLabor(editorContext) : null,
+        fillOnOpen: fillFromInvoice,
+      ),
+    );
+    if (!mounted || value == null || _contentBlocked || !_canEditWork) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      await _offlineWorkFindings.saveLocalWorkSummary(
+        widget.businessId,
+        _jobId,
+        workSummary: await _jobTextForStorage(value),
+      );
+      await _refreshLocalWorkFindings();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(tr('workSavedLocally')),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+
+      unawaited(_flushWorkFindingsQueue());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<String?> _loadInvoiceLabor(BuildContext editorContext) async {
+    bool editorActive() => mounted && editorContext.mounted &&
+        ModalRoute.of(editorContext)?.isCurrent == true && !_contentBlocked;
+    if (!_canSeeFinancial || _contentBlocked) return null;
+    final mode = BriskersConnectionModeController.instance;
+    final documents = await readInvoiceLaborSource(
+      onlineRead: () => _api.jobDocuments(widget.businessId, _jobId),
+      cachedRead: _localDocumentsForJob,
+      forceOffline: mode.forceOffline,
+      forceOnline: mode.forceOnline,
+    );
+    if (!mounted || !editorContext.mounted || !editorActive()) return null;
+    final invoices = documents
+        .where(
+          (row) =>
+              row['kind'] == 'invoice' &&
+              !const {
+                'void',
+                'voided',
+                'cancelled',
+                'canceled',
+              }.contains(row['status']?.toString().toLowerCase()),
+        )
+        .toList();
+    if (invoices.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No invoice is linked to this Job.')),
+      );
+      return null;
+    }
+    final invoice = await chooseJobInvoice(
+      editorContext,
+      invoices: invoices,
+      title: 'Choose invoice labor',
+    );
+    if (invoice == null || !mounted || !editorContext.mounted || !editorActive()) return null;
+    final id = invoice['id']?.toString() ?? '';
+    final detail = await readInvoiceLaborSource<Map<String, dynamic>?>(
+      onlineRead: () => _api.documentDetail(widget.businessId, id),
+      cachedRead: () => _documentDetailCache.load(widget.businessId, id),
+      forceOffline: mode.forceOffline || id.startsWith('local-invoice-'),
+      forceOnline: mode.forceOnline,
+    );
+    if (!mounted || !editorContext.mounted || !editorActive()) return null;
+    if (detail == null || detail['job_id']?.toString() != _jobId ||
+        detail['kind'] != 'invoice' ||
+        const {'void', 'voided', 'cancelled', 'canceled'}.contains(detail['status']?.toString().toLowerCase())) {
+      throw StateError(
+        'Connect and open this invoice before copying its labor.',
+      );
+    }
+    return invoiceLaborWorkSummary(detail);
+  }
+
+  String _imageMime(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    return 'image/jpeg';
+  }
+
+  Future<void> _editPreInspectionDetails() async {
+    final epoch = _loadEpoch;
+    if (_job == null || _busy || !_canEditInspection) return;
+
+    final mileage = TextEditingController(
+      text: _preInspection?['odometer']?.toString() ??
+          _job?['odometer_in']?.toString() ??
+          '',
+    );
+    final notes = TextEditingController(
+      text: _preInspection?['notes']?.toString() ?? '',
+    );
+
+    final save = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          0,
+          16,
+          MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Pre-inspection',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: mileage,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration:
+                    const InputDecoration(labelText: 'Miles In at check-in'),
+              ),
+              const SizedBox(height: 6),
+              TextField(
+                controller: notes,
+                minLines: 3,
+                maxLines: 6,
+                decoration: const InputDecoration(
+                  labelText: 'Inspection notes',
+                  hintText:
+                      'Existing damage, warning lights, interior condition, etc.',
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(sheetContext, true),
+                  child: const Text('Save'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final noteValue = notes.text.trim();
+    final odometerValue = num.tryParse(mileage.text.trim());
+    mileage.dispose();
+    notes.dispose();
+    if (save != true) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      final local = await _offlineInspection.saveLocalInspection(
+        widget.businessId,
+        _jobId,
+        vehicleId: _job?['vehicle_id']?.toString(),
+        notes: noteValue,
+        odometer: odometerValue,
+      );
+      _applyLocalPreInspection(local, expectedEpoch: epoch);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Pre-inspection saved on this device.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+
+      unawaited(_flushPreInspectionQueue());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _addPreInspectionPhotos() async {
+    final epoch = _loadEpoch;
+    if (_busy || !_canEditInspection) return;
+
+    final source = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined, color: Color(0xFF167F43)),
+              title: const Text('Take photo'),
+              onTap: () => Navigator.pop(sheetContext, 'camera'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(sheetContext, 'gallery'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    final photos = <XFile>[];
+    if (source == 'camera') {
+      final photo = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 88,
+        maxWidth: 1920,
+        maxHeight: 1920,
+      );
+      if (photo != null) photos.add(photo);
+    } else {
+      photos.addAll(
+        await _picker.pickMultiImage(
+          imageQuality: 88,
+          maxWidth: 1920,
+          maxHeight: 1920,
+        ),
+      );
+    }
+    if (photos.isEmpty) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      Map<String, dynamic>? local;
+      final fallbackOdometer = num.tryParse(
+        _preInspection?['odometer']?.toString() ??
+            _job?['odometer_in']?.toString() ??
+            '',
+      );
+
+      for (final photo in photos) {
+        local = await _offlineInspection.stagePhoto(
+          widget.businessId,
+          _jobId,
+          vehicleId: _job?['vehicle_id']?.toString(),
+          fallbackOdometer: fallbackOdometer,
+          filename: photo.name,
+          mimeType: _imageMime(photo.name),
+          bytes: await photo.readAsBytes(),
+        );
+      }
+
+      if (local != null) _applyLocalPreInspection(local, expectedEpoch: epoch);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              photos.length == 1
+                  ? 'Photo saved on this device.'
+                  : '${photos.length} photos saved on this device.',
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+
+      unawaited(_flushPreInspectionQueue());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _editPreInspectionPhotoNote(
+    Map<String, dynamic> photo,
+  ) async {
+    final epoch = _loadEpoch;
+    final controller = TextEditingController(
+      text: photo['note']?.toString() ?? '',
+    );
+    final save = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Photo note'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 5,
+          decoration: const InputDecoration(
+            hintText: 'Example: Scratch on left rear quarter panel',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    final note = controller.text.trim();
+    controller.dispose();
+    if (save != true) return;
+
+    final pending = photo['upload_state']?.toString() == 'pending';
+    if (pending) {
+      try {
+        final local = await _offlineInspection.updatePendingPhotoNote(
+          widget.businessId,
+          _jobId,
+          photo['id'].toString(),
+          note,
+        );
+        _applyLocalPreInspection(local, expectedEpoch: epoch);
+        unawaited(_flushPreInspectionQueue());
+      } catch (error) {
+        if (mounted) setState(() => _error = error.toString());
+      }
+      return;
+    }
+
+    await _run(
+      () => _api.updateJobPreInspectionPhotoNote(
+        widget.businessId,
+        photo['id'].toString(),
+        note,
+      ),
+    );
+  }
+
+  Future<void> _deletePreInspectionPhoto(Map<String, dynamic> photo) async {
+    final ok = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Delete photo?'),
+      content: const Text('Remove this photo from the pre-inspection?'),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Delete'))],
+    ));
+    if (ok == true) await _run(() => _api.deleteJobPreInspectionPhoto(widget.businessId, photo['id'].toString()));
+  }
+
+  Future<void> _addFinding() async {
+    if (!_canEditFindings || _job == null || _busy) return;
+    final vehicleId = _job!['vehicle_id']?.toString() ?? '';
+    if (vehicleId.isEmpty) {
+      setState(() => _error = tr('selectVehicleFirst'));
+      return;
+    }
+
+    final controller = TextEditingController();
+    var includeOnInvoice = false;
+    final photos = <XFile>[];
+    String? findingInputError;
+
+    final save = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      useSafeArea: true,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          top: false,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: MediaQuery.sizeOf(sheetContext).height * 0.48,
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.84,
+            ),
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(20, 12, 20,
+                MediaQuery.viewInsetsOf(sheetContext).bottom + 28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      tr('addVehicleFinding'),
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: controller,
+                    autofocus: false,
+                    minLines: 3,
+                    maxLines: 7,
+                    onChanged: (_) {
+                      if (findingInputError != null) {
+                        setSheetState(() => findingInputError = null);
+                      }
+                    },
+                    decoration: InputDecoration(
+                      labelText: tr('finding'),
+                      hintText: tr('findingExample'),
+                      errorText: findingInputError,
+                    ),
+                  ),
+                  if (_canSeeFinancial)
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(tr('includeOnInvoiceNotes')),
+                      value: includeOnInvoice,
+                      onChanged: (value) => setSheetState(
+                        () => includeOnInvoice = value == true,
+                      ),
+                    ),
+                  if (photos.isNotEmpty)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        photos.length == 1
+                            ? '1 photo selected'
+                            : '${photos.length} photos selected',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final picked = await _picker.pickMultiImage(
+                              imageQuality: 88,
+                              maxWidth: 1920,
+                              maxHeight: 1920,
+                            );
+                            if (picked.isNotEmpty) {
+                              setSheetState(
+                                () => photos.addAll(picked),
+                              );
+                            }
+                          },
+                          icon:
+                              const Icon(Icons.photo_library_outlined, color: Colors.teal),
+                          label: const Text('Gallery'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final photo = await _picker.pickImage(
+                              source: ImageSource.camera,
+                              imageQuality: 88,
+                              maxWidth: 1920,
+                              maxHeight: 1920,
+                            );
+                            if (photo != null) {
+                              setSheetState(() => photos.add(photo));
+                            }
+                          },
+                          icon:
+                              const Icon(Icons.photo_camera_outlined, color: Colors.teal),
+                          label: const Text('Camera'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.teal.shade700,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () {
+                        if (controller.text.trim().isEmpty) {
+                          setSheetState(() => findingInputError =
+                              'Describe the finding before saving.');
+                          return;
+                        }
+                        Navigator.pop(sheetContext, true);
+                      },
+                      icon: const Icon(Icons.add),
+                      label: Text(tr('addFinding')),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final body = controller.text.trim();
+    controller.dispose();
+    if (save != true || body.isEmpty) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
     });
 
     try {
