@@ -70,7 +70,9 @@ class LocalDocumentPartyIdentity {
     if (knownOriginal != null) return result;
     if (originalVehicle.isNotEmpty) result['_vehicle_identity_unresolved'] = true;
     if (!coherentJob || result['customer_id'] != customer ||
-        vehicle.isEmpty || row.data['saved_vehicle_id'] == null) return result;
+        vehicle.isEmpty || row.data['saved_vehicle_id'] == null) {
+      return result;
+    }
     final relationship = await db.customSelect(
       'SELECT 1 FROM local_customer_vehicles WHERE business_id=? AND customer_id=? AND vehicle_id=?',
       variables:[Variable(business),Variable(customer),Variable(vehicle)],
@@ -93,7 +95,9 @@ class LocalDocumentPartyIdentity {
     on FormatException { return result; }
     if (decoded is! Map || decoded['kind'] != 'invoice' ||
         decoded['operation_id'] != id.substring('local-invoice-'.length) ||
-        decoded['provisional_job_id'] != job) return result;
+        decoded['provisional_job_id'] != job) {
+      return result;
+    }
     final createdCustomer = await identities.resolve(business,decoded['customer_id']?.toString());
     final createdVehicle = await identities.resolve(business,decoded['vehicle_id']?.toString());
     if (createdCustomer != customer || createdVehicle != vehicle) return result;

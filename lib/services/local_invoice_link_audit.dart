@@ -19,8 +19,10 @@ class LocalInvoiceLinkAudit {
   Map<String,dynamic> _creationIdentity(String raw) {
     try {
       final value=jsonDecode(raw);
-      if(value is Map) return {for(final key in ['operation_id','kind','customer_id','vehicle_id','provisional_job_id'])
-        if(value.containsKey(key)) key:value[key]};
+      if(value is Map) {
+        return {for(final key in ['operation_id','kind','customer_id','vehicle_id','provisional_job_id'])
+          if(value.containsKey(key)) key:value[key]};
+      }
     } on FormatException { return {'error':'Invalid creation JSON'}; }
     return {};
   }
