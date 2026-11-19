@@ -21,6 +21,9 @@ void main() {
       final employee='employee-$i', job='job-$i';
       await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status) VALUES(?,'shop','owner','Repair','open')",[job]);
       await repo.saveEmployeeCompensation(employee:employee,name:'Mechanic $i',rate:3500,weeklyBase:false);
+      await db.customStatement('INSERT INTO local_job_assignments '
+        '(assignment_id,business_id,job_id,employee_id,employee_name,active) VALUES(?,?,?,?,?,1)',
+        ['assignment-$i','shop',job,employee,'Mechanic $i']);
       await repo.createRecheck(operation:'work-$i',job:job,description:'Repair $i',
         employee:employee,name:'Mechanic $i',rate:3500,estimatedMinutes:120);
     }
