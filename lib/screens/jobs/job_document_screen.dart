@@ -2508,10 +2508,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     try {
       if(!await LocalInvoiceSignatureStore().exists(widget.businessId,widget.documentId)) return;
       final signed=await _localPdfSnapshot(snapshot);
-      if(mounted && identical(snapshot,_detail)) setState(() => _signatureStatus={
+      if(mounted && identical(snapshot,_detail)) { setState(() => _signatureStatus={
         'is_current':signed['signature_current']==true,'signer_name':signed['signer_name'],
         'signed_at':signed['signed_at'],
-      });
+      }); }
     } catch (_) {
       // A failed local read never represents a verified current signature.
     }
@@ -6587,19 +6587,28 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
+  Map<String,dynamic> _localWarrantyReadiness(Map<String,dynamic> detail) {
+    final allocation=WarrantyPaymentAllocation.fromWarranty(invoiceTotal:detail['total_amount'],warranty:detail);
+    final email=detail['submission_email']?.toString().trim() ?? '';
+    final missing=<String>[
+      if(detail['extended_warranty']!=true) 'Warranty job information',
+      if(!email.contains('@')) 'Warranty company submission email',
+      if((detail['claim_number']?.toString().trim() ?? '').isEmpty) 'Claim number',
+      if((detail['authorization_number']?.toString().trim() ?? '').isEmpty) 'Authorization number',
+      if((detail['vehicle_vin']?.toString().trim() ?? '').isEmpty) 'VIN',
+      if(num.tryParse((detail['mileage_out'] ?? detail['odometer_out'] ?? detail['odometer_in'])?.toString() ?? '')==null) 'Mileage',
+      if(allocation.requiresReview) 'Reviewed warranty payment allocation',
+      if(detail['signature_current']!=true || detail['signature_bytes'] is! Uint8List) 'Customer signature (Send → Customer signature)',
+    ];
+    return {'ready':missing.isEmpty,'missing':missing,'submission_email':email};
+  }
+
   Future<void> _showSubmissionRequirements() async {
     if (_estimate || _busy) return;
 
-    Map<String, dynamic> readiness;
-    try {
-      readiness = await _api.warrantySubmissionReadiness(
-        widget.businessId,
-        widget.documentId,
-      );
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-      return;
-    }
+    final detail=await _preparePdf();
+    if(detail==null || !mounted) return;
+    final readiness=_localWarrantyReadiness(detail);
 
     if (!mounted) return;
 
@@ -6670,26 +6679,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
     final detail = await _preparePdf();
     if (detail == null || !mounted) return;
-    final email=detail['submission_email']?.toString().trim() ?? '';
-    if(detail['extended_warranty']!=true || email.isEmpty ||
-        (detail['claim_number']?.toString().trim() ?? '').isEmpty ||
-        (detail['authorization_number']?.toString().trim() ?? '').isEmpty) {
-      setState(() => _error='Save the warranty company email, claim and authorization number before preparing submission.');
+    final readiness=_localWarrantyReadiness(detail);
+    if(readiness['ready']!=true) {
+      setState(() => _error='Complete ${(readiness['missing'] as List).join(', ')} before warranty submission.');
       return;
     }
-    final allocation=WarrantyPaymentAllocation.fromWarranty(invoiceTotal:detail['total_amount'],warranty:detail);
-    final missing=<String>[
-      if((detail['vehicle_vin']?.toString().trim() ?? '').isEmpty) 'VIN',
-      if((detail['mileage_out'] ?? detail['odometer_out'] ?? detail['odometer_in'])==null) 'mileage',
-      if(allocation.requiresReview) 'reviewed warranty payment allocation',
-    ];
-    if(missing.isNotEmpty) {
-      setState(() => _error='Complete ${missing.join(', ')} before warranty submission.'); return;
-    }
-    if(detail['signature_current']!=true || detail['signature_bytes'] is! Uint8List) {
-      setState(() => _error='Choose Send → Customer signature to sign the current invoice before warranty submission.');
-      return;
-    }
+    final email=readiness['submission_email'] as String;
     final bytes = await DocumentPdfService.build(detail);
 
     if (!mounted) return;
@@ -6700,7 +6695,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             content: Text(
               'The signed warranty PDF is complete.\n\n'
               'Submit to: $email\n\n'
-              'The system share sheet will open with the signed PDF attached.',
+              'An addressed email draft will open with the signed PDF attached.',
             ),
             actions: [
               TextButton(

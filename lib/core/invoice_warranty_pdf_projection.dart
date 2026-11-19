@@ -11,7 +11,7 @@ class InvoiceWarrantyPdfProjection {
     final nested=invoice['offline_warranty_detail'];
     if(nested is! Map || invoice['kind']=='estimate') return {...invoice};
     if ((nested['business_id']!=null && invoice['business_id']!=null && nested['business_id']!=invoice['business_id']) ||
-        (nested['document_id']!=null && nested['document_id']!=invoice['id'])) return {...invoice};
+        (nested['document_id']!=null && nested['document_id']!=invoice['id'])) { return {...invoice}; }
     return {...invoice,for(final field in fields)
       if(nested.containsKey(field)) field:nested[field]};
   }
