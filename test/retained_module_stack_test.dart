@@ -352,7 +352,8 @@ void main() {
     final switchStart = expenses.indexOf(
       'void didUpdateWidget(covariant ExpensesScreen oldWidget)',
     );
-    final switchEnd = expenses.indexOf('void dispose()', switchStart);
+    // Inspect didUpdateWidget itself, excluding other lifecycle/helper methods.
+    final switchEnd = expenses.indexOf('  @override', switchStart);
     expect(switchStart, greaterThan(0));
     expect(switchEnd, greaterThan(switchStart));
     final didUpdate = expenses.substring(switchStart, switchEnd);
