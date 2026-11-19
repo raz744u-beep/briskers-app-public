@@ -95,17 +95,12 @@ class CustomerDocumentSummaryService {
         document['job_id'] == index['job_id']) {
       document['vehicle_id'] = index['vehicle_id'];
     }
-    if (document['kind'] == 'invoice') {
-      // A summary may itself be hydrated again for an expanded history row.
-      // Retain already-posted local receipts so the queue recognizes their IDs.
-      if (document['payments'] is List) {
-        document['payments'] = [
-          for (final payment in (document['payments'] as List).whereType<Map>())
-            if (payment['state'] == 'posted' && payment['_finalized_locally'] == true)
-              {...payment, '_local_pending_payment': false}
-            else payment,
-        ];
-      }
+    // An expanded history row can hydrate an already-projected summary.
+    // Its financial snapshot already includes the queue and finalization proof.
+    // A fresh customer reload builds unprojected indexes and reads the ledger
+    // again; opening a row must not apply the same receipt a second time.
+    if (document['kind'] == 'invoice' &&
+        index['_customer_summary_projection'] != true) {
       final queued = await OfflineInvoicePaymentLedger(database: _database)
           .pendingForInvoice(businessId, id);
       // Missing pending data must remain unknown rather than becoming a
@@ -139,7 +134,7 @@ class CustomerDocumentSummaryService {
       }
     }
     if (await _blocked(businessId, document)) return const {};
-    return document;
+    return {...document, '_customer_summary_projection': true};
   }
 
   Future<List<Map<String, dynamic>>> forCustomer(

@@ -283,7 +283,7 @@ void main() {
       activeFlow,
       contains('CustomerDocumentSummaryService().forCustomer('),
     );
-    expect(activeFlow, contains('widget.businessId, widget.customerId'));
+    expect(activeFlow, contains('widget.businessId, _customerId'));
     expect(activeFlow, contains('visibility.filter(rows, jobIdKey:'));
     expect(source, contains("item['id']?.toString()"));
 

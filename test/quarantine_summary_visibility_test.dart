@@ -199,7 +199,7 @@ void main() {
       expect(source, contains('visibility.isCurrent(generation)'), reason: path);
     }
     final customer = await File('lib/screens/customers/customer_detail_screen.dart').readAsString();
-    expect(customer, contains("'customer-overview', widget.customerId,"));
+    expect(customer, contains("'customer-overview', _customerId,"));
     expect(customer, contains('_jobVisibility.epoch, _activityRevision'));
     // Offline history now uses the same lifetime-bound section as online.
     // The retired duplicate surface must not be recreated with stale data.
