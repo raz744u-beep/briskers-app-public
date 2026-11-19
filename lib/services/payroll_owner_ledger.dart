@@ -10,7 +10,9 @@ import 'payroll_owner_lease.dart';
 /// Transfers only the existing payroll ledger. Real financial documents are
 /// neither replaced nor uploaded. Local pending shop operations are untouched.
 class PayrollOwnerLedger {
-  PayrollOwnerLedger(this.db, this.business);
+  PayrollOwnerLedger(this.db, this.business, {LocalPayrollRepository? repository})
+      : _repository=repository;
+  final LocalPayrollRepository? _repository;
   final BriskersLocalDatabase db;
   final String business;
   static const tables = [
@@ -30,7 +32,7 @@ class PayrollOwnerLedger {
     'regular_payroll_paid_base', 'regular_payroll_work_coverage', 'regular_payroll_reversals_v1', 'regular_payroll_amount_edits_v1',
   };
   Future<void> prepare() async {
-    await LocalPayrollRepository(db, business: business, owner: true).prepare();
+    await (_repository ?? LocalPayrollRepository(db, business: business, owner: true)).prepare();
     await LocalDocumentSqlStore.ensure(db);
     await LocalJobWorkDate(db).prepare();
     await db.customStatement('CREATE TABLE IF NOT EXISTS regular_payroll_assignment_outgoing '

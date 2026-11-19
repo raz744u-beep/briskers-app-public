@@ -124,8 +124,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   OwnerSessionIdentity? _viewIdentity;
   bool get _canView=>_viewAuthorized && (_debugOwnerView || _viewIdentity?.matches(
     DeviceOwnerAuthorization.instance.currentIdentity(),)==true);
-  late final _viewRepository=LocalPayrollRepository(_db,
-    business:widget.businessId,owner:true,);
+  LocalPayrollRepository get _viewRepository => _taskEditRepository;
   // Editing a task status is not a payroll disbursement. Guard against
   // sign-out and business identity changes throughout the local operation.
   late final _taskEditRepository = LocalPayrollRepository(
@@ -427,18 +426,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final cachedRoster=await OfflineJobAdminService(database:_db,).cachedEmployees(widget.businessId);
     if (!mounted || generation != _loadGeneration) return;
     _loadStage = 'pending requests';
-    final pendingPayments = await PayrollOwnerLedger(_db, widget.businessId,).pending();
+    final pendingPayments = await PayrollOwnerLedger(_db, widget.businessId,
+      repository: repository,).pending();
     _loadStage = 'tasks'; // Invoice saves maintain task identities incrementally.
     final job = widget.jobId;
     if (job != null) {await repository.recoverJobAssignments(job);_workspaceJob=(await _db.customSelect('SELECT * FROM local_jobs WHERE business_id=? AND id=?',variables:[Variable(widget.businessId),Variable(job)]).get()).firstOrNull?.data;}
-    // Keep historical invoice task sources visible in the Tasks UI.
-    // A pre-cutover source is read-only history, never a new payable credit.
-    final sources = (await repository.tasks()).map((r) => <String,dynamic>{
-      ...r,
-      'archived_labor': r['source_kind']=='invoice' &&
-          !LocalInvoiceTaskStore.currentPayrollDate(r['invoice_date']) ? 1 : 0,
-    },).toList();
-    final hydrated=await _taskEditRepository.localCompensation(cachedRoster,grant:_grant,);
+    final profileEmployee=widget.employeeId!=null && !widget.reportsOnly &&
+        !widget.globalTasks && !_jobMode ? widget.employeeId : null;
+    final hydrated=await _taskEditRepository.localCompensation(cachedRoster,
+      grant:_grant,employee:profileEmployee,);
     _carryReview=await _taskEditRepository.applyNov12OilSeparatorCarry();
     await _taskEditRepository.applyOwnerNov13WorkDates();
     final persistedEmployees = job == null
@@ -460,6 +456,15 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     // Preserve historical allocations in read-only Tasks and Reports views.
     // Payroll payment eligibility is guarded separately in WeeklyLaborReview.
     final work = await repository.work(employee: _jobMode ? null : employee, job: job,);
+    // Work needs only the selected employee's jobs, not the entire shop's
+    // task catalog. Keep archived sources visible with the same protection.
+    final sources = (await repository.tasks(jobs: profileEmployee==null?null:{
+      for(final row in work) if(row['job_id'] is String) row['job_id'] as String,
+    })).map((r) => <String,dynamic>{
+      ...r,
+      'archived_labor': r['source_kind']=='invoice' &&
+          !LocalInvoiceTaskStore.currentPayrollDate(r['invoice_date']) ? 1 : 0,
+    },).toList();
     if(!mounted||generation!=_loadGeneration)return;
     if(!_canView)return;
     setState((){_hasLocalData=true;_employees=employees;_employee=employee;_work=work;_taskSources=sources;});

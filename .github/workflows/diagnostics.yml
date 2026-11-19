@@ -88,6 +88,19 @@ jobs:
         working-directory: generated
         run: flutter analyze
 
+      - name: Verify current held-batch regressions (no APK)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 4
+        working-directory: generated
+        run: >-
+          flutter test --reporter expanded --timeout 45s
+          test/invoice_expense_reader_test.dart
+          test/bugs39_weekly_labor_provenance_test.dart
+          test/nov18_main_mechanic_first_frame_test.dart
+          test/bugs39_estimate_conversion_projection_test.dart
+          test/customer_identity_marker_test.dart
+          test/nov18_employee_work_scoped_read_test.dart
+
       - name: Verify remaining Bugs 26 regressions
         if: ${{ !cancelled() }}
         timeout-minutes: 4

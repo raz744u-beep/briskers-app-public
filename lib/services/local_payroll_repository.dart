@@ -323,7 +323,7 @@ class LocalPayrollRepository {
 
   /// Hydrate only saved pay data, plus the Owner's explicit Nov 12 missing-rate
   /// correction for uniquely identified Chris/Kam. Never replace a saved rate.
-  Future<List<Map<String,dynamic>>> localCompensation(List<Map<String,dynamic>> roster,{LocalOwnerGrant? grant}) async {
+  Future<List<Map<String,dynamic>>> localCompensation(List<Map<String,dynamic>> roster,{LocalOwnerGrant? grant,String? employee}) async {
     _authorize(); await prepare();
     final saved=await employees();
     final byId=<String,Map<String,dynamic>>{
@@ -331,7 +331,7 @@ class LocalPayrollRepository {
       for(final r in saved) r['id'] as String: {...?roster.where((x)=>x['id']==r['id']).firstOrNull,...r},
     };
     await db.transaction(() async {
-      for(final entry in byId.entries) {
+      for(final entry in byId.entries.where((entry)=>employee==null || entry.key==employee)) {
         final r=entry.value;
         if(grant!=null) {
           try {
@@ -388,7 +388,8 @@ class LocalPayrollRepository {
       }
       _authorize();
     });
-    return byId.values.toList();
+    return byId.entries.where((entry)=>employee==null || entry.key==employee)
+        .map((entry)=>entry.value).toList();
   }
 
   /// Apply only the exact task the Owner identified. Match local stable IDs,
@@ -396,7 +397,10 @@ class LocalPayrollRepository {
   Future<String?> applyNov12OilSeparatorCarry() async {
     _authorize(); await prepare();
     try { return await db.transaction(() async {
-      final matches=(await work()).where((r)=>r['job_number']=='J-40' &&
+      final jobs=await _read('SELECT id FROM local_jobs WHERE business_id=? AND job_number=?',[business,'J-40']);
+      final candidates=<Map<String,dynamic>>[];
+      for(final job in jobs){candidates.addAll(await work(job:job['id'] as String));}
+      final matches=candidates.where((r)=>r['job_number']=='J-40' &&
         (r['description']??'').toString().trim().toLowerCase()=='oil separator' &&
         const {'chris','chris rideaux'}.contains((r['employee_name']??'').toString().trim().toLowerCase())).toList();
       if(matches.isEmpty)return null;
@@ -1815,7 +1819,7 @@ class LocalPayrollRepository {
     );
   }
 
-  Future<List<Map<String, dynamic>>> tasks() async {
+  Future<List<Map<String, dynamic>>> tasks({Set<String>? jobs}) async {
     _authorize();
     await prepare();
     final rows = await _read(
@@ -1829,7 +1833,8 @@ class LocalPayrollRepository {
       'LEFT JOIN regular_payroll_task_sources s ON s.business_id=t.business_id AND s.task_id=t.id '
       'LEFT JOIN local_documents d ON d.business_id=s.business_id AND d.id=s.invoice_id '
       'LEFT JOIN regular_payroll_task_order o ON o.business_id=t.business_id AND o.task_id=t.id '
-      'WHERE t.business_id=? ORDER BY t.id', [business],
+      "WHERE t.business_id=? ${jobs==null?'':'AND t.job_id IN (SELECT value FROM json_each(?))'} ORDER BY t.id",
+      [business,if(jobs!=null)jsonEncode(jobs.toList())],
     );
     final aliases = await LocalPayrollTaskIdentity(db).aliases(business);
     _authorize();
@@ -1839,6 +1844,13 @@ class LocalPayrollRepository {
   Future<List<Map<String, dynamic>>> work({String? employee, String? job}) async {
     _authorize();
     await prepare();
+    final notes=await HistoricalTaskRecordkeeping(db).read(business);
+    // Historical recordkeeping can move the displayed mechanic without
+    // rewriting a settled allocation. Include those IDs before SQL filtering.
+    final reassigned=employee==null?null:jsonEncode([
+      for(final entry in notes.entries)
+        if(entry.value['employee_id']==employee)entry.key,
+    ]);
     final rows = await _read(
       "SELECT p.business_id,p.id,p.task_id,p.employee_id,e.name AS employee_name,sch.start_date AS work_start_date,sch.end_date AS work_end_date,COALESCE((SELECT po.priority FROM task_priority_overrides_v1 po WHERE po.business_id=t.business_id AND po.task_kind='labor' AND po.task_id=t.id),sch.priority) AS priority,sch.payroll_treatment,"
       "CASE WHEN h.allocation_id IS NULL THEN 0 ELSE 1 END AS owner_prior_paid,"
@@ -1880,13 +1892,13 @@ class LocalPayrollRepository {
       "LEFT JOIN regular_payroll_estimates est ON est.business_id=p.business_id "
       "AND est.task_id=p.task_id AND est.employee_id=p.employee_id "
       "WHERE (COALESCE(m.active,1)=1 OR c.actual_minutes>0 OR c.paid_operation_id IS NOT NULL) AND p.business_id=?  "
-      "${job == null ? '' : 'AND t.job_id=?'} ORDER BY p.id",
-      [business, ?job],
+      "${job == null ? '' : 'AND t.job_id=? '}"
+      "${employee==null?'':'AND (p.employee_id=? OR p.id IN (SELECT value FROM json_each(?))) '}ORDER BY p.id",
+      [business, ?job,if(employee!=null)...[employee,reassigned!]],
     );
     _authorize();
     final taskAliases = await LocalPayrollTaskIdentity(db).aliases(business);
     final verifiedPaid=await VerifiedPaidLabor(db).allocations(business);
-    final notes=await HistoricalTaskRecordkeeping(db).read(business);
     return rows.map((row) {
       final total = row['state'] == 'In Progress'
               ? row['estimated_minutes'] as int
