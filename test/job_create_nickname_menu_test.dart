@@ -39,7 +39,7 @@ void main() {
       await tester.runAsync(()=>Future<void>.delayed(const Duration(milliseconds:20)));
       await tester.pump(const Duration(milliseconds:100));
     }
-    final field=find.byType(DropdownButtonFormField<String?>);
+    final field=find.byKey(const ValueKey('job-create-employee'));
     final menu=tester.widget<DropdownButtonFormField<String?>>(field);
     await tester.ensureVisible(field); await tester.pump();
     await tester.tap(find.text('Unassigned').first); await tester.pumpAndSettle();
@@ -48,7 +48,8 @@ void main() {
     }
     expect(find.textContaining('Kamerron Smith'),findsNothing);
     await tester.tap(find.text('Kam — Mechanic').last); await tester.pumpAndSettle();
-    expect(tester.widget<DropdownButton<String?>>(find.byType(DropdownButton<String?>)).value,'kam');
+    final selected=tester.widget<DropdownButton<String?>>(find.descendant(of:field,matching:find.byType(DropdownButton<String?>)));
+    expect(selected.value,'kam');
     expect(menu.initialValue,isNull);
     await tester.runAsync(() async {
       expect((await db.customSelect('SELECT count(*) AS n FROM local_jobs').getSingle()).read<int>('n'),0);

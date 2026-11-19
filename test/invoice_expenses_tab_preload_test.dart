@@ -68,6 +68,9 @@ void main() {
       await tester.tap(find.text('Expenses').first);
       // Drain only animation frames, without letting SQLite finish a fresh read.
       await tester.pump(); await tester.pump(const Duration(milliseconds:300));
+      await tester.pump(const Duration(milliseconds:16));
+      await tester.pump(const Duration(milliseconds:16));
+      expect(DefaultTabController.of(tester.element(find.byType(TabBar))).index,3);
       expect(find.byType(CircularProgressIndicator).hitTestable(),findsNothing);
       expect(find.text(populated ? 'Saved parts supplier' : 'No expenses linked to this invoice or job.').hitTestable(),findsOneWidget);
       expect(tester.takeException(),isNull);

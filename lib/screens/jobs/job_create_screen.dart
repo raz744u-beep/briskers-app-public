@@ -305,6 +305,7 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
             const LinearProgressIndicator()
           else
             DropdownButtonFormField<String?>(
+              key: const ValueKey('job-create-employee'),
               initialValue: _employeeId,
               isExpanded: true,
               decoration: const InputDecoration(
