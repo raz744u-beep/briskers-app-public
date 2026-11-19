@@ -284,7 +284,9 @@ class LocalDocumentDetailCache {
           prefs.getString(key(businessId, id)) : prefs.getString(key(businessId, id));
       final detail = _decode(raw);
       if (detail == null || detail['id'] != id || detail['kind'] != 'estimate' ||
-          (detail['business_id'] != null && detail['business_id'] != businessId)) continue;
+          (detail['business_id'] != null && detail['business_id'] != businessId)) {
+        continue;
+      }
       result[id] = detail;
     }
     return result;
