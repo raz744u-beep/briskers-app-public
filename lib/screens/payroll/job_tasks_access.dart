@@ -370,7 +370,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
               icon:const Icon(Icons.arrow_drop_down,color:Color(0xFF076B56)),
               hint:Text(mainLoaded?'Unassigned':'Loading…'),
               items:[
-                const DropdownMenuItem<String>(value:null,
+                if(mainLoaded)const DropdownMenuItem<String>(value:null,
                   child:Text('Unassigned')),
                 for(final entry in values.entries)
                   DropdownMenuItem<String>(

@@ -89,6 +89,7 @@ jobs:
         run: flutter analyze
 
       - name: Verify current held-batch regressions (no APK)
+        id: held_batch
         if: ${{ !cancelled() }}
         timeout-minutes: 4
         working-directory: generated
@@ -122,7 +123,7 @@ jobs:
         run: flutter test --dart-define=BRISKERS_ENABLE_OWNER_PAYROLL=true --reporter expanded test/b2568_regular_navigation_test.dart
 
       - name: Run diagnostic and regression tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.held_batch.outcome == 'success' }}
         working-directory: generated
         run: flutter test
 
