@@ -54,7 +54,9 @@ class LocalInvoiceSignatureStore {
       variables:[Variable(business),Variable(document)]).get()).isNotEmpty;
   }
   Future<Map<String,dynamic>> project(String business,String document,Map<String,dynamic> invoice) async {
-    if(!_matches(business,document,invoice))return invoice;
+    if(!_matches(business,document,invoice)) {
+      return {...invoice,'signature_current':false,'signature_bytes':null,'signer_name':null,'signed_at':null};
+    }
     await _ensure();
     final row=await db.customSelect('SELECT * FROM local_invoice_signatures_v1 WHERE business_id=? AND document_id=?',
       variables:[Variable(business),Variable(document)]).getSingleOrNull();

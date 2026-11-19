@@ -62,8 +62,8 @@ void main() {
         {...detail,'claim_number':'OTHER','offline_warranty_detail':null}]) {
         expect((await store.project('shop','invoice',changed))['signature_current'],false);
       }
-      expect((await store.project('other-shop','invoice',detail))['signature_bytes'],isNull);
-      expect((await store.project('shop','other-invoice',{...detail,'id':'other-invoice'}))['signature_bytes'],isNull);
+      expect((await store.project('other-shop','invoice',signed))['signature_bytes'],isNull);
+      expect((await store.project('shop','other-invoice',signed))['signature_bytes'],isNull);
       expect((await store.project('shop','invoice',{...detail,'paid_amount':734.52}))['signature_current'],true,
         reason:'Receipt entry does not rewrite the signed invoice allocation or consent.');
     } finally {await db.close();await dir.delete(recursive:true);}
