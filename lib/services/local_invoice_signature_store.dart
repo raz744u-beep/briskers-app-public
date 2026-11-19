@@ -60,9 +60,9 @@ class LocalInvoiceSignatureStore {
     final row=await db.customSelect('SELECT * FROM local_invoice_signatures_v1 WHERE business_id=? AND document_id=?',
       variables:[Variable(business),Variable(document)]).getSingleOrNull();
     if(row==null)return invoice;
-    if(row.read<String>('content_hash')!=fingerprint(invoice))return {
+    if(row.read<String>('content_hash')!=fingerprint(invoice)) { return {
       ...invoice,'signature_current':false,'signature_bytes':null,'signer_name':null,'signed_at':null,
-    };
+    }; }
     return {...invoice,'signature_bytes':row.read<Uint8List>('image_bytes'),
       'signer_name':row.read<String>('signer_name'),'signed_at':row.read<String>('signed_at'),
       'signature_current':true,'signature_saved_locally':true};
