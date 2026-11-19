@@ -224,6 +224,16 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    // Returning from background may follow a successful app-wide sync.
+    // Refresh the scope automatically without clearing the visible list.
+    // Force Offline is handled by _load and never invokes remote requests.
+    unawaited(_load(showLoading: false));
+  }
+
   Future<void> _restoreFiltersAndLoad() async {
     final epoch = ++_filterRestoreEpoch;
     final business = widget.businessId;
@@ -269,16 +279,6 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         content: Text('Filters could not be saved. Please select them again.'),
       ));
     }
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    super.didChangeAppLifecycleState(state);
-    if (state != AppLifecycleState.resumed || !mounted) return;
-    // Returning from background may follow a successful app-wide sync.
-    // Refresh the scope automatically without clearing the visible list.
-    // Force Offline is handled by _load and never invokes remote requests.
-    unawaited(_load(showLoading: false));
   }
 
   @override
