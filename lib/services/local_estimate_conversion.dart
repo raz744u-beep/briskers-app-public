@@ -127,8 +127,8 @@ class LocalEstimateConversion {
       row['display_status'] = 'Converted';
       if (target.isNotEmpty) {
         row['converted_invoice_id'] = target;
-        row['converted_invoice_number'] = indexes[target]?['document_number'] ?? prior['converted_invoice_number'];
-        row['converted_invoice_date'] = indexes[target]?['document_date'] ?? prior['converted_invoice_date'];
+        row['converted_invoice_number'] = indexes[target]?['document_number'] ?? row['converted_invoice_number'] ?? prior['converted_invoice_number'];
+        row['converted_invoice_date'] = indexes[target]?['document_date'] ?? row['converted_invoice_date'] ?? prior['converted_invoice_date'];
       }
     }
   }

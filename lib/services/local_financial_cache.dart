@@ -733,6 +733,28 @@ class LocalFinancialCache {
       linkedJobId: relatedJobId ?? jobId,
       linkedDocumentIds: {?documentId, ...documentIds},
     );
+    if (scoped) {
+      // A list/detail row can point at this job while its explicit allocation
+      // belongs elsewhere. Fetch those existing shares before deciding that a
+      // whole transaction is unallocated. Pending edits still replace them.
+      final unknown = {for (final row in local)
+        if (!byTransaction.containsKey(row['id']?.toString())) row['id'].toString()};
+      if (unknown.isNotEmpty) {
+        final saved = await _loadScopedSnapshot(businessId, _linkedExpensesKey,
+          transactionIds: unknown);
+        if (saved != null) {
+          for (final value in (jsonDecode(saved) as List).whereType<Map>()) {
+            final row = Map<String, dynamic>.from(value);
+            if (row['business_id'] != null && row['business_id'] != businessId) continue;
+            final id = (row['transaction_id'] ?? row['id'] ?? row['allocation_id'])?.toString() ?? '';
+            final key = row['allocation_id']?.toString() ?? id;
+            if (key.isEmpty || allocations.containsKey(key)) continue;
+            allocations[key] = {...row, 'id': id};
+            (byTransaction[id] ??= []).add(key);
+          }
+        }
+      }
+    }
     for (final row in local) {
       final id = row['id']?.toString() ?? '';
       if (!matchesTransaction(row, businessId, id)) continue;
@@ -1048,9 +1070,9 @@ class LocalFinancialCache {
       "entries AS (SELECT value FROM snapshot, json_each("
       "CASE WHEN json_valid(payload_json) THEN "
       "CASE WHEN json_type(payload_json)='array' THEN payload_json ELSE '[]' END "
-      "ELSE '[]' END)), "
+      "ELSE '[]' END) WHERE type='object'), "
       "selected AS (SELECT value FROM entries WHERE "
-      "json_extract(value,'\$.id') IN (SELECT value FROM json_each(?)) OR "
+      "coalesce(json_extract(value,'\$.transaction_id'),json_extract(value,'\$.id'),json_extract(value,'\$.allocation_id')) IN (SELECT value FROM json_each(?)) OR "
       "json_extract(value,'\$.job_id') IN (SELECT value FROM json_each(?)) OR "
       "json_extract(value,'\$.document_id') IN (SELECT value FROM json_each(?))) "
       "SELECT CASE WHEN json_valid(payload_json) THEN "

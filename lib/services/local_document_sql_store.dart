@@ -63,7 +63,7 @@ class LocalDocumentSqlStore {
             if (current!=null) {
               final latest=jsonDecode(current);
               if (latest is! Map || latest['id']!=value['id'] || latest['kind']!=kind ||
-                  (latest['business_id']!=null && latest['business_id']!=business)) continue;
+                  (latest['business_id']!=null && latest['business_id']!=business)) { continue; }
               final known=kind=='invoice' ? latest['converted_from_estimate_id'] ?? latest['source_estimate_id'] :
                   latest['converted_invoice_id'];
               if (known!=null && known.toString().isNotEmpty && known!=(kind=='invoice' ? estimate : invoice)) continue;

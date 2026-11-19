@@ -98,6 +98,7 @@ jobs:
           test/expense_filter_preferences_test.dart
           test/expenses_filter_restart_test.dart
           test/invoice_expense_reader_test.dart
+          test/invoice_expenses_tab_preload_test.dart
           test/bugs39_weekly_labor_provenance_test.dart
           test/nov18_main_mechanic_first_frame_test.dart
           test/job_mechanic_nickname_first_frame_test.dart

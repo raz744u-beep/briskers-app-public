@@ -742,7 +742,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           if (!mounted || generation != _loadGeneration) return;
           setState(() {
             _detail = recovered;
-        _primeInvoiceExpenses();
+            _primeInvoiceExpenses();
             if (!_notesDirty && !_notesFocusNode.hasFocus) {
               _notesController.text = recovered['memo']?.toString() ?? '';
             }
@@ -829,7 +829,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         if (!mounted || generation != _loadGeneration) return;
         setState(() {
           _detail = projected;
-        _primeInvoiceExpenses();
+          _primeInvoiceExpenses();
           if (!_notesDirty && !_notesFocusNode.hasFocus) {
             _notesController.text = projected['memo']?.toString() ?? '';
           }
@@ -963,7 +963,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         if (!mounted || generation != _loadGeneration) return;
         setState(() {
           _detail = datedCached;
-        _primeInvoiceExpenses();
+          _primeInvoiceExpenses();
           _warrantyDetail = _cachedWarrantyDetail(datedCached);
           if (!_notesDirty && !_notesFocusNode.hasFocus) {
             _notesController.text = datedCached['memo']?.toString() ?? '';
@@ -1540,23 +1540,32 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       ),
     );
     if (changed == true) {
-      _invoiceExpensesTabFuture = null;
+      _invoiceExpensesTabFuture = null; _invoiceExpensesTabRows = null;
       await _load();
     }
   }
 
   Future<List<Map<String, dynamic>>>? _invoiceExpensesTabFuture;
+  String? _invoiceExpensesScope;
+  List<Map<String, dynamic>>? _invoiceExpensesTabRows;
 
   // Begin the local read with the invoice, while Items is already visible.
   // Retain this same future on the first Expenses mount and subsequent visits.
   void _primeInvoiceExpenses() {
-    if (_detail == null || _estimate || !_canManageInvoiceExpenses ||
-        _invoiceExpensesTabFuture != null) return;
+    if (_detail == null || _estimate || !_canManageInvoiceExpenses) { return; }
+    final scope = '${widget.documentId}/${_detail?['job_id'] ?? ''}';
+    if (_invoiceExpensesTabFuture != null && _invoiceExpensesScope == scope) { return; }
+    _invoiceExpensesScope = scope;
+    _invoiceExpensesTabRows = null;
     final future = _invoiceTabExpenses();
     _invoiceExpensesTabFuture = future;
     // The tab owns error presentation; preloading must not emit an unhandled
     // asynchronous error before a user selects that tab.
-    unawaited(future.then<void>((_) {}, onError: (Object error, StackTrace stack) {}));
+    unawaited(future.then<void>((rows) {
+      if (mounted && identical(_invoiceExpensesTabFuture, future)) {
+        setState(() => _invoiceExpensesTabRows = rows);
+      }
+    }, onError: (Object error, StackTrace stack) {}));
   }
 
   Future<List<Map<String, dynamic>>> _invoiceTabExpenses() async {
@@ -1597,6 +1606,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       // not restart the archive lookup.
       Expanded(child: Builder(builder: (_) => FutureBuilder<List<Map<String, dynamic>>>(
         future: _invoiceExpensesTabFuture ??= _invoiceTabExpenses(),
+        initialData: _invoiceExpensesTabRows,
         builder: (context, snapshot) {
           if (!snapshot.hasData && !snapshot.hasError) {
             return const Center(child: CircularProgressIndicator());
@@ -2585,7 +2595,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         if (mounted) {
           setState(() {
             _detail = projected;
-        _primeInvoiceExpenses();
+            _primeInvoiceExpenses();
             _warrantyDetail = warranty;
             _signatureStatus = signature;
           });
