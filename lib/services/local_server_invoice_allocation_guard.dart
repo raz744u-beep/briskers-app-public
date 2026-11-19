@@ -23,7 +23,7 @@ class LocalServerInvoiceAllocationGuard {
         stop();
       }
     }
-    for (final detail in await LocalNumberEvidence.documents(db, business)) {
+    for (final detail in await LocalNumberEvidence.documents(db, business, numbersOnly:true)) {
       if (detail['kind'] != 'invoice') continue;
       final number = normalizedDocumentNumber(detail['document_number']);
       if (number == null) continue;

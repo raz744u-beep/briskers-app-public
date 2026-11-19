@@ -3411,7 +3411,10 @@ class BriskersApi {
         'p_estimate_id': estimateId,
       },
     );
-    final invoiceId=result.toString();
+    if (result is! String || result.trim().isEmpty) {
+      throw StateError('The server did not return a converted invoice identity.');
+    }
+    final invoiceId=result;
     await LocalEstimateConversion(localDatabase).recordAcknowledged(businessId,estimateId,invoiceId);
     return invoiceId;
   }

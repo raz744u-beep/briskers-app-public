@@ -63,7 +63,7 @@ class LocalEstimateConversion {
     await RecoveryCommitStore.ensure(db);
     final records = await db.customSelect(
       "SELECT d.id,d.kind,d.converted,d.document_number,d.document_date,"
-      "CASE WHEN d.kind='estimate' THEN c.payload_json END AS payload_json,"
+      "CASE WHEN d.kind='estimate' AND d.id IN (SELECT value FROM json_each(?)) THEN c.payload_json END AS payload_json,"
       "CASE WHEN d.kind='invoice' AND json_valid(c.payload_json) THEN "
       "CASE WHEN json_extract(c.payload_json,'\$.id')=d.id "
       "AND json_extract(c.payload_json,'\$.kind')='invoice' "
@@ -77,7 +77,7 @@ class LocalEstimateConversion {
       "ON c.cache_key='briskers_document_detail_' || d.business_id || '_' || d.id "
       "WHERE d.business_id=? AND NOT EXISTS(SELECT 1 FROM local_document_detail_deleted x "
       "WHERE x.cache_key='briskers_document_detail_' || d.business_id || '_' || d.id)",
-      variables: [Variable(business)],
+      variables: [Variable(jsonEncode([for(final row in rows) row['id']?.toString()])),Variable(business)],
     ).get();
     final indexes = {for (final record in records) record.read<String>('id'): record.data};
     final legacy = await _legacyConversions(business);
