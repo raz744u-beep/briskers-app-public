@@ -125,7 +125,21 @@ class InvoicePaymentFeed {
         // Invalid corrections cannot create receipt rows or income.
       }
     }
-    return overlayPendingPaymentEdits(merged,corrections);
+    final receipts = overlayPendingPaymentEdits(merged,corrections);
+    final hasNumberHistory = await _db.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_invoice_number_corrections'",
+    ).getSingleOrNull();
+    if (hasNumberHistory == null) return receipts;
+    final correctedNumbers = await _db.customSelect(
+      'SELECT invoice_id,new_invoice_number FROM local_invoice_number_corrections WHERE business_id=?',
+      variables:[Variable(businessId)],
+    ).get();
+    final numbers = {for (final row in correctedNumbers)
+      row.read<String>('invoice_id'):row.read<String>('new_invoice_number')};
+    return [for (final receipt in receipts)
+      if (numbers.containsKey(receipt['invoice_id']))
+        {...receipt,'document_number':numbers[receipt['invoice_id']]}
+      else receipt];
   }
 
   static bool _sameReceipt(Map<String, dynamic> left, Map<String, dynamic> right) {

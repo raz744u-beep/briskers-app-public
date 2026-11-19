@@ -110,7 +110,7 @@ class LocalInvoiceLinkAudit {
     // detail cache would project tasks and migrate caches during inspection.
     final tables = (await _database.customSelect(
       "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
-      "('local_document_details','recovery_document_cache')",
+      "('local_document_details','recovery_document_cache','local_invoice_number_corrections')",
     ).get()).map((r) => r.read<String>('name')).toSet();
     final prefs = await SharedPreferences.getInstance();
     for (final reference in references) {
@@ -136,6 +136,14 @@ class LocalInvoiceLinkAudit {
       try { decoded = raw == null ? null : jsonDecode(raw); }
       on FormatException { reference['snapshot_error'] = 'Invalid saved JSON'; }
       reference['snapshot_found'] = decoded is Map;
+      if (tables.contains('local_invoice_number_corrections')) {
+        final correction = await _database.customSelect(
+          'SELECT old_invoice_number,new_invoice_number,old_job_number,new_job_number,kept_invoice_id,created_at '
+          'FROM local_invoice_number_corrections WHERE business_id=? AND invoice_id=?',
+          variables:[Variable(businessId),Variable(id)],
+        ).getSingleOrNull();
+        if (correction != null) reference['number_correction'] = correction.data;
+      }
       if (decoded is Map) {
         reference['saved'] = {
           for (final field in ['id','document_number','customer_id','customer_name',

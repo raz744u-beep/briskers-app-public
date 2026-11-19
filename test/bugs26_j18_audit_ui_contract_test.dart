@@ -5,6 +5,8 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:briskers_app/core/connection_mode.dart';
+import 'support/duplicate_number_fixture.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -51,5 +53,31 @@ void main() {
     expect(find.byType(TextField),findsNothing);
     expect(find.text('Inspect saved invoice links'),findsNothing);
     expect(find.text('Diagnostics is restricted to the Owner / developer account.'),findsOneWidget);
+  });
+
+  testWidgets('number correction preview keeps Tyra at 6360 and cancel changes neither record', (tester) async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    debugUseLocalDatabase(db);
+    await BriskersConnectionModeController.instance.setMode(BriskersConnectionMode.offline);
+    addTearDown(() async {
+      debugUseLocalDatabase(null);
+      await BriskersConnectionModeController.instance.setMode(BriskersConnectionMode.auto);
+      await db.close();
+    });
+    await seedDuplicateNumbers(db);
+    final before = (await db.customSelect('SELECT * FROM local_documents ORDER BY id').get()).map((r)=>r.data).toList();
+    await tester.pumpWidget(const MaterialApp(home: DiagnosticsScreen(businessId:'shop',roleCode:'owner')));
+    await tester.enterText(find.byType(TextField).first,'6360');
+    tester.testTextInput.hide();
+    await tester.ensureVisible(find.text('Inspect saved invoice links'));
+    await tester.tap(find.text('Inspect saved invoice links'));
+    await tester.pumpAndSettle();
+    final review = find.text('Review Dakota Spinder’s number correction');
+    await tester.ensureVisible(review); await tester.tap(review); await tester.pumpAndSettle();
+    expect(find.text('Correct Dakota Spinder’s numbers?'),findsOneWidget);
+    expect(find.textContaining('Invoice #6360 → #6382'),findsOneWidget);
+    expect(find.textContaining('Tyra Legard keeps Invoice #6360 and J-41.'),findsOneWidget);
+    await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
+    expect((await db.customSelect('SELECT * FROM local_documents ORDER BY id').get()).map((r)=>r.data).toList(),before);
   });
 }

@@ -7,6 +7,9 @@ import '../../core/briskers_colors.dart';
 import '../../services/diagnostics_service.dart';
 import '../../services/functional_diagnostics_service.dart';
 import '../../services/local_invoice_link_audit.dart';
+import '../../services/local_duplicate_number_correction.dart';
+import '../../services/device_owner_authorization.dart';
+import '../../local/local_database_provider.dart';
 import '../../widgets/briskers_page_header.dart';
 
 class DiagnosticsScreen extends StatefulWidget {
@@ -125,7 +128,8 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
         'sync ${row['sync_state']}; '
         'customer identity conflict: ${row['customer_identity_conflict']}; '
         'saved snapshot found: ${row['snapshot_found']}; '
-        'saved snapshot fields: ${row['saved'] ?? row['snapshot_error'] ?? 'Unavailable'}',
+        'saved snapshot fields: ${row['saved'] ?? row['snapshot_error'] ?? 'Unavailable'}; '
+        'number correction: ${row['number_correction'] ?? 'None'}',
       'Invoices actually linked to the selected Job: ${targetInvoices.length}',
       for (final row in targetInvoices)
         'Invoice ${row['invoice_number']}; document ID: ${row['document_id']}; '
@@ -141,6 +145,52 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Private local link report copied.')),
     );
+  }
+
+  List<Map<String,dynamic>> get _numberCorrectionPair {
+    final refs = List<Map<String,dynamic>>.from(_invoiceLinkReport?['references'] as List? ?? const []);
+    if (refs.length != 2 || widget.roleCode != 'owner') return const [];
+    final local = refs.where((r) => r['document_id'].toString().startsWith('local-invoice-') && r['status']=='closed').toList();
+    final kept = refs.where((r) => !r['document_id'].toString().startsWith('local-')).toList();
+    return local.length == 1 && kept.length == 1 ? [local.single,kept.single] : const [];
+  }
+
+  Future<void> _correctLocalDuplicate() async {
+    if (_invoiceLinkRunning || _running || _functionalRunning || widget.roleCode != 'owner') return;
+    final pair = _numberCorrectionPair;
+    if (pair.isEmpty) return;
+    setState(() { _invoiceLinkRunning = true; _invoiceLinkError = null; });
+    try {
+      final service = LocalDuplicateNumberCorrection(localDatabase);
+      final plan = await service.preview(widget.businessId,pair[0]['document_id'] as String,pair[1]['document_id'] as String);
+      if (!mounted) return;
+      final confirmed = await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
+        title: Text('Correct ${plan.customer}’s numbers?'),
+        content: Text('${plan.customer}\n'
+          'Invoice #${plan.evidence['invoice_number']} → #${plan.invoiceNumber}\n'
+          'Job ${plan.evidence['job_number']} → J-${plan.jobNumber}\n\n'
+          '${plan.keepCustomer} keeps Invoice #${plan.evidence['keep_invoice_number']} and ${plan.evidence['keep_job_number']}.\n\n'
+          'The original numbers are retained in correction history. The same customer, vehicle, invoice and job records are kept. '
+          'Payments, labor, expenses and Closed status stay unchanged.'),
+        actions:[
+          TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Cancel')),
+          FilledButton(style:FilledButton.styleFrom(backgroundColor:BriskersColors.confirm),
+            onPressed:()=>Navigator.pop(ctx,true),child:const Text('Save number correction')),
+        ],
+      ));
+      if (confirmed != true || !mounted) return;
+      final grant = await DeviceOwnerAuthorization.instance.authority.authorizeSession(widget.businessId);
+      if (!mounted) return;
+      await service.apply(plan,grant);
+      _invoiceNumberInput.text = '${plan.invoiceNumber}';
+      _jobNumberInput.clear();
+      final report = await _invoiceLinkAudit.inspect(businessId:widget.businessId,invoiceNumber:'${plan.invoiceNumber}');
+      if (mounted) setState(() => _invoiceLinkReport = report);
+    } catch (error) {
+      if (mounted) setState(() => _invoiceLinkError = error.toString());
+    } finally {
+      if (mounted) setState(() => _invoiceLinkRunning = false);
+    }
   }
 
   Future<void> _copyReport() async {
@@ -341,8 +391,8 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                   const SizedBox(height: 8),
                   const Text(
                     'Read-only inspection of saved records on this phone. '
-                    'Checks exact IDs and does not fix, delete or renumber '
-                    'invoices. No online request is made.',
+                    'No online request is made. If a closed local duplicate is found, '
+                    'the Owner can separately review a number correction.',
                   ),
                   const SizedBox(height: 10),
                   TextField(
@@ -386,6 +436,13 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                       icon: const Icon(Icons.copy_outlined),
                       label: const Text('Copy private report'),
                     ),
+                    if (_numberCorrectionPair.isNotEmpty)
+                      FilledButton.icon(
+                        style:FilledButton.styleFrom(backgroundColor:BriskersColors.confirm),
+                        onPressed:_invoiceLinkRunning || _running || _functionalRunning ? null : _correctLocalDuplicate,
+                        icon:const Icon(Icons.numbers),
+                        label:Text('Review ${_numberCorrectionPair.first['customer_name'] ?? 'local invoice'}’s number correction'),
+                      ),
                   ],
                 ],
               ),

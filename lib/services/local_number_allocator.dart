@@ -109,6 +109,24 @@ class LocalNumberAllocator {
     while(await _occupied(business,kind,value,'',usedNumbers:used)) { value++; }
     return value;
   });
+  /// A correction uses a new number above known records and reservations;
+  /// historical gaps and released printed numbers are never guessed free.
+  Future<int> nextFreshNumber(String business, String kind) => db.transaction(() async {
+    await ensureSchema();
+    final used = await _used(business, kind);
+    var next = await _next(business, kind, usedNumbers: used);
+    for (final number in used.keys) {
+      if (number >= next) next = number + 1;
+    }
+    final held = await db.customSelect(
+      'SELECT MAX(number) AS highest FROM local_number_reservations WHERE business_id=? AND kind=?',
+      variables: [Variable(business), Variable(kind)],
+    ).getSingle();
+    final highest = held.readNullable<int>('highest');
+    if (highest != null && highest >= next) next = highest + 1;
+    if (next > 999999999) throw StateError('No new numbers remain in the supported range.');
+    return next;
+  });
   Future<void> setNextNumber(String business,String kind,int value) async {
     if(value<1 || value>999999999) throw StateError('Enter a number from 1 to 999,999,999.');
     await db.transaction(() async {
