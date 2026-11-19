@@ -10,7 +10,7 @@ import 'local_document_sql_store.dart';
 /// snapshots without projecting tasks, changing payments, or repairing numbers.
 class LocalNumberEvidence {
   static Future<List<Map<String, dynamic>>> documents(
-    BriskersLocalDatabase db, String business,
+    BriskersLocalDatabase db, String business, {bool numbersOnly = false,}
   ) async {
     await LocalDocumentSqlStore.ensure(db);
     final prefix = 'briskers_document_detail_${business}_';
@@ -19,8 +19,18 @@ class LocalNumberEvidence {
       for (final key in prefs.getKeys())
         if (key.startsWith(prefix)) key.substring(prefix.length): prefs.getString(key),
     };
+    // Number allocation needs ownership fields, never line items, receipt
+    // images, payments or invoice notes. Keep those payloads inside SQLite.
+    const metadata = "CASE WHEN json_valid(payload_json) THEN json_object("
+      "'id',json_extract(payload_json,'\$.id'),"
+      "'kind',json_extract(payload_json,'\$.kind'),"
+      "'_server_document_id',json_extract(payload_json,'\$._server_document_id'),"
+      "'document_number',json_extract(payload_json,'\$.document_number'),"
+      "'job_id',json_extract(payload_json,'\$.job_id'),"
+      "'job_number',json_extract(payload_json,'\$.job_number')) ELSE payload_json END";
+    final payload = numbersOnly ? metadata : 'payload_json';
     final durable = await db.customSelect(
-      'SELECT cache_key,payload_json FROM local_document_details '
+      'SELECT cache_key,$payload AS payload_json FROM local_document_details '
       'WHERE substr(cache_key,1,?)=?',
       variables: [Variable(prefix.length), Variable(prefix)],
     ).get();
@@ -34,7 +44,7 @@ class LocalNumberEvidence {
     ).get()).map((r) => r.read<String>('name')).toSet();
     if (tables.contains('recovery_document_cache')) {
       final recovery = await db.customSelect(
-        'SELECT document_id,payload_json FROM recovery_document_cache WHERE business_id=?',
+        'SELECT document_id,$payload AS payload_json FROM recovery_document_cache WHERE business_id=?',
         variables: [Variable(business)],
       ).get();
       for (final row in recovery) {

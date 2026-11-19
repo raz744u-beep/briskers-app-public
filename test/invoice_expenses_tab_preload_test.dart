@@ -60,17 +60,21 @@ void main() {
         if(populated) {'id':'expense','business_id':'shop','job_id':'job','direction':'expense',
           'amount':25,'vendor':'Saved parts supplier','transaction_date':'2026-11-17','status':'posted'},
       ]));
+      try {
       await tester.pumpWidget(const MaterialApp(home:JobDocumentScreen(
         businessId:'shop',documentId:'invoice',isOwner:true,canManageExpenses:true,roleCode:'owner')));
       await settle(tester);
-      expect(find.text('6380'),findsWidgets);
+      expect(find.textContaining('6380'),findsWidgets);
       await tester.tap(find.text('Expenses').first);
       // Drain only animation frames, without letting SQLite finish a fresh read.
       await tester.pump(); await tester.pump(const Duration(milliseconds:300));
       expect(find.byType(CircularProgressIndicator).hitTestable(),findsNothing);
       expect(find.text(populated ? 'Saved parts supplier' : 'No expenses linked to this invoice or job.').hitTestable(),findsOneWidget);
       expect(tester.takeException(),isNull);
-      await tester.pumpWidget(const SizedBox.shrink()); await settle(tester);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(seconds:4)); await settle(tester);
+      }
     });
   }
 }

@@ -37,7 +37,8 @@ class LocalNumberAllocator {
   }
   String display(String kind, int number) => switch(kind) { 'job' => 'J-$number', 'estimate' => 'E-$number', _ => '$number' };
 
-  Future<Map<int,Set<String>>> _used(String business, String kind) async {
+  Future<Map<int,Set<String>>> _used(String business, String kind,
+      {List<Map<String,dynamic>>? snapshots}) async {
     final (table,column,predicate)=_table(kind);
     final rows=await db.customSelect('SELECT id,$column AS number FROM $table '
       'WHERE business_id=?$predicate', variables:[Variable<String>(business)]).get();
@@ -48,10 +49,10 @@ class LocalNumberAllocator {
     }
     // A server list can omit a complete saved invoice. Its printed invoice
     // and job numbers are still occupied until an explicit local deletion.
-    final snapshots = kind == 'estimate'
+    final evidence = snapshots ?? (kind == 'estimate'
         ? const <Map<String, dynamic>>[]
-        : await LocalNumberEvidence.documents(db, business);
-    for (final detail in snapshots) {
+        : await LocalNumberEvidence.documents(db, business, numbersOnly:true));
+    for (final detail in evidence) {
       if (kind == 'job') {
         final id = detail['job_id']?.toString() ?? '';
         final number = _parse(detail['job_number'], kind);
@@ -101,6 +102,28 @@ class LocalNumberAllocator {
           row.read<int>('number'),
     ];
   }
+
+  /// One consistent local inventory for the prefills shown together. Creation
+  /// still revalidates current ownership and reservations in its transaction.
+  Future<({List<int> invoices, List<int> jobs, int nextInvoice, int nextJob})>
+      invoicePreview(String business) => db.transaction(() async {
+    await ensureSchema();
+    final evidence=await LocalNumberEvidence.documents(db,business,numbersOnly:true);
+    final result=<String,({List<int> available,int next})>{};
+    for(final kind in ['invoice','job']) {
+      final used=await _used(business,kind,snapshots:evidence);
+      final released=await db.customSelect('SELECT number FROM local_number_reservations '
+        'WHERE business_id=? AND kind=? AND active=0 ORDER BY number',
+        variables:[Variable(business),Variable(kind)]).get();
+      var next=await _next(business,kind,usedNumbers:used);
+      while(await _occupied(business,kind,next,'',usedNumbers:used)) { next++; }
+      result[kind]=(available:[for(final row in released)
+        if(row.read<int>('number')>0 && row.read<int>('number')<=999999999 &&
+            !used.containsKey(row.read<int>('number'))) row.read<int>('number')],next:next);
+    }
+    return (invoices:result['invoice']!.available,jobs:result['job']!.available,
+      nextInvoice:result['invoice']!.next,nextJob:result['job']!.next);
+  });
 
   Future<int> nextNumber(String business,String kind) async => db.transaction(() async {
     await ensureSchema();

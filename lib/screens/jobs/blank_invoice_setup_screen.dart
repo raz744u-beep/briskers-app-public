@@ -88,10 +88,11 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
         });
         return;
       }
-      final invoices = await numbers.availableNumbers(widget.businessId, 'invoice');
-      final jobs = await numbers.availableNumbers(widget.businessId, 'job');
-      final nextInvoice = await numbers.nextNumber(widget.businessId, 'invoice');
-      final nextJob = await numbers.nextNumber(widget.businessId, 'job');
+      final preview = await numbers.invoicePreview(widget.businessId);
+      final invoices = preview.invoices;
+      final jobs = preview.jobs;
+      final nextInvoice = preview.nextInvoice;
+      final nextJob = preview.nextJob;
       // A free suffix at the counter is automatically the next number.
       // Do not ask Owner to approve that as an older pool reuse.
       final reusableInvoices = invoices.where((n) => n != nextInvoice).toList();

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../services/local_job_work_date.dart';
+import '../../services/employee_nickname_store.dart';
 import '../../widgets/job_date_field.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../core/connection_mode.dart';
@@ -323,7 +324,7 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
                   (employee) => DropdownMenuItem<String?>(
                     value: employee['id']?.toString(),
                     child: Text(
-                      '${employee['name'] ?? ''} — '
+                      '${EmployeeNicknameStore.displayLabel(employee, _employees)} — '
                       '${employee['position_name'] ?? 'Employee'}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
