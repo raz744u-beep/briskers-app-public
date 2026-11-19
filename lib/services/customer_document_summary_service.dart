@@ -9,6 +9,8 @@ import '../local/local_database_provider.dart';
 import 'local_document_detail_cache.dart';
 import 'local_job_retirement.dart';
 import 'offline_invoice_payment_ledger.dart';
+import 'local_customer_vehicle_identity.dart';
+import 'local_invoice_closure.dart';
 
 /// Hydrates customer-facing summaries from saved authoritative payment detail
 /// and the durable, identity-deduplicated receipt queue. No financial writes.
@@ -54,7 +56,7 @@ class CustomerDocumentSummaryService {
 
     if (await _blocked(businessId, index)) return const {};
     final cached =
-        await _cache.load(businessId, id) ?? const <String, dynamic>{};
+        await _cache.loadReadOnly(businessId, id) ?? const <String, dynamic>{};
     final indexVersion = num.tryParse(index['row_version']?.toString() ?? '');
     final detailVersion = num.tryParse(cached['row_version']?.toString() ?? '');
     final cacheValid =
@@ -80,7 +82,30 @@ class CustomerDocumentSummaryService {
         index.containsKey('pending_payment')) {
       document.addAll(index);
     }
+    // A saved offline snapshot can retain temporary customer/vehicle IDs after
+    // the index was reconciled. Project only the exact, shop-scoped aliases.
+    final identities = LocalCustomerVehicleIdentity(_database);
+    for (final field in ['customer_id', 'vehicle_id']) {
+      final value = document[field]?.toString();
+      if (value != null && value.isNotEmpty) {
+        document[field] = await identities.resolve(businessId, value);
+      }
+    }
+    if ((document['vehicle_id']?.toString().isEmpty ?? true) &&
+        document['job_id'] == index['job_id']) {
+      document['vehicle_id'] = index['vehicle_id'];
+    }
     if (document['kind'] == 'invoice') {
+      // A summary may itself be hydrated again for an expanded history row.
+      // Retain already-posted local receipts so the queue recognizes their IDs.
+      if (document['payments'] is List) {
+        document['payments'] = [
+          for (final payment in (document['payments'] as List).whereType<Map>())
+            if (payment['state'] == 'posted' && payment['_finalized_locally'] == true)
+              {...payment, '_local_pending_payment': false}
+            else payment,
+        ];
+      }
       final queued = await OfflineInvoicePaymentLedger(database: _database)
           .pendingForInvoice(businessId, id);
       // Missing pending data must remain unknown rather than becoming a
@@ -91,6 +116,10 @@ class CustomerDocumentSummaryService {
         queued,
       );
       if (!pendingKnown) document.remove('pending_payment');
+      // Queued receipts may already be finalized locally. Sync state cannot
+      // turn that saved accounting decision back into "pending finalization".
+      document = await LocalInvoiceClosureStore(_database)
+          .projectFinalized(businessId, document);
     }
     if (document['kind'] == 'estimate') {
       document = await LocalEstimateConversion(_database).project(businessId, document);
@@ -143,6 +172,7 @@ class CustomerDocumentSummaryService {
         'id': row.read<String>('id'),
         'kind': row.read<String>('kind'),
         'job_id': row.readNullable<String>('job_id'),
+        'customer_id': row.readNullable<String>('customer_id'),
         'document_date': row.readNullable<String>('document_date'),
         'vehicle_id': row.readNullable<String>('vehicle_id'),
         'vehicle': row.readNullable<String>('vehicle_label'),

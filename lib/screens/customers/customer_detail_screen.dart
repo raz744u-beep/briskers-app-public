@@ -27,6 +27,7 @@ import '../../services/customer_document_recency.dart';
 import '../../services/customer_job_recency.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/local_customer_repository.dart';
+import '../../services/local_customer_navigation_identity.dart';
 import '../../services/job_summary_visibility.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
 import '../appointments/appointment_create_screen.dart';
@@ -83,6 +84,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
   late JobSummaryVisibility _jobVisibility;
   Map<String, dynamic>? _data;
   String? _error;
+  String? _resolvedCustomerId;
+  String get _customerId => _resolvedCustomerId ?? widget.customerId;
   bool _onlineReady = false;
   bool _showingLocal = false;
 
@@ -98,7 +101,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     final generation = visibility.epoch;
     final vars = <Variable<Object>>[
       Variable<String>(widget.businessId),
-      Variable<String>(widget.customerId),
+      Variable<String>(_customerId),
     ];
     final rows = <Map<String, dynamic>>[];
     final appointments = await localDatabase.customSelect(
@@ -112,14 +115,14 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
         'status':a.read<String>('status')});
     }
     final jobs = await LocalJobRepository().forCustomer(
-      widget.businessId, widget.customerId);
+      widget.businessId, _customerId);
     for (final job in jobs) {
       rows.add({...job, 'type': 'Job', 'job_id': job['id'],
         'number': job['job_number'] ?? 'Pending sync',
         'job_snapshot': job});
     }
     final docs = await CustomerDocumentSummaryService().forCustomer(
-      widget.businessId, widget.customerId, includeClosed: true);
+      widget.businessId, _customerId, includeClosed: true);
     for (final document in docs) {
       final presentation = DocumentPresentation(document);
       rows.add({
@@ -178,7 +181,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       // every invoice and estimate whenever a customer editor closes.
       final detail = await _api.documentDetail(widget.businessId, documentId);
       if (detail['id']?.toString() != documentId ||
-          detail['customer_id']?.toString() != widget.customerId ||
+          detail['customer_id']?.toString() != _customerId ||
           (detail['kind'] != 'invoice' && detail['kind'] != 'estimate')) {
         return;
       }
@@ -210,7 +213,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
         builder: (_) => AppointmentManageScreen(
           businessId: widget.businessId,
           isOwner: widget.roleCode == 'owner',
-          appointment: {'id': id, 'customer_id': widget.customerId,
+          appointment: {'id': id, 'customer_id': _customerId,
             'title': item['title'], 'status': item['status']})));
     } else if (type == 'invoice' || type == 'estimate') {
       await Navigator.push<void>(context, MaterialPageRoute(
@@ -232,7 +235,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
         appBar: AppBar(title: const Text('Service History')),
         body: ListView(children: [CustomerServiceHistorySection(
           businessId: widget.businessId,
-          customerId: widget.customerId,
+          customerId: _customerId,
           vehicles: List<dynamic>.from(_data?['vehicles'] ?? const []),
           roleCode: widget.roleCode,
           initiallyExpanded: true,
@@ -257,7 +260,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
         body: ListView(children: [
           CustomerServiceHistorySection(
             businessId: widget.businessId,
-            customerId: widget.customerId,
+            customerId: _customerId,
             vehicles: knownVehicles,
             roleCode: widget.roleCode,
             initialVehicleId: vehicleId,
@@ -284,7 +287,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
           roleCode: widget.roleCode,
           isOwner: widget.roleCode == 'owner',
           canManageExpenses: _canManageQuickActions,
-          customerId: widget.customerId,
+          customerId: _customerId,
           customerName: customer['name']?.toString(),
           customerVehicles: vehicles,
           sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
@@ -605,7 +608,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
           body: ListView(children: [
             CustomerVehicleFindingsSection(
               businessId: widget.businessId,
-              customerId: widget.customerId,
+              customerId: _customerId,
               vehicles: vehicles,
               canManage: _canManageQuickActions,
               canDelete: widget.roleCode == 'owner',
@@ -647,7 +650,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
   }
 
   Widget _customerOverviewCard() => FutureBuilder<List<Map<String, dynamic>>>(
-    key: ValueKey(('customer-overview', widget.customerId,
+    key: ValueKey(('customer-overview', _customerId,
         _jobVisibility.epoch, _activityRevision)),
     future: _activeCustomerItems(),
     builder: (context, snapshot) {
@@ -695,7 +698,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
           link('Service History', Icons.history_outlined, BriskersColors.jobs, jobs),
           CustomerFindingsOverviewRow(
             businessId: widget.businessId,
-            customerId: widget.customerId,
+            customerId: _customerId,
             vehicles: List<dynamic>.from(_data?['vehicles'] ?? const []),
             onOpen: () => _openAllVehicleFindings(
               List<dynamic>.from(_data?['vehicles'] ?? const []),
@@ -761,7 +764,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
   );
 
   String get _detailCacheKey =>
-      'briskers_customer_detail_${widget.businessId}_${widget.customerId}';
+      'briskers_customer_detail_${widget.businessId}_${_customerId}';
 
   Future<Map<String, dynamic>?> _cachedFullDetail() async {
     final prefs = await SharedPreferences.getInstance();
@@ -770,7 +773,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     try {
       final decoded = jsonDecode(raw);
       return decoded is Map
-          ? Map<String, dynamic>.from(decoded)
+          ? LocalCustomerNavigationIdentity(localDatabase).detail(
+              widget.businessId, _customerId, Map<String, dynamic>.from(decoded))
           : null;
     } catch (_) {
       return null;
@@ -828,6 +832,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
         oldWidget.customerId != widget.customerId) {
       _jobVisibility.dispose();
       _data = null;
+      _resolvedCustomerId = null;
+      _error = null;
       _reportedReview = false;
       _onlineReady = false;
       _listenForQuarantine();
@@ -844,18 +850,33 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     final forceOffline =
         BriskersConnectionModeController.instance.forceOffline;
 
+    final identity = LocalCustomerNavigationIdentity(localDatabase);
+    try {
+      final customerId = await identity.customer(widget.businessId, widget.customerId);
+      if (!mounted || !visibility.isCurrent(generation)) return;
+      _resolvedCustomerId = customerId;
+    } catch (_) {
+      // A failed local identity lookup must not block an online refresh.
+    }
+    if (!mounted || !visibility.isCurrent(generation)) return;
+
     if (!forceOnline) {
       try {
-        final cached = await _cachedFullDetail();
+        Map<String, dynamic>? cached;
+        try { cached = await _cachedFullDetail(); } catch (_) {
+          // An unreadable preference snapshot cannot hide the SQLite record.
+        }
         final local = cached ??
             await _localCustomers.customerDetail(
               widget.businessId,
-              widget.customerId,
+              _customerId,
             );
-        if (local != null && mounted && visibility.isCurrent(generation)) {
+        final verified = local == null ? null : await identity.detail(
+          widget.businessId, _customerId, local);
+        if (verified != null && mounted && visibility.isCurrent(generation)) {
           localShown = true;
           setState(() {
-            _data = local;
+            _data = verified;
             _showingLocal = true;
             _onlineReady = false;
             _error = null;
@@ -870,13 +891,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     if (!mounted || !visibility.isCurrent(generation)) return;
 
     if (forceOffline) {
-      if (mounted && localShown && visibility.isCurrent(generation)) {
-        setState(() {
-          _onlineReady = false;
-          _showingLocal = true;
-          _error = null;
-        });
-      }
+      setState(() {
+        _onlineReady = false;
+        _showingLocal = localShown;
+        _error = localShown ? null
+            : 'Customer details are not saved on this device.';
+      });
       return;
     }
 
@@ -895,13 +915,13 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       try {
         fullDetail = await _api.customerDetail(
           widget.businessId,
-          widget.customerId,
+          _customerId,
         );
         if (!mounted || !visibility.isCurrent(generation)) return;
         await _saveFullDetail(fullDetail);
         await _sync.refreshCustomer(
           widget.businessId,
-          widget.customerId,
+          _customerId,
           fetchedDetail: fullDetail,
         );
       } catch (_) {
@@ -912,7 +932,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       final local = fullDetail ??
           await _localCustomers.customerDetail(
             widget.businessId,
-            widget.customerId,
+            _customerId,
           );
 
       if (!mounted || !visibility.isCurrent(generation)) return;
@@ -948,7 +968,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       MaterialPageRoute(
         builder: (_) => EditCustomerScreen(
           businessId: widget.businessId,
-          customerId: widget.customerId,
+          customerId: _customerId,
           customer: customer,
         ),
       ),
@@ -1028,7 +1048,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     if (saved == true) {
       await _offlineAdmin.queueProblemFlag(
         widget.businessId,
-        widget.customerId,
+        _customerId,
         flagged: flagged,
         note: flagged ? controller.text.trim() : null,
       );
@@ -1049,7 +1069,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       MaterialPageRoute(
         builder: (_) => NewVehicleScreen(
           businessId: widget.businessId,
-          customerId: widget.customerId,
+          customerId: _customerId,
         ),
       ),
     );
@@ -1063,7 +1083,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       MaterialPageRoute(
         builder: (_) => NewVehicleScreen(
           businessId: widget.businessId,
-          customerId: widget.customerId,
+          customerId: _customerId,
           vehicle: vehicle,
         ),
       ),
@@ -1085,7 +1105,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       MaterialPageRoute(
         builder: (_) => AppointmentCreateScreen(
           businessId: widget.businessId,
-          customerId: widget.customerId,
+          customerId: _customerId,
           customerName: customer['name']?.toString() ?? 'Customer',
           vehicles: vehicles,
         ),
@@ -1116,7 +1136,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       MaterialPageRoute(
         builder: (_) => JobCreateScreen(
           businessId: widget.businessId,
-          customerId: widget.customerId,
+          customerId: _customerId,
           customerName: customer['name']?.toString() ?? 'Customer',
           roleCode: widget.roleCode,
           vehicles: vehicles,
@@ -1146,7 +1166,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       MaterialPageRoute(
         builder: (_) => BlankInvoiceSetupScreen(
           businessId: widget.businessId,
-          initialCustomerId: widget.customerId,
+          initialCustomerId: _customerId,
           initialCustomerName: customer['name']?.toString() ?? 'Customer',
           initialVehicles: vehicles,
         ),
@@ -1183,7 +1203,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
           context,MaterialPageRoute(builder:(_)=>BlankInvoiceSetupScreen(
             businessId:widget.businessId,
             kind:'estimate',
-            initialCustomerId:widget.customerId,
+            initialCustomerId:_customerId,
             initialCustomerName:customer['name']?.toString() ?? 'Customer',
             initialVehicles:vehicles,
           )),
@@ -1203,7 +1223,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
         return;
       }
       final history = await LocalJobRepository().forCustomer(
-        widget.businessId, widget.customerId,
+        widget.businessId, _customerId,
       );
       if (!mounted) return;
       final active = history.where((job) {
@@ -1274,7 +1294,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
           MaterialPageRoute(builder:(_)=>BlankInvoiceSetupScreen(
             businessId:widget.businessId,
             kind:'estimate',
-            initialCustomerId:widget.customerId,
+            initialCustomerId:_customerId,
             initialCustomerName:customer['name']?.toString() ?? 'Customer',
             initialVehicles:vehicles,
           )),
@@ -1373,7 +1393,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     if (_data != null && customer.isNotEmpty) {
       recordRecentView(widget.businessId, (
         kind: RecentRecordKind.customer,
-        id: widget.customerId,
+        id: _customerId,
         label: (customer['name'] ?? customer['display_name'] ?? 'Customer').toString(),
       ));
     }
@@ -1431,7 +1451,13 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
               ? Center(
                   child: _error == null
                       ? const CircularProgressIndicator()
-                      : Text(_error!),
+                      : Column(mainAxisSize: MainAxisSize.min, children: [
+                          Padding(padding: const EdgeInsets.all(20),
+                            child: Text(_error!, textAlign: TextAlign.center)),
+                          OutlinedButton.icon(onPressed: _load,
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Try again')),
+                        ]),
                 )
               : ListView(
                   padding: const EdgeInsets.all(16),
@@ -1564,7 +1590,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                       ),
                       const Divider(height: 1, indent: 16, endIndent: 16),
                       CustomerProblemFlagCard(
-                        customerId: widget.customerId,
+                        customerId: _customerId,
                         flagged: customer['problem_flag'] == true,
                         note: customer['problem_flag_note']?.toString() ?? '',
                         canEdit: _canEditLocal,
@@ -1596,7 +1622,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                   if (_customerTab == 3) CustomerNotesSection(
                     key: _notesSectionKey,
                     businessId: widget.businessId,
-                    customerId: widget.customerId,
+                    customerId: _customerId,
                     composerRequest: _noteComposerRequest,
                     canAdd: _canManageQuickActions,
                   ),
@@ -1605,7 +1631,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                       const SizedBox(height: 18),
                       CustomerAccountSection(
                         businessId: widget.businessId,
-                        customerId: widget.customerId,
+                        customerId: _customerId,
                         onDeleted: () =>
                             Navigator.pop(context, true),
                       ),
