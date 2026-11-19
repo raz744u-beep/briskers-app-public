@@ -256,6 +256,40 @@ class LocalDocumentDetailCache {
     }));
   }
 
+  /// Read-only estimate previews in one SQLite query. Preview text does not
+  /// need numbering repair, conversion reconciliation or derived payroll work.
+  Future<Map<String, Map<String, dynamic>>> estimatePreviews(
+    String businessId, Iterable<String> documentIds,
+  ) async {
+    final ids = documentIds.where((id) => id.isNotEmpty).toSet().toList();
+    if (ids.isEmpty) return {};
+    await LocalDocumentSqlStore.ensure(_database);
+    await RecoveryCommitStore.ensure(_database);
+    final rows = await _database.customSelect(
+      "WITH wanted AS (SELECT value AS id FROM json_each(?)) "
+      "SELECT w.id,COALESCE(r.payload_json,c.payload_json) AS payload_json "
+      "FROM wanted w LEFT JOIN local_document_details c ON "
+      "c.cache_key='briskers_document_detail_' || ? || '_' || w.id "
+      "LEFT JOIN recovery_document_cache r ON r.business_id=? AND r.document_id=w.id "
+      "WHERE NOT EXISTS(SELECT 1 FROM local_document_detail_deleted x WHERE "
+      "x.cache_key='briskers_document_detail_' || ? || '_' || w.id)",
+      variables: [Variable(jsonEncode(ids)), Variable(businessId),
+        Variable(businessId), Variable(businessId)],
+    ).get();
+    final prefs = await SharedPreferences.getInstance();
+    final result = <String, Map<String, dynamic>>{};
+    for (final row in rows) {
+      final id = row.read<String>('id');
+      final raw = sqliteWritesEnabled ? row.readNullable<String>('payload_json') ??
+          prefs.getString(key(businessId, id)) : prefs.getString(key(businessId, id));
+      final detail = _decode(raw);
+      if (detail == null || detail['id'] != id || detail['kind'] != 'estimate' ||
+          (detail['business_id'] != null && detail['business_id'] != businessId)) continue;
+      result[id] = detail;
+    }
+    return result;
+  }
+
   /// Read existing local snapshots for exact payment-ID reporting links.
   /// Missing snapshots remain unknown; this never deletes or changes data.
   Future<List<Map<String, dynamic>>> loadAll(String businessId) {

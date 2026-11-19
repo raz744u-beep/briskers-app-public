@@ -203,6 +203,7 @@ class OfflineInvoiceTaxService {
     String businessId, String invoiceId,
     Map<String, dynamic> snapshot,
   ) async {
+    if (snapshot['kind'] == 'estimate') return snapshot;
     final queued = await _queued(businessId, invoiceId);
     if (queued.isEmpty) return snapshot;
     if (queued.length != 1) {

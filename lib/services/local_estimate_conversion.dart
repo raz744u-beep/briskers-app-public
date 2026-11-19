@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import 'local_document_sql_store.dart';
+import 'local_estimate_number.dart';
 import 'recovery_commit_store.dart';
 
 /// Projects explicit saved conversion evidence. Customer, amount and public
@@ -12,7 +13,7 @@ class LocalEstimateConversion {
   const LocalEstimateConversion(this.db);
   final BriskersLocalDatabase db;
 
-  Future<Map<String, Map<String, dynamic>>> _legacyConversions(String business) async {
+  Future<Map<String, Map<String, dynamic>>> _legacyConversions(String business, Set<String> estimates) async {
     final prefix = 'briskers_document_detail_${business}_local-estimate-';
     final rows = await db.customSelect(
       'SELECT c.cache_key,c.payload_json FROM local_document_details c '
@@ -28,11 +29,12 @@ class LocalEstimateConversion {
             (value['business_id'] != null && value['business_id'] != business)) {
           continue;
         }
-        final target = value['_server_document_id']?.toString() ?? '';
+        final localId = row.read<String>('cache_key').substring('briskers_document_detail_${business}_'.length);
+        final derived = LocalEstimateNumber.identity(business, localId);
+        final target = value['_server_document_id']?.toString() ??
+            (estimates.contains(derived) ? derived : '');
         final invoice = value['converted_invoice_id']?.toString() ?? '';
         if (target.isEmpty || (value['converted'] != true && invoice.isEmpty)) continue;
-        final fullPrefix = 'briskers_document_detail_${business}_';
-        final localId = row.read<String>('cache_key').substring(fullPrefix.length);
         if (value['id'] != target && value['id'] != localId) continue;
         final prior = result[target];
         if (prior?['_ambiguous_conversion'] == true ||
@@ -80,13 +82,20 @@ class LocalEstimateConversion {
       variables: [Variable(jsonEncode([for(final row in rows) row['id']?.toString()])),Variable(business)],
     ).get();
     final indexes = {for (final record in records) record.read<String>('id'): record.data};
-    final legacy = await _legacyConversions(business);
+    final estimateIds = {for (final record in records)
+      if (record.data['kind'] == 'estimate') record.read<String>('id')};
+    String estimateIdentity(String id) {
+      if (!id.startsWith('local-estimate-')) return id;
+      final canonical = LocalEstimateNumber.identity(business, id);
+      return estimateIds.contains(canonical) ? canonical : id;
+    }
+    final legacy = await _legacyConversions(business, estimateIds);
     final saved = <String, Map<String, dynamic>>{};
     final reverse = <String, List<String>>{};
     for (final record in records) {
       final source = record.data['source_estimate_id'];
       if (source is String && source.isNotEmpty) {
-        reverse.putIfAbsent(source, () => []).add(record.read<String>('id'));
+        reverse.putIfAbsent(estimateIdentity(source), () => []).add(record.read<String>('id'));
       }
       final raw = record.readNullable<String>('payload_json');
       if (raw == null) continue;
@@ -109,7 +118,7 @@ class LocalEstimateConversion {
       variables:[Variable(business),Variable(business)],
     ).get();
     for (final receipt in receipts) {
-      reverse.putIfAbsent(receipt.read<String>('estimate_id'), () => [])
+      reverse.putIfAbsent(estimateIdentity(receipt.read<String>('estimate_id')), () => [])
           .add(receipt.read<String>('invoice_id'));
     }
     for (final row in rows) {

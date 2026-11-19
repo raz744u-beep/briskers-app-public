@@ -65,6 +65,33 @@ void main() {
     }
   });
 
+  test('temporary estimate identity backlinks resolve to the exact synced estimate', () async {
+    const canonical = '91d72f48-209a-4d96-b2a4-958d95ca40f5';
+    const temporary = 'local-estimate-$canonical';
+    await db.customStatement("UPDATE local_documents SET id=? WHERE id='estimate-2007'", [canonical]);
+    await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop',canonical),
+      jsonEncode({...source,'id':canonical}));
+    await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','invoice-6377'),
+      jsonEncode({...target,'converted_from_estimate_id':temporary}));
+    final cache = LocalDocumentDetailCache(database:db);
+    expect((await cache.load('shop',canonical))!['converted_invoice_id'],'invoice-6377');
+    final rows=await LocalDocumentRepository(database:db).listByKind('shop',kind:'estimate');
+    expect(rows.single['display_status'],'Converted');
+  });
+
+  test('saved temporary estimate conversion survives a missing redirect field', () async {
+    const canonical = '91d72f48-209a-4d96-b2a4-958d95ca40f5';
+    const temporary = 'local-estimate-$canonical';
+    await db.customStatement("UPDATE local_documents SET id=? WHERE id='estimate-2007'", [canonical]);
+    await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop',canonical),
+      jsonEncode({...source,'id':canonical}));
+    await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','invoice-6377'),
+      jsonEncode({...target,'converted_from_estimate_id':null}));
+    await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop',temporary),
+      jsonEncode({...source,'id':temporary,'converted':true,'converted_invoice_id':'invoice-6377'}));
+    expect((await LocalDocumentDetailCache(database:db).load('shop',canonical))!['converted'],true);
+  });
+
   test('matching customer, total and date never invent a conversion', () async {
     await LocalDocumentSqlStore.write(db,LocalDocumentDetailCache.key('shop','invoice-6377'),
       jsonEncode({...target,'converted_from_estimate_id':'different-estimate'}));

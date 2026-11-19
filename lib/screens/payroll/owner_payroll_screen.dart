@@ -2233,20 +2233,81 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     }
   }
 
+  Widget _assignmentCard(Map<String, dynamic> row) {
+    final paid = (row['paid_minutes'] as int? ?? 0) > 0 || row['paid'] == 1;
+    final archived = row['archived_labor'] == 1;
+    final conflict = row['assignment_conflict'] == 1;
+    final removed = row['source_active'] == 0;
+    final state = row['state']?.toString() ?? 'Open';
+    final canProgress = !archived && !paid && !conflict && !removed && !_busy;
+    final hours = (row['estimated_minutes'] as int? ?? 0) / 60;
+    final actual = row['recorded_actual_minutes'] as int? ?? row['actual_minutes'] as int? ?? 0;
+    final credited = row['actual_minutes'] as int? ?? 0;
+    return ApprovedTaskCardSurface(
+      borderColor: taskStatusColor(state),
+      child: Padding(padding: const EdgeInsets.all(14), child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            Icon(taskStatusIcon(state), color: taskStatusColor(state)),
+            const SizedBox(width: 10),
+            Expanded(child: Text(_employeeLabel(row['employee_id']?.toString()),
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17))),
+            _compactPlannedHours(hours),
+            if (paid) const Icon(Icons.lock_outline, color: BriskersColors.secondaryText),
+            if (!paid || archived) IconButton(
+              tooltip: 'Edit Assignment',
+              onPressed: _busy || conflict || removed ? null : () => _editEstimated(row),
+              icon: const Icon(Icons.edit_outlined, color: BriskersColors.confirm)),
+          ]),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center, children: [
+            TaskStatusPill(state),
+            if (canProgress && state == 'Open') TextButton.icon(
+              style: TextButton.styleFrom(foregroundColor: taskBlue),
+              onPressed: () => _recordTaskProgress(row),
+              icon: const Icon(Icons.play_arrow, size: 18), label: const Text('Start')),
+            if (canProgress && (state == 'Open' || state == 'In Progress'))
+              FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: taskBlue, foregroundColor: Colors.white),
+                onPressed: () => _recordTaskProgress(row, markDone: true),
+                icon: const Icon(Icons.done, size: 18),
+                label: Text(state == 'Open' ? 'Mark Done' : 'Finish')),
+          ]),
+          if (paid) const Padding(padding: EdgeInsets.only(top: 8), child: Text('Paid · Locked')),
+          if (archived) ListTile(contentPadding: EdgeInsets.zero,
+            title: const Text('Historical labor · excluded from payroll'),
+            trailing: paid ? null : TextButton(onPressed: () => _reviewCarry(row),
+              child: const Text('Review unpaid work'))),
+          if (removed) const Text('Removed from invoice'),
+          if (conflict) TextButton(onPressed: _busy ? null : () => _runOwnerTaskEdit(
+            () => _taskEditRepository.acceptChangedAssignment(row['id'] as String)),
+            child: const Text('Review changed assignment')),
+          if (actual > 0 || credited > 0)
+            Padding(padding: const EdgeInsets.only(top: 8), child: Text(
+              'Actual: ${(actual / 60).toStringAsFixed(2)} hrs · Credited: ${(credited / 60).toStringAsFixed(2)} hrs',
+              style: const TextStyle(color: BriskersColors.secondaryText))),
+        ])),
+    );
+  }
+
   Widget _assignmentManager() {
     final source = _taskSources.where((r)=>r['job_id']==widget.jobId &&
       r['invoice_id']==widget.invoiceId && r['source_line_id']==widget.focusLineId,).firstOrNull;
     final rows = _work.where((r)=>r['job_id']==widget.jobId && r['invoice_id']==widget.invoiceId &&
       r['source_line_id']==widget.focusLineId,).toList();
     return Scaffold(bottomNavigationBar: widget.sharedBottomNavigationBar,
-      appBar:AppBar(title:const Text('Manage Labor Assignments')),
-      body:SafeArea(child:ListView(padding:const EdgeInsets.all(16),children:[
+      backgroundColor: taskCanvas,
+      appBar: const ApprovedTasksHeader(title: 'Labor Assignments'),
+      body:SafeArea(child:ListView(padding:const EdgeInsets.fromLTRB(16,16,16,32),children:[
         if(_busy || _loadingLocal) const LinearProgressIndicator(),
         if(_error!=null) Text(_error!),
-        if(source!=null) Text(source['description']?.toString() ?? 'Invoice labor',
-          style:Theme.of(context).textTheme.titleMedium,),
+        if(source!=null) Padding(padding: const EdgeInsets.only(bottom: 14),
+          child: Text(source['description']?.toString() ?? 'Invoice labor',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: taskNavy))),
         for(final row in rows) ...[
-          _taskCard(row),
+          _assignmentCard(row),
           if (row['owner_prior_paid'] == 1)
             const ListTile(
               dense:true,
@@ -2259,6 +2320,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             CheckboxListTile(
               value:false,
               dense:true,
+              activeColor: BriskersColors.confirm,
               controlAffinity:ListTileControlAffinity.leading,
               title:const Text('Reconcile previously paid wages'),
               subtitle:const Text('Owner confirmation also marks this labor Done',),
@@ -2269,10 +2331,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             ),
           if(row['state']=='Open' && (row['paid_minutes'] as int? ?? 0)==0)
             Align(alignment:Alignment.centerRight,child:TextButton(onPressed:_busy?null:()=>_removeAssignment(row),
+              style: TextButton.styleFrom(foregroundColor: BriskersColors.destructive),
               child:Text('Remove ${_employeeLabel(row['employee_id'] as String)}',),),),
         ],
         if(source!=null && source['source_active']!=0)
-          OutlinedButton.icon(onPressed:_busy?null:()=>_assign(widget.invoiceId!,{
+          FilledButton.icon(style: FilledButton.styleFrom(
+            backgroundColor: BriskersColors.confirm, foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14)),onPressed:_busy?null:()=>_assign(widget.invoiceId!,{
             'id':widget.focusLineId,'description':source['description'],}),
             icon:const Icon(Icons.person_add_alt_1),label:const Text('Add mechanic'),),
         if(!_loadingLocal && source==null) const Text('No saved invoice labor is available for this line.'),

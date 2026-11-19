@@ -542,7 +542,12 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       return;
     }
     final summaries = <String, String>{};
-    for (final row in shown.take(75)) {
+    final previewRows = shown.take(75).toList();
+    final previews = await _localDetailCache.estimatePreviews(widget.businessId,
+      previewRows.map((row) => row['id']?.toString() ?? ''))
+      .catchError((Object _) => <String, Map<String, dynamic>>{});
+    if (!mounted || epoch != _descriptionEpoch) return;
+    for (final row in previewRows) {
       if (!mounted || epoch != _descriptionEpoch) return;
       final id = row['id']?.toString() ?? '';
       if (id.isEmpty) continue;
@@ -552,7 +557,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         continue;
       }
       try {
-        final detail = await _localDetailCache.load(widget.businessId, id);
+        final detail = previews[id];
         if (detail == null) continue;
         final summary = estimateListDescription(row, detail: detail);
         if (summary.isNotEmpty) summaries[id] = summary;

@@ -500,6 +500,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   Future<Map<String, dynamic>> _withLocalPayments(
     Map<String, dynamic> detail,
   ) async {
+    if (detail['kind'] == 'estimate') {
+      return _projectSavedInvoiceIdentity(
+        await _pendingMemo.project(widget.businessId, widget.documentId, detail));
+    }
     // Independent local projections/read queries can run together, reducing
     // SQLite round trips during first-open. Apply the results in the original
     // memo → findings → receipts → payment-edits order for exact accounting.
@@ -4150,6 +4154,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         vehicleId != originalVehicleId ||
         originalDate == null ||
         DateUtils.dateOnly(originalDate) != DateUtils.dateOnly(date);
+
+    if (_estimate && _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+      await _run(() => _offlineDocumentDraft.updatePendingEstimateDetails(
+        widget.businessId, widget.documentId, documentDate: date,
+        customerId: customerId, customerName: customerName,
+        vehicleId: vehicleId, vehicleLabel: vehicleName, mileage: newMileage,
+        claimNumber: newClaimNumber.isEmpty ? null : newClaimNumber,
+        authorizationNumber: newAuthorizationNumber.isEmpty ? null : newAuthorizationNumber,
+      ), localOnly: true);
+      return;
+    }
 
     if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
       // Never send a local-invoice-* ID to a server function expecting UUID.

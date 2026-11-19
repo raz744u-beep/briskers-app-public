@@ -1112,6 +1112,61 @@ class OfflineDocumentDraftService {
     await _saveDraft(businessId, documentId, detail, lines);
   }
 
+  /// Estimate headers have their own local path; never route them through
+  /// invoice mileage/warranty editing. Preserve the saved items and totals.
+  Future<void> updatePendingEstimateDetails(
+    String businessId, String documentId, {
+    required DateTime documentDate,
+    required String customerId,
+    required String customerName,
+    String? vehicleId,
+    String? vehicleLabel,
+    String? mileage,
+    String? claimNumber,
+    String? authorizationNumber,
+  }) async {
+    if (customerId.isEmpty) throw StateError('Select a saved customer.');
+    if (!documentId.startsWith('local-estimate-')) {
+      throw StateError('This operation requires a pending local estimate.');
+    }
+    await _database.transaction(() async {
+      final detail = await _requireDraft(businessId, documentId);
+      if (detail['kind'] != 'estimate' || detail['converted'] == true ||
+          (detail['converted_invoice_id']?.toString().isNotEmpty ?? false)) {
+        throw StateError('Converted estimates cannot be edited.');
+      }
+      if ((detail['job_id']?.toString().isNotEmpty ?? false) &&
+          (detail['customer_id'] != customerId || detail['vehicle_id'] != vehicleId)) {
+        throw StateError('Change this estimate customer or vehicle after its linked Job has synced.');
+      }
+      final identities = LocalCustomerVehicleIdentity(_database);
+      final customer = (await identities.resolve(businessId, customerId))!;
+      final vehicle = await identities.resolve(businessId, vehicleId);
+      final date = documentDate.toIso8601String().split('T').first;
+      final updated = <String, dynamic>{...detail,
+        'customer_id': customer, 'customer_name': customerName,
+        'vehicle_id': vehicle, 'vehicle': vehicleLabel,
+        'claim_number': claimNumber, 'authorization_number': authorizationNumber,
+        'document_date': date,
+        if (mileage != null) 'odometer_in': mileage.isEmpty ? null : num.tryParse(mileage),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
+      final queued = await _database.customSelect(
+        "SELECT id,payload_json FROM sync_outbox WHERE business_id=? AND entity_id=? "
+        "AND entity_type='document_draft_create' AND state='pending'",
+        variables: [Variable(businessId), Variable(documentId)],
+      ).getSingle();
+      final payload = Map<String, dynamic>.from(jsonDecode(queued.read<String>('payload_json')) as Map);
+      await _database.customStatement('UPDATE sync_outbox SET payload_json=? WHERE id=?',
+        [jsonEncode({...payload, 'customer_id': customer, 'vehicle_id': vehicle,
+          'document_date': date}), queued.read<int>('id')]);
+      await _database.customStatement(
+        'UPDATE local_documents SET customer_id=?,document_date=? WHERE business_id=? AND id=?',
+        [customer,date,businessId,documentId]);
+      await _cache.save(businessId, documentId, updated);
+    });
+  }
+
   /// Edit metadata on a queued local invoice without sending a temporary ID
   /// to UUID-only server RPCs. Refuse edits after replay has been attempted:
   /// the server may already hold a numbered version of this document.
