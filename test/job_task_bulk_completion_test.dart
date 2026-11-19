@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'package:briskers_app/services/job_task_summary.dart';
+import 'package:briskers_app/services/local_task_assignment_store.dart';
+import 'package:briskers_app/services/offline_job_admin_service.dart';
 import 'dart:io';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
@@ -339,6 +341,36 @@ void main() {
     expect(await bulk.complete(plan,now),1);
     expect((await repo.work(job:'old')).single['state'],'Done');
     expect((await repo.work(job:'old')).single['paid_minutes'],0);
+  });
+
+  test('Finish from job list hydrates all three saved labor allocations before planning', () async {
+    await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,job_number,title,status) VALUES('glenn','shop','owner','J-60','Cooling repair','in_progress')");
+    await db.customStatement("INSERT INTO local_documents(id,business_id,job_id,kind,document_date,status) VALUES('6380','shop','glenn','invoice','2026-11-17','issued')");
+    await LocalDocumentDetailCache(database:db).save('shop','6380',{
+      'id':'6380','kind':'invoice','job_id':'glenn','document_date':'2026-11-17','status':'issued',
+      'lines':[
+        {'id':'diagnostic','line_kind':'labor','name':'Diagnostic. Pressure test cooling system','quantity':0},
+        {'id':'pump','line_kind':'labor','name':'Replace water pump','quantity':2.5},
+        {'id':'thermostat','line_kind':'labor','name':'Replace thermostat','quantity':2},
+      ],
+    });
+    await OfflineJobAdminService(database:db).queueMainMechanic('shop','glenn',employeeId:'kam',employeeName:'Kam');
+    final tasks=(await repo.tasks()).where((r)=>r['job_id']=='glenn').toList();
+    expect(tasks,hasLength(3));
+    final pump=tasks.singleWhere((r)=>r['source_line_id']=='pump');
+    await LocalTaskAssignmentStore(db).allocate('shop',pump['id'] as String,'kam',inherited:true);
+    expect(await repo.work(job:'glenn'),hasLength(1));
+    final plan=await bulk.plan('glenn',DateTime(2026,11,19));
+    expect(plan.count,3);
+    expect(await bulk.complete(plan,DateTime(2026,11,19)),3);
+    final done=await repo.work(job:'glenn');
+    expect(done,hasLength(3)); expect(done.every((r)=>r['state']=='Done'),true);
+    expect(done.fold<int>(0,(n,r)=>n+(r['actual_minutes'] as int)),270);
+    expect(done.every((r)=>r['paid_minutes']==0),true);
+    final progress=await JobTaskSummary(db).progress('shop','glenn');
+    expect(progress.done,3);expect(progress.total,3);
+    final saved=await snapshot(); expect(await bulk.complete(plan,DateTime(2026,11,19)),0);
+    expect(await snapshot(),saved);
   });
 
 }

@@ -90,13 +90,16 @@ class JobTaskBulkCompletion {
     String job,
     DateTime now, {
     bool starting = false,
-  }) async => JobTaskCompletionPlan.fromRows(
-    job,
-    await repository.work(job: job),
-    await repository.shopTasks(),
-    now,
-    starting: starting,
-  );
+  }) async {
+    // Match the task workspace: materialize every saved invoice line and its
+    // main-mechanic assignment before selecting the bulk action's snapshot.
+    // A job-list summary can exist before all its labor allocations hydrate.
+    await repository.recoverJobAssignments(job);
+    return JobTaskCompletionPlan.fromRows(
+      job, await repository.work(job: job), await repository.shopTasks(), now,
+      starting: starting,
+    );
+  }
 
   Future<int> start(JobTaskCompletionPlan confirmed, DateTime now) {
     if (!confirmed.starting) {
