@@ -6729,7 +6729,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
     final subject = [
       customerName,
-      authorization,
+      if (claim.isNotEmpty) 'Claim #: $claim',
+      if (authorization.isNotEmpty) 'Authorization #: $authorization',
     ].where((value) => value.isNotEmpty).join(' - ');
 
     final body = <String>[
