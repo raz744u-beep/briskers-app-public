@@ -62,8 +62,8 @@ void main() {
     }
     expect(guard, contains("projected['signature_current'] = false"));
     expect(source, contains('await _pendingMemoForPdf('));
-    expect(source, contains('await _projectSavedInvoiceIdentity(localDetail)'));
-    expect(source, contains('await _projectSavedInvoiceIdentity(cached)'));
+    expect(source, contains('_localPdfSnapshot(localDetail)'));
+    expect(source, contains('_localPdfSnapshot(cached)'));
     expect(source, contains('return _withPdfUnits('));
   });
 }

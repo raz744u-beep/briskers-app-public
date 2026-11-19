@@ -2633,7 +2633,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       final memoForPdf = await _pendingMemoForPdf(detail);
       detail.clear();
       detail.addAll(memoForPdf);
-      return _localPdfSnapshot(detail);
+      return await _localPdfSnapshot(detail);
     } catch (error) {
       // Auto's network may fail while the known invoice is still safely
       // available in the local cache. Do not silently send an unverified PDF.
@@ -6681,7 +6681,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     if (detail == null || !mounted) return;
     final readiness=_localWarrantyReadiness(detail);
     if(readiness['ready']!=true) {
-      setState(() => _error='Complete ${(readiness['missing'] as List).join(', ')} before warranty submission.');
+      await _showSubmissionRequirements();
       return;
     }
     final email=readiness['submission_email'] as String;

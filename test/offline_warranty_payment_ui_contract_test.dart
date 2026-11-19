@@ -35,7 +35,7 @@ void main() {
     final prepare = screen.substring(start, end);
     expect(prepare, isNot(contains('_detail = detail')));
     expect(prepare, contains('await _withLocalPayments(detail)'));
-    expect(prepare, contains('return await _withPdfUnits(detail)'));
+    expect(prepare, contains('return await _localPdfSnapshot(detail)'));
   });
 
   test('unreconciled local payments cannot be finalized or edited on server', () {

@@ -80,7 +80,7 @@ void main() {
     expect(code, contains('InvoicePdfMileageProjection.reconcile('));
     expect(code, contains('pdfDetail: queuedMileage'));
     expect(code, contains('visibleDetail: _detail'));
-    expect(code, contains('await _withPdfUnits(detail)'));
+    expect(code, contains('await _localPdfSnapshot(detail)'));
     expect(code, contains("final result = await Future.wait<dynamic>(["));
     expect(code, contains('_api.documentDetail(widget.businessId, widget.documentId)'));
     expect(code, isNot(contains('closeInvoice(')));
