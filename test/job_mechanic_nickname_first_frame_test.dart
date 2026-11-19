@@ -12,7 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  for (final nicknameInPreview in [true, false]) {
+  for (final nicknameInPreview in [true, false, null]) {
     testWidgets('saved nickname never flashes legal name, preview alias=$nicknameInPreview', (tester) async {
       SharedPreferences.setMockInitialValues({
         'briskers_job_employees_shop': jsonEncode([
@@ -31,7 +31,8 @@ void main() {
         'id': 'job',
         'assigned_employee_id': 'mechanic',
         'assigned_employee': 'Chris Rideaux',
-        if (nicknameInPreview) 'assigned_employee_nickname': 'Chris',
+        if (nicknameInPreview != false)
+          'assigned_employee_nickname': nicknameInPreview == true ? 'Chris' : null,
       }, expectedJobId: 'job')!;
 
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: SizedBox(
@@ -42,7 +43,7 @@ void main() {
         ),
       ))));
       expect(find.text('Chris Rideaux'), findsNothing);
-      expect(find.text(nicknameInPreview ? 'Chris' : 'Loading…'), findsOneWidget);
+      expect(find.text(nicknameInPreview == true ? 'Chris' : 'Loading…'), findsOneWidget);
       expect(tester.widget<DropdownButton<String>>(find.byType(DropdownButton<String>)).value, 'mechanic');
 
       // Observe both the fast core read and the slower roster/payroll refresh.

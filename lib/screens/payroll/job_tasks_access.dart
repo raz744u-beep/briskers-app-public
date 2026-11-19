@@ -45,12 +45,13 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
     final id=(saved['assigned_employee_id'] ?? first?['employee_id'])?.toString();
     if((id==null || id.isEmpty) && !saved.containsKey('assigned_employee_id') &&
         saved['is_unassigned']!=true){return;}
-    final nicknameKnown=saved.containsKey('assigned_employee_nickname') ||
-        (first?.containsKey('nickname') ?? false);
+    final nickname=(saved['assigned_employee_nickname'] ?? first?['nickname'])
+        ?.toString().trim() ?? '';
+    final nicknameKnown=nickname.isNotEmpty;
     main=id==null || id.isEmpty?null:id;
     staff=main==null?[]:[{'id':main,'name':saved['assigned_employee'] ??
       saved['assigned_employee_name'] ?? first?['employee_name'] ?? 'Saved mechanic',
-      'nickname':saved['assigned_employee_nickname'] ?? first?['nickname'],
+      'nickname':nicknameKnown?nickname:null,
       '_nickname_pending':!nicknameKnown}];
     mainLoaded=true;
   }
