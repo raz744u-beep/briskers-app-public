@@ -8,6 +8,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../core/formatters.dart';
 import '../core/mileage_workflow.dart';
 import '../core/warranty_payment_amounts.dart';
+import '../core/invoice_warranty_pdf_projection.dart';
 
 class DocumentPdfService {
   const DocumentPdfService._();
@@ -267,6 +268,7 @@ class DocumentPdfService {
   }
 
   static Future<Uint8List> build(Map<String, dynamic> detail) async {
+    detail = InvoiceWarrantyPdfProjection.apply(detail);
     final doc = pw.Document();
     final logo = await _monochromeLogo();
 
@@ -568,6 +570,9 @@ class DocumentPdfService {
               processorFee: customerAllocation.requiresReview ? null : warrantyProcessorFee,
               retained: warrantyReceipt == null ? null : warrantyBreakdown?.retained,
               actualReceipt: warrantyReceipt != null,
+              surchargeRate:num.tryParse(detail['surcharge_rate']?.toString() ?? '') ?? 0,
+              customerBase: customerAllocation.customerBase,
+              claim: claimNumber, authorization: authorizationNumber,
               customerResponsibility: customerAllocation.customerTotal,
               customerAllocationNeedsReview: customerAllocation.requiresReview,
             ),
@@ -1000,6 +1005,9 @@ class DocumentPdfService {
     required num? processorFee,
     required num? retained,
     required bool actualReceipt,
+    required num surchargeRate,
+    required num customerBase,
+    required String claim, required String authorization,
     required num customerResponsibility,
     required bool customerAllocationNeedsReview,
   }) {
@@ -1058,8 +1066,12 @@ class DocumentPdfService {
             padding: const pw.EdgeInsets.fromLTRB(8, 7, 8, 7),
             child: pw.Column(
               children: [
+                if (claim.isNotEmpty) pw.Text('Claim Number: $claim',style:const pw.TextStyle(fontSize:8.8)),
+                if (authorization.isNotEmpty) pw.Text('Authorization Number: $authorization',style:const pw.TextStyle(fontSize:8.8)),
                 row('Approved warranty amount', approved),
-                row('Warranty Card Payment Amount', terminal),
+                row(surchargeRate>0 ? 'Warranty Card Payment Amount' : 'Warranty Check Payment Amount', terminal),
+                if(surchargeRate>0) pw.Text('Credit card fee: ${(surchargeRate*100).toStringAsFixed(0)}% of warranty card amount',style:const pw.TextStyle(fontSize:8)),
+                row('Customer portion before processing fee', customerAllocationNeedsReview ? null : customerBase),
                 row('Credit Card Processing Fee\n(Customer Responsibility)', processorFee),
                 pw.Divider(height: 8, color: PdfColors.grey500),
                 row(

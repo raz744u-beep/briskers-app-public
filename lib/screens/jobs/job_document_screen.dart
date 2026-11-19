@@ -54,6 +54,8 @@ import '../../services/invoice_tax_proposal.dart';
 import '../../widgets/briskers_dialog.dart';
 import '../../services/invoice_expense_reader.dart';
 import '../../services/document_pdf_service.dart';
+import '../../core/invoice_warranty_pdf_projection.dart';
+import '../../services/local_invoice_signature_store.dart';
 import '../../services/invoice_performance_metrics.dart';
 import '../../services/invoice_labor_work_summary.dart';
 import '../../services/gmail_compose_service.dart';
@@ -1552,6 +1554,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   // Begin the local read with the invoice, while Items is already visible.
   // Retain this same future on the first Expenses mount and subsequent visits.
   void _primeInvoiceExpenses() {
+    unawaited(_refreshSavedSignatureStatus());
     if (_detail == null || _estimate || !_canManageInvoiceExpenses) { return; }
     final scope = '${widget.documentId}/${_detail?['job_id'] ?? ''}';
     if (_invoiceExpensesTabFuture != null && _invoiceExpensesScope == scope) { return; }
@@ -2499,6 +2502,27 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     return projected;
   }
 
+  Future<void> _refreshSavedSignatureStatus() async {
+    if (_estimate || _detail==null) return;
+    final snapshot=_detail!;
+    try {
+      if(!await LocalInvoiceSignatureStore().exists(widget.businessId,widget.documentId)) return;
+      final signed=await _localPdfSnapshot(snapshot);
+      if(mounted && identical(snapshot,_detail)) setState(() => _signatureStatus={
+        'is_current':signed['signature_current']==true,'signer_name':signed['signer_name'],
+        'signed_at':signed['signed_at'],
+      });
+    } catch (_) {
+      // A failed local read never represents a verified current signature.
+    }
+  }
+
+  Future<Map<String,dynamic>> _localPdfSnapshot(Map<String,dynamic> detail) async {
+    final projected=await _withPdfUnits(await _pendingMemoForPdf(
+      await _projectSavedInvoiceIdentity(InvoiceWarrantyPdfProjection.apply(detail))));
+    return LocalInvoiceSignatureStore().project(widget.businessId,widget.documentId,projected);
+  }
+
   Future<Map<String, dynamic>?> _preparePdf() async {
     if (_estimate && LocalEstimateNumber.existing(_detail?['document_number']) == null) {
       setState(() => _error = 'Correct the estimate number before creating a PDF.');
@@ -2514,8 +2538,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
       final localDetail = _detail;
       if (localDetail == null) return null;
-      return _withPdfUnits(await _pendingMemoForPdf(
-        await _projectSavedInvoiceIdentity(localDetail)));
+      return _localPdfSnapshot(localDetail);
     }
 
     try {
@@ -2578,6 +2601,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       if (!_estimate) {
         final warranty = Map<String, dynamic>.from(result[1] as Map);
         detail.addAll(warranty);
+        if (warranty.containsKey('extended_warranty')) {
+          detail['offline_warranty_detail']=warranty;
+        }
         final signature = Map<String, dynamic>.from(result[2] as Map);
         final bucket = signature['bucket']?.toString() ?? '';
         final key = signature['key']?.toString() ?? '';
@@ -2607,7 +2633,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       final memoForPdf = await _pendingMemoForPdf(detail);
       detail.clear();
       detail.addAll(memoForPdf);
-      return await _withPdfUnits(detail);
+      return _localPdfSnapshot(detail);
     } catch (error) {
       // Auto's network may fail while the known invoice is still safely
       // available in the local cache. Do not silently send an unverified PDF.
@@ -2643,8 +2669,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         );
         if (proceed == true && mounted && cached != null) {
           setState(() => _error = null);
-          return _withPdfUnits(await _pendingMemoForPdf(
-            await _projectSavedInvoiceIdentity(cached)));
+          return _localPdfSnapshot(cached);
         }
       }
       if (mounted) {
@@ -4724,6 +4749,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   ),
                 ),
               ),
+              if (!_estimate && _canManageInvoiceExpenses)
+                ListTile(
+                  leading: const Icon(Icons.draw_outlined,color:BriskersColors.invoices),
+                  title: const Text('Customer signature'),
+                  subtitle: const Text('Review and sign on this device, including offline'),
+                  onTap: () => Navigator.pop(sheetContext,'signature'),
+                ),
               if (!_estimate &&
                   _warrantyDetail['extended_warranty'] == true)
                 ListTile(
@@ -4784,6 +4816,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     );
 
     if (!mounted || action == null) return;
+    if (action == 'signature') await _captureCustomerSignature();
     if (action == 'warranty_submit') {
       await _prepareWarrantySubmission();
     }
@@ -6495,15 +6528,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _captureCustomerSignature() async {
-    if (_estimate || _busy || _detail == null) return;
+    if (_estimate || _busy || _detail == null || !_canManageInvoiceExpenses) return;
 
     final detail = await _preparePdf();
     if (detail == null || !mounted) return;
 
     final disclaimers = List<dynamic>.from(
-      _warrantyDetail['disclaimers'] ?? const [],
+      detail['disclaimers'] ?? const [],
     ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
 
+    final allocation=WarrantyPaymentAllocation.fromWarranty(invoiceTotal:detail['total_amount'],warranty:detail);
     final result = await Navigator.push<Map<String, dynamic>>(
       context,
       MaterialPageRoute(
@@ -6513,7 +6547,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           invoiceTotal: _money(detail['total_amount']),
           disclaimers: disclaimers,
           extendedWarranty:
-              _warrantyDetail['extended_warranty'] == true,
+              detail['extended_warranty'] == true,
+          warrantyAllocation: detail['extended_warranty']==true && !allocation.requiresReview ? {
+            'Warranty card amount':_money(detail['terminal_amount']),
+            'Customer portion':_money(allocation.customerBase),
+            'Card processing fee':_money(allocation.processorFee),
+            'Total customer out of pocket':_money(allocation.customerTotal),
+          } : const {},
         ),
       ),
     );
@@ -6526,13 +6566,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
     setState(() => _busy = true);
     try {
-      await _api.uploadDocumentSignature(
-        widget.businessId,
-        widget.documentId,
-        signerName: signerName,
-        bytes: bytes,
-      );
-      await _load();
+      await LocalInvoiceSignatureStore().save(widget.businessId,widget.documentId,detail,
+        signerName:signerName,bytes:bytes);
+      final signed=await LocalInvoiceSignatureStore().project(widget.businessId,widget.documentId,detail);
+      if (!mounted) return;
+      setState(() => _signatureStatus={
+        'is_current':signed['signature_current']==true,'signer_name':signed['signer_name'],
+        'signed_at':signed['signed_at'],
+      });
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -6627,41 +6668,29 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   Future<void> _prepareWarrantySubmission() async {
     if (_estimate || _busy) return;
 
-    Map<String, dynamic> readiness;
-    try {
-      readiness = await _api.warrantySubmissionReadiness(
-        widget.businessId,
-        widget.documentId,
-      );
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-      return;
-    }
-
-    if (readiness['ready'] != true) {
-      if (mounted) setState(() => _submissionReadiness = readiness);
-      await _showSubmissionRequirements();
-      return;
-    }
-
     final detail = await _preparePdf();
     if (detail == null || !mounted) return;
-
-    final signature = await _api.documentSignatureStatus(
-      widget.businessId,
-      widget.documentId,
-    );
-    final bucket = signature['bucket']?.toString() ?? '';
-    final key = signature['key']?.toString() ?? '';
-    if (bucket.isNotEmpty && key.isNotEmpty) {
-      detail['signature_bytes'] = await _api.downloadAttachment(bucket, key);
-      detail['signer_name'] = signature['signer_name'];
-      detail['signed_at'] = signature['signed_at'];
-      detail['signature_current'] = signature['is_current'] == true;
+    final email=detail['submission_email']?.toString().trim() ?? '';
+    if(detail['extended_warranty']!=true || email.isEmpty ||
+        (detail['claim_number']?.toString().trim() ?? '').isEmpty ||
+        (detail['authorization_number']?.toString().trim() ?? '').isEmpty) {
+      setState(() => _error='Save the warranty company email, claim and authorization number before preparing submission.');
+      return;
     }
-
+    final allocation=WarrantyPaymentAllocation.fromWarranty(invoiceTotal:detail['total_amount'],warranty:detail);
+    final missing=<String>[
+      if((detail['vehicle_vin']?.toString().trim() ?? '').isEmpty) 'VIN',
+      if((detail['mileage_out'] ?? detail['odometer_out'] ?? detail['odometer_in'])==null) 'mileage',
+      if(allocation.requiresReview) 'reviewed warranty payment allocation',
+    ];
+    if(missing.isNotEmpty) {
+      setState(() => _error='Complete ${missing.join(', ')} before warranty submission.'); return;
+    }
+    if(detail['signature_current']!=true || detail['signature_bytes'] is! Uint8List) {
+      setState(() => _error='Choose Send → Customer signature to sign the current invoice before warranty submission.');
+      return;
+    }
     final bytes = await DocumentPdfService.build(detail);
-    final email = readiness['submission_email']?.toString() ?? '';
 
     if (!mounted) return;
     final confirmed = await showDialog<bool>(
@@ -7499,7 +7528,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 onTap: _showDisclaimers,
               ),
             ),
-            if (signatureNeeded) ...[
+            if (_canManageInvoiceExpenses) ...[
               const SizedBox(height: 8),
               Card(
                 margin: EdgeInsets.zero,
@@ -7518,7 +7547,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   title: Text(
                     signatureCurrent
                         ? tr('customerSignatureComplete')
-                        : tr('customerSignatureRequired'),
+                        : signatureNeeded ? tr('customerSignatureRequired') : 'Customer signature',
                     style: TextStyle(
                       color: signatureCurrent
                           ? BriskersColors.invoices
@@ -7534,7 +7563,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                               DateFormat('MMM d, yyyy h:mm a')
                                   .format(signedAt.toLocal()),
                           ].join(' • ')
-                        : tr('signatureRequiredBeforeSubmission'),
+                        : 'Have the customer review and sign this invoice on the screen.',
                   ),
                   trailing: TextButton(
                     onPressed: _busy ? null : _captureCustomerSignature,

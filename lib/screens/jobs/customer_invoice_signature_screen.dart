@@ -14,6 +14,7 @@ class CustomerInvoiceSignatureScreen extends StatefulWidget {
     required this.invoiceTotal,
     required this.disclaimers,
     required this.extendedWarranty,
+    this.warrantyAllocation = const {},
   });
 
   final String customerName;
@@ -21,6 +22,7 @@ class CustomerInvoiceSignatureScreen extends StatefulWidget {
   final String invoiceTotal;
   final List<Map<String, dynamic>> disclaimers;
   final bool extendedWarranty;
+  final Map<String,String> warrantyAllocation;
 
   @override
   State<CustomerInvoiceSignatureScreen> createState() =>
@@ -166,6 +168,19 @@ class _CustomerInvoiceSignatureScreenState
                 ),
               ),
             ),
+            if (widget.warrantyAllocation.isNotEmpty) ...[
+              const SizedBox(height:14),
+              Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(
+                crossAxisAlignment:CrossAxisAlignment.stretch,
+                children:[
+                  const Text('Warranty payment allocation',style:TextStyle(fontWeight:FontWeight.w800)),
+                  for(final entry in widget.warrantyAllocation.entries)
+                    Padding(padding:const EdgeInsets.only(top:8),child:Row(children:[
+                      Expanded(child:Text(entry.key)),Text(entry.value,style:const TextStyle(fontWeight:FontWeight.w700)),
+                    ])),
+                ],
+              ))),
+            ],
             if (widget.extendedWarranty) ...[
               const SizedBox(height: 14),
               const Card(
