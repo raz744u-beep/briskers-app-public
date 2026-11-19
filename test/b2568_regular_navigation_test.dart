@@ -178,7 +178,7 @@ void main(){
       find.widgetWithText(TextButton,'Start')));
     await until(find.descendant(of:turboCard,matching:find.text('In Progress')));
     await click(find.descendant(of:turboCard,matching:
-      find.widgetWithText(OutlinedButton,'Mark Done')));
+      find.widgetWithText(FilledButton,'Finish')));
     await until(find.textContaining('Actual: 3.00h · Credited: 3.00h'));
     await tester.runAsync(()async{
       final repo=LocalPayrollRepository(db,business:'shop',owner:true);
@@ -211,7 +211,7 @@ void main(){
         find.widgetWithText(TextButton,'Start')));
       await until(find.descendant(of:card,matching:find.text('In Progress')));
       await click(find.descendant(of:card,matching:
-        find.widgetWithText(OutlinedButton,'Mark Done')));
+        find.widgetWithText(FilledButton,'Finish')));
       await until(find.descendant(of:card,matching:find.text('Done')));
     }
     await tester.runAsync(()async{

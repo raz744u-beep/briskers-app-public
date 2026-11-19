@@ -2244,6 +2244,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final actual = row['recorded_actual_minutes'] as int? ?? row['actual_minutes'] as int? ?? 0;
     final credited = row['actual_minutes'] as int? ?? 0;
     return ApprovedTaskCardSurface(
+      key: ValueKey('mechanic-work-${row['id']}'),
       borderColor: taskStatusColor(state),
       child: Padding(padding: const EdgeInsets.all(14), child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -2252,6 +2253,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             const SizedBox(width: 10),
             Expanded(child: Text(_employeeLabel(row['employee_id']?.toString()),
               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17))),
+            TaskScheduleIndicator(row),
             _compactPlannedHours(hours),
             if (paid) const Icon(Icons.lock_outline, color: BriskersColors.secondaryText),
             if (!paid || archived) IconButton(
@@ -2285,7 +2287,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             child: const Text('Review changed assignment')),
           if (actual > 0 || credited > 0)
             Padding(padding: const EdgeInsets.only(top: 8), child: Text(
-              'Actual: ${(actual / 60).toStringAsFixed(2)} hrs · Credited: ${(credited / 60).toStringAsFixed(2)} hrs',
+              'Actual: ${(actual / 60).toStringAsFixed(2)}h · Credited: ${(credited / 60).toStringAsFixed(2)}h',
               style: const TextStyle(color: BriskersColors.secondaryText))),
         ])),
     );
