@@ -4193,14 +4193,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         DateUtils.dateOnly(originalDate) != DateUtils.dateOnly(date);
 
     if (_estimate && _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
-      await _run(() => _offlineDocumentDraft.updatePendingEstimateDetails(
+      final saved = await _run(() => _offlineDocumentDraft.updatePendingEstimateDetails(
         widget.businessId, widget.documentId, documentDate: date,
         customerId: customerId, customerName: customerName,
         vehicleId: vehicleId, vehicleLabel: vehicleName,
         mileage: mileageTouched ? newMileage : null,
         claimNumber: newClaimNumber.isEmpty ? null : newClaimNumber,
         authorizationNumber: newAuthorizationNumber.isEmpty ? null : newAuthorizationNumber,
+        allowConflictedLocalReview: widget.isOwner,
       ), localOnly: true);
+      if (saved && mounted && _detail?['sync_state'] == 'conflict') {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Changes saved on this phone for Owner review only. '
+              'Estimate sync is still blocked; nothing was sent to the server.'),
+        ));
+      }
       return;
     }
 
