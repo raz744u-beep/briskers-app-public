@@ -162,34 +162,61 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
     VoidCallback? onEdit, Key? key}) => Material(key: key, color: Colors.white,
       borderRadius: BorderRadius.circular(18), elevation: 1,
       child: InkWell(borderRadius: BorderRadius.circular(18), onTap: onTap, onLongPress: onEdit,
-        child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18), border: Border.all(color: const Color(0xFFE1E8F4)),
-          gradient: LinearGradient(colors: [Colors.white, color.withValues(alpha: .13)])),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [Icon(icon, color: color, size: 25), const SizedBox(width: 7),
-              Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13, height: 1.1, fontWeight: FontWeight.w800))),
-              if (onEdit != null) SizedBox(width: 27, height: 30, child: IconButton(
-                key: ValueKey('edit-${key is ValueKey ? key.value : title}'),
-                padding: EdgeInsets.zero, tooltip: 'Change report', iconSize: 17,
-                onPressed: onEdit, icon: const Icon(Icons.edit_outlined))),
+        child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18), border: Border.all(color: const Color(0xFFE1E8F4), width: 2),
+          gradient: LinearGradient(colors: [Colors.white, color.withValues(alpha: .18)])),
+          child: onEdit == null ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [CircleAvatar(radius: 15, backgroundColor: color.withValues(alpha: .12),
+              child: Icon(icon, color: color, size: 22)), const SizedBox(width: 6),
+              Expanded(child: Text(title, maxLines: 3, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, height: 1.1, fontWeight: FontWeight.w800))),
+            ]), const Spacer(),
+            FittedBox(fit: BoxFit.scaleDown, child: Text(value,
+              style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800, color: Color(0xFF111A31)))),
+          ]) : Stack(children: [
+            Row(children: [CircleAvatar(radius: 21, backgroundColor: color.withValues(alpha: .12),
+                child: Icon(icon, color: color, size: 29)), const SizedBox(width: 8),
+              Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Padding(padding: const EdgeInsets.only(right: 14), child: Text(title, maxLines: 3,
+                  style: const TextStyle(fontSize: 13, height: 1.1, fontWeight: FontWeight.w800))),
+                const SizedBox(height: 6),
+                FittedBox(fit: BoxFit.scaleDown, child: Text(value,
+                  style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800, color: Color(0xFF111A31)))),
+                if (subtitle != null) Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10, color: BriskersColors.secondaryText)),
+              ])),
             ]),
-            const Spacer(),
-            FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(value,
-              style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800, color: const Color(0xFF111A31)))),
-            if (subtitle != null) Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 10, color: BriskersColors.secondaryText)),
+            Positioned(top: -8, right: -8, child: IconButton(
+              key: ValueKey('edit-${key is ValueKey ? key.value : title}'),
+              tooltip: 'Change report', iconSize: 16, onPressed: onEdit, icon: const Icon(Icons.edit_outlined))),
           ]))));
+
+  Widget _tableRow({String? index, required String title, required String quantity, required String value,
+    VoidCallback? onTap, bool header = false}) {
+    final style = TextStyle(fontSize: header ? 11 : 13, fontWeight: header ? FontWeight.w800 : FontWeight.w600);
+    return Material(color: header ? const Color(0xFFE8EDF6) : Colors.transparent,
+      child: InkWell(onTap: onTap, child: Container(padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+        decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE1E8F4)))),
+        child: Row(children: [
+          SizedBox(width: 24, child: header ? Text('#', style: style) : CircleAvatar(radius: 12,
+            backgroundColor: const Color(0xFFDCEBFE), child: Text(index ?? '', style: style))),
+          const SizedBox(width: 6),
+          Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: style)),
+          SizedBox(width: 46, child: Text(quantity, textAlign: TextAlign.center, style: style)),
+          SizedBox(width: 82, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight,
+            child: Text(value, style: style))),
+        ]))));
+  }
 
   Widget _card(Widget child) => Container(margin: const EdgeInsets.only(bottom: 14), padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: const Color(0xFFE1E8F4)), boxShadow: const [BoxShadow(color: const Color(0x11052749), blurRadius: 4, offset: Offset(0, 2))]), child: child);
+      border: Border.all(color: const Color(0xFFE1E8F4)), boxShadow: const [BoxShadow(color: Color(0x11052749), blurRadius: 4, offset: Offset(0, 2))]), child: child);
 
   Widget _overview(OwnerReportData data) {
     final summary = data.summary(_period);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), itemCount: 4,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisExtent: 125,
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisExtent: 110,
           crossAxisSpacing: 10, mainAxisSpacing: 10),
         itemBuilder: (context, index) {
           final metric = _tiles[index];
@@ -256,7 +283,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
     documentId: doc['id'].toString(), isOwner: true, roleCode: 'owner', canManageExpenses: true,
     initialDocumentSummary: doc, sharedBottomNavigationBar: widget.sharedBottomNavigationBar));
 
-  Widget _summaries(List<({String title, String value, IconData icon, Color color})> entries) => SizedBox(height: 120,
+  Widget _summaries(List<({String title, String value, IconData icon, Color color})> entries) => SizedBox(height: 112,
     child: Row(children: [for (final (index, entry) in entries.indexed) ...[
       if (index != 0) const SizedBox(width: 7),
       Expanded(child: _tile(entry.title, entry.value, entry.icon, entry.color)),
@@ -296,12 +323,10 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
         Row(children: [const Text('Rank by '), _selector(_customerRank, const ['Sales','Profitability','Visits'],
           (v) => setState(() => _customerRank = v))]),
         const Divider(),
-        for (final (index, r) in shown.indexed) ListTile(contentPadding: EdgeInsets.zero,
-          leading: CircleAvatar(radius: 16, backgroundColor: const Color(0xFFE3EFFD), child: Text('${index + 1}')),
-          title: Text(r.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: Text('${r.jobs.length} jobs'),
-          trailing: Text(_customerRank == 'Visits' ? '${r.jobs.length}' : _money(
-            _customerRank == 'Profitability' ? r.profit : r.salesKnown ? r.sales : null), style: const TextStyle(fontWeight: FontWeight.w700)),
+        _tableRow(title: 'Customer', quantity: 'Jobs', value: _customerRank == 'Visits' ? 'Visits' : _customerRank == 'Profitability' ? 'Profit' : 'Revenue', header: true),
+        for (final (index, r) in shown.indexed) _tableRow(index: '${index + 1}', title: r.name,
+          quantity: '${r.jobs.length}', value: _customerRank == 'Visits' ? '${r.jobs.length}' : _money(
+            _customerRank == 'Profitability' ? r.profit : r.salesKnown ? r.sales : null),
           onTap: () => _customerDetails(r)),
         if (rows.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('No customers in this period.')),
         const Divider(),
@@ -367,13 +392,11 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
           _selector(_itemRank, const ['Revenue','Quantity','Cost','Profit'], (v) => setState(() => _itemRank = v)),
         ]),
         const Divider(),
-        for (final (index, r) in shown.indexed) ListTile(contentPadding: EdgeInsets.zero,
-          leading: CircleAvatar(radius: 16, backgroundColor: const Color(0xFFE3EFFD), child: Text('${index + 1}')),
-          title: Text(r.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: Text('${NumberFormat('#,##0.##').format(r.quantity)} ${r.labor ? 'hrs · Labor' : 'units · Parts / Materials'}'),
-          trailing: Text(_itemRank == 'Quantity' ? NumberFormat('#,##0.##').format(r.quantity) :
+        _tableRow(title: 'Item / Part', quantity: 'Qty Sold', value: _itemRank, header: true),
+        for (final (index, r) in shown.indexed) _tableRow(index: '${index + 1}', title: r.name,
+          quantity: '${NumberFormat('#,##0.##').format(r.quantity)}${r.labor ? ' hrs' : ''}',
+          value: _itemRank == 'Quantity' ? NumberFormat('#,##0.##').format(r.quantity) :
             _money(_itemRank == 'Cost' ? r.cost : _itemRank == 'Profit' ? r.profit : r.revenue),
-            style: const TextStyle(fontWeight: FontWeight.w700)),
           onTap: () => _itemDetails(r)),
         if (rows.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('No items in this period.')),
         const Divider(),
@@ -429,8 +452,8 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
   @override
   Widget build(BuildContext context) {
     if (!widget.isOwner) return const Scaffold(body: Center(child: Text('Owner access is required.')));
-    final label = switch (_period.preset) {'thisMonth':'This Month', 'lastMonth':'Last Month', '30days':'Last 30 Days',
-      '60days':'Last 60 Days', '90days':'Last 90 Days', 'thisYear':'This Year', _:'Custom'};
+    final label = switch (_period.preset) {'thisMonth' => 'This Month', 'lastMonth' => 'Last Month', '30days' => 'Last 30 Days',
+      '60days' => 'Last 60 Days', '90days' => 'Last 90 Days', 'thisYear' => 'This Year', _ => 'Custom'};
     return Scaffold(backgroundColor: taskCanvas,
       appBar: ApprovedTasksHeader(title: 'Owner Reports', actions: [IconButton(tooltip: 'Refresh local reports',
         onPressed: () => _load(), icon: const Icon(Icons.refresh, color: Colors.white))]),

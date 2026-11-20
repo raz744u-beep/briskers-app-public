@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:drift/drift.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/owner_report_models.dart';
 import '../local/briskers_local_database.dart' hide LocalFinancialCache;
@@ -29,16 +30,23 @@ class LocalOwnerReports {
     await RecoveryCommitStore.ensure(db);
     final blockedJobs = await LocalJobRetirement.blockedJobIds(db, business);
     final blockedDocuments = await LocalJobRetirement.blockedDocumentIds(db, business);
+    final preferences = await SharedPreferences.getInstance();
+    final legacyDetails = <String, String>{
+      for (final key in preferences.getKeys().where((k) => k.startsWith('briskers_document_detail_${business}_')))
+        if (preferences.get(key) is String) key: preferences.getString(key)!,
+    };
     return db.transaction(() async {
       final names = (await db.customSelect("SELECT name FROM sqlite_master WHERE type IN ('table','view')").get())
           .map((r) => r.read<String>('name')).toSet();
       final aliases = names.contains('local_document_identity_aliases')
-          ? await db.customSelect('SELECT a.alias_id FROM local_document_identity_aliases a JOIN local_documents d '
-              'ON d.business_id=a.business_id AND d.id=a.canonical_id WHERE a.business_id=?', variables: [Variable(business)]).get()
+          ? await db.customSelect('SELECT a.alias_id,ad.job_id AS alias_job,d.job_id AS canonical_job FROM local_document_identity_aliases a JOIN local_documents d '
+              'ON d.business_id=a.business_id AND d.id=a.canonical_id '
+              'JOIN local_documents ad ON ad.business_id=a.business_id AND ad.id=a.alias_id '
+              "WHERE a.business_id=? AND d.kind='invoice' AND ad.kind='invoice'", variables: [Variable(business)]).get()
           : <QueryRow>[];
       final aliasIds = aliases.map((r) => r.read<String>('alias_id')).toSet();
       final source = await db.customSelect('''
-        SELECT d.*,c.display_name AS customer_name,
+        SELECT d.*,c.display_name AS customer_name,l.cache_key AS detail_key,
           COALESCE(l.payload_json,r.payload_json) AS detail_json
         FROM local_documents d
         LEFT JOIN local_customers c ON c.business_id=d.business_id AND c.id=d.customer_id
@@ -65,7 +73,9 @@ class LocalOwnerReports {
         if (blockedDocuments.contains(id) || blockedJobs.contains(index['job_id']) || aliasIds.contains(id)) continue;
         ReportRow detail = {};
         try {
-          final decoded = jsonDecode(row.readNullable<String>('detail_json') ?? 'null');
+          final saved = row.readNullable<String>('detail_json') ??
+            (row.data['detail_key'] == null ? legacyDetails['briskers_document_detail_${business}_$id'] : null);
+          final decoded = jsonDecode(saved ?? 'null');
           if (decoded is Map && decoded['id'] == id && decoded['kind'] == 'invoice' &&
               (decoded['business_id'] == null || decoded['business_id'] == business)) {
             detail = Map<String, dynamic>.from(decoded);
@@ -73,22 +83,25 @@ class LocalOwnerReports {
         } catch (_) { issues.add('Some saved invoice details could not be read.'); }
         final doc = <String, dynamic>{...index, ...detail, 'id': id, 'kind': 'invoice', 'business_id': business,
           'total_amount': detail['total_amount'] ?? index['total'],
-          'customer_name': index['customer_name'] ?? detail['customer_name'] ?? 'Customer'}..remove('detail_json');
+          'customer_name': index['customer_name'] ?? detail['customer_name'] ?? 'Customer'}..remove('detail_json')..remove('detail_key');
         final projected = OfflineInvoicePaymentLedger.projectPendingPayments(doc, queued[id] ?? const []);
         final paid = reportCents(projected['paid_amount']) ?? 0;
         final pending = reportCents(projected['pending_payment']) ?? 0;
         doc['_received_cents'] = paid + pending;
-        doc['_balance_known'] = projected['_payment_reconciliation_required'] != true;
+        doc['_balance_known'] = projected['_payment_reconciliation_required'] != true && detail['paid_amount'] != null;
         documents.add(doc);
       }
       final invoices = await LocalInvoiceClosureStore(db).projectRows(business, documents);
+      final redundantJobs = aliases.where((r) => r.data['alias_job'] != r.data['canonical_job'])
+          .map((r) => r.data['alias_job']).whereType<String>().where((id) =>
+            !invoices.any((d) => d['job_id'] == id)).toSet();
       final jobs = (await db.customSelect('SELECT * FROM local_jobs WHERE business_id=?', variables: [Variable(business)]).get())
-          .map((r) => r.data).where((r) => !blockedJobs.contains(r['id'])).toList();
+          .map((r) => r.data).where((r) => !blockedJobs.contains(r['id']) && !redundantJobs.contains(r['id'])).toList();
       final cache = LocalFinancialCache(database: db);
       final invalidFinancial = await db.customSelect(
         "SELECT 1 FROM local_financial_cache WHERE business_id=? AND "
         "(cache_key IN ('transactions_snapshot','invoice_receipts_v1') OR cache_key GLOB 'transaction_detail_*') "
-        "AND (NOT json_valid(payload_json) OR CASE WHEN json_valid(payload_json) THEN json_type(payload_json)='null' ELSE 0 END) LIMIT 1",
+        "AND (NOT json_valid(payload_json) OR CASE WHEN json_valid(payload_json) THEN json_type(payload_json) <> CASE WHEN cache_key GLOB 'transaction_detail_*' THEN 'object' ELSE 'array' END ELSE 0 END) LIMIT 1",
         variables: [Variable(business)]).get();
       if (invalidFinancial.isNotEmpty) issues.add('Saved financial records could not be read.');
       bool inScope(ReportRow r) => r['business_id'] == null || r['business_id'] == business;

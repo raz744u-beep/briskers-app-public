@@ -13,7 +13,7 @@ ReportRow invoice({String id = 'invoice', String job = 'job', num total = 1080, 
   String date = '2026-11-19', List<ReportRow>? lines}) => {
   'id':id, 'kind':'invoice', 'business_id':'shop', 'job_id':job, 'customer_id':'customer',
   'customer_name':'Jennifer', 'document_date':date, 'status':'open', 'closed_at':0,
-  'total_amount':total, if(tax != null) 'tax_amount':tax,
+  'total_amount':total, 'tax_amount':?tax,
   'lines':lines ?? [{'id':'line','name':'Labor','line_kind':'labor','quantity':18,'unit_price':50,'net_amount':900}],
 };
 ReportRow credit({String id = 'allocation', int assigned = 1200, int actual = 0,
@@ -191,6 +191,15 @@ void main() {
     expect(report.summary(period).values[OwnerReportMetric.projected],90000);
     expect((await db.customSelect('SELECT * FROM local_documents').get()).map((r)=>r.data).toList(),before);
     expect((await repository.load('other',isOwner:true)).invoices,isEmpty);
+  });
+  test('upgrade-era invoice details remain available locally without migrating accounting records', () async {
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    SharedPreferences.setMockInitialValues({'briskers_document_detail_shop_invoice':jsonEncode(invoice(lines:[]))});
+    await db.customStatement("INSERT INTO local_documents(id,business_id,kind,total,document_date) VALUES('invoice','shop','invoice',1080,'2026-11-19')");
+    final report=await LocalOwnerReports(database:db).load('shop',isOwner:true);
+    expect(report.summary(period).values[OwnerReportMetric.sales],100000);
+    expect(await db.customSelect('SELECT * FROM local_document_details').get(),isEmpty);
   });
   test('corrupt saved financial snapshot surfaces unknown rather than empty cash', () async {
     final db=BriskersLocalDatabase(NativeDatabase.memory());

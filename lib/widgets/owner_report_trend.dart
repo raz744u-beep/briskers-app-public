@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' show DateFormat, NumberFormat;
 import '../core/owner_report_models.dart';
 
 const reportSeriesColors = <OwnerReportMetric, Color>{
@@ -100,7 +100,7 @@ class _OwnerReportTrendState extends State<OwnerReportTrend> {
             setState(() => _detail = '${_label(periods[index])} · ${key.label}: ${value == null ? 'Not recorded' : NumberFormat.simpleCurrency(locale: 'en_US').format(value / 100)}');
           }, child: Semantics(label: 'Financial comparison chart. Swipe horizontally; tap a bar for its value.',
             child: CustomPaint(size: Size(periods.length * 90, 270), painter: _TrendPainter(
-              summaries, selected, periods.map(_label).toList()))))),
+              summaries, selected, periods.map(_label).toList())))))),
       ])),
       const SizedBox(height: 8),
       Text(_detail ?? 'Swipe the chart to explore history. Tap a bar for its exact value.',
@@ -147,7 +147,9 @@ class _TrendPainter extends CustomPainter {
     const height = 230.0;
     double y(num value) => height * (range.top - value) / (range.top - range.bottom);
     final grid = Paint()..color = const Color(0xFFDCE3EF)..strokeWidth = 1;
-    for (var i = 0; i <= 4; i++) canvas.drawLine(Offset(0, height * i / 4), Offset(size.width, height * i / 4), grid);
+    for (var i = 0; i <= 4; i++) {
+      canvas.drawLine(Offset(0, height * i / 4), Offset(size.width, height * i / 4), grid);
+    }
     canvas.drawLine(Offset(0, y(0)), Offset(size.width, y(0)), Paint()..color = const Color(0xFF667085));
     for (var i = 0; i < rows.length; i++) {
       final width = 64 / series.length;
