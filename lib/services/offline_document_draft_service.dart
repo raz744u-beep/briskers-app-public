@@ -25,6 +25,17 @@ import 'local_document_repository.dart';
 import 'local_job_repository.dart';
 import 'offline_invoice_payment_ledger.dart';
 
+/// A remote estimate cannot replace the sole local copy of edited header data.
+/// Leave the outbox in review instead of repeatedly replaying an unsafe write.
+class _EstimateHeaderSyncConflict implements Exception {
+  const _EstimateHeaderSyncConflict(this.reason);
+  final String reason;
+
+  @override
+  String toString() => 'Estimate synchronization needs review: $reason. '
+      'The saved local estimate has been retained.';
+}
+
 class OfflineDocumentDraftService {
   OfflineDocumentDraftService({
     BriskersApi api = const BriskersApi(),
@@ -44,6 +55,91 @@ class OfflineDocumentDraftService {
   // Share each in-flight upload across Auto and manual Sync Now on this device.
   static final Expando<Map<String, Future<void>>> _activeFlushes = Expando();
   final Random _random = Random.secure();
+
+  static const _estimateMileageEditedKey = '_offline_estimate_mileage_was_edited';
+
+  static String? _headerText(Object? value) {
+    final text = value?.toString().trim();
+    return text == null || text.isEmpty ? null : text;
+  }
+
+  /// Only the existing version-guarded estimate claim/authorization RPC is
+  /// safe for replay. Mileage In remains derived from shared job/vehicle
+  /// records on the server; it has no estimate-scoped snapshot/mutation yet.
+  /// A successful estimate create is NOT sufficient to retire the outbox.
+  Future<Map<String, dynamic>> _confirmPendingEstimateHeader(
+    String businessId,
+    String serverId,
+    Map<String, dynamic> local,
+    Map<String, dynamic> remote,
+    int outboxId,
+  ) async {
+    final desiredClaim = _headerText(local['claim_number']);
+    final desiredAuthorization = _headerText(local['authorization_number']);
+    String? actualClaim() => _headerText(remote['claim_number']);
+    String? actualAuthorization() => _headerText(remote['authorization_number']);
+
+    if (actualClaim() != desiredClaim ||
+        actualAuthorization() != desiredAuthorization) {
+      // A previously confirmed upload might have been edited on another
+      // device. Never overwrite independently populated server identifiers.
+      if ((actualClaim() != null && actualClaim() != desiredClaim) ||
+          (actualAuthorization() != null &&
+              actualAuthorization() != desiredAuthorization)) {
+        throw const _EstimateHeaderSyncConflict(
+          'server warranty identifiers differ from the offline version',
+        );
+      }
+      final version = int.tryParse(remote['row_version']?.toString() ?? '');
+      if (version == null || version < 1) {
+        throw const _EstimateHeaderSyncConflict(
+          'server estimate revision is unavailable',
+        );
+      }
+      try {
+        await LocalJobQuarantine.guardReplay(
+          _database,
+          businessId,
+          () => _api.updateDocumentClaimInfo(
+            businessId,
+            serverId,
+            expectedVersion: version,
+            claimNumber: desiredClaim,
+            authorizationNumber: desiredAuthorization,
+          ),
+          outboxId: outboxId,
+        );
+      } catch (error) {
+        if (error is SyncReplayDeferred) rethrow;
+        // A lost RPC acknowledgment may follow a committed update.
+        // Verify, never blindly repeat a guessed-revision write.
+        remote = await _api.documentDetail(businessId, serverId);
+        if (actualClaim() != desiredClaim ||
+            actualAuthorization() != desiredAuthorization) {
+          rethrow;
+        }
+      }
+      remote = await _api.documentDetail(businessId, serverId);
+      if (actualClaim() != desiredClaim ||
+          actualAuthorization() != desiredAuthorization) {
+        throw const _EstimateHeaderSyncConflict(
+          'server did not confirm the edited warranty identifiers',
+        );
+      }
+    }
+
+    // A vehicle's current mileage or a Job's odometer is NOT a saved
+    // historical estimate-mileage snapshot. Even apparent equality can
+    // change when another device updates the vehicle. Keep the original
+    // local value/clear request until a document-scoped guarded RPC exists.
+    if (local[_estimateMileageEditedKey] == true ||
+        local['odometer_in'] != null) {
+      throw const _EstimateHeaderSyncConflict(
+        'Mileage In requires an estimate-scoped revision-guarded server field',
+      );
+    }
+    return remote;
+  }
 
   bool isLocalDraftId(String id) => id.startsWith('local-estimate-') || id.startsWith('local-invoice-');
 
@@ -1159,6 +1255,7 @@ class OfflineDocumentDraftService {
         'claim_number': claimNumber, 'authorization_number': authorizationNumber,
         'document_date': date,
         if (mileage != null) 'odometer_in': mileage.isEmpty ? null : num.tryParse(mileage),
+        if (mileage != null) _estimateMileageEditedKey: true,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       };
       final queued = await _database.customSelect(
@@ -1707,6 +1804,8 @@ class OfflineDocumentDraftService {
           if (serverId != operationId || LocalEstimateNumber.existing(serverDetail['document_number']) != expectedNumber) {
             throw StateError('The synchronized estimate number differs from the saved estimate.');
           }
+          serverDetail = await _confirmPendingEstimateHeader(
+            businessId, serverId, localDetail, serverDetail, outboxId);
         }
 
         if ((payload['kind'] == 'invoice' ||
@@ -1873,9 +1972,10 @@ class OfflineDocumentDraftService {
           );
         });
       } catch (error) {
-        final conflict = preflight['kind'] == 'estimate' &&
-            error is PostgrestException &&
-            const {'PT409','23505','42501','22023'}.contains(error.code);
+        final conflict = error is _EstimateHeaderSyncConflict ||
+            (preflight['kind'] == 'estimate' &&
+             error is PostgrestException &&
+             const {'PT409','23505','42501','22023'}.contains(error.code));
         await _database.customStatement(
           '''
           UPDATE sync_outbox
