@@ -87,9 +87,18 @@ void main() {
     await tester.enterText(find.byKey(const ValueKey('report-customer-search')),'no such person');
     await tester.pumpAndSettle(); expect(find.text('Jennifer'),findsNothing);
     await tab(tester,'Items');
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('report-item-search'))).controller!.text,isEmpty);
     expect(find.text('Water pump'),findsOneWidget);
     await tester.enterText(find.byKey(const ValueKey('report-item-search')),'no such part');
     await tester.pumpAndSettle(); expect(find.text('Water pump'),findsNothing);
+    await tab(tester,'Customers');
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('report-customer-search'))).controller!.text,'no such person');
+    expect(find.text('Jennifer'),findsNothing);
+    await tester.enterText(find.byKey(const ValueKey('report-customer-search')),'');
+    await tester.pumpAndSettle(); expect(find.text('Jennifer'),findsOneWidget);
+    await tab(tester,'Items');
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('report-item-search'))).controller!.text,'no such part');
+    expect(find.text('Water pump'),findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
   for (final width in [320.0,375.0,800.0]) {
