@@ -595,15 +595,55 @@ class LocalDocumentRepository {
           {...Map<String, dynamic>.from(item),
             'id': (item['id'] ?? item['invoice_id'])?.toString() ?? '', 'kind': 'invoice'},
     ];
+    final projected = await _homeInvoiceLifecycle(businessId, documents);
+    return withoutClosedAttentionInvoices(snapshot, {
+      for (final document in projected)
+        if (DocumentPresentation(document).isClosed || DocumentPresentation(document).isVoid)
+          document['id'].toString(),
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> _homeInvoiceLifecycle(
+    String businessId, List<Map<String, dynamic>> documents,
+  ) async {
     final ids = documents.map((row) => row['id'].toString()).where((id) => id.isNotEmpty).toSet();
-    if (ids.isEmpty) return snapshot;
+    if (ids.isEmpty) return documents;
+    await LocalDocumentSqlStore.ensure(_database);
     final indexed = await _database.customSelect(
-      "SELECT id,status,display_status_code,closed_at FROM local_documents "
-      "WHERE business_id=? AND kind='invoice' AND id IN (SELECT value FROM json_each(?))",
+      "SELECT d.id,d.status,d.display_status_code,d.closed_at,d.row_version,c.payload_json "
+      "FROM local_documents d LEFT JOIN local_document_details c ON "
+      "c.cache_key='briskers_document_detail_' || d.business_id || '_' || d.id "
+      "AND NOT EXISTS(SELECT 1 FROM local_document_detail_deleted x WHERE x.cache_key=c.cache_key) "
+      "WHERE d.business_id=? AND d.kind='invoice' AND d.id IN (SELECT value FROM json_each(?))",
       variables: [Variable(businessId), Variable(jsonEncode(ids.toList()))],
     ).get();
-    final byId = {for (final row in indexed) row.read<String>('id'): row.data};
-    final projected = await LocalInvoiceClosureStore(_database).projectRows(businessId, [
+    final byId = <String, Map<String, dynamic>>{};
+    for (final row in indexed) {
+      final id = row.read<String>('id');
+      var hint = <String, dynamic>{'id': id, 'kind': 'invoice',
+        'status': row.data['status'], 'display_status_code': row.data['display_status_code'],
+        'closed_at': row.data['closed_at']};
+      final raw = row.readNullable<String>('payload_json');
+      if (raw != null) {
+        try {
+          final saved = jsonDecode(raw);
+          final indexedVersion = num.tryParse(row.data['row_version']?.toString() ?? '');
+          final savedVersion = saved is Map ? num.tryParse(saved['row_version']?.toString() ?? '') : null;
+          final newerIndex = indexedVersion != null && savedVersion != null && indexedVersion > savedVersion;
+          final reopenedIndex = hint['status'] == 'reopened' || hint['display_status_code'] == 'reopened';
+          if (saved is Map && saved['id'] == id && saved['kind'] == 'invoice' &&
+              (saved['business_id'] == null || saved['business_id'] == businessId) &&
+              !newerIndex && !reopenedIndex && DocumentPresentation(Map<String,dynamic>.from(saved)).isClosed) {
+            hint = {...hint, 'status': 'closed', 'display_status_code': 'closed',
+              'closed_at': saved['closed_at']};
+          }
+        } on FormatException {
+          // Unreadable snapshots cannot supply a closure decision.
+        }
+      }
+      byId[id] = hint;
+    }
+    return LocalInvoiceClosureStore(_database).projectRows(businessId, [
       for (final document in documents)
         if (byId.containsKey(document['id']) &&
             (DocumentPresentation({...byId[document['id']]!, 'kind': 'invoice'}).isClosed ||
@@ -611,11 +651,6 @@ class LocalDocumentRepository {
           {...document, ...byId[document['id']]!}
         else document,
     ]);
-    return withoutClosedAttentionInvoices(snapshot, {
-      for (final document in projected)
-        if (DocumentPresentation(document).isClosed || DocumentPresentation(document).isVoid)
-          document['id'].toString(),
-    });
   }
 
   /// Read-only offline Home attention from the already-synced invoice index.
@@ -681,8 +716,11 @@ class LocalDocumentRepository {
     final docs = await listByKind(businessId, kind: 'invoice');
     final receipts = await InvoicePaymentFeed(database: _database).load(businessId);
     final paid = invoiceRecordedReceiptTotals(receipts);
-    return docs.where((d) => invoiceNeedsPayment(d,
-        receipts: paid[d['id']?.toString()] ?? 0)).length;
+    final candidates = docs.where((d) => invoiceNeedsPayment(d,
+        receipts: paid[d['id']?.toString()] ?? 0)).toList();
+    final projected = await _homeInvoiceLifecycle(businessId, candidates);
+    return projected.where((d) => !DocumentPresentation(d).isClosed &&
+        !DocumentPresentation(d).isVoid).length;
   }
 
   Stream<int> watchOpenInvoiceCount(String businessId) async* {

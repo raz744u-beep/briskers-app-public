@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:briskers_app/core/invoice_attention_projection.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_document_repository.dart';
+import 'package:briskers_app/services/local_document_sql_store.dart';
+import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_invoice_closure.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -65,6 +67,31 @@ void main() {
     final attention=await LocalDocumentRepository(database:db).pendingCloseAttention('shop');
     expect(attention['count'],2);
     expect((attention['items'] as List).map((r)=>r['id']).toSet(),{'invoice-6357','invoice-6390'});
+  });
+
+  test('exact saved Closed detail excludes a stale pending index without modifying it', () async {
+    final key=LocalDocumentDetailCache.key('shop','invoice-6390');
+    await LocalDocumentSqlStore.ensure(db);
+    await LocalDocumentSqlStore.write(db,key,jsonEncode({'id':'invoice-6390','kind':'invoice',
+      'business_id':'shop','status':'closed','row_version':10,'paid_amount':100,'total_amount':100}));
+    final repo=LocalDocumentRepository(database:db);
+    expect((await repo.pendingCloseAttention('shop'))['count'],0);
+    await db.customStatement("UPDATE local_documents SET display_status_code='open' WHERE id='invoice-6390'");
+    expect(await repo.openInvoiceCount('shop'),0,reason:'The invoice tile must respect the same saved Closed detail.');
+    await db.customStatement("UPDATE local_documents SET display_status_code='pending_close' WHERE id='invoice-6390'");
+    expect(await LocalDocumentSqlStore.read(db,key),contains('"paid_amount":100'));
+    expect((await db.customSelect("SELECT display_status_code FROM local_documents WHERE id='invoice-6390'").getSingle()).read<String>('display_status_code'),'pending_close');
+  });
+
+  test('older or foreign Closed details cannot override a newer reopened index', () async {
+    final key=LocalDocumentDetailCache.key('shop','invoice-6390');
+    await LocalDocumentSqlStore.ensure(db);
+    await db.customStatement("UPDATE local_documents SET row_version=11 WHERE id='invoice-6390'");
+    for(final business in ['shop','elsewhere']) {
+      await LocalDocumentSqlStore.write(db,key,jsonEncode({'id':'invoice-6390','kind':'invoice',
+        'business_id':business,'status':'closed','row_version': business=='shop' ? 10 : 12}));
+      expect((await LocalDocumentRepository(database:db).pendingCloseAttention('shop'))['count'],1);
+    }
   });
 
   test('verified close event projection is idempotent and count never goes negative', () {
