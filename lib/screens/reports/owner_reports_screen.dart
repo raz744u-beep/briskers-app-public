@@ -445,7 +445,11 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
 
   Widget _otherTab() => _card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
     Text(_tabs.index == 1 ? 'Financial reports' : 'Tax reports', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-    const SizedBox(height: 8), const Text('This update includes Overview, Customers and Items.'),
+    const SizedBox(height: 8), Text(_tabs.index == 1
+      ? 'Income, expenses and profit are available in Overview.'
+      : 'Choose Sales Tax Billed in the Overview report selector to see invoice tax totals.'),
+    TextButton.icon(onPressed: () => _tabs.animateTo(0), icon: const Icon(Icons.bar_chart),
+      label: const Text('View Overview')),
     if (OwnerPayrollScreen.enabled) TextButton.icon(onPressed: () => _open(OwnerPayrollScreen(businessId: widget.businessId,
       reportsOnly: true, sharedBottomNavigationBar: widget.sharedBottomNavigationBar)),
       icon: const Icon(Icons.receipt_long_outlined), label: const Text('Payroll payment reports')),
