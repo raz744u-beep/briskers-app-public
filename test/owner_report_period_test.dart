@@ -542,4 +542,21 @@ void main() {
     expect(d.summary(period).values[OwnerReportMetric.sales], 10000);
   });
 
+  test('register includes all period invoices, with paid first and review below, without poisoning paid tax totals', () {
+    final d = data([
+      invoice('unpaid', date: '2026-11-01'),
+      invoice('paid', date: '2026-11-20'),
+      {...invoice('review', date: '2026-11-02'), 'tax_amount': null, '_balance_known': false},
+      invoice('outside', date: '2026-10-31'),
+    ], [cash('receipt', doc: 'paid')]);
+    final register = OwnerReportPeriod(d, period, ReportTransactionBasis.invoices);
+    expect(register.entries.map((entry) => entry.invoiceNumber), ['paid', 'unpaid', 'review']);
+    expect(register.entries.length, d.invoicesIn(period).length);
+    expect(register.paidInvoiceTotals.gross, 11000);
+    expect(register.paidInvoiceTotals.net, 10000);
+    expect(register.paidInvoiceTotals.tax, 1000);
+    expect(register.totals.gross, 33000);
+    expect(register.totals.tax, isNull);
+  });
+
 }
