@@ -629,11 +629,13 @@ class LocalDocumentRepository {
           final saved = jsonDecode(raw);
           final indexedVersion = num.tryParse(row.data['row_version']?.toString() ?? '');
           final savedVersion = saved is Map ? num.tryParse(saved['row_version']?.toString() ?? '') : null;
-          final newerIndex = indexedVersion != null && savedVersion != null && indexedVersion > savedVersion;
-          final reopenedIndex = hint['status'] == 'reopened' || hint['display_status_code'] == 'reopened';
+          final reopenedIndex = hint['status']?.toString().toLowerCase() == 'reopened' ||
+              hint['display_status_code']?.toString().toLowerCase() == 'reopened';
+          final reopeningIsCurrent = reopenedIndex && (indexedVersion == null ||
+              savedVersion == null || indexedVersion >= savedVersion);
           if (saved is Map && saved['id'] == id && saved['kind'] == 'invoice' &&
               (saved['business_id'] == null || saved['business_id'] == businessId) &&
-              !newerIndex && !reopenedIndex && DocumentPresentation(Map<String,dynamic>.from(saved)).isClosed) {
+              !reopeningIsCurrent && DocumentPresentation(Map<String,dynamic>.from(saved)).isClosed) {
             hint = {...hint, 'status': 'closed', 'display_status_code': 'closed',
               'closed_at': saved['closed_at']};
           }

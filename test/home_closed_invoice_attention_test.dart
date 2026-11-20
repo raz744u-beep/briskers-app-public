@@ -83,15 +83,21 @@ void main() {
     expect((await db.customSelect("SELECT display_status_code FROM local_documents WHERE id='invoice-6390'").getSingle()).read<String>('display_status_code'),'pending_close');
   });
 
-  test('older or foreign Closed details cannot override a newer reopened index', () async {
+  test('only explicit reopening can supersede a saved Closed detail; foreign cache is rejected', () async {
     final key=LocalDocumentDetailCache.key('shop','invoice-6390');
     await LocalDocumentSqlStore.ensure(db);
     await db.customStatement("UPDATE local_documents SET row_version=11 WHERE id='invoice-6390'");
-    for(final business in ['shop','elsewhere']) {
-      await LocalDocumentSqlStore.write(db,key,jsonEncode({'id':'invoice-6390','kind':'invoice',
-        'business_id':business,'status':'closed','row_version': business=='shop' ? 10 : 12}));
-      expect((await LocalDocumentRepository(database:db).pendingCloseAttention('shop'))['count'],1);
-    }
+    await LocalDocumentSqlStore.write(db,key,jsonEncode({'id':'invoice-6390','kind':'invoice',
+      'business_id':'shop','status':'closed','row_version':10}));
+    final repo=LocalDocumentRepository(database:db);
+    expect((await repo.pendingCloseAttention('shop'))['count'],0,
+      reason:'An unrelated newer index version cannot reopen a saved Closed invoice.');
+    await db.customStatement("UPDATE local_documents SET display_status_code='reopened' WHERE id='invoice-6390'");
+    expect(await repo.openInvoiceCount('shop'),1,reason:'A current explicit reopening remains visible.');
+    await db.customStatement("UPDATE local_documents SET display_status_code='pending_close' WHERE id='invoice-6390'");
+    await LocalDocumentSqlStore.write(db,key,jsonEncode({'id':'invoice-6390','kind':'invoice',
+      'business_id':'elsewhere','status':'closed','row_version':12}));
+    expect((await repo.pendingCloseAttention('shop'))['count'],1);
   });
 
   test('verified close event projection is idempotent and count never goes negative', () {
