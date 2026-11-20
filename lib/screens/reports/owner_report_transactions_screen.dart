@@ -93,7 +93,7 @@ class _OwnerReportTransactionsScreenState
       child: InkWell(onTap: onTap, child: Row(children: [
         for (var i = 0; i < values.length; i++) SizedBox(width: widths[i],
           child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-            child: Text(values[i], textAlign: i >= 4 ? TextAlign.right : TextAlign.left,
+            child: Text(values[i], maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: i >= 4 ? TextAlign.right : TextAlign.left,
               style: TextStyle(fontWeight: header ? FontWeight.w700 : FontWeight.w500)))),
       ])));
   }
@@ -107,6 +107,8 @@ class _OwnerReportTransactionsScreenState
     final report = OwnerReportPeriod(_data, widget.period, _basis);
     final entries = report.entries, totals = report.totals;
     final payments = _basis == ReportTransactionBasis.payments;
+    final paidTotals = report.paidInvoiceTotals;
+    final paidCount = report.paidInvoices.length;
     final range =
         '${DateFormat('MMM d').format(widget.period.start)} – ${DateFormat('MMM d, yyyy').format(widget.period.end)}';
     return Scaffold(
@@ -195,6 +197,11 @@ class _OwnerReportTransactionsScreenState
                 itemBuilder: (context, index) {
                   if (index == entries.length) {
                     return Column(children: [
+                      if (!payments) ...[
+                        _registerRow(['', '', '$paidCount paid invoices', 'Paid totals', _money(paidTotals.gross), '', ''], header: true),
+                        _registerRow(['', '', 'Paid excluding tax', '', _money(paidTotals.net), '', ''], header: true),
+                        _registerRow(['', '', 'Tax on paid invoices', '', _money(paidTotals.tax), '', ''], header: true),
+                      ],
                       _registerRow(['', '', '${entries.length} ${payments ? 'payments' : 'invoices'}', 'Totals', _money(totals.gross), _money(totals.paid), _money(totals.amountDue)], header: true),
                       _registerRow(['', '', 'Total excluding tax', '', _money(totals.net), '', ''], header: true),
                       _registerRow(['', '', payments ? 'Tax collected' : 'Tax billed', '', _money(totals.tax), '', ''], header: true),
@@ -203,12 +210,19 @@ class _OwnerReportTransactionsScreenState
                   final entry = entries[index];
                   final status = entry.paid == null || entry.amountDue == null ? 'Needs review'
                     : entry.amountDue == 0 ? 'Paid' : entry.paid! > 0 ? 'Partly paid' : 'Open';
-                  return _registerRow([
+                  final row = _registerRow([
                     entry.date == null ? 'Date missing' : DateFormat('MMM d, yyyy').format(entry.date!),
                     entry.invoiceNumber.isEmpty ? '—' : '#${entry.invoiceNumber}', entry.name,
                     status, _money(entry.gross), _money(entry.paid),
                     entry.invoice == null ? '—' : _money(entry.amountDue),
                   ], onTap: entry.invoice == null ? null : () => _invoice(entry));
+                  if (!payments && index == paidCount) {
+                    return Column(children: [
+                      _registerRow(['', '', 'Unpaid / Needs review', '${entries.length - paidCount} invoices', '', '', ''], header: true),
+                      row,
+                    ]);
+                  }
+                  return row;
                 },
               )),
             ])),

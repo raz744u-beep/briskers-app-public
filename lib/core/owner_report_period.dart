@@ -45,6 +45,8 @@ class ReportPeriodEntry {
   final int? gross, tax, retained;
   final int? amountDue, paid;
   final bool review;
+  bool get fullyPaid => invoice != null && !review && gross != null &&
+      paid != null && amountDue == 0 && paid! >= gross!;
   int? get net => gross == null || tax == null ? null : gross! - tax!;
   String get invoiceNumber =>
       (invoice?['document_number'] ?? row['document_number'] ?? '').toString();
@@ -123,6 +125,9 @@ class OwnerReportPeriod {
   late final List<ReportPeriodEntry> entries = _entries();
   ReportPeriodTotals get totals =>
       ReportPeriodTotals(entries, unavailable: unavailable);
+  List<ReportPeriodEntry> get paidInvoices => entries.where((entry) => entry.fullyPaid).toList();
+  ReportPeriodTotals get paidInvoiceTotals => ReportPeriodTotals(paidInvoices);
+
   List<ReportPeriodEntry> _entries() {
     if (basis != ReportTransactionBasis.payments) {
       final docs = basis == ReportTransactionBasis.invoices
@@ -140,7 +145,11 @@ class OwnerReportPeriod {
                 r.amountDue! > 0,
           )
           .toList()
-        ..sort(_descending);
+        ..sort((a, b) {
+          if (a.fullyPaid != b.fullyPaid) { return a.fullyPaid ? -1 : 1; }
+          final date = (a.date ?? DateTime(1900)).compareTo(b.date ?? DateTime(1900));
+          return date != 0 ? date : a.invoiceNumber.compareTo(b.invoiceNumber);
+        });
     }
     final all = data._paymentEntries ??= _allPayments();
     return [
