@@ -74,6 +74,18 @@ class OfflineDocumentDraftService {
     Map<String, dynamic> remote,
     int outboxId,
   ) async {
+    // A vehicle's current mileage or a Job's odometer is NOT a durable
+    // estimate-scoped snapshot. Reject unsupported Mileage In before changing
+    // remote Claim/Authorization fields; otherwise a mixed offline edit can
+    // partially commit and then stop in conflict. The server create remains
+    // idempotent, and this local header/outbox stay available for review.
+    if (local[_estimateMileageEditedKey] == true ||
+        local['odometer_in'] != null) {
+      throw const _EstimateHeaderSyncConflict(
+        'Mileage In requires an estimate-scoped revision-guarded server field',
+      );
+    }
+
     final desiredClaim = _headerText(local['claim_number']);
     final desiredAuthorization = _headerText(local['authorization_number']);
     String? actualClaim() => _headerText(remote['claim_number']);
@@ -128,16 +140,6 @@ class OfflineDocumentDraftService {
       }
     }
 
-    // A vehicle's current mileage or a Job's odometer is NOT a saved
-    // historical estimate-mileage snapshot. Even apparent equality can
-    // change when another device updates the vehicle. Keep the original
-    // local value/clear request until a document-scoped guarded RPC exists.
-    if (local[_estimateMileageEditedKey] == true ||
-        local['odometer_in'] != null) {
-      throw const _EstimateHeaderSyncConflict(
-        'Mileage In requires an estimate-scoped revision-guarded server field',
-      );
-    }
     return remote;
   }
 
