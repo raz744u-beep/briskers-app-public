@@ -229,7 +229,9 @@ class OwnerReportData {
       if (doc['lines'] is! List) { laborKnown = false; continue; }
       for (final line in (doc['lines'] as List).whereType<Map>().where(isInvoiceLaborLine)) {
         if (line['id'] == null || !credits.any((r) => r['source_active'] != 0 && r['duplicate_of_task_id'] == null &&
-            r['invoice_id'] == doc['id'] && (r['source_line_id'] ?? r['labor_line_id']) == line['id'])) laborKnown = false;
+            r['invoice_id'] == doc['id'] && (r['source_line_id'] ?? r['labor_line_id']) == line['id'])) {
+          laborKnown = false;
+        }
       }
     }
     if (!laborKnown) issues.add('Mechanic hours, rates or original paid costs need review.');

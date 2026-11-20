@@ -174,10 +174,10 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
             FittedBox(fit: BoxFit.scaleDown, child: Text(value,
               style: const TextStyle(fontSize: 25, height: 1.1, fontWeight: FontWeight.w800, color: Color(0xFF111A31)))),
           ]) : Stack(children: [
-            Row(children: [CircleAvatar(radius: 21, backgroundColor: color.withValues(alpha: .12),
-                child: Icon(icon, color: color, size: 29)), const SizedBox(width: 8),
+            Row(children: [CircleAvatar(radius: MediaQuery.sizeOf(context).width < 350 ? 15 : 21,
+                backgroundColor: color.withValues(alpha: .12), child: Icon(icon, color: color, size: 26)), const SizedBox(width: 8),
               Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Padding(padding: const EdgeInsets.only(right: 14), child: Text(title, maxLines: 3,
+                Padding(padding: const EdgeInsets.only(right: 28), child: Text(title, maxLines: 3,
                   style: const TextStyle(fontSize: 13, height: 1.1, fontWeight: FontWeight.w800))),
                 const SizedBox(height: 6),
                 FittedBox(fit: BoxFit.scaleDown, child: Text(value,

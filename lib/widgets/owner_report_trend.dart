@@ -161,7 +161,7 @@ class _TrendPainter extends CustomPainter {
         final top = math.min(y(value), y(0)), bottom = math.max(y(value), y(0));
         canvas.drawRect(Rect.fromLTRB(left, top, left + width - 3, bottom), Paint()..color = reportSeriesColors[series[j]]!);
       }
-      final text = TextPainter(text: TextSpan(text: labels[i], style: const TextStyle(fontSize: 11, color: Color(0xFF17202A))), textDirection: TextDirection.ltr)..layout(maxWidth: 88);
+      final text = TextPainter(text: TextSpan(text: labels[i], style: const TextStyle(fontFamily: 'Roboto', fontSize: 11, color: Color(0xFF17202A))), textDirection: TextDirection.ltr)..layout(maxWidth: 88);
       text.paint(canvas, Offset(i * 90 + (90 - text.width) / 2, height + 10));
     }
   }

@@ -114,7 +114,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
     await tester.runAsync(loadHandoffFonts);
     final boundary=GlobalKey();
-    await tester.pumpWidget(RepaintBoundary(key:boundary,child:MaterialApp(
+    await tester.pumpWidget(RepaintBoundary(key:boundary,child:MaterialApp(debugShowCheckedModeBanner:false,
       theme:ThemeData(fontFamily:'Roboto'),home:OwnerReportsScreen(businessId:'shop',isOwner:true,repository:reports))));
     await tester.pumpAndSettle();
     Future<void> capture(String name) async {
