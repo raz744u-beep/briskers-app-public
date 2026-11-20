@@ -1,6 +1,9 @@
 import 'dart:convert';
 import 'package:briskers_app/core/owner_report_models.dart';
 import 'package:briskers_app/services/local_owner_reports.dart';
+import 'package:briskers_app/services/local_payroll_repository.dart';
+import 'package:briskers_app/services/local_invoice_closure.dart';
+import 'package:briskers_app/services/local_financial_totals_journal.dart';
 import 'package:briskers_app/services/owner_report_preferences.dart';
 import 'package:briskers_app/services/local_financial_cache.dart';
 import 'package:briskers_app/services/local_document_sql_store.dart';
@@ -200,6 +203,44 @@ void main() {
     final report=await LocalOwnerReports(database:db).load('shop',isOwner:true);
     expect(report.summary(period).values[OwnerReportMetric.sales],100000);
     expect(await db.customSelect('SELECT * FROM local_document_details').get(),isEmpty);
+  });
+  test('SQLite forecast reads assigned hours and frozen paid costs, excluding reversed coverage', () async {
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    await LocalPayrollRepository(db,business:'shop',owner:true).prepare();
+    await LocalDocumentSqlStore.ensure(db);
+    await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status) VALUES('job','shop','owner','Repair','in_progress')");
+    await db.customStatement("INSERT INTO local_documents(id,business_id,kind,job_id,total,document_date) VALUES('invoice','shop','invoice','job',1080,'2026-11-19')");
+    await db.customStatement('INSERT INTO local_document_details VALUES(?,?)',
+      ['briskers_document_detail_shop_invoice',jsonEncode(invoice())]);
+    await db.customStatement("INSERT INTO regular_payroll_task_sources(business_id,task_id,invoice_id,line_id,source_kind) VALUES('shop','task','invoice','line','invoice')");
+    await db.customStatement("INSERT INTO regular_payroll_estimates VALUES('shop','task','chris',180)");
+    await db.customStatement("INSERT INTO local_mechanic_work_credits_v1(business_id,allocation_id,job_id,labor_line_id,task_id,employee_id,actual_minutes,rate_cents) VALUES('shop','allocation','job','line','task','chris',0,4000)");
+    await db.customStatement("INSERT INTO regular_payroll_work_coverage VALUES('shop','allocation','paid',60,3500,'{}')");
+    await db.customStatement("INSERT INTO regular_payroll_work_coverage VALUES('shop','allocation','reversed',60,9900,'{}')");
+    await db.customStatement("INSERT INTO regular_payroll_reversals_v1 VALUES('shop','reversed','owner','Correction','2026-11-19')");
+    final repository=LocalOwnerReports(database:db);
+    var report=await repository.load('shop',isOwner:true);
+    expect(report.jobFigure(report.openJobs.single,projected:true).labor,11500);
+    expect(report.summary(period).values[OwnerReportMetric.projected],88500);
+    // The raw coverage fallback must also honor the reversal fence.
+    await db.customStatement('DROP VIEW regular_payroll_active_coverage_v1');
+    report=await repository.load('shop',isOwner:true);
+    expect(report.jobFigure(report.openJobs.single,projected:true).labor,11500);
+    expect((await db.customSelect('SELECT * FROM regular_payroll_work_coverage').get()),hasLength(2));
+  });
+  test('a locally finalized receipt represented in both journal and feed is received once', () async {
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final receipt=<String,dynamic>{'invoice_id':'invoice','receipt_id':'receipt','operation_id':'receipt',
+      'amount':100,'transaction_date':'2026-11-19','receipt_state':'local_finalized'};
+    await LocalInvoiceClosureStore(db).prepareIncome();
+    await db.customStatement('INSERT INTO local_finalized_invoice_income VALUES(?,?,?,?)',
+      ['shop','invoice','receipt',jsonEncode(receipt)]);
+    await LocalFinancialTotalsJournal(database:db).record('shop','invoice-payment:receipt',after:{
+      ...receipt,'id':'invoice-payment:receipt','direction':'income','document_id':'invoice','locally_finalized_invoice_receipt':true});
+    final report=await LocalOwnerReports(database:db).load('shop',isOwner:true);
+    expect(report.summary(period).values[OwnerReportMetric.income],10000);
   });
   test('corrupt saved financial snapshot surfaces unknown rather than empty cash', () async {
     final db=BriskersLocalDatabase(NativeDatabase.memory());

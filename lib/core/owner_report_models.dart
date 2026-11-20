@@ -31,17 +31,16 @@ class ReportPeriod {
     final today = day(now);
     return switch (code) {
       'lastMonth' => ReportPeriod(DateTime(now.year, now.month - 1), DateTime(now.year, now.month, 0), preset: code),
-      '30days' => ReportPeriod(today.subtract(const Duration(days: 29)), today, preset: code),
-      '60days' => ReportPeriod(today.subtract(const Duration(days: 59)), today, preset: code),
-      '90days' => ReportPeriod(today.subtract(const Duration(days: 89)), today, preset: code),
+      '30days' => ReportPeriod(DateTime(today.year, today.month, today.day - 29), today, preset: code),
+      '60days' => ReportPeriod(DateTime(today.year, today.month, today.day - 59), today, preset: code),
+      '90days' => ReportPeriod(DateTime(today.year, today.month, today.day - 89), today, preset: code),
       'thisYear' => ReportPeriod(DateTime(now.year), today, preset: code),
       _ => ReportPeriod(DateTime(now.year, now.month), today, preset: 'thisMonth'),
     };
   }
   bool contains(Object? raw) {
-    final date = DateTime.tryParse(raw?.toString() ?? '');
-    if (date == null) return false;
-    final d = day(date);
+    final d = reportDate(raw);
+    if (d == null) return false;
     return !d.isBefore(day(start)) && !d.isAfter(day(end));
   }
   ReportPeriod shift(int direction) {
@@ -51,8 +50,20 @@ class ReportPeriod {
       return ReportPeriod(first, DateTime(first.year, first.month + 1, 0));
     }
     final days = end.difference(start).inDays + 1;
-    return ReportPeriod(start.add(Duration(days: days * direction)), end.add(Duration(days: days * direction)));
+    return ReportPeriod(DateTime(start.year, start.month, start.day + days * direction),
+      DateTime(end.year, end.month, end.day + days * direction));
   }
+}
+
+// Business dates keep their written calendar day, including ISO timestamps
+// with an explicit offset. Parsing the timestamp first would move late-night
+// receipts into tomorrow when the device or CI runs in UTC.
+DateTime? reportDate(Object? raw) {
+  final match = RegExp(r'^(\d{4})-(\d{2})-(\d{2})(?:$|[T ])').firstMatch(raw?.toString() ?? '');
+  if (match == null) return null;
+  final year = int.parse(match[1]!), month = int.parse(match[2]!), day = int.parse(match[3]!);
+  if (month < 1 || month > 12 || day < 1 || day > DateTime(year, month + 1, 0).day) return null;
+  return DateTime(year, month, day);
 }
 
 int? reportCents(Object? raw) {
@@ -103,7 +114,7 @@ class OwnerReportSummary {
   final List<ReportRow> invoices;
 }
 
-/// Immutable facts read together from the on-device database. Calculation is
+/// A consistent snapshot read from the on-device database. Calculation is
 /// separate from I/O and never edits invoice, payment or payroll records.
 class OwnerReportData {
   OwnerReportData({required this.business, required List<ReportRow> invoices,
@@ -145,14 +156,16 @@ class OwnerReportData {
     int? amount(ReportRow r) => reportCents(r['direction'] == 'income' &&
         r['reporting_status'] == 'verified' && r['reporting_amount'] != null
         ? r['reporting_amount'] : r['amount']);
-    final undatedIncome = transactions.any((r) => r['direction'] == 'income' && DateTime.tryParse(r['transaction_date']?.toString() ?? '') == null);
-    final undatedExpense = transactions.any((r) => r['direction'] == 'expense' && DateTime.tryParse(r['transaction_date']?.toString() ?? '') == null);
+    final undatedIncome = transactions.any((r) => r['direction'] == 'income' && reportDate(r['transaction_date']) == null);
+    final undatedExpense = transactions.any((r) => r['direction'] == 'expense' && reportDate(r['transaction_date']) == null);
     final income = undatedIncome || readIssues.contains('Saved financial records could not be read.') ? null : _sum(financial.where((r) => r['direction'] == 'income').map(amount));
     final spend = undatedExpense || readIssues.contains('Saved financial records could not be read.') ? null : _sum(financial.where((r) => r['direction'] == 'expense').map(amount));
-    final sales = _sum(selected.map(salesOf));
+    final undatedInvoices = invoices.any((r) => reportDate(r['document_date']) == null);
+    final sales = undatedInvoices ? null : _sum(selected.map(salesOf));
     final forecast = openJobs.map((job) => jobFigure(job, projected: true)).toList();
     final issues = <String>{...readIssues};
     if (undatedIncome || undatedExpense) issues.add('Some saved transactions have no date; period totals need review.');
+    if (undatedInvoices) issues.add('Some saved invoices have no invoice date; sales totals need review.');
     final missing = selected.where((r) => salesOf(r) == null).length;
     if (missing > 0) issues.add('$missing invoice(s) are missing saved totals or tax details.');
     return OwnerReportSummary({
@@ -163,7 +176,7 @@ class OwnerReportData {
       OwnerReportMetric.projected: _sum(forecast.map((r) => r.profit)),
       OwnerReportMetric.openJobs: forecast.length,
       OwnerReportMetric.averageSale: sales == null ? null : selected.isEmpty ? 0 : (sales / selected.length).round(),
-      OwnerReportMetric.salesTax: _sum(selected.map((r) => reportCents(r['tax_amount']))),
+      OwnerReportMetric.salesTax: undatedInvoices ? null : _sum(selected.map((r) => reportCents(r['tax_amount']))),
     }, issues.toList(), selected);
   }
 
@@ -233,7 +246,7 @@ class OwnerReportData {
     }
     for (final group in groups.values) {
       final earlier = invoices.any((r) => r['customer_id'] == group.id &&
-        (DateTime.tryParse(r['document_date']?.toString() ?? '')?.isBefore(p.start) ?? false));
+        (reportDate(r['document_date'])?.isBefore(p.start) ?? false));
       group.newCustomer = !earlier;
       for (final id in group.jobs) {
         final job = jobs.where((r) => r['id'] == id).firstOrNull;

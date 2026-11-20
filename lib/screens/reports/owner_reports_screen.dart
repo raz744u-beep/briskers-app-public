@@ -210,7 +210,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
 
   Widget _card(Widget child) => Container(margin: const EdgeInsets.only(bottom: 14), padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: const Color(0xFFE1E8F4)), boxShadow: const [BoxShadow(color: Color(0x11052749), blurRadius: 4, offset: Offset(0, 2))]), child: child);
+      border: Border.all(color: const Color(0xFFE1E8F4)), boxShadow: const [BoxShadow(color: Color(0x11052749), blurRadius: 4, offset: Offset(0, 2))]), child: Material(color: Colors.transparent, child: child));
 
   Widget _overview(OwnerReportData data) {
     final summary = data.summary(_period);
@@ -288,8 +288,8 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
       if (index != 0) const SizedBox(width: 7),
       Expanded(child: _tile(entry.title, entry.value, entry.icon, entry.color)),
     ]]));
-  Widget _selector(String value, List<String> values, ValueChanged<String> changed, {String? label}) => DropdownButton<String>(
-    value: value, isDense: true, underline: const SizedBox.shrink(),
+  Widget _selector(String value, List<String> values, ValueChanged<String> changed, {String? label, bool expanded = false}) => DropdownButton<String>(
+    value: value, isDense: true, isExpanded: expanded, underline: const SizedBox.shrink(),
     items: [for (final v in values) DropdownMenuItem(value: v, child: Text(v))],
     onChanged: (v) { if (v != null) changed(v); }, hint: label == null ? null : Text(label));
 
@@ -320,8 +320,9 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
           hintText: 'Search customers', prefixIcon: Icon(Icons.search), border: OutlineInputBorder()),
           onChanged: (v) => setState(() => _customerQuery = v)),
         const SizedBox(height: 10),
-        Row(children: [const Text('Rank by '), _selector(_customerRank, const ['Sales','Profitability','Visits'],
-          (v) => setState(() => _customerRank = v))]),
+        Row(children: [const Text('Rank by '), const SizedBox(width: 8),
+          Expanded(child: _selector(_customerRank, const ['Sales','Profitability','Visits'],
+            (v) => setState(() => _customerRank = v), expanded: true))]),
         const Divider(),
         _tableRow(title: 'Customer', quantity: 'Jobs', value: _customerRank == 'Visits' ? 'Visits' : _customerRank == 'Profitability' ? 'Profit' : 'Revenue', header: true),
         for (final (index, r) in shown.indexed) _tableRow(index: '${index + 1}', title: r.name,
@@ -377,7 +378,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
       _summaries([
         (title: 'Items Sold\nParts / Materials', value: NumberFormat('#,##0.##').format(quantity), icon: Icons.inventory_2_outlined, color: BriskersColors.tabBlue),
         (title: 'Item Revenue\nSales Excl. Tax', value: _money(revenue), icon: Icons.payments_outlined, color: BriskersColors.confirm),
-        (title: 'Avg. Sale\nper Part', value: _money(quantity == 0 ? 0 : (partsRevenue / quantity).round()), icon: Icons.trending_up, color: BriskersColors.tabPurple),
+        (title: 'Avg. Sale\nper Item', value: _money(quantity == 0 ? 0 : (partsRevenue / quantity).round()), icon: Icons.trending_up, color: BriskersColors.tabPurple),
       ]),
       const SizedBox(height: 14),
       _card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

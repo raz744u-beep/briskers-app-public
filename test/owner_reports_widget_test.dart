@@ -1,3 +1,7 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'support/handoff_qa_fonts.dart';
 import 'package:briskers_app/core/owner_report_models.dart';
 import 'package:briskers_app/local/briskers_local_database.dart' show BriskersLocalDatabase;
 import 'package:briskers_app/screens/reports/owner_reports_screen.dart';
@@ -94,6 +98,28 @@ void main() {
     await open(tester,owner:false);
     expect(find.text('Owner access is required.'),findsOneWidget);
     expect(reports.reads,0);
+    await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets('capture the actual approved report widgets at phone size', (tester) async {
+    tester.view.physicalSize=const Size(400,950);tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.runAsync(loadHandoffFonts);
+    final boundary=GlobalKey();
+    await tester.pumpWidget(RepaintBoundary(key:boundary,child:MaterialApp(
+      theme:ThemeData(fontFamily:'Roboto'),home:OwnerReportsScreen(businessId:'shop',isOwner:true,repository:reports))));
+    await tester.pumpAndSettle();
+    Future<void> capture(String name) async {
+      await tester.runAsync(() async {
+        final image=await (boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary).toImage(pixelRatio:2);
+        final bytes=await image.toByteData(format:ui.ImageByteFormat.png);
+        final file=File('build/payroll-qa/owner-reports-$name.png');
+        await file.parent.create(recursive:true);await file.writeAsBytes(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+    }
+    await capture('overview');await tab(tester,'Customers');await capture('customers');
+    await tab(tester,'Items');await capture('items');
+    expect(tester.takeException(),isNull);
     await tester.pumpWidget(const SizedBox());
   });
   testWidgets('local revisions refresh results and disposal stops polling', (tester) async {
