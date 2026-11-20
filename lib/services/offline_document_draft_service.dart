@@ -1232,24 +1232,61 @@ class OfflineDocumentDraftService {
     String? mileage,
     String? claimNumber,
     String? authorizationNumber,
+    bool allowConflictedLocalReview = false,
   }) async {
     if (customerId.isEmpty) throw StateError('Select a saved customer.');
     if (!documentId.startsWith('local-estimate-')) {
       throw StateError('This operation requires a pending local estimate.');
     }
     await _database.transaction(() async {
-      final detail = await _requireDraft(businessId, documentId);
+      // Only a durable conflict may be edited for local Owner review.
+      // An attempted but pending/inflight upload can still be racing a remote
+      // acknowledgment, so it must never enter this local-review path.
+      final outboxes = await _database.customSelect(
+        "SELECT id,state,attempt_count,last_attempt_at,payload_json "
+        "FROM sync_outbox WHERE business_id=? AND entity_id=? "
+        "AND entity_type='document_draft_create' LIMIT 2",
+        variables: [Variable(businessId), Variable(documentId)],
+      ).get();
+      if (outboxes.length != 1) {
+        throw StateError('This estimate is no longer queued. Reopen it.');
+      }
+      final queued = outboxes.single;
+      final state = queued.read<String>('state');
+      final reviewOnly = state == 'conflict';
+      if (reviewOnly && !allowConflictedLocalReview) {
+        throw StateError('Only the Owner can save an estimate header for conflict review.');
+      }
+      if (state != 'pending' && !reviewOnly) {
+        throw StateError('This estimate is synchronizing. Reopen it once sync finishes.');
+      }
+      // The normal strict gate still protects every unattempted draft edit.
+      // Do NOT widen _requireDraft, which also protects invoices and line edits.
+      final detail = reviewOnly
+          ? await _cache.load(businessId, documentId)
+          : await _requireDraft(businessId, documentId);
+      if (detail == null ||
+          (detail['_server_document_id']?.toString().isNotEmpty ?? false)) {
+        throw StateError('This estimate has synced. Reopen its numbered record.');
+      }
       if (detail['kind'] != 'estimate' || detail['converted'] == true ||
           (detail['converted_invoice_id']?.toString().isNotEmpty ?? false)) {
         throw StateError('Converted estimates cannot be edited.');
       }
-      if ((detail['job_id']?.toString().isNotEmpty ?? false) &&
-          (detail['customer_id'] != customerId || detail['vehicle_id'] != vehicleId)) {
-        throw StateError('Change this estimate customer or vehicle after its linked Job has synced.');
-      }
       final identities = LocalCustomerVehicleIdentity(_database);
       final customer = (await identities.resolve(businessId, customerId))!;
       final vehicle = await identities.resolve(businessId, vehicleId);
+      // A conflicted estimate may already exist remotely. Do not alter the
+      // queued create identity or the customer/vehicle linkage for review.
+      if (reviewOnly &&
+          (detail['customer_id'] != customer ||
+           detail['vehicle_id'] != vehicle)) {
+        throw StateError('Keep this conflicted estimate customer and vehicle unchanged until Owner sync resolution.');
+      }
+      if ((detail['job_id']?.toString().isNotEmpty ?? false) &&
+          (detail['customer_id'] != customer || detail['vehicle_id'] != vehicle)) {
+        throw StateError('Change this estimate customer or vehicle after its linked Job has synced.');
+      }
       final date = documentDate.toIso8601String().split('T').first;
       final updated = <String, dynamic>{...detail,
         'customer_id': customer, 'customer_name': customerName,
@@ -1259,19 +1296,25 @@ class OfflineDocumentDraftService {
         if (mileage != null) 'odometer_in': mileage.isEmpty ? null : num.tryParse(mileage),
         if (mileage != null) _estimateMileageEditedKey: true,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
+        'sync_state': reviewOnly ? 'conflict' : 'pending',
       };
-      final queued = await _database.customSelect(
-        "SELECT id,payload_json FROM sync_outbox WHERE business_id=? AND entity_id=? "
-        "AND entity_type='document_draft_create' AND state='pending'",
-        variables: [Variable(businessId), Variable(documentId)],
-      ).getSingle();
-      final payload = Map<String, dynamic>.from(jsonDecode(queued.read<String>('payload_json')) as Map);
-      await _database.customStatement('UPDATE sync_outbox SET payload_json=? WHERE id=?',
-        [jsonEncode({...payload, 'customer_id': customer, 'vehicle_id': vehicle,
-          'document_date': date}), queued.read<int>('id')]);
+      if (!reviewOnly) {
+        final payload = Map<String, dynamic>.from(
+          jsonDecode(queued.read<String>('payload_json')) as Map);
+        await _database.customStatement(
+          'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+          [jsonEncode({...payload, 'customer_id': customer,
+            'vehicle_id': vehicle, 'document_date': date}),
+            queued.read<int>('id')],
+        );
+      }
+      // Conflict review edits stay solely on this device. Preserve the
+      // original outbox operation ID, state, attempts, payload and last_error;
+      // never schedule a retry or pretend a server save took place.
       await _database.customStatement(
-        'UPDATE local_documents SET customer_id=?,document_date=? WHERE business_id=? AND id=?',
-        [customer,date,businessId,documentId]);
+        'UPDATE local_documents SET customer_id=?,document_date=?,sync_state=? '
+        'WHERE business_id=? AND id=?',
+        [customer,date,reviewOnly ? 'conflict' : 'pending',businessId,documentId]);
       await _cache.save(businessId, documentId, updated);
     });
   }
