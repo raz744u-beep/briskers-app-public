@@ -113,7 +113,11 @@ void main() {
         final payload = jsonDecode(row['payload'] as String) as Map;
         expect(payload['photos'], [
           '${target.path}/Originals/file-0',
-          {'source_uri': '${target.path}/Originals/file-1'},
+          {
+            'source_uri': Uri.file(
+              '${target.path}/Originals/file-1',
+            ).toString(),
+          },
         ]);
         expect(await File('${target.path}/Originals/file-1').readAsBytes(), [
           4,

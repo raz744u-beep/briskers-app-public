@@ -244,9 +244,19 @@ class BackupArchive {
         '${source.path}/$manifestName',
       ).copy('${target.path}/$manifestName');
       final replacements = (manifest['source_files'] as Map)
-          .map<String, String>(
-            (key, value) => MapEntry(key as String, '${target.path}/$value'),
-          );
+          .map<String, String>((key, value) {
+            final original = key as String;
+            final path = '${target.path}/$value';
+            // ContentResolver/SAF readers need a URI. Preserve URI semantics
+            // while replacing device-specific content grants with owned files.
+            return MapEntry(
+              original,
+              original.startsWith('content://') ||
+                      original.startsWith('file://')
+                  ? Uri.file(path).toString()
+                  : path,
+            );
+          });
       dynamic rewrite(dynamic value) {
         if (value is String) {
           if (replacements.containsKey(value)) return replacements[value];

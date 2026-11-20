@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:sqlite3/sqlite3.dart';
+import 'package:briskers_app/services/expenseiq_local_photo_sync.dart';
 import 'package:briskers_app/services/backup/restored_attachment_lookup.dart';
 import 'package:briskers_app/services/local_mechanic_work_credit_repository.dart';
 import 'package:briskers_app/services/local_job_deletion_v3.dart';
@@ -453,6 +455,74 @@ void main() {
           (notes['attachments'] as List).single['local_file_path'] as String;
       expect(restoredPath, startsWith(restored.path));
       expect(await File(restoredPath).readAsBytes(), [7, 5, 3, 1]);
+    },
+  );
+  test(
+    'restored external receipts stay readable without the old folder grant',
+    () async {
+      const content = 'content://old-device-grant/receipt.jpg';
+      final manifest =
+          jsonDecode(
+                await File('${source.path}/backup-info.json').readAsString(),
+              )
+              as Map;
+      await Directory('${source.path}/Receipts').create();
+      await File(
+        '${source.path}/Receipts/original.jpg',
+      ).writeAsBytes([255, 216, 255, 219, 1]);
+      final sourceDb = sqlite3.open(
+        '${source.path}/Database/briskers_local.sqlite',
+      );
+      sourceDb.execute('INSERT INTO backup_fixture_ledger VALUES(?,?,?,?)', [
+        'receipt-link',
+        0,
+        0,
+        jsonEncode({'source_uri': content}),
+      ]);
+      sourceDb.close();
+      await BackupArchive.seal(
+        source,
+        businessId: 'shop',
+        appVersion: 'test',
+        sourceFiles: {
+          ...(manifest['source_files'] as Map).cast<String, String>(),
+          content: 'Receipts/original.jpg',
+        },
+        warnings: [],
+      );
+      final target = Directory('${root.path}/uri-restored');
+      final restored = await BackupArchive.restoreTo(
+        source,
+        target,
+        businessId: 'shop',
+      );
+      final db = sqlite3.open(restored.path);
+      final payload =
+          jsonDecode(
+                db
+                        .select(
+                          "SELECT payload FROM backup_fixture_ledger WHERE id='receipt-link'",
+                        )
+                        .single['payload']
+                    as String,
+              )
+              as Map;
+      db.close();
+      final uri = payload['source_uri'] as String;
+      expect(Uri.parse(uri).scheme, 'file');
+      var reads = 0;
+      final bytes = await ExpenseIqLocalPhotoSync(database: database)
+          .readOriginalPhoto(
+            'shop',
+            'receipt-transaction',
+            {'filename': 'receipt.jpg', 'source_uri': uri},
+            reader: (value) async {
+              reads++;
+              return File.fromUri(Uri.parse(value)).readAsBytes();
+            },
+          );
+      expect(bytes, [255, 216, 255, 219, 1]);
+      expect(reads, 1);
     },
   );
 }
