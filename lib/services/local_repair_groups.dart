@@ -47,6 +47,11 @@ class LocalRepairGroups {
       variables: _vars(business, estimate)).get()).isNotEmpty;
   }
 
+  Future<bool> requiresLocalDocument(String business, String document) async =>
+    (await db.customSelect('''SELECT 1 FROM repair_group_documents_v1 WHERE business=? AND estimate=?
+      UNION ALL SELECT 1 FROM repair_group_invoice_content_v1 WHERE business=? AND document=? LIMIT 1''',
+      variables: [business, document, business, document].map(Variable<String>.new).toList()).get()).isNotEmpty;
+
   Future<Map<String, dynamic>> _editable(String business, String estimate) async {
     if (business.isEmpty || estimate.isEmpty) { throw ArgumentError('Missing document scope.'); }
     final detail = await cache.load(business, estimate);

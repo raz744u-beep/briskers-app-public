@@ -623,7 +623,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     final loadWatch = Stopwatch()..start();
     final forceOffline = localOnly ||
         BriskersConnectionModeController.instance.forceOffline;
-    var unsyncedDraft = false;
+    var unsyncedDraft = await LocalRepairGroups().requiresLocalDocument(
+      widget.businessId, widget.documentId);
     if (!forceOffline) {
       // Retry offline-created reusable notes after returning online.
       unawaited(_standardNotes.flushPending(widget.businessId)
@@ -661,7 +662,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       }
       // A never-synced invoice must stay editable locally even in Auto mode,
       // rather than querying the server with a temporary local ID.
-      unsyncedDraft = serverId.isEmpty || serverCanonical == widget.documentId;
+      unsyncedDraft = unsyncedDraft || serverId.isEmpty || serverCanonical == widget.documentId;
     }
 
     if (forceOffline || unsyncedDraft) {

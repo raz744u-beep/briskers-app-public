@@ -71,6 +71,9 @@ void main() {
     await authorize(RepairGroup.otherId, event: 'decline', decision: RepairDecision.declined);
     final invoice = await drafts.convertEstimateOffline('shop', estimate);
     final billed = (await cache.load('shop', invoice))!;
+    expect(await groups.requiresLocalDocument('shop', estimate), isTrue);
+    expect(await groups.requiresLocalDocument('shop', invoice), isTrue);
+    expect(await groups.requiresLocalDocument('other-shop', invoice), isFalse);
     expect(billed['lines'], hasLength(1));
     expect(billed['total_amount'], 110);
     expect((await detail())['lines'], hasLength(2));
