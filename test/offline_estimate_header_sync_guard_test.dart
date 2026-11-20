@@ -214,7 +214,11 @@ void main() {
     expect(saved['claim_number'], 'CLAIM-003');
     expect(saved['authorization_number'], 'AUTH-004');
     expect(saved['_server_document_id'], isNull);
-    expect(api.claimUpdates, 1);
+    // The remote estimate may be created idempotently, but no part of a
+    // mixed warranty/mileage header is applied until mileage can be stored.
+    expect(api.claimUpdates, 0);
+    expect(api.claimNumber, isNull);
+    expect(api.authorizationNumber, isNull);
     expect(api.mileageUpdates, 0);
     expect(api.vehicleMileage, 12345);
     await drafts.flush('shop');
