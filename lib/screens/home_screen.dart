@@ -1,3 +1,4 @@
+import 'reports/owner_reports_screen.dart';
 import '../core/invoice_attention_projection.dart';
 import '../services/verified_invoice_close_events.dart';
 import '../widgets/recent_records_card.dart';
@@ -896,7 +897,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return;
     }
     Navigator.of(context).push<void>(MaterialPageRoute(
-      builder: (_) => section == ShopNavigationSection.employees
+      builder: (_) => section == ShopNavigationSection.reports
+          ? OwnerReportsScreen(businessId: widget.businessId, isOwner: widget.roleCode == 'owner',
+              sharedBottomNavigationBar: widget.estimatesNavigationBar)
+          : section == ShopNavigationSection.employees
           ? EmployeesSettingsScreen(
               businessId: widget.businessId,
               isOwner: true,
@@ -1417,7 +1421,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onTasksTap: OwnerPayrollScreen.enabled && widget.roleCode == 'owner'
                   ? () => _openOwnerSection(ShopNavigationSection.tasks) : null,
               onReportsTap: () {
-                if (OwnerPayrollScreen.enabled && widget.roleCode == 'owner') {
+                if (widget.roleCode == 'owner') {
                   _openOwnerSection(ShopNavigationSection.reports);
                 } else if (OwnerPayrollScreen.enabled && widget.roleCode == 'mechanic') {
                   Navigator.of(context).push<void>(MaterialPageRoute(

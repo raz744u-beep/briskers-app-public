@@ -1,3 +1,4 @@
+import 'reports/owner_reports_screen.dart';
 import '../services/verified_invoice_close_events.dart';
 import '../services/local_warranty_companies.dart';
 import 'dart:async';
@@ -576,6 +577,9 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
         roleCode: widget.roleCode,
         onBusinessNameChanged: (name) => setState(() => _businessName = name),
       );
+    } else if (section == ShopNavigationSection.reports) {
+      if (widget.roleCode != 'owner') return;
+      page = OwnerReportsScreen(businessId: widget.businessId, isOwner: true, sharedBottomNavigationBar: dock);
     } else {
       if (widget.roleCode != 'owner' || !OwnerPayrollScreen.enabled) return;
       page = section == ShopNavigationSection.employees
