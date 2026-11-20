@@ -8,12 +8,17 @@ import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/employee_nickname_store.dart';
 import 'package:briskers_app/screens/payroll/job_tasks_access.dart';
 
-void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-  testWidgets('paid Chris allocation keeps manager accessible and permits additive Kam assignment', (tester) async {
+class _Fixture {
+  const _Fixture(this.db, this.repo, this.task, this.before);
+  final BriskersLocalDatabase db;
+  final LocalPayrollRepository repo;
+  final String task;
+  final Map<String,dynamic> before;
+}
+
+Future<_Fixture> _fixture() async {
     SharedPreferences.setMockInitialValues({});
     final db=BriskersLocalDatabase(NativeDatabase.memory());
-    addTearDown(() async { await db.close(); LocalDocumentDetailCache.sqliteWritesEnabled=false; });
     await LocalDocumentDetailCache.initialize(db);
     final repo=LocalPayrollRepository(db,business:'shop',owner:true);
     await repo.prepare();
@@ -32,6 +37,16 @@ void main() {
     await db.customStatement("UPDATE local_mechanic_work_credits_v1 SET paid_operation_id='recorded-payment' WHERE business_id='shop' AND employee_id='chris'");
     await EmployeeNicknameStore(database:db).save('shop','chris','Chris');
     final before=(await db.customSelect("SELECT * FROM local_mechanic_work_credits_v1 WHERE employee_id='chris'").get()).single.data;
+    return _Fixture(db,repo,task,before);
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  tearDown(() => LocalDocumentDetailCache.sqliteWritesEnabled=false);
+  testWidgets('paid Chris allocation keeps the pencil and mechanic label accessible', (tester) async {
+    final fixture=await _fixture();
+    final db=fixture.db;
+    addTearDown(db.close);
     await tester.pumpWidget(MaterialApp(home:Scaffold(body:SizedBox(width:350,
       child:JobTasksAccess(business:'shop',job:'job',invoice:'invoice',line:'engine',database:db)))));
     for(var i=0;i<40;i++) {
@@ -44,8 +59,16 @@ void main() {
       widget is IconButton && widget.tooltip == 'Edit or split mechanic labor'));
     expect(pencil.onPressed,isNotNull,reason:'Paid work must not disable the whole manager');
     expect(tester.widget<InkWell>(find.byKey(const ValueKey('manage-line-mechanics-engine'))).onTap,isNotNull);
-    // The same additive operation used by Add mechanic keeps paid Chris intact.
-    await tester.runAsync(() async {
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  test('adding Kam preserves paid Chris allocation and billed quantity', () async {
+    final fixture=await _fixture();
+    final db=fixture.db;
+    final repo=fixture.repo;
+    final task=fixture.task;
+    final before=fixture.before;
+    addTearDown(db.close);
       await repo.assignExistingService(job:'job',invoice:'invoice',line:'engine',
         employee:'kam',name:'Kamerron Smith',rate:3500,minutes:60);
       await expectLater(repo.setEstimatedMinutes(task,'chris',1080),throwsStateError);
@@ -56,7 +79,5 @@ void main() {
       final rows=await repo.work();
       expect(rows.singleWhere((r)=>r['employee_id']=='chris')['estimated_minutes'],1200);
       expect(rows.singleWhere((r)=>r['employee_id']=='kam')['estimated_minutes'],60);
-    });
-    await tester.pumpWidget(const SizedBox.shrink());
   });
 }
