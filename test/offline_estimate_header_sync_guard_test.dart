@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:briskers_app/core/connection_mode.dart';
@@ -6,6 +5,7 @@ import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/offline_document_draft_service.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
