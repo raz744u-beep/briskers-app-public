@@ -7,6 +7,8 @@ import 'package:path_provider_platform_interface/path_provider_platform_interfac
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:briskers_app/services/backup/restored_attachment_lookup.dart';
+import 'package:briskers_app/services/local_mechanic_work_credit_repository.dart';
+import 'package:briskers_app/services/local_job_deletion_v3.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/local/local_database_provider.dart';
 import 'package:briskers_app/services/backup/backup_archive.dart';
@@ -49,6 +51,36 @@ void main() {
     await database.customStatement(
       "INSERT INTO backup_fixture_ledger VALUES('same-payment',1,48000,'{}')",
     );
+    await LocalMechanicWorkCreditRepository(database: database).prepare();
+    await LocalJobDeletionV3.ensureSchema(database);
+    await database.customStatement(
+      "INSERT INTO local_job_deletion_v3_entities VALUES('shop','deleted-job','verified-delete','job','deleted-job')",
+    );
+    await database.customStatement(
+      "INSERT INTO local_mechanic_work_credits_v1(business_id,allocation_id,job_id,labor_line_id,task_id,employee_id,actual_minutes,rate_cents,completed,paid_operation_id) VALUES('shop','paid-allocation','job','line','task','mechanic',120,4000,1,'paid-operation')",
+    );
+    final paidProof = File(
+      '${root.path}/briskers_media/shop/payroll/proof.jpg',
+    );
+    await paidProof.parent.create(recursive: true);
+    await paidProof.writeAsBytes([2, 4, 6]);
+    await database.customStatement(
+      'INSERT INTO regular_payroll_work_coverage VALUES(?,?,?,?,?,?)',
+      [
+        'shop',
+        'paid-allocation',
+        'paid-operation',
+        120,
+        8000,
+        jsonEncode({'proof': paidProof.path}),
+      ],
+    );
+    await database.customStatement(
+      'CREATE INDEX backup_fixture_paid_index ON backup_fixture_ledger(paid)',
+    );
+    await database.customStatement(
+      'CREATE VIEW backup_fixture_paid_view AS SELECT * FROM backup_fixture_ledger WHERE paid=1',
+    );
     source = Directory('${root.path}/backup-review-fixture/import');
     await Directory('${source.path}/Database').create(recursive: true);
     await Directory('${source.path}/Settings').create();
@@ -59,6 +91,8 @@ void main() {
         'keep_auth_token': 'never-restore',
       }),
     );
+    await Directory('${source.path}/Photos').create();
+    await paidProof.copy('${source.path}/Photos/paid-proof.jpg');
     await database.customStatement('VACUUM INTO ?', [
       '${source.path}/Database/briskers_local.sqlite',
     ]);
@@ -66,7 +100,7 @@ void main() {
       source,
       businessId: 'shop',
       appVersion: 'test',
-      sourceFiles: {},
+      sourceFiles: {paidProof.path: 'Photos/paid-proof.jpg'},
       warnings: [],
     );
     await database.customStatement(
@@ -233,7 +267,7 @@ void main() {
         buildNumber: '1',
         buildSignature: 'test',
       );
-      await Directory('${source.path}/Photos').create();
+      await Directory('${source.path}/Photos').create(recursive: true);
       await File('${source.path}/Photos/cached.jpg').writeAsBytes([9, 8, 7]);
       const old = '/data/old-phone/files/attachment_cache/findings/abc.jpg';
       await BackupArchive.seal(
@@ -277,6 +311,98 @@ void main() {
       expect(
         await File('${root.path}/backup-restore-request.json').exists(),
         false,
+      );
+    },
+  );
+  test(
+    'real paid-work guards, indexes and views survive full restoration',
+    () async {
+      await expectLater(
+        database.customStatement("DELETE FROM regular_payroll_work_coverage"),
+        throwsA(anything),
+      );
+      await LocalBackupService.applyRequestedRestore();
+      final row = await database
+          .customSelect('SELECT * FROM regular_payroll_work_coverage')
+          .getSingle();
+      expect(row.read<String>('operation_id'), 'paid-operation');
+      expect(row.read<int>('amount'), 8000);
+      final proof =
+          (jsonDecode(row.read<String>('snapshot')) as Map)['proof'] as String;
+      expect(proof, contains('restored-backup-'));
+      expect(await File(proof).readAsBytes(), [2, 4, 6]);
+      await expectLater(
+        database.customStatement("DELETE FROM regular_payroll_work_coverage"),
+        throwsA(anything),
+      );
+      await expectLater(
+        database.customStatement(
+          "UPDATE local_mechanic_work_credits_v1 SET actual_minutes=0",
+        ),
+        throwsA(anything),
+      );
+      expect(
+        (await database
+                .customSelect('SELECT * FROM backup_fixture_paid_view')
+                .get())
+            .length,
+        1,
+      );
+      expect(
+        (await database
+                .customSelect(
+                  "SELECT name FROM sqlite_master WHERE type='index' AND name='backup_fixture_paid_index'",
+                )
+                .get())
+            .length,
+        1,
+      );
+    },
+  );
+  test(
+    'verified deletion history and its no-delete guards survive restoration',
+    () async {
+      await LocalBackupService.applyRequestedRestore();
+      final markers = await database
+          .customSelect('SELECT * FROM local_job_deletion_v3_entities')
+          .get();
+      expect(markers.length, 1);
+      expect(markers.single.read<String>('entity_id'), 'deleted-job');
+      expect(markers.single.read<String>('operation_id'), 'verified-delete');
+      await expectLater(
+        database.customStatement('DELETE FROM local_job_deletion_v3_entities'),
+        throwsA(anything),
+      );
+    },
+  );
+  test(
+    'runtime tables first created after the backup do not block older compatible restore',
+    () async {
+      await database.customStatement(
+        'CREATE TABLE later_runtime(id TEXT PRIMARY KEY)',
+      );
+      await database.customStatement(
+        "INSERT INTO later_runtime VALUES('after-backup')",
+      );
+      await database.customStatement(
+        "CREATE TRIGGER later_runtime_no_delete BEFORE DELETE ON later_runtime BEGIN SELECT RAISE(ABORT,'immutable'); END",
+      );
+      await LocalBackupService.applyRequestedRestore();
+      expect(
+        (await database
+                .customSelect(
+                  "SELECT name FROM sqlite_master WHERE name='later_runtime'",
+                )
+                .get())
+            .isEmpty,
+        true,
+      );
+      expect(
+        (await database
+                .customSelect('SELECT * FROM regular_payroll_work_coverage')
+                .get())
+            .length,
+        1,
       );
     },
   );

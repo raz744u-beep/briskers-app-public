@@ -62,7 +62,7 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
   Future<void> _initialize() async {
     try {
       // Finish a requested restore before caches, network, or background workers.
-      _step = 'Checking requested restore';
+      setState(() => _step = 'Checking requested restore');
       await LocalBackupService.applyRequestedRestore();
       await _runStep('Opening local database', initializeLocalDatabase);
       await _runStep('Opening offline document store', () => LocalDocumentDetailCache.initialize(localDatabase));

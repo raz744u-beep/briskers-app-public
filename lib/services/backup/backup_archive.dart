@@ -52,6 +52,19 @@ class BackupArchive {
       row['name'] as String: row['sql'] as String,
   };
 
+  static Map<String, String> schemaObjects(Database db, String type) {
+    if (!const {'trigger', 'index', 'view'}.contains(type)) {
+      throw ArgumentError.value(type);
+    }
+    return {
+      for (final row in db.select(
+        "SELECT name,sql FROM sqlite_master WHERE type=? AND sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        [type],
+      ))
+        row['name'] as String: row['sql'] as String,
+    };
+  }
+
   static void checkDatabase(Database db) {
     if (db.select('PRAGMA integrity_check').single.values.single != 'ok') {
       throw StateError('Backup database failed its integrity check');
@@ -251,6 +264,12 @@ class BackupArchive {
       final db = sqlite3.open(result.path);
       try {
         db.execute('BEGIN IMMEDIATE');
+        final guards = schemaObjects(db, 'trigger');
+        // This isolated copy is being relocated, not edited as business work.
+        // Restore all guards before committing; rollback also restores them.
+        for (final name in guards.keys) {
+          db.execute('DROP TRIGGER ${quote(name)}');
+        }
         for (final table in counts(db).keys) {
           final columns = db.select('PRAGMA table_info(${quote(table)})');
           for (final column in columns) {
@@ -269,6 +288,9 @@ class BackupArchive {
               }
             }
           }
+        }
+        for (final sql in guards.values) {
+          db.execute(sql);
         }
         checkDatabase(db);
         db.execute('COMMIT');

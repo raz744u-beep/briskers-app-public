@@ -64,6 +64,9 @@ class BriskersBackupBridge(private val activity: Activity, messenger: BinaryMess
                                 val source = DC.buildDocumentUriUsingTree(tree, DC.getTreeDocumentId(tree))
                                 val target = ownedFile(call.argument<String>("destination")!!)
                                 require(!target.exists()) { "Restore staging already exists" }
+                                require(children(source).any { it.name == "backup-info.json" && !it.directory }) {
+                                    "Select one dated backup folder containing backup-info.json"
+                                }
                                 var remaining = 100000
                                 fun copyFolder(uri: Uri, folder: File, depth: Int) {
                                     require(depth < 32) { "Backup folders too deep" }

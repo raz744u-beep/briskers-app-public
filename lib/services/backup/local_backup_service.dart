@@ -345,15 +345,33 @@ class LocalBackupService {
       final oldDb = sqlite3.open(original.path, mode: OpenMode.readOnly);
       final newDb = sqlite3.open(restored.path, mode: OpenMode.readOnly);
       late Map<String, String> oldSchema, newSchema;
+      late Map<String, Map<String, String>> oldObjects, newObjects;
       try {
         oldSchema = BackupArchive.schema(oldDb);
         newSchema = BackupArchive.schema(newDb);
+        oldObjects = {
+          for (final type in ['trigger', 'index', 'view'])
+            type: BackupArchive.schemaObjects(oldDb, type),
+        };
+        newObjects = {
+          for (final type in ['index', 'view', 'trigger'])
+            type: BackupArchive.schemaObjects(newDb, type),
+        };
         if (oldDb.userVersion != newDb.userVersion) {
           throw StateError(
             'Use the matching app version to restore this backup',
           );
         }
+        final managed = localDatabase.allTables
+            .map((table) => table.actualTableName)
+            .toSet();
         for (final entry in oldSchema.entries) {
+          if (!newSchema.containsKey(entry.key) &&
+              !managed.contains(entry.key)) {
+            // Lazy runtime tables may have been created after this backup.
+            // They belong to the replaced state and can be recreated normally.
+            continue;
+          }
           if (newSchema[entry.key] != entry.value) {
             throw StateError('Database layout differs; restore stopped safely');
           }
@@ -369,10 +387,28 @@ class LocalBackupService {
       try {
         await localDatabase.transaction(() async {
           await localDatabase.customStatement('PRAGMA defer_foreign_keys=ON');
+          // Whole-database replacement must bypass row-edit/delete guards only
+          // inside this atomic startup transaction. Reinstall the snapshot's
+          // exact indices/views/guards before commit. Any error rolls all DDL
+          // and data back, including the original immutable-payroll guards.
+          for (final type in ['trigger', 'view', 'index']) {
+            for (final name in oldObjects[type]!.keys) {
+              await localDatabase.customStatement(
+                'DROP ${type.toUpperCase()} ${BackupArchive.quote(name)}',
+              );
+            }
+          }
           for (final entry in newSchema.entries) {
             if (!oldSchema.containsKey(entry.key)) {
               await localDatabase.customStatement(entry.value);
             }
+          }
+          for (final table in oldSchema.keys.where(
+            (name) => !newSchema.containsKey(name),
+          )) {
+            await localDatabase.customStatement(
+              'DROP TABLE ${BackupArchive.quote(table)}',
+            );
           }
           for (final table in newSchema.keys) {
             await localDatabase.customStatement(
@@ -384,6 +420,11 @@ class LocalBackupService {
             await localDatabase.customStatement(
               'INSERT INTO $quoted SELECT * FROM backup_restore.$quoted',
             );
+          }
+          for (final type in ['index', 'view', 'trigger']) {
+            for (final sql in newObjects[type]!.values) {
+              await localDatabase.customStatement(sql);
+            }
           }
           if ((await localDatabase
                   .customSelect('PRAGMA foreign_key_check')
