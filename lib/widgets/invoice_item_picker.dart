@@ -16,9 +16,12 @@ class _InvoiceItemPickerState extends State<InvoiceItemPicker> {
   @override
   Widget build(BuildContext context) {
     final query = _query.trim().toLowerCase();
-    final items = widget.items.where((item) => query.isEmpty ||
-      ['name', 'description', 'barcode', 'category'].any((key) =>
-        (item[key]?.toString() ?? '').toLowerCase().contains(query))).toList();
+    // Provisional catalog keys are replaced during their own sync and cannot
+    // be used as the UUID catalog link of an existing document line.
+    final items = widget.items.where((item) =>
+      !(item['id']?.toString().startsWith('local-catalog-') ?? false) &&
+      (query.isEmpty || ['name', 'description', 'barcode', 'category'].any((key) =>
+        (item[key]?.toString() ?? '').toLowerCase().contains(query)))).toList();
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
       child: SizedBox(

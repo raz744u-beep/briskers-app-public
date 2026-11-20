@@ -124,11 +124,13 @@ void main() {
           isScrollControlled:true,builder:(_) => const InvoiceItemPicker(accent:Colors.teal,items:[
             {'id':'wrong','name':'Oil filter','selling_price':12},
             {'id':'correct','name':'Air filter','selling_price':24},
+            {'id':'local-catalog-new','name':'Air filter awaiting catalog sync','selling_price':25},
           ]));
       },child:const Text('Replace'))))));
     await tester.tap(find.text('Replace')); await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField),'air'); await tester.pump();
     expect(find.text('Oil filter'),findsNothing);
+    expect(find.text('Air filter awaiting catalog sync'),findsNothing);
     await tester.tap(find.text('Air filter')); await tester.pumpAndSettle();
     expect(selected,containsPair('id','correct'));
   });
