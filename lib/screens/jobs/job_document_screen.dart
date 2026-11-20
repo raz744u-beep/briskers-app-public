@@ -2298,7 +2298,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         accent: _documentActionColor,
         title: tr('editInvoiceItem'),
         saveLabel: tr('saveChanges'),
-        lockCatalogFields: true,
+        lockCatalogFields: line['item_id'] != null,
         selectCatalogItem: _selectReplacementCatalogItem,
       ),
     );
@@ -8724,6 +8724,8 @@ class _EditLineDialogState extends State<_EditLineDialog> {
   String? _replacementPricingUnit;
   String? _error;
 
+  bool get _catalogLocked => widget.lockCatalogFields || _replacementItemId != null;
+
   @override
   void initState() {
     super.initState();
@@ -8883,16 +8885,19 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                       TextField(
                         scrollPadding: const EdgeInsets.only(bottom: 180),
                         controller: _name,
-                        readOnly: widget.lockCatalogFields,
-                        onTap: widget.selectCatalogItem == null ? null : _replaceCatalogItem,
+                        readOnly: _catalogLocked,
+                        onTap: !_catalogLocked || widget.selectCatalogItem == null
+                            ? null : _replaceCatalogItem,
                         textCapitalization: TextCapitalization.words,
                         decoration: InputDecoration(
                           labelText: tr('item'),
                           suffixIcon: widget.selectCatalogItem == null ? null
-                              : const Icon(Icons.search),
+                              : IconButton(tooltip: 'Search catalog',
+                                  onPressed: _replaceCatalogItem,
+                                  icon: const Icon(Icons.search)),
                           border: const OutlineInputBorder(),
-                          filled: widget.lockCatalogFields,
-                          fillColor: widget.lockCatalogFields
+                          filled: _catalogLocked,
+                          fillColor: _catalogLocked
                               ? Theme.of(context)
                                   .colorScheme
                                   .surfaceContainerHighest
