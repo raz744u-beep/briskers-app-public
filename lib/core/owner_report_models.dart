@@ -88,10 +88,12 @@ class ReportPeriod {
       ),
     };
   }
-  bool contains(Object? raw) {
-    final d = reportDate(raw);
-    if (d == null) return false;
-    return !d.isBefore(day(start)) && !d.isAfter(day(end));
+  bool contains(Object? raw) => containsDate(reportDate(raw));
+  bool containsDate(DateTime? date) {
+    if (date == null) return false;
+    int key(DateTime d) => d.year * 10000 + d.month * 100 + d.day;
+    final value = key(date);
+    return value >= key(start) && value <= key(end);
   }
 
   ReportPeriod shift(int direction) {
@@ -119,10 +121,9 @@ class ReportPeriod {
 // Business dates keep their written calendar day, including ISO timestamps
 // with an explicit offset. Parsing the timestamp first would move late-night
 // receipts into tomorrow when the device or CI runs in UTC.
+final _reportDatePattern = RegExp(r'^(\d{4})-(\d{2})-(\d{2})(?:$|[T ])');
 DateTime? reportDate(Object? raw) {
-  final match = RegExp(
-    r'^(\d{4})-(\d{2})-(\d{2})(?:$|[T ])',
-  ).firstMatch(raw?.toString() ?? '');
+  final match = _reportDatePattern.firstMatch(raw?.toString() ?? '');
   if (match == null) return null;
   final year = int.parse(match[1]!),
       month = int.parse(match[2]!),
@@ -261,8 +262,12 @@ class OwnerReportData {
               d['status'] == 'closed',
         );
   }).toList();
+  final _dates = <String, DateTime?>{};
+  DateTime? dateOf(Object? raw) =>
+      _dates.putIfAbsent(raw?.toString() ?? '', () => reportDate(raw));
+  bool inPeriod(ReportPeriod p, Object? raw) => p.containsDate(dateOf(raw));
   List<ReportRow> invoicesIn(ReportPeriod p) =>
-      invoices.where((r) => p.contains(r['document_date'])).toList();
+      invoices.where((r) => inPeriod(p, r['document_date'])).toList();
   static int? salesOf(ReportRow r) {
     final gross = reportCents(r['total_amount']);
     final tax = reportCents(r['tax_amount']);
@@ -288,7 +293,7 @@ class OwnerReportData {
   OwnerReportSummary _summary(ReportPeriod p) {
     final selected = invoicesIn(p);
     final financial = transactions
-        .where((r) => p.contains(r['transaction_date']))
+        .where((r) => inPeriod(p, r['transaction_date']))
         .toList();
     int? amount(ReportRow r) => reportCents(
       r['direction'] == 'income' &&
@@ -299,13 +304,11 @@ class OwnerReportData {
     );
     final undatedIncome = transactions.any(
       (r) =>
-          r['direction'] == 'income' &&
-          reportDate(r['transaction_date']) == null,
+          r['direction'] == 'income' && dateOf(r['transaction_date']) == null,
     );
     final undatedExpense = transactions.any(
       (r) =>
-          r['direction'] == 'expense' &&
-          reportDate(r['transaction_date']) == null,
+          r['direction'] == 'expense' && dateOf(r['transaction_date']) == null,
     );
     final ambiguousIncome = financial.any(
       (r) => r['_report_payment_review'] == true,
@@ -322,7 +325,7 @@ class OwnerReportData {
         ? null
         : _sum(financial.where((r) => r['direction'] == 'expense').map(amount));
     final undatedInvoices = invoices.any(
-      (r) => reportDate(r['document_date']) == null,
+      (r) => dateOf(r['document_date']) == null,
     );
     final billedSales = undatedInvoices ? null : _sum(selected.map(salesOf));
     final collected = _collected.putIfAbsent(
@@ -337,7 +340,7 @@ class OwnerReportData {
     final paidInvoiceCount = transactions
         .where(
           (r) =>
-              r['direction'] == 'income' && p.contains(r['transaction_date']),
+              r['direction'] == 'income' && inPeriod(p, r['transaction_date']),
         )
         .map((r) => r['document_id'] ?? r['invoice_id'] ?? r['id'])
         .toSet()

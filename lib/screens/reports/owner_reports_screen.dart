@@ -194,7 +194,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
               Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Padding(padding: const EdgeInsets.only(right: 28), child: Text(title, maxLines: 3,
                   style: const TextStyle(fontSize: 13, height: 1.1, fontWeight: FontWeight.w800))),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 FittedBox(fit: BoxFit.scaleDown, child: Text(value,
                   style: const TextStyle(fontSize: 25, height: 1.1, fontWeight: FontWeight.w800, color: Color(0xFF111A31)))),
                 if (subtitle != null) Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,

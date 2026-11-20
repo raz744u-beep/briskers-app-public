@@ -59,6 +59,7 @@ class OwnerReportPaymentMerge {
       }
     }
     final unique = <ReportRow>[];
+    final receiptByKey = <String, ReportRow>{};
     for (final original in receipts) {
       final r = <String, dynamic>{
         ...original,
@@ -66,16 +67,16 @@ class OwnerReportPaymentMerge {
       };
       final keys = paymentKeys(r, receipt: true);
       if (keys.isEmpty) continue;
-      final previous = unique
-          .where(
-            (p) =>
-                document(p) == document(r) &&
-                paymentKeys(p, receipt: true).intersection(keys).isNotEmpty,
-          )
+      final previous = keys
+          .map((key) => receiptByKey['${document(r)}:$key'])
+          .nonNulls
           .firstOrNull;
       if (previous != null) {
         if (reportCents(previous['amount']) != reportCents(r['amount'])) {
           previous['_report_payment_review'] = true;
+        }
+        for (final key in keys) {
+          receiptByKey['${document(r)}:$key'] = previous;
         }
         continue;
       }
@@ -85,32 +86,39 @@ class OwnerReportPaymentMerge {
         if (tx != null && r['transaction_id'] == null) r['transaction_id'] = tx;
       }
       unique.add(r);
+      for (final key in keys) {
+        receiptByKey['${document(r)}:$key'] = r;
+      }
+    }
+    final financialById = <String, List<ReportRow>>{};
+    final financialByPayment = <String, List<ReportRow>>{};
+    final financialByInvoice = <String, List<ReportRow>>{};
+    for (final row in rows.where((r) => r['direction'] == 'income')) {
+      (financialById[row['id'].toString()] ??= []).add(row);
+      for (final key in paymentKeys(row)) {
+        (financialByPayment[key] ??= []).add(row);
+      }
+      final doc = document(row);
+      if (doc != null) {
+        (financialByInvoice[doc] ??= []).add(row);
+      }
     }
     final matched = <String, List<ReportRow>>{};
     final supplemental = <ReportRow>[];
     for (final receipt in unique) {
       final keys = paymentKeys(receipt, receipt: true);
-      final matches = rows
-          .where(
-            (f) =>
-                f['direction'] == 'income' &&
-                (document(f) == null || document(f) == document(receipt)) &&
-                ((receipt['transaction_id'] != null &&
-                        receipt['transaction_id'] == f['id']) ||
-                    paymentKeys(f).intersection(keys).isNotEmpty),
-          )
+      final candidates = <ReportRow>{
+        ...?financialById[receipt['transaction_id']?.toString()],
+        for (final key in keys) ...?financialByPayment[key],
+      };
+      final matches = candidates
+          .where((f) => document(f) == null || document(f) == document(receipt))
           .toList();
       if (matches.length == 1) {
         (matched[matches.single['id'].toString()] ??= []).add(receipt);
       } else {
-        final sameInvoice = rows
-            .where(
-              (f) =>
-                  f['direction'] == 'income' &&
-                  document(receipt) != null &&
-                  document(f) == document(receipt),
-            )
-            .toList();
+        final sameInvoice =
+            financialByInvoice[document(receipt)] ?? const <ReportRow>[];
         final serverId =
             receipt['server_payment_id'] ??
             (receipt['receipt_state'] == 'posted'
@@ -185,7 +193,8 @@ class OwnerReportPaymentMerge {
           result.add(
             decorate({
               ...row,
-              'id': '${row['id']}:${part['receipt_id'] ?? part['operation_id'] ?? part['server_payment_id']}',
+              'id':
+                  '${row['id']}:${part['receipt_id'] ?? part['operation_id'] ?? part['server_payment_id']}',
               'amount': amount / 100,
               if (cumulativeRetained != null)
                 'reporting_amount':
@@ -201,7 +210,8 @@ class OwnerReportPaymentMerge {
     for (final r in supplemental) {
       result.add(
         decorate({
-          'id': 'report-receipt:${r['receipt_id'] ?? r['operation_id'] ?? r['server_payment_id']}',
+          'id':
+              'report-receipt:${r['receipt_id'] ?? r['operation_id'] ?? r['server_payment_id']}',
           'direction': 'income',
           'amount': r['amount'],
           'transaction_date': r['transaction_date'],

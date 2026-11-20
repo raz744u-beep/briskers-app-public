@@ -9,7 +9,7 @@ int? reportIncomeCents(ReportRow r) => reportCents(
 );
 
 class ReportPeriodEntry {
-  const ReportPeriodEntry({
+  ReportPeriodEntry({
     required this.row,
     this.invoice,
     required this.gross,
@@ -33,8 +33,9 @@ class ReportPeriodEntry {
               row['customer_name'] ??
               'Other income')
           .toString();
-  DateTime? get date =>
-      reportDate(row['transaction_date'] ?? row['document_date']);
+  late final DateTime? date = reportDate(
+    row['transaction_date'] ?? row['document_date'],
+  );
 }
 
 class ReportPeriodTotals {
@@ -85,11 +86,11 @@ class OwnerReportPeriod {
   final ReportPeriod period;
   final ReportTransactionBasis basis;
   bool get undated => basis != ReportTransactionBasis.payments
-      ? data.invoices.any((r) => reportDate(r['document_date']) == null)
+      ? data.invoices.any((r) => data.dateOf(r['document_date']) == null)
       : data.transactions.any(
           (r) =>
               r['direction'] == 'income' &&
-              reportDate(r['transaction_date']) == null,
+              data.dateOf(r['transaction_date']) == null,
         );
   bool get unavailable =>
       undated ||
@@ -106,7 +107,7 @@ class OwnerReportPeriod {
       final docs = basis == ReportTransactionBasis.invoices
           ? data.invoicesIn(period)
           : data.invoices.where((d) {
-              final date = reportDate(d['document_date']);
+              final date = data.dateOf(d['document_date']);
               return date == null ||
                   !date.isAfter(ReportPeriod.day(period.end));
             }).toList();
@@ -123,7 +124,7 @@ class OwnerReportPeriod {
     final all = data._paymentEntries ??= _allPayments();
     return [
       for (final e in all)
-        if (period.contains(e.row['transaction_date']))
+        if (data.inPeriod(period, e.row['transaction_date']))
           ReportPeriodEntry(
             row: e.row,
             invoice: e.invoice,
@@ -218,7 +219,7 @@ class OwnerReportPeriod {
     )) {
       final id = (row['document_id'] ?? row['invoice_id'])?.toString();
       if (id == null) continue;
-      final date = reportDate(row['transaction_date']),
+      final date = data.dateOf(row['transaction_date']),
           amount = reportCents(row['amount']);
       if (date == null || amount == null) {
         _unclearBalances.add(id);
