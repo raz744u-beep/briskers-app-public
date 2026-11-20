@@ -26,7 +26,10 @@ OwnerReportData fixture() => OwnerReportData(business:'shop', invoices:[
   {'id':'invoice','kind':'invoice','business_id':'shop','customer_id':'c','customer_name':'Jennifer',
     'document_number':'6380','document_date':'2026-11-19','total_amount':108,'tax_amount':8,
     'lines':[{'id':'part','name':'Water pump','item_id':'pump','quantity':1,'unit_price':100,'unit_cost':50}]},
-],transactions:[],jobs:[],expenses:[],labor:[]);
+],transactions:[
+  {'id':'income','direction':'income','amount':50,'transaction_date':'2026-11-19'},
+  {'id':'expense','direction':'expense','amount':20,'transaction_date':'2026-11-19'},
+],jobs:[],expenses:[],labor:[]);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -117,6 +120,10 @@ void main() {
         image.dispose();
       });
     }
+    final chart=tester.getTopLeft(find.byKey(const ValueKey('owner-report-chart')));
+    await tester.tapAt(chart+const Offset(11*90+12+2*(64/3)+8,20));
+    await tester.pumpAndSettle();
+    expect(find.text(r'Nov 26 · Net Profit: $30.00'),findsOneWidget);
     await capture('overview');await tab(tester,'Customers');await capture('customers');
     await tab(tester,'Items');await capture('items');
     expect(tester.takeException(),isNull);

@@ -93,13 +93,14 @@ class _OwnerReportTrendState extends State<OwnerReportTrend> {
         Expanded(child: SingleChildScrollView(controller: _scroll, scrollDirection: Axis.horizontal,
           child: GestureDetector(onTapUp: (event) {
             final index = (event.localPosition.dx / 90).floor().clamp(0, periods.length - 1);
-            final within = event.localPosition.dx % 90;
-            final series = ((within / 90) * selected.length).floor().clamp(0, selected.length - 1);
+            final within = event.localPosition.dx % 90 - 12;
+            if (within < 0 || within >= 64) return;
+            final series = (within / (64 / selected.length)).floor().clamp(0, selected.length - 1);
             final key = selected[series];
             final value = summaries[index].values[key];
             setState(() => _detail = '${_label(periods[index])} · ${key.label}: ${value == null ? 'Not recorded' : NumberFormat.simpleCurrency(locale: 'en_US').format(value / 100)}');
           }, child: Semantics(label: 'Financial comparison chart. Swipe horizontally; tap a bar for its value.',
-            child: CustomPaint(size: Size(periods.length * 90, 270), painter: _TrendPainter(
+            child: CustomPaint(key: const ValueKey('owner-report-chart'), size: Size(periods.length * 90, 270), painter: _TrendPainter(
               summaries, selected, periods.map(_label).toList())))))),
       ])),
       const SizedBox(height: 8),

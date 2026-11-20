@@ -140,8 +140,16 @@ void main() {
   test('item labor aliases and duplicate IDs do not add paid or completed cost twice', () {
     final report=data(credits:[credit(actual:60,done:true), credit(actual:60,done:true),
       {...credit(id:'alias',actual:60,done:true),'duplicate_of_task_id':'task'},
-      {...credit(id:'inactive',actual:60,done:true),'source_active':0}]);
+      {...credit(id:'inactive',actual:0,done:false),'source_active':0}]);
     expect(report.items(period).single.cost,4000);
+  });
+  test('a second labor line without cost coverage cannot disappear from the forecast', () {
+    final doc=invoice();
+    doc['lines']=[...(doc['lines'] as List), {'id':'second','name':'Labor','quantity':2,'unit_price':150}];
+    expect(data(docs:[doc]).summary(period).values[OwnerReportMetric.projected],isNull);
+    final inactive=data(credits:[credit(), {...credit(id:'inactive',actual:60,done:true),'source_active':0}]);
+    expect(inactive.summary(period).values[OwnerReportMetric.projected],isNull);
+    expect(inactive.items(period).single.cost,isNull);
   });
   test('date presets are inclusive and preserve calendar days across leap months', () {
     final feb=ReportPeriod.preset('lastMonth',DateTime(2024,3,20));

@@ -210,7 +210,10 @@ class OwnerReportData {
       final paid = reportInt(r['paid_cents']), paidMinutes = reportInt(r['paid_minutes']);
       final active = r['source_active'] != 0 && r['duplicate_of_task_id'] == null;
       if (r['duplicate_of_task_id'] != null && paidMinutes > 0) { laborKnown = false; continue; }
-      if (!active && paidMinutes == 0) continue;
+      if (!active && paidMinutes == 0) {
+        if (r['duplicate_of_task_id'] == null && r['completed'] == 1 && reportInt(r['actual_minutes']) > 0) laborKnown = false;
+        continue;
+      }
       final actual = reportInt(r['actual_minutes']);
       final expected = projected ? math.max(actual, reportInt(r['estimated_minutes'])) : actual;
       final minutes = active && (projected || r['completed'] == 1) ? expected : paidMinutes;
@@ -222,8 +225,13 @@ class OwnerReportData {
         laborTotal += paid + (remaining * rate / 60).round();
       }
     }
-    final laborLines = docs.expand((r) => (r['lines'] as List? ?? const []).whereType<Map>()).where(isInvoiceLaborLine).toList();
-    if (laborLines.isNotEmpty && credits.where((r) => r['source_active'] != 0 && r['duplicate_of_task_id'] == null).isEmpty) laborKnown = false;
+    for (final doc in docs) {
+      if (doc['lines'] is! List) { laborKnown = false; continue; }
+      for (final line in (doc['lines'] as List).whereType<Map>().where(isInvoiceLaborLine)) {
+        if (line['id'] == null || !credits.any((r) => r['source_active'] != 0 && r['duplicate_of_task_id'] == null &&
+            r['invoice_id'] == doc['id'] && (r['source_line_id'] ?? r['labor_line_id']) == line['id'])) laborKnown = false;
+      }
+    }
     if (!laborKnown) issues.add('Mechanic hours, rates or original paid costs need review.');
     return ReportJobFigure(job: job, sales: sales, expenses: expenseReadable ? direct : null,
       labor: laborKnown ? laborTotal : null, issues: issues);
@@ -290,10 +298,11 @@ class OwnerReportData {
             byId[(r['allocation_id'] ?? r['id']).toString()] = r;
           }
           final parts = byId.values.where((r) =>
-            (r['source_active'] != 0 && r['duplicate_of_task_id'] == null) || reportInt(r['paid_minutes']) > 0).toList();
+            (r['source_active'] != 0 && r['duplicate_of_task_id'] == null) || reportInt(r['paid_minutes']) > 0 ||
+            (r['duplicate_of_task_id'] == null && r['completed'] == 1 && reportInt(r['actual_minutes']) > 0)).toList();
           if (parts.isNotEmpty) {
             cost = _sum(parts.map((r) {
-              if (r['duplicate_of_task_id'] != null) return null;
+              if (r['duplicate_of_task_id'] != null || (r['source_active'] == 0 && reportInt(r['paid_minutes']) == 0)) return null;
               final actual = reportInt(r['actual_minutes']);
               final paidMinutes = reportInt(r['paid_minutes']);
               final remaining = r['completed'] == 1 ? actual - paidMinutes : 0;
