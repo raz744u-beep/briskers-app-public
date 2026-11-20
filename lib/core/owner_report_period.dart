@@ -8,6 +8,27 @@ int? reportIncomeCents(ReportRow r) => reportCents(
       : r['amount'],
 );
 
+/// Recover historical tax only from saved amounts that reconcile to the saved total.
+int? reportInvoiceTax(ReportRow invoice) {
+  final explicit = reportCents(invoice['tax_amount']);
+  if (explicit != null) { return explicit; }
+  final gross = reportCents(invoice['total_amount']);
+  final net = reportCents(invoice['net_amount']);
+  if (gross != null && net != null && gross >= net) { return gross - net; }
+  final lines = invoice['lines'];
+  if (gross == null || lines is! List || lines.isEmpty) { return null; }
+  var savedNet = 0, savedTax = 0;
+  for (final line in lines) {
+    if (line is! Map) { return null; }
+    final amount = reportCents(line['net_amount']);
+    final rate = num.tryParse(line['tax_rate']?.toString() ?? '');
+    if (amount == null || rate == null || !rate.isFinite || rate < 0) { return null; }
+    savedNet += amount;
+    savedTax += (amount * rate).round();
+  }
+  return savedNet + savedTax == gross ? savedTax : null;
+}
+
 class ReportPeriodEntry {
   ReportPeriodEntry({
     required this.row,
@@ -167,7 +188,7 @@ class OwnerReportPeriod {
           tax = reportCents(r['tax_amount']);
         } else if (doc != null && !unclearTax.contains(id)) {
           final gross = reportCents(doc['total_amount']),
-              invoiceTax = reportCents(doc['tax_amount']);
+              invoiceTax = reportInvoiceTax(doc);
           if (gross != null &&
               invoiceTax != null &&
               gross > 0 &&
@@ -279,7 +300,7 @@ class OwnerReportPeriod {
       row: doc,
       invoice: doc,
       gross: reportCents(doc['total_amount']),
-      tax: reportCents(doc['tax_amount']),
+      tax: reportInvoiceTax(doc),
       retained: reportCents(doc['total_amount']),
       amountDue: balance.due,
       paid: balance.paid,

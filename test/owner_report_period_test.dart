@@ -532,4 +532,14 @@ void main() {
       expect(past.entries.single.amountDue, isNull);
     },
   );
+  test('historical saved net or complete saved line tax recovers tax without current settings', () {
+    final legacy = invoice('a')..remove('tax_amount');
+    expect(reportInvoiceTax({...legacy, 'net_amount': 100}), 1000);
+    expect(reportInvoiceTax({...legacy, 'lines': [{'net_amount': 100, 'tax_rate': 0.1}]}), 1000);
+    expect(reportInvoiceTax({...legacy, 'lines': [{'net_amount': 100, 'tax_rate': 0.03}]}), isNull);
+    final d = data([{...legacy, 'net_amount': 100}], [cash('receipt')]);
+    expect(d.summary(period).values[OwnerReportMetric.salesTax], 1000);
+    expect(d.summary(period).values[OwnerReportMetric.sales], 10000);
+  });
+
 }

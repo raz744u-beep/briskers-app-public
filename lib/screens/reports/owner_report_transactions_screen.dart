@@ -12,7 +12,7 @@ class OwnerReportTransactionsScreen extends StatefulWidget {
     required this.isOwner,
     required this.data,
     required this.period,
-    this.initialBasis = ReportTransactionBasis.payments,
+    this.initialBasis = ReportTransactionBasis.invoices,
     this.reload,
     this.sharedBottomNavigationBar,
   });
@@ -87,44 +87,16 @@ class _OwnerReportTransactionsScreenState
     if (mounted) await _refresh();
   }
 
-  Widget _amountCell(String text) => SizedBox(
-    width: 88,
-    child: Padding(
-      padding: const EdgeInsets.only(left: 6),
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        alignment: Alignment.centerRight,
-        child: Text(
-          text,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-        ),
-      ),
-    ),
-  );
-  Widget _total(String label, int? n, {bool strong = false}) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
-    child: Row(
-      children: [
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: strong ? FontWeight.w800 : FontWeight.w500,
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Text(
-          _money(n),
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: strong ? FontWeight.w800 : FontWeight.w600,
-          ),
-        ),
-      ],
-    ),
-  );
+  Widget _registerRow(List<String> values, {bool header = false, VoidCallback? onTap}) {
+    const widths = [110.0, 100.0, 210.0, 130.0, 120.0, 120.0, 120.0];
+    return Material(color: header ? const Color(0xFFE1EEFD) : Colors.white,
+      child: InkWell(onTap: onTap, child: Row(children: [
+        for (var i = 0; i < values.length; i++) SizedBox(width: widths[i],
+          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+            child: Text(values[i], textAlign: i >= 4 ? TextAlign.right : TextAlign.left,
+              style: TextStyle(fontWeight: header ? FontWeight.w700 : FontWeight.w500)))),
+      ])));
+  }
   @override
   Widget build(BuildContext context) {
     if (!widget.isOwner || widget.data.business != widget.businessId) {
@@ -140,7 +112,7 @@ class _OwnerReportTransactionsScreenState
     return Scaffold(
       backgroundColor: taskCanvas,
       appBar: ApprovedTasksHeader(
-        title: 'Transactions',
+        title: payments ? 'Payments Received' : 'Sales Register',
         subtitle: range,
         actions: [
           IconButton(
@@ -169,7 +141,7 @@ class _OwnerReportTransactionsScreenState
                   items: const [
                     DropdownMenuItem(
                       value: ReportTransactionBasis.invoices,
-                      child: Text('Invoices issued'),
+                      child: Text('Sales register'),
                     ),
                     DropdownMenuItem(
                       value: ReportTransactionBasis.payments,
@@ -190,7 +162,7 @@ class _OwnerReportTransactionsScreenState
                       ? 'Payments are selected by payment date. They may include older invoices or other income.'
                       : _basis == ReportTransactionBasis.unpaid
                       ? 'Outstanding invoices through the selected end date. These are separate from money received.'
-                      : 'Invoices are selected by original invoice date, including unpaid invoices.',
+                      : 'Invoices by invoice date. Paid and balance are through the selected end date. Swipe sideways for all columns.',
                   style: const TextStyle(
                     fontSize: 12,
                     color: BriskersColors.secondaryText,
@@ -214,185 +186,33 @@ class _OwnerReportTransactionsScreenState
               ],
             ),
           ),
-          Container(
-            color: const Color(0xFFE7EDF4),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: const Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Invoice / Name',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-                SizedBox(
-                  width: 88,
-                  child: Text(
-                    'Amount due',
-                    textAlign: TextAlign.right,
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                  ),
-                ),
-                SizedBox(
-                  width: 88,
-                  child: Text(
-                    'Paid',
-                    textAlign: TextAlign.right,
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: _refresh,
-              child: ListView.builder(
+          Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal,
+            child: SizedBox(width: 910, child: Column(children: [
+              _registerRow(['Date', 'Invoice', 'Customer', 'Status', payments ? 'Received' : 'Amount', 'Paid', 'Balance'], header: true),
+              Expanded(child: ListView.builder(
                 key: ValueKey('period-transaction-list-${_basis.name}'),
-                physics: const AlwaysScrollableScrollPhysics(),
-                itemCount: entries.isEmpty ? 1 : entries.length,
+                itemCount: entries.length + 1,
                 itemBuilder: (context, index) {
-                  if (entries.isEmpty) {
-                    return const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Text('No transactions in this period.'),
-                    );
+                  if (index == entries.length) {
+                    return Column(children: [
+                      _registerRow(['', '', '${entries.length} ${payments ? 'payments' : 'invoices'}', 'Totals', _money(totals.gross), _money(totals.paid), _money(totals.amountDue)], header: true),
+                      _registerRow(['', '', 'Total excluding tax', '', _money(totals.net), '', ''], header: true),
+                      _registerRow(['', '', payments ? 'Tax collected' : 'Tax billed', '', _money(totals.tax), '', ''], header: true),
+                    ]);
                   }
-                  final e = entries[index];
-                  return Material(
-                    color: Colors.white,
-                    child: InkWell(
-                      onTap: e.invoice == null ? null : () => _invoice(e),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                        decoration: const BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(color: BriskersColors.divider),
-                          ),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    e.invoiceNumber.isEmpty
-                                        ? 'Other income'
-                                        : '#${e.invoiceNumber}',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  Text(
-                                    e.name,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 14),
-                                  ),
-                                  Text(
-                                    e.date == null
-                                        ? 'Date missing'
-                                        : DateFormat('MMM d').format(e.date!),
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: BriskersColors.secondaryText,
-                                    ),
-                                  ),
-                                  if (e.invoice != null)
-                                    Text(
-                                      'Invoice total ${_money(reportCents(e.invoice!['total_amount']))}',
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        color: BriskersColors.secondaryText,
-                                      ),
-                                    ),
-                                  if (e.review)
-                                    const Text(
-                                      'Payment needs review',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: BriskersColors.destructive,
-                                      ),
-                                    )
-                                  else if (e.tax == null)
-                                    const Text(
-                                      'Tax details not recorded',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: BriskersColors.secondaryText,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                            _amountCell(
-                              e.invoice == null
-                                  ? '—'
-                                  : e.amountDue == null
-                                  ? 'Review'
-                                  : _money(e.amountDue),
-                            ),
-                            _amountCell(
-                              e.paid == null ? 'Review' : _money(e.paid),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
+                  final entry = entries[index];
+                  final status = entry.paid == null || entry.amountDue == null ? 'Needs review'
+                    : entry.amountDue == 0 ? 'Paid' : entry.paid! > 0 ? 'Partly paid' : 'Open';
+                  return _registerRow([
+                    entry.date == null ? 'Date missing' : DateFormat('MMM d, yyyy').format(entry.date!),
+                    entry.invoiceNumber.isEmpty ? '—' : '#${entry.invoiceNumber}', entry.name,
+                    status, _money(entry.gross), _money(entry.paid),
+                    entry.invoice == null ? '—' : _money(entry.amountDue),
+                  ], onTap: entry.invoice == null ? null : () => _invoice(entry));
                 },
-              ),
-            ),
-          ),
-          Container(
-            key: const ValueKey('period-transaction-totals'),
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-            decoration: const BoxDecoration(
-              color: Color(0xFFE1EEFD),
-              border: Border(top: BorderSide(color: BriskersColors.divider)),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '${entries.length} ${payments ? 'payment entries' : 'invoices'}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: BriskersColors.secondaryText,
-                    ),
-                  ),
-                ),
-                _total('Total including tax', totals.gross, strong: true),
-                _total('Total excluding tax', totals.net),
-                _total(payments ? 'Tax collected' : 'Tax billed', totals.tax),
-                _total('Amount due', totals.amountDue),
-                _total('Amount paid', totals.paid),
-                Text(
-                  'Balances as of ${DateFormat('MMM d, yyyy').format(widget.period.end)}',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: BriskersColors.secondaryText,
-                  ),
-                ),
-                if (payments && totals.fees != null && totals.fees != 0) ...[
-                  const Divider(),
-                  _total('Recorded processor fees', totals.fees),
-                  _total(
-                    'Income received after fees',
-                    totals.retained,
-                    strong: true,
-                  ),
-                ],
-              ],
-            ),
-          ),
+              )),
+            ])),
+          )),
         ],
       ),
     );

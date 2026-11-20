@@ -149,10 +149,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('#6380'), findsOneWidget);
       expect(find.text('Jennifer'), findsOneWidget);
-      expect(find.text('Tax collected'), findsOneWidget);
-      expect(find.text('Amount paid'), findsOneWidget);
-      expect(find.text(r'$46.30'), findsOneWidget);
-      expect(find.text(r'$3.70'), findsOneWidget);
+      expect(find.text('Sales Register'), findsOneWidget);
+      expect(find.text('Amount'), findsOneWidget);
+      expect(find.text('Paid'), findsOneWidget);
+      expect(find.text('Balance'), findsOneWidget);
+      expect(find.text(r'$108.00'), findsNWidgets(2));
+      expect(find.text(r'$50.00'), findsNWidgets(2));
       expect(find.text(r'$58.00'), findsNWidgets(2));
       expect(find.byKey(const ValueKey('installed-dock')), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -161,7 +163,7 @@ void main() {
       await tester.tap(find.text('Unpaid / Needs Review').last);
       await tester.pumpAndSettle();
       expect(find.text('Tax billed'), findsOneWidget);
-      expect(find.text(r'$108.00'), findsOneWidget);
+      expect(find.text(r'$108.00'), findsNWidgets(2));
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     });

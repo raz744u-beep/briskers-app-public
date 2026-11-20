@@ -270,7 +270,7 @@ class OwnerReportData {
       invoices.where((r) => inPeriod(p, r['document_date'])).toList();
   static int? salesOf(ReportRow r) {
     final gross = reportCents(r['total_amount']);
-    final tax = reportCents(r['tax_amount']);
+    final tax = reportInvoiceTax(r);
     return gross == null || tax == null ? null : gross - tax;
   }
 
@@ -382,7 +382,7 @@ class OwnerReportData {
         OwnerReportMetric.billedSales: billedSales,
         OwnerReportMetric.billedTax: undatedInvoices
             ? null
-            : _sum(selected.map((r) => reportCents(r['tax_amount']))),
+            : _sum(selected.map(reportInvoiceTax)),
         OwnerReportMetric.billedGross: undatedInvoices
             ? null
             : _sum(selected.map((r) => reportCents(r['total_amount']))),
