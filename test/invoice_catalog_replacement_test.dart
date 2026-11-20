@@ -55,13 +55,14 @@ void main() {
     await db.customStatement("INSERT INTO local_documents(id,business_id,kind,status,total,row_version) VALUES('invoice','shop','invoice','open',20,1)");
     var service=OfflineDocumentEditService(api:api,cache:cache,database:db);
     await service.updateLine('shop','invoice','original-line',name:'Correct part',
-      replacementItemId:'correct-part',description:'Selected from catalog',
+      replacementItemId:'correct-part',replacementPricingUnit:'each',description:'Selected from catalog',
       quantity:2,unitPrice:30,taxRate:.1,lineKind:'item');
     expect(api.calls,0);
     final saved=(await cache.load('shop','invoice'))!;
     expect(saved['total_amount'],66);
     expect((saved['lines'] as List).single,containsPair('id','original-line'));
     expect((saved['lines'] as List).single,containsPair('item_id','correct-part'));
+    expect((saved['lines'] as List).single,containsPair('pricing_unit','each'));
     await db.close();
     db=BriskersLocalDatabase(NativeDatabase(file));
     addTearDown(db.close);
@@ -120,7 +121,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(home:Builder(builder:(context) => Scaffold(
       body:TextButton(onPressed:() async {
         selected=await showModalBottomSheet<Map<String,dynamic>>(context:context,
-          isScrollControlled:true,builder:(_) => InvoiceItemPicker(accent:Colors.teal,items:const[
+          isScrollControlled:true,builder:(_) => const InvoiceItemPicker(accent:Colors.teal,items:[
             {'id':'wrong','name':'Oil filter','selling_price':12},
             {'id':'correct','name':'Air filter','selling_price':24},
           ]));

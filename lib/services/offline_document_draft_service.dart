@@ -1009,6 +1009,7 @@ class OfflineDocumentDraftService {
     required num taxRate,
     required String lineKind,
     String? replacementItemId,
+    String? replacementPricingUnit,
   }) async {
     final detail = await _requireDraft(businessId, documentId);
     final lines = _lines(detail);
@@ -1024,7 +1025,9 @@ class OfflineDocumentDraftService {
     final taxAmount = netAmount * taxRate;
     lines[index] = <String, dynamic>{
       ...lines[index],
-      if (replacementItemId != null) 'item_id': replacementItemId,
+      if (replacementItemId != null) ...{
+        'item_id': replacementItemId, 'pricing_unit': replacementPricingUnit,
+      },
       'name': name,
       'description': description,
       'quantity': quantity,
@@ -1387,19 +1390,19 @@ class OfflineDocumentDraftService {
               unitPrice: _number(b['unit_price']), taxRate: _number(b['tax_rate']),
               description: b['description']?.toString()), outboxId: outboxId);
         } else {
-        await LocalJobQuarantine.guardReplay(
-          _database,
-          businessId,
-          () => _api.updateDocumentLineV2(businessId, a['id'].toString(),
-            expectedVersion: version, name: b['name']?.toString() ?? 'Item',
-            quantity: _number(b['quantity']),
-            unitPrice: _number(b['unit_price']), taxRate: _number(b['tax_rate']),
-            description: b['description']?.toString(),
-            lineKind: b['line_kind']?.toString() ?? 'item',
-            replacementItemId: a['item_id'] == b['item_id']
-                ? null : b['item_id']?.toString()),
-          outboxId: outboxId,
-        );
+          await LocalJobQuarantine.guardReplay(
+            _database,
+            businessId,
+            () => _api.updateDocumentLineV2(businessId, a['id'].toString(),
+              expectedVersion: version, name: b['name']?.toString() ?? 'Item',
+              quantity: _number(b['quantity']),
+              unitPrice: _number(b['unit_price']), taxRate: _number(b['tax_rate']),
+              description: b['description']?.toString(),
+              lineKind: b['line_kind']?.toString() ?? 'item',
+              replacementItemId: a['item_id'] == b['item_id']
+                  ? null : b['item_id']?.toString()),
+            outboxId: outboxId,
+          );
         }
         corrected = true;
         break;

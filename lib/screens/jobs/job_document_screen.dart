@@ -1313,6 +1313,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     required num taxRate,
     required String lineKind,
     String? replacementItemId,
+    String? replacementPricingUnit,
   }) async {
     if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
       await _offlineDocumentDraft.updateLine(
@@ -1326,6 +1327,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         taxRate: taxRate,
         lineKind: lineKind,
         replacementItemId: replacementItemId,
+        replacementPricingUnit: replacementPricingUnit,
       );
       return;
     }
@@ -1341,6 +1343,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         taxRate: taxRate,
         lineKind: lineKind,
         replacementItemId: replacementItemId,
+        replacementPricingUnit: replacementPricingUnit,
       );
       return;
     }
@@ -2313,6 +2316,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         description: translatedResult['description']?.toString(),
         lineKind: translatedResult['line_kind'].toString(),
         replacementItemId: translatedResult['replacement_item_id']?.toString(),
+        replacementPricingUnit: translatedResult['replacement_pricing_unit']?.toString(),
       );
     });
   }
@@ -8717,6 +8721,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
   late final TextEditingController _taxPercent;
   late String _lineKind;
   String? _replacementItemId;
+  String? _replacementPricingUnit;
   String? _error;
 
   @override
@@ -8768,6 +8773,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
       }
       setState(() {
         _replacementItemId = item['id']?.toString();
+        _replacementPricingUnit = item['pricing_unit']?.toString();
         _name.text = name;
         // Keep the job's work description when replacing a labor catalog entry.
         if (!wasLabor) _description.text = item['description']?.toString() ?? '';
@@ -8800,7 +8806,10 @@ class _EditLineDialogState extends State<_EditLineDialog> {
     Navigator.pop(
       context,
       <String, dynamic>{
-        if (_replacementItemId != null) 'replacement_item_id': _replacementItemId,
+        if (_replacementItemId != null) ...{
+          'replacement_item_id': _replacementItemId,
+          'replacement_pricing_unit': _replacementPricingUnit,
+        },
         'name': _name.text.trim(),
         'line_kind': _lineKind,
         'description': _description.text.trim().isEmpty

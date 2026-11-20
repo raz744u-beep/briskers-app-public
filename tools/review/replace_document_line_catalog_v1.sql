@@ -22,7 +22,7 @@ BEGIN
     WHERE business_id=p_business_id AND id=old_line.document_id FOR UPDATE;
   PERFORM briskers.require_permission(p_business_id,
     CASE WHEN document.kind='estimate' THEN 'estimates.edit' ELSE 'invoices.edit' END);
-  IF document.origin IS DISTINCT FROM 'native' OR document.closed_at IS NOT NULL
+  IF document.closed_at IS NOT NULL
       OR document.status IN ('closed','void')
       OR (document.kind='estimate' AND EXISTS(SELECT 1 FROM briskers.sales_documents i
         WHERE i.business_id=p_business_id AND i.source_estimate_id=document.id AND i.kind='invoice')) THEN

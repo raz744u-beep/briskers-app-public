@@ -128,49 +128,52 @@ class OfflineDocumentEditService {
     required num taxRate,
     required String lineKind,
     String? replacementItemId,
+    String? replacementPricingUnit,
   }) async {
     await _database.transaction(() async {
-    final detail = await _requireCached(businessId, documentId);
-    final lines = _lines(detail);
-    final index =
-        lines.indexWhere((line) => line['id']?.toString() == lineId);
-    if (index < 0) throw StateError('The estimate line is not saved locally.');
-    if (replacementItemId != null && isInvoiceLaborLine(lines[index]) &&
-        !isInvoiceLaborLine({'name': name, 'line_kind': lineKind})) {
-      throw StateError('Keep labor allocations on a labor line.');
-    }
+      final detail = await _requireCached(businessId, documentId);
+      final lines = _lines(detail);
+      final index =
+          lines.indexWhere((line) => line['id']?.toString() == lineId);
+      if (index < 0) throw StateError('The estimate line is not saved locally.');
+      if (replacementItemId != null && isInvoiceLaborLine(lines[index]) &&
+          !isInvoiceLaborLine({'name': name, 'line_kind': lineKind})) {
+        throw StateError('Keep labor allocations on a labor line.');
+      }
 
-    final netAmount = quantity * unitPrice;
-    final taxAmount = netAmount * taxRate;
-    lines[index] = <String, dynamic>{
-      ...lines[index],
-      if (replacementItemId != null) 'item_id': replacementItemId,
-      'name': name,
-      'description': description,
-      'quantity': quantity,
-      'unit_price': unitPrice,
-      'tax_rate': taxRate,
-      'net_amount': netAmount,
-      'tax_amount': taxAmount,
-      'line_kind': lineKind,
-      '_local_pending': true,
-    };
-    await _saveDesired(businessId, documentId, detail, lines);
-    await _queue(
-      businessId,
-      documentId,
-      'update_line',
-      {
-        'line_id': lineId,
-        if (replacementItemId != null) 'replacement_item_id': replacementItemId,
+      final netAmount = quantity * unitPrice;
+      final taxAmount = netAmount * taxRate;
+      lines[index] = <String, dynamic>{
+        ...lines[index],
+        if (replacementItemId != null) ...{
+          'item_id': replacementItemId, 'pricing_unit': replacementPricingUnit,
+        },
         'name': name,
         'description': description,
         'quantity': quantity,
         'unit_price': unitPrice,
         'tax_rate': taxRate,
+        'net_amount': netAmount,
+        'tax_amount': taxAmount,
         'line_kind': lineKind,
-      },
-    );
+        '_local_pending': true,
+      };
+      await _saveDesired(businessId, documentId, detail, lines);
+      await _queue(
+        businessId,
+        documentId,
+        'update_line',
+        {
+          'line_id': lineId,
+          'replacement_item_id': ?replacementItemId,
+          'name': name,
+          'description': description,
+          'quantity': quantity,
+          'unit_price': unitPrice,
+          'tax_rate': taxRate,
+          'line_kind': lineKind,
+        },
+      );
     });
   }
 

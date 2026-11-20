@@ -40,7 +40,8 @@ void main() {
       if(find.text('Chris 20.0h').evaluate().isNotEmpty) break;
     }
     expect(find.text('Chris 20.0h'),findsOneWidget);
-    final pencil=tester.widget<IconButton>(find.byTooltip('Edit or split mechanic labor'));
+    final pencil=tester.widget<IconButton>(find.byWidgetPredicate((widget) =>
+      widget is IconButton && widget.tooltip == 'Edit or split mechanic labor'));
     expect(pencil.onPressed,isNotNull,reason:'Paid work must not disable the whole manager');
     expect(tester.widget<InkWell>(find.byKey(const ValueKey('manage-line-mechanics-engine'))).onTap,isNotNull);
     // The same additive operation used by Add mechanic keeps paid Chris intact.

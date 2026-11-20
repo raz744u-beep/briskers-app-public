@@ -4303,7 +4303,7 @@ class BriskersApi {
       params: {
         'p_business_id': businessId,
         'p_line_id': lineId,
-        if (replacementItemId != null) 'p_item_id': replacementItemId,
+        'p_item_id': ?replacementItemId,
         'p_expected_version': expectedVersion,
         'p_name': name,
         'p_quantity': quantity,
