@@ -75,6 +75,8 @@ class _RepairAuthorizationScreenState extends State<RepairAuthorizationScreen> {
       final charges = (widget.detail['lines'] as List? ?? const []).whereType<Map>()
         .map((line) => Map<String, dynamic>.from(line)).where(RepairGroup.isGeneralCharge).toList();
       final chargeCents = approved > 0 ? charges.fold<int>(0, (sum, line) => sum + RepairGroup.lineCents(line)) : 0;
+      final needsDiscountReview = approved > 0 && charges.any((line) => line['line_kind'] == 'discount') &&
+        data.groups.any((group) => choices[group.id] != RepairDecision.approved);
       return ListView(padding: const EdgeInsets.all(16), children: [
         Text('Estimate ${widget.detail['document_number'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
         Text('${widget.detail['customer_name'] ?? ''} · ${widget.detail['vehicle'] ?? ''}'),
@@ -101,11 +103,13 @@ class _RepairAuthorizationScreenState extends State<RepairAuthorizationScreen> {
             if (reviewing) Text(choices[group.id] == RepairDecision.approved ? 'Approved' : 'Declined',
               style: TextStyle(color: choices[group.id] == RepairDecision.approved ? BriskersColors.confirm : BriskersColors.destructive)),
           ]))),
-        if (charges.isNotEmpty) Text('General charges (supplies / discounts): \$${(chargeCents / 100).toStringAsFixed(2)}'),
-        Text('Authorized total including tax: \$${((approved + chargeCents) / 100).toStringAsFixed(2)}',
+        if (charges.isNotEmpty && !needsDiscountReview) Text('General charges (supplies / discounts): \$${(chargeCents / 100).toStringAsFixed(2)}'),
+        if (!needsDiscountReview) Text('Authorized total including tax: \$${((approved + chargeCents) / 100).toStringAsFixed(2)}',
           style: const TextStyle(fontWeight: FontWeight.w700)),
+        if (needsDiscountReview) const Text('Partial selections with discounts need updated pricing before authorization.',
+          style: TextStyle(color: BriskersColors.destructive)),
         if (!reviewing) FilledButton(style: FilledButton.styleFrom(backgroundColor: BriskersColors.confirm),
-          onPressed: allChosen ? () => setState(() => reviewing = true) : null, child: const Text('Review selections')),
+          onPressed: allChosen && !needsDiscountReview ? () => setState(() => reviewing = true) : null, child: const Text('Review selections')),
         if (reviewing) ...[
           TextButton(onPressed: busy ? null : () => setState(() { reviewing = false; strokes.clear(); }), child: const Text('Change selections')),
           DropdownButtonFormField<RepairAuthorizationMethod>(initialValue: method,
@@ -127,7 +131,7 @@ class _RepairAuthorizationScreenState extends State<RepairAuthorizationScreen> {
           ],
           if (error != null) Text(error!, style: const TextStyle(color: BriskersColors.destructive)),
           FilledButton(style: FilledButton.styleFrom(backgroundColor: BriskersColors.confirm),
-            onPressed: busy || !allChosen ? null : () => _save(data.scope), child: Text(busy ? 'Saving…' : 'Submit authorization')),
+            onPressed: busy || !allChosen || needsDiscountReview ? null : () => _save(data.scope), child: Text(busy ? 'Saving…' : 'Submit authorization')),
         ],
       ]);
     })),

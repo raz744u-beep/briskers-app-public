@@ -154,6 +154,8 @@ class LocalDocumentDetailCache {
     return _database.transaction(
       () => _serialized(key, () async {
         if (await _blocked(businessId, documentId, detail)) return;
+        detail = await LocalRepairGroups(database: _database, cache: this)
+            .protectInvoiceContent(businessId, documentId, detail);
         await _estimateNumber(businessId, documentId, detail);
         final completeConversion = detail['converted'] == true &&
             (detail['converted_invoice_id']?.toString().isNotEmpty ?? false);

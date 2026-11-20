@@ -1311,6 +1311,14 @@ class OfflineDocumentDraftService {
     Map<String, dynamic> detail,
     List<Map<String, dynamic>> lines,
   ) async {
+    if (detail['repair_group_invoice'] != null) {
+      throw StateError('Renew repair authorization before changing these invoice items.');
+    }
+    if (lines.any((line) => line['line_kind'] == 'discount') &&
+        (detail['repair_group_invoice'] != null ||
+          await LocalRepairGroups(database: _database, cache: _cache).enabled(businessId, documentId))) {
+      throw StateError('This discounted repair quote cannot be edited here yet. The saved amounts have not changed.');
+    }
     for (var i = 0; i < lines.length; i++) {
       lines[i] = <String, dynamic>{...lines[i], 'position': i + 1};
     }

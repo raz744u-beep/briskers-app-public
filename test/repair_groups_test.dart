@@ -194,4 +194,49 @@ void main() {
     await expectLater(drafts.convertEstimateOffline('shop', copy), throwsStateError);
     expect(await groups.history('shop', estimate), hasLength(1));
   });
+  test('saved full-estimate discounts stay exact and partial pricing fails before authorization', () async {
+    final a = await firstGroup();
+    final source = await detail();
+    await cache.save('shop', estimate, {...source, 'net_amount': 180, 'tax_amount': 18, 'total_amount': 198,
+      'lines': [...source['lines'] as List, {
+        'id': 'discount', 'name': 'Discount', 'line_kind': 'discount', 'quantity': 1,
+        'unit_price': 0, 'tax_rate': 0, 'net_amount': -20, 'tax_amount': -2, 'total_amount': -22,
+        'discount_method': 'percent', 'discount_timing': 'before_tax', 'discount_value': 10,
+      }]});
+    final scope = await groups.snapshot('shop', estimate, await detail());
+    final line = (source['lines'] as List).first as Map;
+    await expectLater(drafts.updateLine('shop', estimate, line['id'] as String,
+      name: 'Brakes', quantity: 1, unitPrice: 120, taxRate: 0.1, lineKind: 'part'), throwsStateError);
+    expect((await detail())['total_amount'], 198);
+    await expectLater(groups.authorize('shop', estimate, eventId: 'partial-discount', expectedScope: scope,
+      decisions: {a: RepairDecision.approved, RepairGroup.otherId: RepairDecision.declined},
+      method: RepairAuthorizationMethod.telephone, actor: 'Owner', notes: 'Telephone'), throwsStateError);
+    expect(await groups.history('shop', estimate), isEmpty);
+    await groups.authorize('shop', estimate, eventId: 'full-discount', expectedScope: scope,
+      decisions: {a: RepairDecision.approved, RepairGroup.otherId: RepairDecision.approved},
+      method: RepairAuthorizationMethod.telephone, actor: 'Owner', notes: 'Telephone');
+    final invoice = await drafts.convertEstimateOffline('shop', estimate);
+    expect((await cache.load('shop', invoice))!['total_amount'], 198);
+    expect((await detail())['total_amount'], 198);
+  });
+  test('legacy refresh cannot erase approved invoice scope and item edits require renewed authorization', () async {
+    final a = await firstGroup();
+    await authorize(a);
+    final invoice = await drafts.convertEstimateOffline('shop', estimate);
+    final saved = (await cache.load('shop', invoice))!;
+    expect((saved['repair_group_invoice'] as List).single['source_estimate_id'], estimate);
+    expect((saved['repair_group_invoice'] as List).single['authorization_event_id'], 'event');
+    await expectLater(drafts.addLine('shop', invoice, name: 'Unapproved work', quantity: 1,
+      unitPrice: 500, taxRate: 0, lineKind: 'labor'), throwsStateError);
+    final stale = {...saved}..remove('repair_group_invoice');
+    stale['lines'] = [{'id': 'unapproved-server-line', 'name': 'Unapproved work', 'line_kind': 'labor'}];
+    stale['total_amount'] = 999;
+    stale['job_id'] = 'unrelated-job';
+    await cache.save('shop', invoice, stale);
+    final retained = (await cache.load('shop', invoice))!;
+    expect(retained['total_amount'], 110);
+    expect(retained['lines'], saved['lines']);
+    expect(retained['job_id'], saved['job_id']);
+    expect(retained['repair_group_invoice'], saved['repair_group_invoice']);
+  });
 }

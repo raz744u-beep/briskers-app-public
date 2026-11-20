@@ -353,6 +353,14 @@ class OfflineDocumentEditService {
     Map<String, dynamic> detail,
     List<Map<String, dynamic>> lines,
   ) async {
+    if (detail['repair_group_invoice'] != null) {
+      throw StateError('Renew repair authorization before changing these invoice items.');
+    }
+    if (lines.any((line) => line['line_kind'] == 'discount') &&
+        (detail['repair_group_invoice'] != null ||
+          await LocalRepairGroups(database: _database, cache: _cache).enabled(businessId, documentId))) {
+      throw StateError('This discounted repair quote cannot be edited here yet. The saved amounts have not changed.');
+    }
     for (var index = 0; index < lines.length; index++) {
       lines[index] = <String, dynamic>{
         ...lines[index],
@@ -671,7 +679,8 @@ class OfflineDocumentEditService {
 
     for (final documentId in documentIds) {
       if (await LocalRepairGroups(database: _database, cache: _cache)
-          .enabled(businessId, documentId)) {
+          .enabled(businessId, documentId) ||
+          (await _cache.loadReadOnly(businessId, documentId))?['repair_group_invoice'] != null) {
         continue;
       }
       final pending = rows

@@ -20,6 +20,28 @@ class LocalRepairGroups {
   List<Variable<String>> _vars(String business, String estimate) =>
     [Variable(business), Variable(estimate)];
 
+  /// A legacy server refresh cannot erase authorized local invoice content.
+  /// Payment/status fields still use the established ledger/closure projections.
+  Future<Map<String, dynamic>> protectInvoiceContent(String business, String document,
+      Map<String, dynamic> detail) async {
+    if (detail['kind'] != 'invoice') { return detail; }
+    final row = await db.customSelect('SELECT content_json FROM repair_group_invoice_content_v1 WHERE business=? AND document=?',
+      variables: _vars(business, document)).getSingleOrNull();
+    if (detail['repair_group_invoice'] is List && detail['lines'] is List) {
+      final content = {for (final key in ['lines', 'net_amount', 'tax_amount', 'total_amount',
+        'repair_group_invoice', 'converted_from_estimate_id', 'converted_from_estimate_number',
+        'job_id', 'job_number', 'customer_id', 'customer_name', 'vehicle_id', 'vehicle',
+        'document_number', 'document_date', 'status', 'display_status', 'display_status_code',
+        'closed_at', 'paid_amount', 'pending_payment']) key: detail[key]};
+      await db.customStatement('INSERT INTO repair_group_invoice_content_v1 VALUES(?,?,?) '
+        'ON CONFLICT(business,document) DO UPDATE SET content_json=excluded.content_json',
+        [business, document, jsonEncode(content)]);
+      return detail;
+    }
+    if (row == null) { return detail; }
+    return {...detail, ...Map<String, dynamic>.from(jsonDecode(row.read<String>('content_json')) as Map)};
+  }
+
   Future<bool> enabled(String business, String estimate) async {
     return (await db.customSelect('SELECT 1 FROM repair_group_documents_v1 WHERE business=? AND estimate=?',
       variables: _vars(business, estimate)).get()).isNotEmpty;
@@ -140,6 +162,9 @@ class LocalRepairGroups {
     if (!await enabled(business, sourceId)) { return; }
     final target = await _editable(business, targetId);
     final sourceLines = (source['lines'] as List).whereType<Map>().toList();
+    if (sourceLines.any((line) => line['line_kind'] == 'discount')) {
+      throw StateError('Grouped discounted estimates need shared pricing support before copying.');
+    }
     final targetLines = (target['lines'] as List).whereType<Map>().toList();
     if (sourceLines.length != targetLines.length) {
       throw StateError('Copied item identities do not match the source.');
@@ -269,12 +294,20 @@ class LocalRepairGroups {
       netCents += (net * 100).round();
       taxCents += (tax * 100).round();
     }
+    final events = <String, Map<String, dynamic>>{};
+    for (final event in await history(business, estimate)) {
+      for (final group in (event['groups'] as List).whereType<Map>()) {
+        if (group['decision'] == 'approved') events[group['id'] as String] = event;
+      }
+    }
     return {...detail, 'lines': lines, 'net_amount': netCents / 100,
       'tax_amount': taxCents / 100, 'total_amount': (netCents + taxCents) / 100,
       'repair_group_invoice': [for (final group in approved) {
         'id': group.id, 'name': group.name, 'description': group.description,
         'source_line_ids': group.lines.map((line) => line['id']).toList(),
         'authorized_cents': group.quotedCents, 'evidence': group.evidence,
+        'source_estimate_id': estimate, 'authorization_event_id': events[group.id]?['event_id'],
+        'estimate_revision': events[group.id]?['revision'],
       }],
     };
   }
@@ -325,6 +358,11 @@ class LocalRepairGroups {
     final all = await groups(business, estimate, detail);
     final selected = all.where((group) => decisions.containsKey(group.id)).toList();
     if (selected.length != decisions.length || selected.any((group) => group.lines.isEmpty)) { throw ArgumentError('Select nonempty repair groups.'); }
+    if ((detail['lines'] as List).whereType<Map>().any((line) => line['line_kind'] == 'discount') &&
+        decisions.containsValue(RepairDecision.approved) &&
+        all.any((group) => group.lines.isNotEmpty && decisions[group.id] != RepairDecision.approved)) {
+      throw StateError('Partial selections with discounts require updated shared pricing before authorization.');
+    }
     for (final group in selected) {
       if (jsonEncode(RepairGroup.canonical(scope[group.id])) != jsonEncode(RepairGroup.canonical(expectedScope[group.id]))) {
         throw StateError('Repair scope changed. Review the current estimate before authorizing.');

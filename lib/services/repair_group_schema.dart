@@ -6,6 +6,9 @@ class RepairGroupSchema {
     await db.customStatement('''CREATE TABLE IF NOT EXISTS repair_group_documents_v1(
       business TEXT NOT NULL, estimate TEXT NOT NULL,
       PRIMARY KEY(business,estimate))''');
+    await db.customStatement('''CREATE TABLE IF NOT EXISTS repair_group_invoice_content_v1(
+      business TEXT NOT NULL, document TEXT NOT NULL, content_json TEXT NOT NULL,
+      PRIMARY KEY(business,document))''');
     await db.customStatement('''CREATE TABLE IF NOT EXISTS repair_groups_v1(
       business TEXT NOT NULL, estimate TEXT NOT NULL, id TEXT NOT NULL,
       name TEXT NOT NULL, description TEXT NOT NULL, position INTEGER NOT NULL,

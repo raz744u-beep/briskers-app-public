@@ -277,6 +277,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Map<String, dynamic>? _detail;
   bool _hasRepairGroups = false;
+  bool get _groupedDocument => _hasRepairGroups || _detail?['repair_group_invoice'] != null;
   Map<String, dynamic> _identifixMeta = const {};
   Map<String, dynamic> _warrantyDetail = const {};
   Map<String, dynamic> _signatureStatus = const {};
@@ -1335,7 +1336,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       );
       return;
     }
-    if (BriskersConnectionModeController.instance.forceOffline || _hasRepairGroups) {
+    if (BriskersConnectionModeController.instance.forceOffline || _groupedDocument) {
       await _offlineDocumentEdit.updateLine(
         widget.businessId,
         widget.documentId,
@@ -1374,7 +1375,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       );
       return;
     }
-    if (BriskersConnectionModeController.instance.forceOffline || _hasRepairGroups) {
+    if (BriskersConnectionModeController.instance.forceOffline || _groupedDocument) {
       await _offlineDocumentEdit.deleteLine(
         widget.businessId,
         widget.documentId,
@@ -1398,7 +1399,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       );
       return;
     }
-    if (BriskersConnectionModeController.instance.forceOffline || _hasRepairGroups) {
+    if (BriskersConnectionModeController.instance.forceOffline || _groupedDocument) {
       await _offlineDocumentEdit.copyLine(
         widget.businessId,
         widget.documentId,
@@ -1426,7 +1427,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       );
       return;
     }
-    if (BriskersConnectionModeController.instance.forceOffline || _hasRepairGroups) {
+    if (BriskersConnectionModeController.instance.forceOffline || _groupedDocument) {
       await _offlineDocumentEdit.moveLine(
         widget.businessId,
         widget.documentId,
@@ -2326,8 +2327,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _addDiscount() async {
-    if (_hasRepairGroups) {
-      setState(() => _error = 'Local grouped discount editing requires the shared pricing upgrade. The quote has not been changed.');
+    if (_groupedDocument) {
+      setState(() => _error = 'Discount changes for grouped repairs are not available yet. The saved quote has not changed.');
       return;
     }
     if (_readOnly) return;
@@ -2360,8 +2361,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _editDiscount(Map<String, dynamic> line) async {
-    if (_hasRepairGroups) {
-      setState(() => _error = 'Local grouped discount editing requires the shared pricing upgrade. The quote has not been changed.');
+    if (_groupedDocument) {
+      setState(() => _error = 'Discount changes for grouped repairs are not available yet. The saved quote has not changed.');
       return;
     }
     final result = await showModalBottomSheet<Map<String, dynamic>>(
