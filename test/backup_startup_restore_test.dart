@@ -406,4 +406,53 @@ void main() {
       );
     },
   );
+  test(
+    'customer-note originals referenced only in preferences are copied and relocated',
+    () async {
+      PackageInfo.setMockInitialValues(
+        appName: 'Briskers',
+        packageName: 'test',
+        version: '1',
+        buildNumber: '1',
+        buildSignature: 'test',
+      );
+      final external = await Directory.systemTemp.createTemp(
+        'briskers-external-note-',
+      );
+      addTearDown(() => external.delete(recursive: true));
+      final original = File('${external.path}/note-original.bin');
+      await original.writeAsBytes([7, 5, 3, 1]);
+      const key = 'briskers_customer_section_shop_customer_notes';
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        key,
+        jsonEncode({
+          'attachments': [
+            {'local_file_path': original.path},
+          ],
+        }),
+      );
+      final folder = Directory('${root.path}/notes-snapshot');
+      await folder.create();
+      final manifest = await LocalBackupService.snapshot('shop', folder);
+      expect(
+        (manifest['source_files'] as Map).containsKey(original.path),
+        true,
+      );
+      final restored = Directory('${root.path}/notes-restored');
+      await BackupArchive.restoreTo(folder, restored, businessId: 'shop');
+      final settings =
+          jsonDecode(
+                await File(
+                  '${restored.path}/Settings/preferences.json',
+                ).readAsString(),
+              )
+              as Map;
+      final notes = jsonDecode(settings[key] as String) as Map;
+      final restoredPath =
+          (notes['attachments'] as List).single['local_file_path'] as String;
+      expect(restoredPath, startsWith(restored.path));
+      expect(await File(restoredPath).readAsBytes(), [7, 5, 3, 1]);
+    },
+  );
 }

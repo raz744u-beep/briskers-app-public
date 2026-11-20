@@ -151,6 +151,12 @@ class LocalBackupService {
     } finally {
       db.close();
     }
+    final prefs = await SharedPreferences.getInstance();
+    final settings = {
+      for (final key in prefs.getKeys().where(safePreference))
+        key: prefs.get(key),
+    };
+    references.addAll(BackupArchive.referencesIn(settings));
     // Include every owned original and cached attachment, even if a legacy
     // projection no longer points to it. Never include a live database, tokens,
     // temporary downloads, or the backup folder itself.
@@ -200,11 +206,6 @@ class LocalBackupService {
         '${inventory.known - inventory.available} known cloud attachments are not stored on this device.',
       );
     }
-    final prefs = await SharedPreferences.getInstance();
-    final settings = {
-      for (final key in prefs.getKeys().where(safePreference))
-        key: prefs.get(key),
-    };
     final settingsFile = File('${folder.path}/Settings/preferences.json');
     await settingsFile.parent.create(recursive: true);
     await settingsFile.writeAsString(jsonEncode(settings), flush: true);

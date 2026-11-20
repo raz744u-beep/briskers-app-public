@@ -76,7 +76,7 @@ class BackupArchive {
 
   /// Discover references in every table, including runtime payroll and JSON
   /// caches/outboxes. Unknown or unreadable originals become explicit warnings.
-  static Set<String> referencedFiles(Database db) {
+  static Set<String> referencesIn(dynamic data) {
     final result = <String>{};
     void visit(dynamic value) {
       if (value is String) {
@@ -100,9 +100,17 @@ class BackupArchive {
       }
     }
 
+    visit(data);
+    return result;
+  }
+
+  static Set<String> referencedFiles(Database db) {
+    final result = <String>{};
     for (final table in counts(db).keys) {
       for (final row in db.select('SELECT * FROM ${quote(table)}')) {
-        row.values.forEach(visit);
+        for (final value in row.values) {
+          result.addAll(referencesIn(value));
+        }
       }
     }
     return result;
@@ -259,6 +267,13 @@ class BackupArchive {
         }
         return value;
       }
+
+      final settings = File('${target.path}/Settings/preferences.json');
+      final settingsData = jsonDecode(await settings.readAsString());
+      await settings.writeAsString(
+        jsonEncode(rewrite(settingsData)),
+        flush: true,
+      );
 
       final result = File('${target.path}/Database/briskers_local.sqlite');
       final db = sqlite3.open(result.path);

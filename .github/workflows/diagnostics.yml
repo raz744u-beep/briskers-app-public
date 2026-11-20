@@ -2,7 +2,7 @@ name: Briskers Diagnostics
 
 on:
   push:
-    branches: [feature/offline-complete-backup-20261120, fix/bugs38-round1-historical-edit-guard, fix/bugs38-consolidated, fix/payroll-link-invoice-expenses-20261118, fix/4742-expense-filter-integration-20261119, fix/job-mechanic-nickname-first-frame-20261119, fix/4743-device-regressions, fix/job-finish-all-zero-hours-20261119, fix/offline-warranty-pdf-signature-20261119]
+    branches: [fix/bugs38-round1-historical-edit-guard, fix/bugs38-consolidated, fix/payroll-link-invoice-expenses-20261118, fix/4742-expense-filter-integration-20261119, fix/job-mechanic-nickname-first-frame-20261119, fix/4743-device-regressions, fix/job-finish-all-zero-hours-20261119, fix/offline-warranty-pdf-signature-20261119]
   workflow_dispatch:
   pull_request:
     paths:
