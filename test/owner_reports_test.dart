@@ -257,4 +257,42 @@ void main() {
     final report=await LocalOwnerReports(database:db).load('shop',isOwner:true);
     expect(report.summary(period).values[OwnerReportMetric.net],isNull);
   });
+  test('reports use corrected recovery snapshots and identities instead of stale Gloria and Reginald caches', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    await LocalDocumentSqlStore.ensure(db);
+    // The normal repository initializes the recovery schema before reading.
+    await LocalOwnerReports(database: db).load('shop', isOwner: true);
+    for (final entry in [
+      (id: 'gloria', number: '6359', gross: 7882.11, tax: 700.00),
+      (id: 'reginald', number: '6357', gross: 1637.63, tax: 145.00),
+    ]) {
+      final recovered = {...invoice(id: entry.id, total: entry.gross, tax: entry.tax, lines: []),
+        'document_number': entry.number, 'status': 'closed', 'paid_amount': entry.gross};
+      final stale = {...recovered, 'paid_amount': 0, 'tax_amount': null, 'document_number': null};
+      for (final id in [entry.id, 'old-${entry.id}']) {
+        await db.customStatement("INSERT INTO local_documents(id,business_id,kind,total,document_date,status) VALUES(?,'shop','invoice',?,'2026-11-19','closed')", [id, entry.gross]);
+        await db.customStatement('INSERT INTO local_document_details VALUES(?,?)', ['briskers_document_detail_shop_$id', jsonEncode({...stale, 'id': id})]);
+      }
+      await db.customStatement('INSERT INTO recovery_document_cache VALUES(?,?,?)', ['shop', entry.id, jsonEncode(recovered)]);
+      await db.customStatement('INSERT INTO recovery_commits(business_id,local_invoice_id,server_invoice_id,identities_json,original_json,proof_json) VALUES(?,?,?,?,?,?)', ['shop', 'old-${entry.id}', entry.id, '{}', '{}', '{}']);
+    }
+    final cache = LocalFinancialCache(database: db);
+    await cache.saveTransactions('shop', [
+      {'id':'g1','document_id':'old-gloria','direction':'income','amount':3000,'transaction_date':'2026-11-19'},
+      {'id':'g2','document_id':'old-gloria','direction':'income','amount':4882.11,'transaction_date':'2026-11-19'},
+      {'id':'r1','document_id':'old-reginald','direction':'income','amount':1637.63,'transaction_date':'2026-11-19'},
+    ]);
+    final report = await LocalOwnerReports(database: db).load('shop', isOwner: true);
+    expect(report.invoices, hasLength(2));
+    expect(report.invoices.map((r) => r['document_number']).toSet(), {'6359', '6357'});
+    final register = OwnerReportPeriod(report, period, ReportTransactionBasis.invoices, now: DateTime(2026, 11, 20));
+    expect(register.paidInvoices, hasLength(2));
+    expect(register.totals.paid, 951974);
+    expect(register.totals.amountDue, 0);
+    expect(report.summary(period).values[OwnerReportMetric.salesTax], 84500);
+    final stored = await db.customSelect("SELECT payload_json FROM local_document_details WHERE cache_key='briskers_document_detail_shop_gloria'").getSingle();
+    expect((jsonDecode(stored.read<String>('payload_json')) as Map)['paid_amount'], 0);
+  });
+
 }
