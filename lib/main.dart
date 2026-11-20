@@ -194,6 +194,16 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
                           textAlign: TextAlign.center),
                     ],
                     const SizedBox(height: 12),
+                    if (_failedStep == 'Checking requested restore')
+                      TextButton(
+                        onPressed: () async {
+                          await LocalBackupService.cancelRequestedRestore();
+                          if (!mounted) return;
+                          setState(() { _failedStep = null; _failureKind = null; });
+                          await _initialize();
+                        },
+                        child: const Text('Stop restore and open saved data'),
+                      ),
                     const Text('Your local data has not been cleared. '
                         'Do not uninstall or clear app storage.',
                         textAlign: TextAlign.center),

@@ -23,6 +23,9 @@ class LocalBackupService {
   static const statusKey = 'briskers_backup_status_v1';
   static const automaticKey = 'briskers_backup_automatic_v1';
   static const restoreRequest = 'briskers_backup_restore_request_v1';
+  static Future<File> _restoreRequestFile() async => File(
+    '${(await getApplicationSupportDirectory()).path}/backup-restore-request.json',
+  );
 
   static bool safePreference(String key) =>
       key.startsWith('briskers_') &&
@@ -239,21 +242,34 @@ class LocalBackupService {
     // Restoring is a replacement, never a synchronization or a replay of wages.
     await prefs.setString('briskers_connection_mode', 'offline');
     BriskersConnectionModeController.instance.useSafeOfflineFallback();
-    await prefs.setString(
-      restoreRequest,
-      jsonEncode({'business': businessId, 'source': source.path}),
-    );
+    final request = jsonEncode({'business': businessId, 'source': source.path});
+    // The presence check at bootstrap must not depend on the preferences plugin
+    // that older devices sometimes fail to initialize. Publish this flag last.
+    await prefs.setString(restoreRequest, request);
+    final flag = await _restoreRequestFile();
+    final pending = File('${flag.path}.part');
+    await pending.writeAsString(request, flush: true);
+    await pending.rename(flag.path);
+  }
+
+  static Future<void> cancelRequestedRestore() async {
+    final flag = await _restoreRequestFile();
+    if (await flag.exists()) await flag.delete();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(restoreRequest);
+    // Preserve current database, safety snapshot, and every media original.
   }
 
   /// Runs at bootstrap before document caches, session/network initialization,
   /// and background scheduling. The SQL transaction keeps the live DB intact
   /// on any copy/schema failure. A safety snapshot is retained before replacement.
   static Future<void> applyRequestedRestore() async {
+    final flag = await _restoreRequestFile();
+    if (!await flag.exists()) return;
+    final raw = await flag.readAsString();
     final prefs = await SharedPreferences.getInstance().timeout(
       const Duration(seconds: 8),
     );
-    final raw = prefs.getString(restoreRequest);
-    if (raw == null) return;
     final request = jsonDecode(raw) as Map;
     final support = await getApplicationSupportDirectory();
     final source = Directory(request['source'] as String);
@@ -392,6 +408,7 @@ class LocalBackupService {
     }
     await prefs.setString('briskers_connection_mode', 'offline');
     await prefs.remove(restoreRequest);
+    await flag.delete();
     await prefs.setString(
       'briskers_backup_restored_at_v1',
       DateTime.now().toUtc().toIso8601String(),
