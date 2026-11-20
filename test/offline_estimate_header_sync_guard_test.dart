@@ -209,7 +209,17 @@ void main() {
     final pending = await queue(id);
     expect(pending['state'], 'conflict');
     expect(pending['last_error']?.toString(), contains('Mileage In'));
+    // The document screen reads the local detail, not sync_outbox. The
+    // conflict must survive reload and be visible without a second edit.
     final saved = (await cache.load('shop', id))!;
+    expect(saved['sync_state'], 'conflict');
+    expect(saved['_offline_estimate_sync_error']?.toString(),
+        contains('Mileage In'));
+    final savedLocalRow = await db.customSelect(
+      "SELECT sync_state FROM local_documents WHERE business_id='shop' AND id=?",
+      variables: [Variable<String>(id)],
+    ).getSingle();
+    expect(savedLocalRow.read<String>('sync_state'), 'conflict');
     expect(saved['odometer_in'], 12345);
     expect(saved['claim_number'], 'CLAIM-003');
     expect(saved['authorization_number'], 'AUTH-004');
