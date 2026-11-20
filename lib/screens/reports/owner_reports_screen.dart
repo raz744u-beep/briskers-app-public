@@ -172,7 +172,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
                 style: const TextStyle(fontSize: 12, height: 1.1, fontWeight: FontWeight.w800))),
             ]), const Spacer(),
             FittedBox(fit: BoxFit.scaleDown, child: Text(value,
-              style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800, color: Color(0xFF111A31)))),
+              style: const TextStyle(fontSize: 25, height: 1.1, fontWeight: FontWeight.w800, color: Color(0xFF111A31)))),
           ]) : Stack(children: [
             Row(children: [CircleAvatar(radius: 21, backgroundColor: color.withValues(alpha: .12),
                 child: Icon(icon, color: color, size: 29)), const SizedBox(width: 8),
@@ -181,9 +181,9 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
                   style: const TextStyle(fontSize: 13, height: 1.1, fontWeight: FontWeight.w800))),
                 const SizedBox(height: 6),
                 FittedBox(fit: BoxFit.scaleDown, child: Text(value,
-                  style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800, color: Color(0xFF111A31)))),
+                  style: const TextStyle(fontSize: 25, height: 1.1, fontWeight: FontWeight.w800, color: Color(0xFF111A31)))),
                 if (subtitle != null) Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 10, color: BriskersColors.secondaryText)),
+                  style: const TextStyle(fontSize: 10, height: 1.1, color: BriskersColors.secondaryText)),
               ])),
             ]),
             Positioned(top: -8, right: -8, child: IconButton(
@@ -216,7 +216,8 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
     final summary = data.summary(_period);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), itemCount: 4,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisExtent: 110,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2,
+          mainAxisExtent: MediaQuery.textScalerOf(context).scale(110),
           crossAxisSpacing: 10, mainAxisSpacing: 10),
         itemBuilder: (context, index) {
           final metric = _tiles[index];
@@ -283,7 +284,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
     documentId: doc['id'].toString(), isOwner: true, roleCode: 'owner', canManageExpenses: true,
     initialDocumentSummary: doc, sharedBottomNavigationBar: widget.sharedBottomNavigationBar));
 
-  Widget _summaries(List<({String title, String value, IconData icon, Color color})> entries) => SizedBox(height: 112,
+  Widget _summaries(List<({String title, String value, IconData icon, Color color})> entries) => SizedBox(height: MediaQuery.textScalerOf(context).scale(112),
     child: Row(children: [for (final (index, entry) in entries.indexed) ...[
       if (index != 0) const SizedBox(width: 7),
       Expanded(child: _tile(entry.title, entry.value, entry.icon, entry.color)),

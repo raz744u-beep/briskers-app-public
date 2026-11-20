@@ -61,6 +61,7 @@ void main() {
     expect(find.text('Filters'),findsNothing); expect(find.text('Export'),findsNothing);
     await tester.tap(find.byKey(const ValueKey('edit-overview-report-tile-0')));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('choose-report-projected')));
     await tester.tap(find.byKey(const ValueKey('choose-report-projected')));
     await tester.pumpAndSettle();
     expect(find.text('Projected Net Income'),findsOneWidget);
@@ -91,6 +92,11 @@ void main() {
       tester.view.physicalSize=Size(width,900);tester.view.devicePixelRatio=1;
       addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
       await open(tester);
+      await tester.tap(find.byKey(const ValueKey('edit-overview-report-tile-0')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('choose-report-projected')));
+      await tester.tap(find.byKey(const ValueKey('choose-report-projected')));
+      await tester.pumpAndSettle();
       expect(tester.takeException(),isNull);
       await tab(tester,'Customers');expect(tester.takeException(),isNull);
       await tab(tester,'Items');expect(tester.takeException(),isNull);
