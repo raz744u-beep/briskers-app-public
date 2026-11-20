@@ -11,10 +11,11 @@ import 'briskers_dialog.dart';
 class RepairGroupPanel extends StatefulWidget {
   const RepairGroupPanel({super.key, required this.business, required this.estimate,
     required this.detail, required this.editable, required this.onEnabled,
-    required this.onEditLine, required this.onAddItems, this.store});
+    required this.onEditLine, required this.onAddItems, this.owner = false, this.store});
   final String business, estimate;
   final Map<String, dynamic> detail;
   final bool editable;
+  final bool owner;
   final ValueChanged<bool> onEnabled;
   final ValueChanged<Map<String, dynamic>> onEditLine;
   final Future<void> Function() onAddItems;
@@ -136,7 +137,7 @@ class _RepairGroupPanelState extends State<RepairGroupPanel> {
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         if (data.enabled) Align(alignment: Alignment.centerLeft, child: TextButton.icon(
           onPressed: () => Navigator.push<void>(context, MaterialPageRoute(builder: (_) => RepairAuthorizationHistoryScreen(
-            business: widget.business, estimate: widget.estimate, owner: widget.editable, store: store))),
+            business: widget.business, estimate: widget.estimate, owner: widget.owner, store: store))),
           icon: const Icon(Icons.history_outlined), label: const Text('Authorization history'))),
         if (widget.editable) Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           child: Wrap(spacing: 8, children: [

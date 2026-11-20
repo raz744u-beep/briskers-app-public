@@ -15,7 +15,8 @@ class LocalRepairGroups {
       cache = cache ?? LocalDocumentDetailCache(database: database);
   final BriskersLocalDatabase db;
   final LocalDocumentDetailCache cache;
-  static String newId() => List.generate(24, (_) => Random.secure().nextInt(256)
+  static final _random = Random.secure();
+  static String newId() => List.generate(24, (_) => _random.nextInt(256)
     .toRadixString(16).padLeft(2, '0')).join();
   List<Variable<String>> _vars(String business, String estimate) =>
     [Variable(business), Variable(estimate)];
@@ -320,6 +321,11 @@ class LocalRepairGroups {
     for (final group in selected) {
       preserved[group.id] = await _preserveEvidence(business, eventId, group, mediaBytes);
     }
+    final approvedCents = selected.where((group) => decisions[group.id] == RepairDecision.approved)
+      .fold<int>(0, (sum, group) => sum + group.quotedCents);
+    final charges = approvedCents > 0 ? (detail['lines'] as List).whereType<Map>()
+      .map((line) => Map<String, dynamic>.from(line)).where(RepairGroup.isGeneralCharge).toList()
+      : <Map<String, dynamic>>[];
     final payload = <String, dynamic>{
       'event_id': eventId, 'estimate_id': estimate, 'revision': RepairGroup.hash(scope),
       'vehicle_id': detail['vehicle_id'], 'customer_id': detail['customer_id'],
@@ -327,6 +333,8 @@ class LocalRepairGroups {
       'method': method.name, 'actor': actor.trim(), 'notes': notes.trim(),
       'signature_ref': signed ? eventId : null,
       'signature_hash': signed ? RepairGroup.hash(base64Encode(signature!)) : null,
+      'general_charges': charges,
+      'authorized_total_cents': approvedCents + charges.fold<int>(0, (sum, line) => sum + RepairGroup.lineCents(line)),
       'groups': [for (final group in selected) {
         ...preserved[group.id]!,
         'scope': scope[group.id], 'decision': decisions[group.id]!.name,

@@ -5888,6 +5888,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             key: ValueKey('repair-groups-${widget.documentId}'),
             business: widget.businessId, estimate: widget.documentId,
             detail: _detail!, editable: widget.isOwner && !_readOnly && !_busy,
+            owner: widget.isOwner,
             onEnabled: (enabled) {
               if (mounted && enabled != _hasRepairGroups) setState(() => _hasRepairGroups = enabled);
             },
