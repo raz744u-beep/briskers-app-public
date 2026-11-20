@@ -45,15 +45,25 @@ class LocalOwnerReports {
               'JOIN local_documents ad ON ad.business_id=a.business_id AND ad.id=a.alias_id '
               "WHERE a.business_id=? AND d.kind='invoice' AND ad.kind='invoice'", variables: [Variable(business)]).get()
           : <QueryRow>[];
+      final recoveryAliases = await db.customSelect(
+        'SELECT local_invoice_id,server_invoice_id FROM recovery_commits WHERE business_id=?',
+        variables: [Variable(business)]).get();
+      final invoiceAliases = <String, String>{
+        for (final alias in aliases) alias.read<String>('alias_id'): alias.read<String>('canonical_id'),
+        for (final alias in recoveryAliases) alias.read<String>('local_invoice_id'): alias.read<String>('server_invoice_id'),
+      };
       final aliasIds = aliases.map((r) => r.read<String>('alias_id')).toSet();
       final source = await db.customSelect('''
         SELECT d.*,c.display_name AS customer_name,l.cache_key AS detail_key,
-          COALESCE(l.payload_json,r.payload_json) AS detail_json
+          CASE WHEN r.document_id IS NOT NULL THEN r.payload_json ELSE l.payload_json END AS detail_json,
+          r.document_id AS recovery_id
         FROM local_documents d
         LEFT JOIN local_customers c ON c.business_id=d.business_id AND c.id=d.customer_id
         LEFT JOIN local_document_details l ON l.cache_key='briskers_document_detail_' || d.business_id || '_' || d.id
         LEFT JOIN recovery_document_cache r ON r.business_id=d.business_id AND r.document_id=d.id
         WHERE d.business_id=? AND d.kind='invoice' AND NOT EXISTS (
+          SELECT 1 FROM recovery_commits rc WHERE rc.business_id=d.business_id AND rc.local_invoice_id=d.id
+        ) AND NOT EXISTS (
           SELECT 1 FROM local_document_detail_deleted x
           WHERE x.cache_key='briskers_document_detail_' || d.business_id || '_' || d.id)
       ''', variables: [Variable(business)]).get();
@@ -72,10 +82,11 @@ class LocalOwnerReports {
         final index = row.data;
         final id = row.read<String>('id');
         if (blockedDocuments.contains(id) || blockedJobs.contains(index['job_id']) || aliasIds.contains(id)) continue;
+        if (row.data['recovery_id'] != null && row.data['detail_json'] == null) continue;
         ReportRow detail = {};
         try {
           final saved = row.readNullable<String>('detail_json') ??
-            (row.data['detail_key'] == null ? legacyDetails['briskers_document_detail_${business}_$id'] : null);
+            (row.data['recovery_id'] == null && row.data['detail_key'] == null ? legacyDetails['briskers_document_detail_${business}_$id'] : null);
           final decoded = jsonDecode(saved ?? 'null');
           if (decoded is Map && decoded['id'] == id && decoded['kind'] == 'invoice' &&
               (decoded['business_id'] == null || decoded['business_id'] == business)) {
@@ -116,10 +127,11 @@ class LocalOwnerReports {
       final financial = OwnerReportPaymentMerge.combine(
         financial: ledger.where((r) => inScope(r) && r['locally_finalized_invoice_receipt'] != true).toList(),
         receipts: [for(final r in receipts) {...r, if(localNewOperations.contains(r['operation_id'])) '_report_new_local_receipt':true}],
-        invoices: invoices, aliases:{for(final a in aliases) a.read<String>('alias_id'):a.read<String>('canonical_id')});
+        invoices: invoices, aliases: invoiceAliases);
       final receiptsByInvoice = <String, int>{};
       for (final r in receipts) {
-        final id = r['invoice_id']?.toString();
+        final rawId = r['invoice_id']?.toString();
+        final id = invoiceAliases[rawId] ?? rawId;
         if (id != null) receiptsByInvoice[id] = (receiptsByInvoice[id] ?? 0) + (reportCents(r['amount']) ?? 0);
       }
       for (final doc in invoices) {
