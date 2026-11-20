@@ -87,15 +87,44 @@ class _OwnerReportTransactionsScreenState
     if (mounted) await _refresh();
   }
 
-  Widget _registerRow(List<String> values, {bool header = false, VoidCallback? onTap}) {
+  Widget _registerRow(
+    List<String> values, {
+    bool header = false,
+    bool alternate = false,
+    VoidCallback? onTap,
+  }) {
     const widths = [110.0, 100.0, 210.0, 130.0, 120.0, 120.0, 120.0];
-    return Material(color: header ? const Color(0xFFE1EEFD) : Colors.white,
-      child: InkWell(onTap: onTap, child: Row(children: [
-        for (var i = 0; i < values.length; i++) SizedBox(width: widths[i],
-          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-            child: Text(values[i], maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: i >= 4 ? TextAlign.right : TextAlign.left,
-              style: TextStyle(fontWeight: header ? FontWeight.w700 : FontWeight.w500)))),
-      ])));
+    const gridLine = BorderSide(color: Color(0xFFCCD7E5), width: 0.7);
+    final background = header
+        ? const Color(0xFFE1EEFD)
+        : alternate ? const Color(0xFFF1F6FC) : Colors.white;
+    return Material(
+      color: background,
+      child: InkWell(
+        onTap: onTap,
+        child: DecoratedBox(
+          decoration: const BoxDecoration(border: Border(bottom: gridLine)),
+          child: Row(children: [
+            for (var i = 0; i < values.length; i++)
+              Container(
+                width: widths[i],
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+                decoration: BoxDecoration(border: Border(
+                  left: i == 0 ? gridLine : BorderSide.none,
+                  right: gridLine,
+                )),
+                child: Text(
+                  values[i],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: i >= 4 ? TextAlign.right : TextAlign.left,
+                  style: TextStyle(fontWeight: header ? FontWeight.w700 : FontWeight.w500),
+                ),
+              ),
+          ]),
+        ),
+      ),
+    );
   }
   @override
   Widget build(BuildContext context) {
@@ -215,7 +244,7 @@ class _OwnerReportTransactionsScreenState
                     entry.invoiceNumber.isEmpty ? '—' : '#${entry.invoiceNumber}', entry.name,
                     status, _money(entry.gross), _money(entry.paid),
                     entry.invoice == null ? '—' : _money(entry.amountDue),
-                  ], onTap: entry.invoice == null ? null : () => _invoice(entry));
+                  ], alternate: index.isOdd, onTap: entry.invoice == null ? null : () => _invoice(entry));
                   if (!payments && index == paidCount) {
                     return Column(children: [
                       _registerRow(['', '', 'Unpaid / Needs review', '${entries.length - paidCount} invoices', '', '', ''], header: true),
