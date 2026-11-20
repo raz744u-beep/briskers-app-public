@@ -16,6 +16,7 @@ class MoreScreen extends StatelessWidget {
     required this.roleCode,
     this.onBusinessNameChanged,
     this.onSettingsTap,
+    this.onReportsTap,
   });
 
   final String businessId;
@@ -23,6 +24,7 @@ class MoreScreen extends StatelessWidget {
   final String roleCode;
   final ValueChanged<String>? onBusinessNameChanged;
   final VoidCallback? onSettingsTap;
+  final VoidCallback? onReportsTap;
 
   @override
   Widget build(BuildContext context) {
@@ -70,7 +72,7 @@ class MoreScreen extends StatelessWidget {
             title: Text(tr('reportsProfitability')),
             subtitle: Text(tr('reportsProfitabilitySub')),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.push<void>(context, MaterialPageRoute(
+            onTap: onReportsTap ?? () => Navigator.push<void>(context, MaterialPageRoute(
               builder: (_) => OwnerReportsScreen(businessId: businessId, isOwner: true))),
           ),
         if (canOpenSettings) ...[

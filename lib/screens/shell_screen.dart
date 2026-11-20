@@ -723,6 +723,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
               businessName: _businessName,
               roleCode: widget.roleCode,
               onSettingsTap: () => _selectDockSection(ShopNavigationSection.settings, nested: false),
+              onReportsTap: () => _selectDockSection(ShopNavigationSection.reports, nested: false),
               onBusinessNameChanged: (name) =>
                   setState(() => _businessName = name),
             );
