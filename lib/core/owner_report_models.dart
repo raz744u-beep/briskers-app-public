@@ -49,7 +49,8 @@ class ReportPeriod {
       final first = DateTime(start.year, start.month + direction);
       return ReportPeriod(first, DateTime(first.year, first.month + 1, 0));
     }
-    final days = end.difference(start).inDays + 1;
+    final days = DateTime.utc(end.year, end.month, end.day)
+        .difference(DateTime.utc(start.year, start.month, start.day)).inDays + 1;
     return ReportPeriod(DateTime(start.year, start.month, start.day + days * direction),
       DateTime(end.year, end.month, end.day + days * direction));
   }
