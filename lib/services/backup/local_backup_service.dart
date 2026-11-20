@@ -34,7 +34,20 @@ class LocalBackupService {
         caseSensitive: false,
       ).hasMatch(key);
 
+  @visibleForTesting
+  static Future<void> Function(String)? debugOwnerAuthorization;
+
   static Future<void> authorize(String businessId) async {
+    Future<void> Function(String)? testAuthorization;
+    assert(() {
+      testAuthorization = debugOwnerAuthorization;
+      return true;
+    }());
+    final override = testAuthorization;
+    if (override != null) {
+      await override(businessId);
+      return;
+    }
     await DeviceOwnerAuthorization.instance.authority.authorizeSession(
       businessId,
     );
@@ -53,7 +66,7 @@ class LocalBackupService {
       final tree = prefs.getString(rootKey);
       if (tree == null) throw StateError('Choose a backup folder first');
       final root = await getTemporaryDirectory();
-      scratch = await Directory('${root.path}/briskers-backup-').createTemp();
+      scratch = await root.createTemp('briskers-backup-');
       progress.value = 'Saving database';
       final manifest = await snapshot(businessId, scratch);
       progress.value = 'Copying backup to your folder and checking every file';
@@ -232,11 +245,10 @@ class LocalBackupService {
     final tree = await chooseFolder();
     if (tree == null) return null;
     _busy = true;
-    final root = await getApplicationSupportDirectory();
-    final container = await Directory(
-      '${root.path}/backup-review-',
-    ).createTemp();
+    Directory? container;
     try {
+      final root = await getApplicationSupportDirectory();
+      container = await root.createTemp('backup-review-');
       progress.value = 'Reading and verifying backup';
       final imported = Directory('${container.path}/import');
       await channel.invokeMethod<void>('importFolder', {
@@ -249,7 +261,9 @@ class LocalBackupService {
       progress.value = 'Restore test passed';
       return imported;
     } catch (_) {
-      await container.delete(recursive: true);
+      if (container != null && await container.exists()) {
+        await container.delete(recursive: true);
+      }
       rethrow;
     } finally {
       _busy = false;

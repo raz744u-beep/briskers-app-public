@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -23,6 +24,8 @@ class _Paths extends PathProviderPlatform {
   Future<String?> getApplicationSupportPath() async => root;
   @override
   Future<String?> getApplicationDocumentsPath() async => root;
+  @override
+  Future<String?> getTemporaryPath() async => '$root/cache';
 }
 
 void main() {
@@ -38,6 +41,7 @@ void main() {
       'keep_auth_token': 'device-only',
     });
     root = await Directory.systemTemp.createTemp('briskers-startup-restore-');
+    await Directory('${root.path}/cache').create();
     previousPaths = PathProviderPlatform.instance;
     PathProviderPlatform.instance = _Paths(root.path);
     database = BriskersLocalDatabase(
@@ -120,6 +124,9 @@ void main() {
   });
 
   tearDown(() async {
+    LocalBackupService.debugOwnerAuthorization = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(LocalBackupService.channel, null);
     debugUseLocalDatabase(null);
     await database.close();
     PathProviderPlatform.instance = previousPaths;
@@ -523,6 +530,140 @@ void main() {
           );
       expect(bytes, [255, 216, 255, 219, 1]);
       expect(reads, 1);
+    },
+  );
+  Future<void> copyFolder(Directory from, Directory to) async {
+    await to.create(recursive: true);
+    await for (final item in from.list(recursive: true, followLinks: false)) {
+      final relative = item.path.substring(from.path.length + 1);
+      if (item is Directory) {
+        await Directory('${to.path}/$relative').create(recursive: true);
+      } else if (item is File) {
+        final target = File('${to.path}/$relative');
+        await target.parent.create(recursive: true);
+        await item.copy(target.path);
+      }
+    }
+  }
+
+  test(
+    'Create Backup uses a real temporary directory and saves a verified external copy',
+    () async {
+      PackageInfo.setMockInitialValues(
+        appName: 'Briskers',
+        packageName: 'test',
+        version: '1',
+        buildNumber: '1',
+        buildSignature: 'test',
+      );
+      var authorizations = 0;
+      LocalBackupService.debugOwnerAuthorization = (business) async {
+        expect(business, 'shop');
+        authorizations++;
+      };
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        LocalBackupService.rootKey,
+        'content://selected-backup-parent',
+      );
+      Directory? exported;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(LocalBackupService.channel, (call) async {
+            expect(call.method, 'exportFolder');
+            final arguments = Map<String, dynamic>.from(call.arguments as Map);
+            final staged = Directory(arguments['source'] as String);
+            expect(await staged.exists(), true);
+            expect(
+              staged.path,
+              startsWith('${root.path}/cache/briskers-backup-'),
+            );
+            await BackupArchive.verify(staged, businessId: 'shop');
+            exported = Directory('${root.path}/external/${arguments['name']}');
+            await copyFolder(staged, exported!);
+            await BackupArchive.verify(exported!, businessId: 'shop');
+            return 'content://verified-dated-backup';
+          });
+      final status = await LocalBackupService.create('shop');
+      expect(status['complete'], true);
+      expect(authorizations, 1);
+      expect(prefs.getString(LocalBackupService.statusKey), isNotNull);
+      expect(await Directory('${root.path}/cache').list().isEmpty, true);
+      expect(await exported!.exists(), true);
+    },
+  );
+
+  test(
+    'restore selection creates a staging folder and verifies an isolated restore',
+    () async {
+      LocalBackupService.debugOwnerAuthorization = (_) async {};
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(LocalBackupService.channel, (call) async {
+            if (call.method == 'pickFolder') {
+              return 'content://selected-dated-backup';
+            }
+            expect(call.method, 'importFolder');
+            final arguments = Map<String, dynamic>.from(call.arguments as Map);
+            await copyFolder(
+              source,
+              Directory(arguments['destination'] as String),
+            );
+            return null;
+          });
+      final inspected = await LocalBackupService.inspect('shop');
+      expect(inspected, isNotNull);
+      expect(inspected!.path, startsWith('${root.path}/backup-review-'));
+      expect(
+        await File(
+          '${inspected.parent.path}/Restored/Database/briskers_local.sqlite',
+        ).exists(),
+        true,
+      );
+      expect(
+        (await database
+                .customSelect('SELECT display_name FROM local_customers')
+                .getSingle())
+            .read<String>('display_name'),
+        'Current Customer',
+      );
+    },
+  );
+
+  test(
+    'interrupted restore import clears staging and permits a later backup',
+    () async {
+      PackageInfo.setMockInitialValues(
+        appName: 'Briskers',
+        packageName: 'test',
+        version: '1',
+        buildNumber: '1',
+        buildSignature: 'test',
+      );
+      LocalBackupService.debugOwnerAuthorization = (_) async {};
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        LocalBackupService.rootKey,
+        'content://selected-backup-parent',
+      );
+      String? failedStaging;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(LocalBackupService.channel, (call) async {
+            if (call.method == 'pickFolder') {
+              return 'content://selected-dated-backup';
+            }
+            if (call.method == 'importFolder') {
+              failedStaging = (call.arguments as Map)['destination'] as String;
+              await Directory(failedStaging!).create(recursive: true);
+              throw PlatformException(code: 'copy_interrupted');
+            }
+            expect(call.method, 'exportFolder');
+            return 'content://verified-retry-backup';
+          });
+      await expectLater(
+        LocalBackupService.inspect('shop'),
+        throwsA(isA<PlatformException>()),
+      );
+      expect(await Directory(failedStaging!).parent.exists(), false);
+      expect((await LocalBackupService.create('shop'))['complete'], true);
     },
   );
 }

@@ -106,10 +106,15 @@ class BackupArchive {
 
   static Set<String> referencedFiles(Database db) {
     final result = <String>{};
-    for (final table in counts(db).keys) {
-      for (final row in db.select('SELECT * FROM ${quote(table)}')) {
-        for (final value in row.values) {
-          result.addAll(referencesIn(value));
+    for (final table in schema(db).keys) {
+      // Receipt/signature BLOBs can be large. Inspect text references without
+      // materializing the image bytes of an entire table in memory.
+      for (final column in db.select('PRAGMA table_info(${quote(table)})')) {
+        final name = quote(column['name'] as String);
+        for (final row in db.select(
+          "SELECT DISTINCT $name AS value FROM ${quote(table)} WHERE typeof($name)='text'",
+        )) {
+          result.addAll(referencesIn(row['value']));
         }
       }
     }
