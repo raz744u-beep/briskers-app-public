@@ -40,6 +40,8 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
   String? _error;
   String _customerQuery = '', _itemQuery = '', _customerRank = 'Sales', _itemRank = 'Revenue', _itemFilter = 'All Items';
   bool _allCustomers = false, _allItems = false;
+  final _customerSearch = TextEditingController();
+  final _itemSearch = TextEditingController();
   static final _currency = NumberFormat.simpleCurrency(locale: 'en_US');
   String _money(int? cents) => cents == null ? 'Not recorded' : _currency.format(cents / 100);
 
@@ -53,6 +55,8 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
   }
   void _scope() {
     _generation++;
+    _customerQuery = _itemQuery = '';
+    _customerSearch.clear(); _itemSearch.clear();
     _repository = widget.repository ?? LocalOwnerReports();
     _preferences = OwnerReportPreferences(widget.businessId);
     _timer?.cancel();
@@ -75,6 +79,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
   @override
   void dispose() {
     _generation++; _timer?.cancel(); _tabs.dispose();
+    _customerSearch.dispose(); _itemSearch.dispose();
     WidgetsBinding.instance.removeObserver(this); super.dispose();
   }
   Future<void> _checkRevision() async {
@@ -317,7 +322,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
       _card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [const Expanded(child: Text('Top Customers', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
           TextButton(onPressed: () => setState(() => _allCustomers = !_allCustomers), child: Text(_allCustomers ? 'Top 5' : 'View All'))]),
-        TextField(key: const ValueKey('report-customer-search'), decoration: const InputDecoration(
+        TextField(key: const ValueKey('report-customer-search'), controller: _customerSearch, decoration: const InputDecoration(
           hintText: 'Search customers', prefixIcon: Icon(Icons.search), border: OutlineInputBorder()),
           onChanged: (v) => setState(() => _customerQuery = v)),
         const SizedBox(height: 10),
@@ -385,7 +390,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
       _card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [const Expanded(child: Text('Top-Selling Items', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
           TextButton(onPressed: () => setState(() => _allItems = !_allItems), child: Text(_allItems ? 'Top 5' : 'View All'))]),
-        TextField(key: const ValueKey('report-item-search'), decoration: const InputDecoration(
+        TextField(key: const ValueKey('report-item-search'), controller: _itemSearch, decoration: const InputDecoration(
           hintText: 'Search items', prefixIcon: Icon(Icons.search), border: OutlineInputBorder()),
           onChanged: (v) => setState(() => _itemQuery = v)),
         const SizedBox(height: 12),

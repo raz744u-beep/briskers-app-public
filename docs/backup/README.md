@@ -1,6 +1,6 @@
 # Offline folder backup and restore
 
-Source base: ac70d02a916e5e186b21ae8b78c7c3ed0fe4be57 (current consolidated source / Owner Reports). Isolated branch: feature/offline-complete-backup-20261120. Do not replace or reset the repair-groups working checkout. Integrate these commits into the final combined branch after its checks pass.
+Initial source base: ac70d02a916e5e186b21ae8b78c7c3ed0fe4be57. Also includes consolidated Reports search fix 9654cd402746b94991184ac840c72f25831ed24b so that behavior is preserved. Isolated branch: feature/offline-complete-backup-20261120. Do not replace or reset the repair-groups working checkout. Integrate these commits into the final combined branch after its checks pass.
 
 ## Owner operation
 
