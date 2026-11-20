@@ -2032,6 +2032,30 @@ class OfflineDocumentDraftService {
           ''',
           [conflict ? 'conflict' : 'pending', _unixNow(), error.toString(), outboxId],
         );
+        if (conflict && preflight['kind'] == 'estimate') {
+          // Outbox conflict must also be visible when this estimate reopens.
+          // Never replace the sole local header copy with a remote estimate.
+          // If the cache projection fails, the durable outbox stays blocked.
+          try {
+            final retained = await _cache.load(businessId, localId);
+            if (retained != null &&
+                (retained['_server_document_id']?.toString().isEmpty ?? true)) {
+              await _cache.save(businessId, localId, {
+                ...retained,
+                'sync_state': 'conflict',
+                '_offline_estimate_sync_error': error.toString(),
+              });
+              await _database.customStatement(
+                "UPDATE local_documents SET sync_state='conflict' "
+                "WHERE business_id=? AND id=? AND kind='estimate'",
+                [businessId, localId],
+              );
+            }
+          } catch (_) {
+            // The outbox conflict is authoritative even if local UI
+            // projection cannot be refreshed on this attempt.
+          }
+        }
         if (!conflict) break;
       }
     }
