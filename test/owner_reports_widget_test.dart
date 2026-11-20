@@ -50,6 +50,7 @@ void main() {
   Future<void> tab(WidgetTester tester, String title) async {
     final finder=find.descendant(of:find.byType(BriskersCurvedTabs),matching:find.text(title));
     await tester.ensureVisible(finder); await tester.tap(finder); await tester.pumpAndSettle();
+    expect(tester.getTopLeft(find.byKey(const ValueKey('report-date-range'))).dy,greaterThanOrEqualTo(120));
   }
   testWidgets('overview has four configurable slots and preserves the installed dock', (tester) async {
     await open(tester);

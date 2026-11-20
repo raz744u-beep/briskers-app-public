@@ -469,8 +469,8 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
             (label:'Customers', color:BriskersColors.tabBlue, icon:Icons.people_outline),
             (label:'Items', color:BriskersColors.tabBlue, icon:Icons.inventory_2_outlined),
           ]))),
-        Expanded(child: RefreshIndicator(onRefresh: _load, child: ListView(padding: const EdgeInsets.all(12), children: [
-          Container(margin: const EdgeInsets.only(bottom: 14), decoration: BoxDecoration(
+        Expanded(child: RefreshIndicator(onRefresh: _load, child: ListView(key: ValueKey('owner-report-body-${_tabs.index}'), padding: const EdgeInsets.all(12), children: [
+          Container(key: const ValueKey('report-date-range'), margin: const EdgeInsets.only(bottom: 14), decoration: BoxDecoration(
             color: const Color(0xFFDCEBFE), borderRadius: BorderRadius.circular(16)),
             child: Row(children: [
               IconButton(tooltip:'Previous period', onPressed: () => _setPeriod(_period.shift(-1)), icon: const Icon(Icons.chevron_left)),
