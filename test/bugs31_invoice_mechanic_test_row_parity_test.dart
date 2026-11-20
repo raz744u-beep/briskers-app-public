@@ -19,7 +19,7 @@ void main() {
     expect(layout,isNot(contains('limits.maxWidth>=300')));
   });
 
-  test('saved mechanic name/hours and edit or lock keep TEST inline emphasis', () {
+  test('saved mechanic name/hours keep inline emphasis and manager remains editable', () {
     final source=File('lib/screens/payroll/job_tasks_access.dart').readAsStringSync();
     expect(source,contains('Row(mainAxisSize:MainAxisSize.max,children:['));
     expect(source,isNot(contains('Icons.engineering_outlined')));
@@ -30,7 +30,12 @@ void main() {
     expect(source,isNot(contains('alignment:WrapAlignment.end')));
     expect(source,contains('fontSize:15,color:Color(0xFF00897E)'));
     expect(source,contains('fontWeight:FontWeight.w800'));
-    expect(source,contains("? Icons.lock_outline : Icons.edit_outlined"));
+    expect(source,contains('Icons.edit_outlined'));
+    // Settlement locks each allocation inside the manager, not access to it.
+    final manager=File('lib/screens/payroll/owner_payroll_screen.dart').readAsStringSync();
+    expect(manager,contains('if (paid) const Icon(Icons.lock_outline'));
+    expect(manager,contains('Paid · Locked'));
+    expect(source,isNot(contains("busy || linePeople.every((p)=>p['paid']==true)")));
     expect(source,contains("'Edit or split mechanic labor'"));
     expect(source,contains("linePeople.map((p) =>"));
     expect(source,contains(").join(' · ')"));

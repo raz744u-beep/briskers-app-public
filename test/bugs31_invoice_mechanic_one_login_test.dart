@@ -23,7 +23,7 @@ void main() {
     // A single assigned mechanic must not trap the pencil in the
     // estimated-hours-only dialog; it also needs Add/Split.
     expect(source, isNot(contains('linePeople.length==1')));
-    expect(source, contains('? null : open,'));
+    expect(source, matches(RegExp(r'onPressed:\s*busy\s*\?\s*null\s*:\s*open')));
     expect(source, contains('focusLineId:widget.line'));
   });
 }
