@@ -179,4 +179,19 @@ void main() {
     expect(await groups.vehicleHistory('other-shop', 'vehicle'), isEmpty);
     expect(await groups.vehicleHistory('shop', 'unrelated-vehicle'), isEmpty);
   });
+  test('copying a grouped estimate preserves groups but never its authorization', () async {
+    final a = await firstGroup();
+    await authorize(a);
+    final source = await detail();
+    final copy = await drafts.createStandaloneEstimate('shop', customerId: 'customer', customerName: 'Customer',
+      initialLines: (source['lines'] as List).whereType<Map>().map((line) => Map<String, dynamic>.from(line)).toList());
+    await groups.copyOrganization('shop', estimate, copy, source);
+    final copied = (await cache.load('shop', copy))!;
+    expect(await groups.enabled('shop', copy), isTrue);
+    expect((await groups.groups('shop', copy, copied)).first.id, isNot(a));
+    expect(await groups.history('shop', copy), isEmpty);
+    expect(await groups.decisions('shop', copy, copied), isEmpty);
+    await expectLater(drafts.convertEstimateOffline('shop', copy), throwsStateError);
+    expect(await groups.history('shop', estimate), hasLength(1));
+  });
 }

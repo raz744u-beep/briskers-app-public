@@ -6,7 +6,6 @@ import '../core/repair_group.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_document_detail_cache.dart';
-import 'repair_group_schema.dart';
 import 'local_attachment_cache.dart';
 
 class LocalRepairGroups {
@@ -22,7 +21,6 @@ class LocalRepairGroups {
     [Variable(business), Variable(estimate)];
 
   Future<bool> enabled(String business, String estimate) async {
-    await RepairGroupSchema.ensure(db);
     return (await db.customSelect('SELECT 1 FROM repair_group_documents_v1 WHERE business=? AND estimate=?',
       variables: _vars(business, estimate)).get()).isNotEmpty;
   }
@@ -39,7 +37,6 @@ class LocalRepairGroups {
 
   Future<List<RepairGroup>> groups(String business, String estimate,
       Map<String, dynamic> detail) async {
-    await RepairGroupSchema.ensure(db);
     final rows = await db.customSelect('SELECT * FROM repair_groups_v1 WHERE business=? AND estimate=? ORDER BY position,id',
       variables: _vars(business, estimate)).get();
     final members = await db.customSelect('SELECT line,group_id FROM repair_group_members_v1 WHERE business=? AND estimate=?',
@@ -75,7 +72,6 @@ class LocalRepairGroups {
 
   Future<Map<String, dynamic>> snapshot(String business, String estimate,
       Map<String, dynamic> detail) async {
-    await RepairGroupSchema.ensure(db);
     final scopes = await db.customSelect('SELECT * FROM repair_group_scope_v1 WHERE business=? AND estimate=? ORDER BY group_id',
       variables: _vars(business, estimate)).get();
     final current = {for (final row in scopes) row.read<String>('group_id'): row};
@@ -89,7 +85,6 @@ class LocalRepairGroups {
   Future<String> add(String business, String estimate, String name) => db.transaction(() async {
     final detail = await _editable(business, estimate);
     if (name.trim().isEmpty) { throw ArgumentError('Enter a repair group name.'); }
-    await RepairGroupSchema.ensure(db);
     final id = newId();
     await db.customStatement('INSERT OR IGNORE INTO repair_group_documents_v1 VALUES(?,?)', [business, estimate]);
     await db.customStatement('''INSERT INTO repair_groups_v1
@@ -103,7 +98,6 @@ class LocalRepairGroups {
       required String description, List<Map<String, dynamic>> evidence = const []}) => db.transaction(() async {
     final detail = await _editable(business, estimate);
     if (id == RepairGroup.otherId || name.trim().isEmpty) { throw ArgumentError('Invalid group.'); }
-    await RepairGroupSchema.ensure(db);
     await db.customStatement('UPDATE repair_groups_v1 SET name=?,description=?,evidence_json=? WHERE business=? AND estimate=? AND id=?',
       [name.trim(), description.trim(), jsonEncode(evidence), business, estimate, id]);
     await observe(business, estimate, detail);
@@ -111,7 +105,6 @@ class LocalRepairGroups {
 
   Future<void> remove(String business, String estimate, String id) => db.transaction(() async {
     final detail = await _editable(business, estimate);
-    await RepairGroupSchema.ensure(db);
     await db.customStatement('DELETE FROM repair_group_members_v1 WHERE business=? AND estimate=? AND group_id=?', [business, estimate, id]);
     await db.customStatement('DELETE FROM repair_groups_v1 WHERE business=? AND estimate=? AND id=?', [business, estimate, id]);
     await observe(business, estimate, detail);
@@ -140,8 +133,33 @@ class LocalRepairGroups {
     await observe(business, estimate, detail);
   });
 
+  /// A copied grouped estimate retains organization but starts with no
+  /// decisions. Never let copying turn undecided work into legacy auto-billing.
+  Future<void> copyOrganization(String business, String sourceId, String targetId,
+      Map<String, dynamic> source) => db.transaction(() async {
+    if (!await enabled(business, sourceId)) { return; }
+    final target = await _editable(business, targetId);
+    final sourceLines = (source['lines'] as List).whereType<Map>().toList();
+    final targetLines = (target['lines'] as List).whereType<Map>().toList();
+    if (sourceLines.length != targetLines.length) {
+      throw StateError('Copied item identities do not match the source.');
+    }
+    final ids = {for (var i = 0; i < sourceLines.length; i++) sourceLines[i]['id']: targetLines[i]['id']};
+    await db.customStatement('INSERT OR IGNORE INTO repair_group_documents_v1 VALUES(?,?)', [business, targetId]);
+    final sameContext = source['customer_id'] == target['customer_id'] && source['vehicle_id'] == target['vehicle_id'];
+    for (final group in await groups(business, sourceId, source)) {
+      if (group.isOther) { continue; }
+      final id = await add(business, targetId, group.name);
+      await edit(business, targetId, id, name: group.name, description: group.description,
+        evidence: sameContext ? group.evidence : const []);
+      for (final line in group.lines) {
+        await move(business, targetId, ids[line['id']] as String, id);
+      }
+    }
+    await observe(business, targetId, target);
+  });
+
   Future<List<Map<String, dynamic>>> history(String business, String estimate) async {
-    await RepairGroupSchema.ensure(db);
     final rows = await db.customSelect('SELECT payload_json FROM repair_authorizations_v1 WHERE business=? AND estimate=? ORDER BY rowid',
       variables: _vars(business, estimate)).get();
     return rows.map((row) => Map<String, dynamic>.from(jsonDecode(row.read<String>('payload_json')) as Map)).toList();
@@ -170,7 +188,6 @@ class LocalRepairGroups {
 
   Future<List<Map<String, dynamic>>> vehicleHistory(String business, String vehicle) async {
     if (vehicle.isEmpty) { return []; }
-    await RepairGroupSchema.ensure(db);
     final rows = await db.customSelect('''SELECT payload_json FROM repair_authorizations_v1
       WHERE business=? AND json_extract(payload_json,'\$.vehicle_id')=? ORDER BY rowid DESC''',
       variables: [Variable(business), Variable(vehicle)]).get();
@@ -178,14 +195,12 @@ class LocalRepairGroups {
   }
 
   Future<Uint8List?> media(String business, String id) async {
-    await RepairGroupSchema.ensure(db);
     final row = await db.customSelect('SELECT image_bytes FROM repair_authorization_media_v1 WHERE business=? AND media_id=?',
       variables: [Variable(business), Variable(id)]).getSingleOrNull();
     return row?.read<Uint8List>('image_bytes');
   }
 
   Future<Uint8List?> signature(String business, String id) async {
-    await RepairGroupSchema.ensure(db);
     final row = await db.customSelect('SELECT image_bytes FROM repair_signatures_v1 WHERE business=? AND signature_id=?',
       variables: [Variable(business), Variable(id)]).getSingleOrNull();
     return row?.read<Uint8List>('image_bytes');
@@ -283,7 +298,6 @@ class LocalRepairGroups {
     required Map<String, RepairDecision> decisions, required RepairAuthorizationMethod method,
     required String actor, String notes = '', Uint8List? signature,
   }) => db.transaction(() async {
-    await RepairGroupSchema.ensure(db);
     // A durable event is its own acknowledgment even if the document has
     // since been converted or edited, or the original photo was removed.
     final replay = await db.customSelect('SELECT payload_json FROM repair_authorizations_v1 WHERE business=? AND event_id=?',

@@ -4418,7 +4418,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       // No partially copied invoice can upload between line mutations.
       final lines = (plan['lines'] as List)
           .whereType<Map<String, dynamic>>().toList();
-      newId = _estimate
+      newId = await localDatabase.transaction(() async {
+        final created = _estimate
           ? await _offlineDocumentDraft.createStandaloneEstimate(
               widget.businessId,
               customerId: selectedCustomerId,
@@ -4437,6 +4438,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               initialLines: lines,
               initialMemo: plan['memo']?.toString(),
             );
+        if (_estimate) {
+          await LocalRepairGroups().copyOrganization(widget.businessId, widget.documentId, created, original);
+        }
+        return created;
+      });
     });
     if (!mounted || !done || newId == null) return;
     await Navigator.push<void>(
