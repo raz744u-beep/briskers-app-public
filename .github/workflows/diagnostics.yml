@@ -98,6 +98,7 @@ jobs:
         working-directory: generated
         run: >-
           flutter test --reporter expanded --timeout 45s
+          test/owner_report_period_test.dart
           test/owner_reports_test.dart
           test/owner_reports_widget_test.dart
           test/invoice_catalog_replacement_test.dart

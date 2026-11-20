@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/owner_report_models.dart';
+import '../core/owner_report_payment_merge.dart';
 import '../local/briskers_local_database.dart' hide LocalFinancialCache;
 import '../local/local_database_provider.dart';
 import 'invoice_payment_feed.dart';
@@ -39,7 +40,7 @@ class LocalOwnerReports {
       final names = (await db.customSelect("SELECT name FROM sqlite_master WHERE type IN ('table','view')").get())
           .map((r) => r.read<String>('name')).toSet();
       final aliases = names.contains('local_document_identity_aliases')
-          ? await db.customSelect('SELECT a.alias_id,ad.job_id AS alias_job,d.job_id AS canonical_job FROM local_document_identity_aliases a JOIN local_documents d '
+          ? await db.customSelect('SELECT a.alias_id,a.canonical_id,ad.job_id AS alias_job,d.job_id AS canonical_job FROM local_document_identity_aliases a JOIN local_documents d '
               'ON d.business_id=a.business_id AND d.id=a.canonical_id '
               'JOIN local_documents ad ON ad.business_id=a.business_id AND ad.id=a.alias_id '
               "WHERE a.business_id=? AND d.kind='invoice' AND ad.kind='invoice'", variables: [Variable(business)]).get()
@@ -110,8 +111,12 @@ class LocalOwnerReports {
       // This journal contribution is represented by finalizedIncome in the
       // receipt feed. Adding it a second time would double-count local cash.
       final receipts = (await InvoicePaymentFeed(database: db, cache: cache).load(business)).where(inScope).toList();
-      final financial = InvoicePaymentFeed.combine(
-        financial: ledger.where((r) => inScope(r) && r['locally_finalized_invoice_receipt'] != true).toList(), receipts: receipts);
+      final localNewOperations = {for(final batch in queued.values) for(final p in batch)
+        if(p['replay_attempted']!=true && p['operation_id']!=null) p['operation_id'].toString()};
+      final financial = OwnerReportPaymentMerge.combine(
+        financial: ledger.where((r) => inScope(r) && r['locally_finalized_invoice_receipt'] != true).toList(),
+        receipts: [for(final r in receipts) {...r, if(localNewOperations.contains(r['operation_id'])) '_report_new_local_receipt':true}],
+        invoices: invoices, aliases:{for(final a in aliases) a.read<String>('alias_id'):a.read<String>('canonical_id')});
       final receiptsByInvoice = <String, int>{};
       for (final r in receipts) {
         final id = r['invoice_id']?.toString();

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'support/handoff_qa_fonts.dart';
@@ -27,7 +28,7 @@ OwnerReportData fixture() => OwnerReportData(business:'shop', invoices:[
     'document_number':'6380','document_date':'2026-11-19','total_amount':108,'tax_amount':8,
     'lines':[{'id':'part','name':'Water pump','item_id':'pump','quantity':1,'unit_price':100,'unit_cost':50}]},
 ],transactions:[
-  {'id':'income','direction':'income','amount':50,'transaction_date':'2026-11-19'},
+  {'id':'income','document_id':'invoice','direction':'income','amount':50,'transaction_date':'2026-11-19'},
   {'id':'expense','direction':'expense','amount':20,'transaction_date':'2026-11-19'},
 ],jobs:[],expenses:[],labor:[]);
 
@@ -114,6 +115,54 @@ void main() {
       expect(tester.takeException(),isNull);
       await tab(tester,'Customers');expect(tester.takeException(),isNull);
       await tab(tester,'Items');expect(tester.takeException(),isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+  testWidgets('period selection is visible, stays selected and does not reload local records', (tester) async {
+    await open(tester);
+    final reads = reports.reads;
+    await tester.tap(find.byKey(const ValueKey('report-date-range')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('report-period-lastMonth')));
+    await tester.pump();
+    expect(find.textContaining('Last Month:'), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(reports.reads, reads);
+    await tester.tap(find.byKey(const ValueKey('report-date-range')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<ListTile>(find.byKey(const ValueKey('report-period-lastMonth'))).selected, isTrue);
+    await tester.tap(find.byKey(const ValueKey('report-period-30days')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Last 30 Days:'), findsOneWidget);
+    final prefs = await SharedPreferences.getInstance();
+    expect((jsonDecode(prefs.getString('owner_reports_overview_v1:shop')!) as Map)['preset'], '30days');
+    expect(reports.reads, reads);
+    await tester.pumpWidget(const SizedBox());
+  });
+  for (final width in [320.0, 400.0]) {
+    testWidgets('transaction page shows received totals and due then paid at $width pixels', (tester) async {
+      tester.view.physicalSize = Size(width, 950); tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+      await open(tester);
+      await tester.ensureVisible(find.byKey(const ValueKey('view-period-transactions')));
+      await tester.tap(find.byKey(const ValueKey('view-period-transactions')));
+      await tester.pumpAndSettle();
+      expect(find.text('#6380'), findsOneWidget);
+      expect(find.text('Jennifer'), findsOneWidget);
+      expect(find.text('Tax collected'), findsOneWidget);
+      expect(find.text('Amount paid'), findsOneWidget);
+      expect(find.text(r'$46.30'), findsOneWidget);
+      expect(find.text(r'$3.70'), findsOneWidget);
+      expect(find.text(r'$58.00'), findsNWidgets(2));
+      expect(find.byKey(const ValueKey('installed-dock')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(const ValueKey('report-transaction-basis')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Unpaid / Needs Review').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Tax billed'), findsOneWidget);
+      expect(find.text(r'$108.00'), findsOneWidget);
+      expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     });
   }
