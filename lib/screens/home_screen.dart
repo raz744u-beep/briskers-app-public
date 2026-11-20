@@ -1675,6 +1675,7 @@ class _NeedsAttentionPanel extends StatelessWidget {
             ],
           ),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               item(
                 Icons.calendar_month_outlined,
@@ -1689,7 +1690,7 @@ class _NeedsAttentionPanel extends StatelessWidget {
               item(
                 Icons.receipt_long_outlined,
                 pendingCloseInvoices,
-                'Ready to Close',
+                'Ready to\nClose',
                 onPendingCloseInvoices,
               ),
               const SizedBox(
