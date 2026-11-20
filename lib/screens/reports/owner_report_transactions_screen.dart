@@ -161,6 +161,7 @@ class _OwnerReportTransactionsScreenState
                 DropdownButtonFormField<ReportTransactionBasis>(
                   key: const ValueKey('report-transaction-basis'),
                   initialValue: _basis,
+                  isExpanded: true,
                   decoration: const InputDecoration(
                     labelText: 'Show',
                     border: OutlineInputBorder(),
