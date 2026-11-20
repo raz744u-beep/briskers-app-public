@@ -1,4 +1,5 @@
 import 'local_invoice_closure.dart';
+import 'local_repair_groups.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:drift/drift.dart' show Variable;
@@ -159,6 +160,8 @@ class LocalDocumentDetailCache {
         final converted = completeConversion ? detail :
             await LocalEstimateConversion(_database).project(businessId, detail);
         final encoded = jsonEncode(converted);
+        await LocalRepairGroups(database: _database, cache: this)
+            .observe(businessId, documentId, converted);
         if (await RecoveryCommitStore.isOriginal(_database,businessId,documentId)) return;
         if (await RecoveryCommitStore.snapshot(_database,businessId,documentId) != null) {
           await _database.customStatement(

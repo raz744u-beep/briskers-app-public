@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'local_repair_groups.dart';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
@@ -163,10 +164,12 @@ class OfflineEstimateInvoiceService {
     String businessId, {
     required String estimateId,
     required String invoiceId,
-  }) async {
-    final estimate = await _cache.load(businessId, estimateId);
+  }) => _database.transaction(() => _mergeLocal(businessId, estimateId: estimateId, invoiceId: invoiceId));
+
+  Future<void> _mergeLocal(String businessId, {required String estimateId, required String invoiceId}) async {
+    final source = await _cache.load(businessId, estimateId);
     final invoice = await _cache.load(businessId, invoiceId);
-    if (estimate == null) {
+    if (source == null) {
       throw StateError(
         'This estimate is not saved locally yet. Open it online once, then retry.',
       );
@@ -176,9 +179,12 @@ class OfflineEstimateInvoiceService {
         'This invoice is not saved locally yet. Open it online once, then retry.',
       );
     }
-    if (estimate['converted'] == true) {
+    if (source['converted'] == true) {
+      if (source['converted_invoice_id'] == invoiceId) return;
       throw StateError('This estimate has already been converted.');
     }
+    final estimate = await LocalRepairGroups(database: _database, cache: _cache)
+        .authorizedDocument(businessId, estimateId, source);
 
     final estimateLines = List<dynamic>.from(
       estimate['lines'] ?? const [],
@@ -218,7 +224,7 @@ class OfflineEstimateInvoiceService {
     final invoiceNumber = invoice['document_number']?.toString();
 
     final updatedEstimate = <String, dynamic>{
-      ...estimate,
+      ...source,
       'status': 'accepted',
       'converted': true,
       'converted_invoice_id': invoiceId,
@@ -300,6 +306,10 @@ class OfflineEstimateInvoiceService {
       final payload = Map<String, dynamic>.from(
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
+      // Legacy server merge copies every source line. Keep this local result
+      // queued until a group-aware reconciliation protocol is available.
+      if (await LocalRepairGroups(database: _database, cache: _cache)
+          .enabled(businessId, payload['estimate_id'].toString())) continue;
 
       try {
         await LocalJobQuarantine.assertReplayAllowed(

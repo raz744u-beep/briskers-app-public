@@ -1,4 +1,5 @@
 import 'invoice_labor_work_summary.dart';
+import 'local_repair_groups.dart';
 import 'local_warranty_companies.dart';
 import 'local_customer_vehicle_identity.dart';
 import 'invoice_tax_proposal.dart';
@@ -857,14 +858,22 @@ class OfflineDocumentDraftService {
 
   /// Converts a cached estimate without creating another Job. The server
   /// conversion is deferred until the source estimate has a permanent ID.
-  Future<String> convertEstimateOffline(String businessId, String estimateId) async {
-    final estimate = await _cache.load(businessId, estimateId);
-    if (estimate == null) {
+  Future<String> convertEstimateOffline(String businessId, String estimateId) =>
+      _database.transaction(() => _convertEstimateOffline(businessId, estimateId));
+
+  Future<String> _convertEstimateOffline(String businessId, String estimateId) async {
+    final source = await _cache.load(businessId, estimateId);
+    if (source == null) {
       throw StateError('Open the estimate once while online to cache it.');
     }
-    if (estimate['converted'] == true) {
+    if (source['converted'] == true) {
+      final id = source['converted_invoice_id']?.toString() ?? '';
+      final prior = id.isEmpty ? null : await _cache.loadReadOnly(businessId, id);
+      if (prior?['converted_from_estimate_id'] == estimateId) return id;
       throw StateError('This estimate is already converted.');
     }
+    final estimate = await LocalRepairGroups(database: _database, cache: _cache)
+        .authorizedDocument(businessId, estimateId, source);
     final lines = _lines(estimate);
     if (lines.isEmpty) throw StateError('Add at least one item first.');
 
@@ -904,7 +913,7 @@ class OfflineDocumentDraftService {
       }).toList(),
     };
     final modifiedEstimate = <String, dynamic>{
-      ...estimate,
+      ...source,
       'converted': true,
       'status': 'accepted',
       'converted_invoice_id': invoiceId,
