@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/owner_report_models.dart';
 
@@ -36,13 +37,20 @@ class OwnerReportPreferences {
     'preset': period.preset, 'start': period.start.toIso8601String(), 'end': period.end.toIso8601String()});
   Future<void> _patch(Map<String, dynamic> patch) {
     final previous = _writes[_key] ?? Future<void>.value();
-    final next = previous.then((_) async {
-      final value = {...await _read(awaitWrites: false), ...patch};
-      await _save(value);
-    });
-    // A failed write is reported to its caller, but must not poison later saves.
-    _writes[_key] = next.then<void>((_) {}, onError: (Object _) {});
-    return next;
+    final finished = Completer<void>();
+    _writes[_key] = finished.future;
+    return () async {
+      try {
+        await previous;
+        final value = {...await _read(awaitWrites: false), ...patch};
+        await _save(value);
+      } finally {
+        // Complete the queue before returning to the caller. Failed saves
+        // report their error while allowing the next independent edit to run.
+        finished.complete();
+        if (identical(_writes[_key], finished.future)) _writes.remove(_key);
+      }
+    }();
   }
   Future<void> _save(Map<String, dynamic> value) async {
     final ok = await (await SharedPreferences.getInstance()).setString(_key, jsonEncode(value));

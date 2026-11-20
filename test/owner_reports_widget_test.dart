@@ -46,6 +46,10 @@ void main() {
     await tester.pumpWidget(MaterialApp(home:OwnerReportsScreen(businessId:'shop',isOwner:owner,
       repository:reports,sharedBottomNavigationBar:const SizedBox(key:ValueKey('installed-dock'),height:70,child:Text('Existing navigation')))));
     await tester.pumpAndSettle();
+    for (var i=0; i<20 && find.text('Reading local reports…').evaluate().isNotEmpty; i++) {
+      await tester.pump(const Duration(milliseconds:20));
+    }
+    expect(find.text('Reading local reports…'),findsNothing);
   }
   Future<void> tab(WidgetTester tester, String title) async {
     final finder=find.descendant(of:find.byType(BriskersCurvedTabs),matching:find.text(title));
