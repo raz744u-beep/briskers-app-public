@@ -238,7 +238,7 @@ class OwnerReportPeriod {
     return selected..sort(_descending);
   }
 
-  final _paidAtEnd = <String, int>{}, _allPaid = <String, int>{};
+  final _paidAtEnd = <String, int>{}, _allPaid = <String, int>{}, _paidNow = <String, int>{};
   final _unclearBalances = <String>{};
   bool _balancesPrepared = false;
   void _prepareBalances() {
@@ -262,10 +262,37 @@ class OwnerReportPeriod {
         continue;
       }
       _allPaid[id] = (_allPaid[id] ?? 0) + amount;
+      if (!date.isAfter(ReportPeriod.day(now))) {
+        _paidNow[id] = (_paidNow[id] ?? 0) + amount;
+      }
       if (!date.isAfter(ReportPeriod.day(period.end))) {
         _paidAtEnd[id] = (_paidAtEnd[id] ?? 0) + amount;
       }
     }
+  }
+
+  ({int? due, int? paid}) _currentBalance(ReportRow doc) {
+    final gross = reportCents(doc['total_amount']);
+    if (gross == null || doc['_payment_reconciliation_required'] == true) {
+      return (due: null, paid: null);
+    }
+    final closePaid = doc['_verified_closed_paid_cents'];
+    if (closePaid is int && closePaid >= gross) {
+      return (due: 0, paid: closePaid);
+    }
+    final saved = reportCents(doc['paid_amount']);
+    if (saved != null && saved >= 0 && doc['_balance_known'] != false) {
+      if (doc['status'] == 'closed' && saved < gross) { return (due: null, paid: null); }
+      return (due: (gross - saved).clamp(0, 0x7FFFFFFFFFFFFFFF), paid: saved);
+    }
+    _prepareBalances();
+    if (_unclearBalances.contains(doc['id'])) { return (due: null, paid: null); }
+    final recorded = _paidNow[doc['id']] ?? 0;
+    if (recorded >= gross) { return (due: 0, paid: recorded); }
+    if (doc['_balance_known'] == false || const {'paid', 'closed'}.contains(doc['status'])) {
+      return (due: null, paid: null);
+    }
+    return (due: (gross - recorded).clamp(0, 0x7FFFFFFFFFFFFFFF), paid: recorded);
   }
 
   final _balances = <String, ({int? due, int? paid})>{};
@@ -304,7 +331,7 @@ class OwnerReportPeriod {
     },
   );
   ReportPeriodEntry _invoiceEntry(ReportRow doc) {
-    final balance = _balance(doc);
+    final balance = _currentBalance(doc);
     return ReportPeriodEntry(
       row: doc,
       invoice: doc,

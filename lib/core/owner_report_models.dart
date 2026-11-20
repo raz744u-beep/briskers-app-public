@@ -12,7 +12,7 @@ enum OwnerReportMetric {
   net('Net Profit', 'Cash basis: received income less recorded expenses.'),
   sales(
     'Sales Excl. Tax',
-    'Money received excluding its sales tax portion, by payment date. Unpaid invoice amounts are excluded.',
+    'Sales excluding tax on verified fully paid invoices dated in the selected period.',
   ),
   projected(
     'Projected Net Income',
@@ -21,15 +21,15 @@ enum OwnerReportMetric {
   openJobs('Open Jobs', 'Current active jobs, independent of the date filter.'),
   averageSale(
     'Average Paid Sale',
-    'Received sales excluding tax per invoice receiving a payment in the selected period.',
+    'Average sales excluding tax for verified fully paid invoices dated in the selected period.',
   ),
   salesTax(
-    'Tax Collected',
-    'Sales tax portion of payments actually received in the selected period. This is not a tax-return liability calculation.',
+    'Tax on Paid Invoices',
+    'Saved invoice tax on verified fully paid invoices dated in the selected period.',
   ),
   grossSales(
     'Sales Incl. Tax',
-    'Money actually received including sales tax, by payment date.',
+    'Total including tax on verified fully paid invoices dated in the selected period.',
   ),
   billedSales(
     'Invoiced Sales Excl. Tax',
@@ -284,7 +284,7 @@ class OwnerReportData {
   }
 
   List<ReportPeriodEntry>? _paymentEntries;
-  final _collected = <String, ReportPeriodTotals>{};
+  final _paidTotals = <String, ReportPeriodTotals>{};
   final _summaries = <String, OwnerReportSummary>{};
   OwnerReportSummary summary(ReportPeriod p) => _summaries.putIfAbsent(
     '${p.start.toIso8601String()}:${p.end.toIso8601String()}',
@@ -328,23 +328,12 @@ class OwnerReportData {
       (r) => dateOf(r['document_date']) == null,
     );
     final billedSales = undatedInvoices ? null : _sum(selected.map(salesOf));
-    final collected = _collected.putIfAbsent(
+    final paidRegister = OwnerReportPeriod(this, p, ReportTransactionBasis.invoices);
+    final collected = _paidTotals.putIfAbsent(
       '${p.start.toIso8601String()}:${p.end.toIso8601String()}',
-      () => OwnerReportPeriod(
-        this,
-        p,
-        ReportTransactionBasis.payments,
-        includeBalances: false,
-      ).totals,
+      () => paidRegister.paidInvoiceTotals,
     );
-    final paidInvoiceCount = transactions
-        .where(
-          (r) =>
-              r['direction'] == 'income' && inPeriod(p, r['transaction_date']),
-        )
-        .map((r) => r['document_id'] ?? r['invoice_id'] ?? r['id'])
-        .toSet()
-        .length;
+    final paidInvoiceCount = paidRegister.paidInvoices.length;
     final forecast = openJobs
         .map((job) => jobFigure(job, projected: true))
         .toList();

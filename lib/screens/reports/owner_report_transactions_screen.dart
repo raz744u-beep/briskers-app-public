@@ -192,8 +192,8 @@ class _OwnerReportTransactionsScreenState
                   payments
                       ? 'Payments are selected by payment date. They may include older invoices or other income.'
                       : _basis == ReportTransactionBasis.unpaid
-                      ? 'Outstanding invoices through the selected end date. These are separate from money received.'
-                      : 'Invoices by invoice date. Paid and balance are through the selected end date. Swipe sideways for all columns.',
+                      ? 'Outstanding invoices through the selected end date, with their current saved payments.'
+                      : 'Invoices by invoice date. Paid and balance reflect current saved payments. Swipe sideways for all columns.',
                   style: const TextStyle(
                     fontSize: 12,
                     color: BriskersColors.secondaryText,
