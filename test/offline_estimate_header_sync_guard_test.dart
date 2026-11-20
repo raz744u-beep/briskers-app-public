@@ -254,4 +254,76 @@ void main() {
     expect(api.mileageUpdates, 0);
     expect((await cache.load('shop', id))!['odometer_in'], isNull);
   });
+
+  test('Owner can save conflicted estimate header locally without retry or remote writes', () async {
+    final id = await create();
+    await drafts.updatePendingEstimateDetails(
+      'shop', id, documentDate: DateTime(2026, 11, 20),
+      customerId: 'customer-id', customerName: 'Fixture',
+      mileage: '12345', claimNumber: 'BEFORE',
+    );
+    await mode.setMode(BriskersConnectionMode.auto);
+    await drafts.flush('shop');
+    final before = await queue(id);
+    expect(before['state'], 'conflict');
+    expect(before['attempt_count'], 1);
+    final originalPayload = before['payload_json'];
+
+    // The regular editor is not an Owner conflict-resolution authorization.
+    await expectLater(
+      drafts.updatePendingEstimateDetails(
+        'shop', id, documentDate: DateTime(2026, 11, 21),
+        customerId: 'customer-id', customerName: 'Fixture',
+        claimNumber: 'NOT-AUTHORIZED',
+      ),
+      throwsStateError,
+    );
+    await mode.setMode(BriskersConnectionMode.offline);
+    await drafts.updatePendingEstimateDetails(
+      'shop', id, documentDate: DateTime(2026, 11, 21),
+      customerId: 'customer-id', customerName: 'Fixture',
+      claimNumber: 'REVIEW-ONLY', authorizationNumber: 'AUTH-REVIEW',
+      allowConflictedLocalReview: true,
+    );
+    final after = await queue(id);
+    expect(after['state'], 'conflict');
+    expect(after['attempt_count'], before['attempt_count']);
+    expect(after['payload_json'], originalPayload);
+    expect(after['last_error'], before['last_error']);
+    final local = (await cache.load('shop', id))!;
+    expect(local['document_date'], '2026-11-21');
+    expect(local['claim_number'], 'REVIEW-ONLY');
+    expect(local['authorization_number'], 'AUTH-REVIEW');
+    expect(local['odometer_in'], 12345);
+    expect(local['_offline_estimate_mileage_was_edited'], true);
+    expect(local['sync_state'], 'conflict');
+    expect(api.claimUpdates, 0);
+    expect(api.mileageUpdates, 0);
+    await mode.setMode(BriskersConnectionMode.auto);
+    await drafts.flush('shop');
+    expect(api.creates, 1);
+    expect((await queue(id))['state'], 'conflict');
+    expect((await cache.load('shop', id))!['claim_number'], 'REVIEW-ONLY');
+  });
+
+  test('attempted pending estimates remain locked even with Owner review flag', () async {
+    final id = await create();
+    await db.customStatement(
+      "UPDATE sync_outbox SET attempt_count=1,last_attempt_at=123456 "
+      "WHERE business_id='shop' AND entity_id=?",
+      [id],
+    );
+    await expectLater(
+      drafts.updatePendingEstimateDetails(
+        'shop', id, documentDate: DateTime(2026, 11, 21),
+        customerId: 'customer-id', customerName: 'Fixture',
+        claimNumber: 'UNSAFE', allowConflictedLocalReview: true,
+      ),
+      throwsStateError,
+    );
+    final local = (await cache.load('shop', id))!;
+    expect(local['claim_number'], isNull);
+    expect((await queue(id))['state'], 'pending');
+    expect((await queue(id))['attempt_count'], 1);
+  });
 }
