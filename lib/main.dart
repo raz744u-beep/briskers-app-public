@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
 
 import 'app.dart';
+import 'services/backup/local_backup_service.dart';
 import 'services/local_document_detail_cache.dart';
 import 'services/device_owner_authorization.dart';
 import 'core/briskers_i18n.dart';
@@ -38,6 +40,10 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
   String? _languagePrefsError;
   String? _connectionPrefsError;
   bool _ready = false;
+  Timer? _backupTimer;
+
+  @override
+  void dispose() { _backupTimer?.cancel(); super.dispose(); }
 
   @override
   void initState() {
@@ -55,6 +61,9 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
 
   Future<void> _initialize() async {
     try {
+      // Finish a requested restore before caches, network, or background workers.
+      _step = 'Checking requested restore';
+      await LocalBackupService.applyRequestedRestore();
       await _runStep('Opening local database', initializeLocalDatabase);
       await _runStep('Opening offline document store', () => LocalDocumentDetailCache.initialize(localDatabase));
       // Preferences are non-financial UI settings. A stalled or unavailable
@@ -94,7 +103,15 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
       DeviceOwnerAuthorization.instance.initialize();
       await _runStep('Starting photo background service',
           ExpenseIqBackgroundScheduler.initialize);
-      if (mounted) setState(() => _ready = true);
+      if (mounted) {
+        setState(() => _ready = true);
+        _backupTimer = Timer.periodic(const Duration(minutes: 15), (_) {
+          if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+            unawaited(LocalBackupService.automaticIfDue());
+          }
+        });
+        unawaited(LocalBackupService.automaticIfDue());
+      }
     } catch (error, stack) {
       debugPrint('Briskers startup failed at $_step: $error\n$stack');
       if (mounted) {
