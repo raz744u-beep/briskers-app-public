@@ -1,4 +1,5 @@
 import 'invoice_labor_work_summary.dart';
+import 'local_repair_groups.dart';
 import 'local_warranty_companies.dart';
 import 'dart:convert';
 import 'invoice_tax_proposal.dart';
@@ -669,6 +670,10 @@ class OfflineDocumentEditService {
     }
 
     for (final documentId in documentIds) {
+      if (await LocalRepairGroups(database: _database, cache: _cache)
+          .enabled(businessId, documentId)) {
+        continue;
+      }
       final pending = rows
           .where((row) => row.read<String>('entity_id') == documentId)
           .toList();

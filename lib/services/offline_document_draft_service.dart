@@ -91,8 +91,12 @@ class OfflineDocumentDraftService {
       if (line['line_kind'] == 'discount') continue;
       final price = (_number(line['quantity']) *
           _number(line['unit_price']) * 100).round() / 100;
+      final lineTax = (price * _number(line['tax_rate']) * 100).round() / 100;
+      line['net_amount'] = price;
+      line['tax_amount'] = lineTax;
+      line['total_amount'] = price + lineTax;
       net += price;
-      tax += (price * _number(line['tax_rate']) * 100).round() / 100;
+      tax += lineTax;
     }
     return (net: net, tax: tax, total: net + tax);
   }
@@ -1513,6 +1517,12 @@ class OfflineDocumentDraftService {
       final preflight = Map<String, dynamic>.from(
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
+      // Legacy estimate upload has no repair-group/authorization contract.
+      // Do not publish an ungrouped copy that could later bill declined work.
+      if (await LocalRepairGroups(database: _database, cache: _cache)
+          .enabled(businessId, localId)) {
+        continue;
+      }
       // Device-numbered invoices remain local until explicit reconciliation exists.
       if(preflight['local_document_number'] != null) continue;
       final dependencies = <String>[

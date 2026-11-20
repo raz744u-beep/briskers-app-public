@@ -234,6 +234,10 @@ class OfflineEstimateInvoiceService {
     };
     final updatedInvoice = <String, dynamic>{
       ...invoice,
+      if (estimate['repair_group_invoice'] != null) 'repair_group_invoice': [
+        ...?invoice['repair_group_invoice'] as List?,
+        ...estimate['repair_group_invoice'] as List,
+      ],
       'lines': [...invoiceLines, ...copied],
       'net_amount': newNet,
       'tax_amount': newTax,
@@ -309,7 +313,9 @@ class OfflineEstimateInvoiceService {
       // Legacy server merge copies every source line. Keep this local result
       // queued until a group-aware reconciliation protocol is available.
       if (await LocalRepairGroups(database: _database, cache: _cache)
-          .enabled(businessId, payload['estimate_id'].toString())) continue;
+          .enabled(businessId, payload['estimate_id'].toString())) {
+        continue;
+      }
 
       try {
         await LocalJobQuarantine.assertReplayAllowed(

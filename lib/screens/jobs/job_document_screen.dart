@@ -56,6 +56,9 @@ import '../../services/invoice_expense_reader.dart';
 import '../../services/document_pdf_service.dart';
 import '../../core/invoice_warranty_pdf_projection.dart';
 import '../../services/local_invoice_signature_store.dart';
+import '../../services/local_repair_groups.dart';
+import '../../core/repair_group.dart';
+import '../../widgets/repair_group_panel.dart';
 import '../../services/invoice_performance_metrics.dart';
 import '../../services/invoice_labor_work_summary.dart';
 import '../../services/gmail_compose_service.dart';
@@ -273,6 +276,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   final FocusNode _notesFocusNode = FocusNode();
 
   Map<String, dynamic>? _detail;
+  bool _hasRepairGroups = false;
   Map<String, dynamic> _identifixMeta = const {};
   Map<String, dynamic> _warrantyDetail = const {};
   Map<String, dynamic> _signatureStatus = const {};
@@ -1331,7 +1335,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       );
       return;
     }
-    if (BriskersConnectionModeController.instance.forceOffline) {
+    if (BriskersConnectionModeController.instance.forceOffline || _hasRepairGroups) {
       await _offlineDocumentEdit.updateLine(
         widget.businessId,
         widget.documentId,
@@ -1370,7 +1374,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       );
       return;
     }
-    if (BriskersConnectionModeController.instance.forceOffline) {
+    if (BriskersConnectionModeController.instance.forceOffline || _hasRepairGroups) {
       await _offlineDocumentEdit.deleteLine(
         widget.businessId,
         widget.documentId,
@@ -1394,7 +1398,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       );
       return;
     }
-    if (BriskersConnectionModeController.instance.forceOffline) {
+    if (BriskersConnectionModeController.instance.forceOffline || _hasRepairGroups) {
       await _offlineDocumentEdit.copyLine(
         widget.businessId,
         widget.documentId,
@@ -1422,7 +1426,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       );
       return;
     }
-    if (BriskersConnectionModeController.instance.forceOffline) {
+    if (BriskersConnectionModeController.instance.forceOffline || _hasRepairGroups) {
       await _offlineDocumentEdit.moveLine(
         widget.businessId,
         widget.documentId,
@@ -2322,6 +2326,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _addDiscount() async {
+    if (_hasRepairGroups) {
+      setState(() => _error = 'Local grouped discount editing requires the shared pricing upgrade. The quote has not been changed.');
+      return;
+    }
     if (_readOnly) return;
 
     final result = await showModalBottomSheet<Map<String, dynamic>>(
@@ -2352,6 +2360,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _editDiscount(Map<String, dynamic> line) async {
+    if (_hasRepairGroups) {
+      setState(() => _error = 'Local grouped discount editing requires the shared pricing upgrade. The quote has not been changed.');
+      return;
+    }
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
@@ -2822,7 +2834,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       return;
     }
 
-    if (BriskersConnectionModeController.instance.forceOffline) {
+    if (BriskersConnectionModeController.instance.forceOffline ||
+        await LocalRepairGroups().enabled(widget.businessId, widget.documentId)) {
       String? localInvoiceId;
       await _run(() async {
         localInvoiceId = await _offlineDocumentDraft.convertEstimateOffline(
@@ -2935,8 +2948,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _addEstimateToExistingInvoice() async {
-    final estimate = _detail;
-    if (estimate == null || _busy) return;
+    final source = _detail;
+    if (source == null || _busy) return;
+    Map<String, dynamic> estimate;
+    try {
+      estimate = await LocalRepairGroups().authorizedDocument(widget.businessId, widget.documentId, source);
+    } catch (error) {
+      if (mounted) setState(() => _error = '$error');
+      return;
+    }
 
     List<Map<String, dynamic>> invoices =
         await _offlineEstimateInvoice.eligibleLocalInvoices(
@@ -5829,6 +5849,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     required num shownPaid,
     required num balance,
   }) {
+    final visibleLines = _estimate && _hasRepairGroups
+        ? lines.where(RepairGroup.isGeneralCharge).toList() : lines;
+    final invoiceGroups = {
+      for (final group in (_detail?['repair_group_invoice'] as List? ?? const []).whereType<Map>())
+        group['id']: group,
+    };
     final importLines = List<dynamic>.from(
       _identifixMeta['lines'] ?? const [],
     ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
@@ -5858,6 +5884,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
+          if (_estimate) RepairGroupPanel(
+            key: ValueKey('repair-groups-${widget.documentId}'),
+            business: widget.businessId, estimate: widget.documentId,
+            detail: _detail!, editable: widget.isOwner && !_readOnly && !_busy,
+            onEnabled: (enabled) {
+              if (mounted && enabled != _hasRepairGroups) setState(() => _hasRepairGroups = enabled);
+            },
+            onEditLine: (line) => unawaited(_editLine(line)),
+            onAddItems: _openAddItemChoices,
+          ),
           if (identifixImported)
             Container(
               margin: const EdgeInsets.fromLTRB(12, 12, 12, 10),
@@ -5932,13 +5968,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ],
             ),
           ),
-          if (lines.isEmpty)
+          if (visibleLines.isEmpty && !_hasRepairGroups)
             const Padding(
               padding: EdgeInsets.all(22),
               child: Center(child: Text('No items added yet.')),
             )
           else
-            ...lines.map((line) {
+            ...visibleLines.map((line) {
               final description =
                   line['description']?.toString().trim() ?? '';
               final amount = _lineNetAmount(line);
@@ -5975,6 +6011,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      if (!_estimate && invoiceGroups[line['repair_group_id']] != null)
+                        Text('${invoiceGroups[line['repair_group_id']]!['name']} · Approved',
+                          style: const TextStyle(fontSize: 12, color: BriskersColors.secondaryText)),
                       if (OwnerPayrollScreen.enabled && widget.isOwner &&
                           !_estimate && isInvoiceLaborLine(line) &&
                           line['id'] is String && _detail?['job_id'] is String)

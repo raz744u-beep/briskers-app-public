@@ -26,12 +26,17 @@ class RepairGroupSchema {
     await db.customStatement('''CREATE TABLE IF NOT EXISTS repair_signatures_v1(
       business TEXT NOT NULL, signature_id TEXT NOT NULL, image_bytes BLOB NOT NULL,
       PRIMARY KEY(business,signature_id))''');
+    await db.customStatement('''CREATE TABLE IF NOT EXISTS repair_authorization_media_v1(
+      business TEXT NOT NULL, media_id TEXT NOT NULL, image_bytes BLOB NOT NULL,
+      PRIMARY KEY(business,media_id))''');
     await db.customStatement('''CREATE INDEX IF NOT EXISTS repair_authorizations_estimate_v1
       ON repair_authorizations_v1(business,estimate)''');
-    for (final operation in ['UPDATE', 'DELETE']) {
-      await db.customStatement('''CREATE TRIGGER IF NOT EXISTS repair_authorizations_no_${operation.toLowerCase()}_v1
-        BEFORE $operation ON repair_authorizations_v1
+    for (final table in ['repair_authorizations_v1', 'repair_signatures_v1', 'repair_authorization_media_v1']) {
+      for (final operation in ['UPDATE', 'DELETE']) {
+        await db.customStatement('''CREATE TRIGGER IF NOT EXISTS ${table}_no_${operation.toLowerCase()}
+        BEFORE $operation ON $table
         BEGIN SELECT RAISE(ABORT,'Repair authorization history is immutable'); END''');
+      }
     }
   }
 }

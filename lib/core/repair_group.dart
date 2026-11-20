@@ -35,7 +35,7 @@ class RepairGroup {
       final keys = value.keys.map((key) => key.toString()).toList()..sort();
       return {for (final key in keys) key: canonical(value[key])};
     }
-    if (value is List) return value.map(canonical).toList();
+    if (value is List) { return value.map(canonical).toList(); }
     return value;
   }
   static String hash(Object? value) => base64UrlEncode(const DartSha256()
@@ -55,10 +55,13 @@ class RepairGroup {
   static Map<String, dynamic> _scopeLine(Map<String, dynamic> line) => {
     for (final key in ['id', 'name', 'description', 'item_id', 'line_kind',
       'quantity', 'unit_price', 'tax_rate', 'tax_mode', 'net_amount',
-      'tax_amount', 'total_amount']) key: line[key],
+      'tax_amount', 'total_amount', 'discount_method', 'discount_value',
+      'discount_timing']) key: line[key],
   };
   static bool isGeneralCharge(Map<String, dynamic> line) =>
-    const {'supplies', 'shop_supplies', 'discount'}.contains(line['line_kind']);
+    const {'supplies', 'shop_supplies', 'discount'}.contains(line['line_kind']) ||
+    (line['line_kind'] != 'labor' && const {'shop supplies', 'supplies'}
+      .contains(line['name']?.toString().trim().toLowerCase()));
   static List<Map<String, dynamic>> _lines(Map<String, dynamic> document) =>
     (document['lines'] as List? ?? const []).whereType<Map>()
       .map((line) => Map<String, dynamic>.from(line)).toList();

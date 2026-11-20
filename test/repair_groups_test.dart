@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:briskers_app/core/repair_group.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_repair_groups.dart';
+import 'package:briskers_app/services/local_payroll_repository.dart';
 import 'package:briskers_app/services/offline_document_draft_service.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -82,7 +84,7 @@ void main() {
   test('undecided or all declined cannot bill supplies', () async {
     final a = await firstGroup();
     await drafts.addLine('shop', estimate, name: 'Shop supplies', quantity: 1,
-      unitPrice: 15, taxRate: 0, lineKind: 'supplies');
+      unitPrice: 15, taxRate: 0, lineKind: 'item');
     await expectLater(drafts.convertEstimateOffline('shop', estimate), throwsStateError);
     await authorize(a, decision: RepairDecision.declined);
     await authorize(RepairGroup.otherId, event: 'decline-other', decision: RepairDecision.declined);
@@ -119,7 +121,53 @@ void main() {
       actor: 'Owner', notes: 'Customer present'), throwsStateError);
     await expectLater(groups.add('other-shop', estimate, 'Foreign group'), throwsStateError);
     expect(await groups.history('shop', estimate), isEmpty);
-    final tables = await db.customSelect("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%payroll%'").get();
-    expect(jsonEncode(tables.map((row) => row.data).toList()), isNot(contains('repair_authorizations')));
+  });
+  test('authorization leaves existing task states, assignments, payroll, numbering and payments untouched', () async {
+    final payroll = LocalPayrollRepository(db, business: 'shop', owner: true);
+    await payroll.prepare();
+    await drafts.createQuickInvoice('shop', customerId: 'customer', customerName: 'Customer', initialLines: [
+      {'name': 'Labor', 'description': 'Existing work', 'line_kind': 'labor',
+        'quantity': 2, 'unit_price': 100, 'tax_rate': 0}
+    ]);
+    final a = await firstGroup();
+    Future<String> protectedSnapshot() async {
+      final result = <String, dynamic>{};
+      for (final table in ['local_jobs', 'local_documents', 'regular_payroll_tasks',
+        'regular_payroll_portions', 'regular_payroll_payments', 'regular_payroll_paid_work', 'sync_outbox']) {
+        result[table] = (await db.customSelect('SELECT * FROM $table ORDER BY rowid').get()).map((row) => row.data).toList();
+      }
+      return jsonEncode(result);
+    }
+    final before = await protectedSnapshot();
+    await authorize(a);
+    expect(await protectedSnapshot(), before);
+  });
+  test('signed decisions retain original photographs after source removal and replay after conversion', () async {
+    final a = await firstGroup();
+    final folder = await Directory.systemTemp.createTemp('repair-evidence-');
+    addTearDown(() => folder.delete(recursive: true));
+    final file = File('${folder.path}/finding.png');
+    final png = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lfoAAAAASUVORK5CYII=');
+    await file.writeAsBytes(png);
+    await groups.edit('shop', estimate, a, name: 'Brakes', description: 'Worn pads', evidence: [
+      {'id': 'finding', 'body': 'Pads worn', 'photos': [{'local_file_path': file.path}]}
+    ]);
+    final scope = await groups.snapshot('shop', estimate, await detail());
+    Future<void> submit() => groups.authorize('shop', estimate, eventId: 'signed', expectedScope: scope,
+      decisions: {a: RepairDecision.approved}, method: RepairAuthorizationMethod.deviceSignature,
+      actor: 'Customer', signature: png);
+    await submit();
+    final event = (await groups.history('shop', estimate)).single;
+    final repair = (event['groups'] as List).single as Map;
+    final finding = (repair['evidence'] as List).single as Map;
+    final photo = (finding['photos'] as List).single as Map;
+    await file.delete();
+    expect(await groups.media('shop', photo['media_ref'] as String), png);
+    expect(await groups.signature('shop', 'signed'), png);
+    await drafts.convertEstimateOffline('shop', estimate);
+    await submit();
+    expect(await groups.history('shop', estimate), hasLength(1));
+    await expectLater(db.customStatement('DELETE FROM repair_signatures_v1'), throwsA(anything));
+    await expectLater(db.customStatement('DELETE FROM repair_authorization_media_v1'), throwsA(anything));
   });
 }

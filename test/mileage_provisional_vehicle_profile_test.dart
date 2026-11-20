@@ -37,7 +37,7 @@ void main() {
   test('local v22 vehicle columns preserve reading provenance', () async {
     final database = BriskersLocalDatabase(NativeDatabase.memory());
     try {
-      expect(database.schemaVersion, 22);
+      expect(database.schemaVersion, 23);
       final columns = await database.customSelect(
         'PRAGMA table_info(local_vehicles)',
       ).get();
