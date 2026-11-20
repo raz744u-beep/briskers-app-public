@@ -8099,6 +8099,55 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 child: Column(
                   children: [
                   _customerHeader(),
+                  if (_estimate && _detail?['sync_state'] == 'conflict')
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface,
+                          border: const Border(
+                            left: BorderSide(
+                              color: BriskersColors.estimates,
+                              width: 4,
+                            ),
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.warning_amber_outlined,
+                                color: BriskersColors.estimates),
+                            const SizedBox(width: 8),
+                            Expanded(child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Estimate sync needs Owner review',
+                                    style: TextStyle(fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 4),
+                                const Text(
+                                  'Saved on this phone. Automatic sync is blocked; '
+                                  'a numbered copy may already exist on the server. '
+                                  'Review before retrying or deleting.'),
+                                if ((_detail?['_offline_estimate_sync_error']
+                                        ?.toString().isNotEmpty ?? false))
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(
+                                      _detail!['_offline_estimate_sync_error'].toString(),
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context).textTheme.bodySmall,
+                                    ),
+                                  ),
+                              ],
+                            )),
+                          ],
+                        ),
+                      ),
+                    ),
                   if (_estimate && number.isEmpty)
                     ListTile(
                       title: const Text('Estimate number needs correction'),
