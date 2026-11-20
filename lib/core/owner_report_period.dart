@@ -11,18 +11,18 @@ int? reportIncomeCents(ReportRow r) => reportCents(
 /// Recover historical tax only from saved amounts that reconcile to the saved total.
 int? reportInvoiceTax(ReportRow invoice) {
   final explicit = reportCents(invoice['tax_amount']);
-  if (explicit != null) return explicit;
+  if (explicit != null) { return explicit; }
   final gross = reportCents(invoice['total_amount']);
   final net = reportCents(invoice['net_amount']);
-  if (gross != null && net != null && gross >= net) return gross - net;
+  if (gross != null && net != null && gross >= net) { return gross - net; }
   final lines = invoice['lines'];
-  if (gross == null || lines is! List || lines.isEmpty) return null;
+  if (gross == null || lines is! List || lines.isEmpty) { return null; }
   var savedNet = 0, savedTax = 0;
   for (final line in lines) {
-    if (line is! Map) return null;
+    if (line is! Map) { return null; }
     final amount = reportCents(line['net_amount']);
     final rate = num.tryParse(line['tax_rate']?.toString() ?? '');
-    if (amount == null || rate == null || !rate.isFinite || rate < 0) return null;
+    if (amount == null || rate == null || !rate.isFinite || rate < 0) { return null; }
     savedNet += amount;
     savedTax += (amount * rate).round();
   }
