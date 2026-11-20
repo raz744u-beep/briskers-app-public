@@ -3940,6 +3940,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     var mileageText = (explicitMileageOut
         ? _detail!['mileage_out']
         : _detail!['odometer_in'])?.toString().trim() ?? '';
+    // A header Save is not an explicit Miles In edit. Only pass mileage to
+    // pending-estimate replay when the Owner edited it or selected a different
+    // vehicle with a different mileage. Preserve an intentional blank clear.
+    var mileageTouched = false;
     final claimController = TextEditingController(
       text: _detail!['claim_number']?.toString() ?? '',
     );
@@ -3997,8 +4001,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           customer['display_name']?.toString() ?? '';
                       vehicleId = vehicle?['id']?.toString();
                       vehicleName = _vehicleLabel(vehicle);
-                      mileageText = explicitMileageOut ? '' :
+                      final nextMileage = explicitMileageOut ? '' :
                           (vehicle?['mileage']?.toString().trim() ?? '');
+                      if (nextMileage != mileageText) mileageTouched = true;
+                      mileageText = nextMileage;
                     });
                   },
                 ),
@@ -4018,8 +4024,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           setSheetState(() {
                             vehicleId = vehicle['id']?.toString();
                             vehicleName = _vehicleLabel(vehicle);
-                            mileageText = explicitMileageOut ? '' :
+                            final nextMileage = explicitMileageOut ? '' :
                                 (vehicle['mileage']?.toString().trim() ?? '');
+                            if (nextMileage != mileageText) mileageTouched = true;
+                            mileageText = nextMileage;
                           });
                         },
                 ),
@@ -4082,7 +4090,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                                     MileageWorkflow.parse(raw) != null)
                                 : (raw.isEmpty || num.tryParse(raw) != null);
                             if (valid) {
-                              setSheetState(() => mileageText = raw);
+                              setSheetState(() {
+                                mileageText = raw;
+                                mileageTouched = true;
+                              });
                             } else if (sheetContext.mounted) {
                               ScaffoldMessenger.of(sheetContext).showSnackBar(
                                 const SnackBar(
@@ -4185,7 +4196,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       await _run(() => _offlineDocumentDraft.updatePendingEstimateDetails(
         widget.businessId, widget.documentId, documentDate: date,
         customerId: customerId, customerName: customerName,
-        vehicleId: vehicleId, vehicleLabel: vehicleName, mileage: newMileage,
+        vehicleId: vehicleId, vehicleLabel: vehicleName,
+        mileage: mileageTouched ? newMileage : null,
         claimNumber: newClaimNumber.isEmpty ? null : newClaimNumber,
         authorizationNumber: newAuthorizationNumber.isEmpty ? null : newAuthorizationNumber,
       ), localOnly: true);
