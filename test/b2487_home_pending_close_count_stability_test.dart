@@ -9,7 +9,10 @@ void main() {
     expect(code, contains('if (connection.forceOffline || !_attentionServerVerified)'));
     expect(code, contains('final localSnapshot = Map<String, dynamic>.from(_attention)'));
     expect(code, contains('_attentionServerVerified = true;'));
-    expect(code, contains('setState(() => _attention = data);'));
+    expect(code, contains('projectPendingCloseAttention(businessId, data)'));
+    expect(code, contains('setState(() => _attention = projected);'));
+    expect(code, contains('lifecycleEpoch == _attentionLifecycleEpoch'));
+    expect(code, contains('withoutClosedAttentionInvoices(_attention, {event.invoiceId})'));
     expect(code, contains('if (!sameScope() || connection.forceOffline) return;'));
     expect(code, contains('_attentionRefreshQueued = true;'));
     expect(code, contains("timeout(const Duration(seconds: 8))"));

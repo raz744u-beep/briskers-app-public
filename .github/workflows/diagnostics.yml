@@ -108,6 +108,7 @@ jobs:
           test/offline_warranty_pdf_signature_test.dart
           test/bugs39_estimate_conversion_projection_test.dart
           test/estimate_local_header_and_preview_test.dart
+          test/home_closed_invoice_attention_test.dart
           test/customer_identity_marker_test.dart
           test/nov18_employee_work_scoped_read_test.dart
 

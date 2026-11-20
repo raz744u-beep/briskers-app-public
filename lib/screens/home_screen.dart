@@ -1,3 +1,5 @@
+import '../core/invoice_attention_projection.dart';
+import '../services/verified_invoice_close_events.dart';
 import '../widgets/recent_records_card.dart';
 import 'dart:async';
 
@@ -212,6 +214,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   String? _expandedSection;
   Map<String, dynamic> _attention = const {};
+  StreamSubscription<VerifiedInvoiceClosed>? _invoiceClosures;
+  int _attentionLifecycleEpoch = 0;
   bool _attentionLoading = false;
   bool _attentionRefreshQueued = false;
   // In Auto keep the last authorized server counts visible while refreshing.
@@ -241,6 +245,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_catchUpRecurring());
     });
+    _invoiceClosures = VerifiedInvoiceCloseEvents.changes.listen((event) {
+      if (!mounted || event.businessId != widget.businessId) return;
+      ++_attentionLifecycleEpoch;
+      setState(() => _attention = withoutClosedAttentionInvoices(_attention, {event.invoiceId}));
+      unawaited(_loadAttention());
+    });
     _loadAttention();
     _loadWeather();
     BriskersConnectionModeController.instance.addListener(_onConnectionMode);
@@ -253,6 +263,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     unawaited(_recentSubscription?.cancel());
+    unawaited(_invoiceClosures?.cancel());
     WidgetsBinding.instance.removeObserver(this);
     BriskersConnectionModeController.instance.removeListener(_onConnectionMode);
     super.dispose();
@@ -362,8 +373,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _attentionLoading = true;
     final businessId = widget.businessId;
     final roleCode = widget.roleCode;
+    final lifecycleEpoch = _attentionLifecycleEpoch;
     bool sameScope() => mounted && widget.businessId == businessId &&
-        widget.roleCode == roleCode;
+        widget.roleCode == roleCode && lifecycleEpoch == _attentionLifecycleEpoch;
 
     try {
       final localJobs = await _localJobs.unassignedOpenJobs(
@@ -403,7 +415,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             .timeout(const Duration(seconds: 8));
         if (!sameScope() || connection.forceOffline) return;
         _attentionServerVerified = true;
-        setState(() => _attention = data);
+        final projected = await _localDocuments.projectPendingCloseAttention(businessId, data);
+        if (!sameScope() || connection.forceOffline) return;
+        setState(() => _attention = projected);
       } catch (_) {
         if (!sameScope() || connection.forceOffline) return;
         // Preserve the last verified server snapshot if an Auto refresh fails.
@@ -423,7 +437,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case 'appointment_requests':
         return 'Appointment Requests';
       case 'pending_close_invoices':
-        return 'Pending Close Invoices';
+        return 'Ready to Close';
       case 'unassigned_jobs':
         return 'Unassigned Jobs';
       case 'unread_messages':
@@ -1675,7 +1689,7 @@ class _NeedsAttentionPanel extends StatelessWidget {
               item(
                 Icons.receipt_long_outlined,
                 pendingCloseInvoices,
-                'Pending Close\nInvoices',
+                'Ready to Close',
                 onPendingCloseInvoices,
               ),
               const SizedBox(
@@ -1851,7 +1865,7 @@ class _HomeTiles extends StatelessWidget {
             ),
             _tile(
               'Invoices',
-              '$invoicesOpenCount Not Closed',
+              '$invoicesOpenCount Open',
               Icons.receipt_long_outlined,
               BriskersColors.invoices,
               () => onToggle('invoices'),

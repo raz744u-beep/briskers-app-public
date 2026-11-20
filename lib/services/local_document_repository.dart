@@ -1,4 +1,6 @@
 import 'local_document_identity.dart';
+import 'dart:convert';
+import '../core/invoice_attention_projection.dart';
 import 'local_estimate_conversion.dart';
 import 'local_document_sql_store.dart';
 import 'local_estimate_number.dart';
@@ -579,6 +581,43 @@ class LocalDocumentRepository {
         .asyncMap((_) => openEstimateCount(businessId));
   }
 
+  /// The Home snapshot can come from SQLite or a stale server response.
+  /// Apply the same durable lifecycle decisions as invoice pages before it
+  /// supplies either a badge count or attention rows. No accounting writes.
+  Future<Map<String, dynamic>> projectPendingCloseAttention(
+    String businessId, Map<String, dynamic> snapshot,
+  ) async {
+    final raw = snapshot['pending_close_invoices'];
+    if (raw is! List || raw.isEmpty) return snapshot;
+    final documents = <Map<String, dynamic>>[
+      for (final item in raw.whereType<Map>())
+        if (item['business_id'] == null || item['business_id'] == businessId)
+          {...Map<String, dynamic>.from(item),
+            'id': (item['id'] ?? item['invoice_id'])?.toString() ?? '', 'kind': 'invoice'},
+    ];
+    final ids = documents.map((row) => row['id'].toString()).where((id) => id.isNotEmpty).toSet();
+    if (ids.isEmpty) return snapshot;
+    final indexed = await _database.customSelect(
+      "SELECT id,status,display_status_code,closed_at FROM local_documents "
+      "WHERE business_id=? AND kind='invoice' AND id IN (SELECT value FROM json_each(?))",
+      variables: [Variable(businessId), Variable(jsonEncode(ids.toList()))],
+    ).get();
+    final byId = {for (final row in indexed) row.read<String>('id'): row.data};
+    final projected = await LocalInvoiceClosureStore(_database).projectRows(businessId, [
+      for (final document in documents)
+        if (byId.containsKey(document['id']) &&
+            (DocumentPresentation({...byId[document['id']]!, 'kind': 'invoice'}).isClosed ||
+             DocumentPresentation({...byId[document['id']]!, 'kind': 'invoice'}).isVoid))
+          {...document, ...byId[document['id']]!}
+        else document,
+    ]);
+    return withoutClosedAttentionInvoices(snapshot, {
+      for (final document in projected)
+        if (DocumentPresentation(document).isClosed || DocumentPresentation(document).isVoid)
+          document['id'].toString(),
+    });
+  }
+
   /// Read-only offline Home attention from the already-synced invoice index.
   /// Does not interpret a missing snapshot as evidence that invoices are paid.
   Future<Map<String, dynamic>> pendingCloseAttention(
@@ -591,20 +630,14 @@ class LocalDocumentRepository {
         '''
       d.business_id = ? AND d.kind = 'invoice'
       AND ${_visibleDocumentSql('d')}
-      AND d.closed_at IS NULL
       AND lower(replace(coalesce(d.display_status_code, ''), ' ', '_'))
           IN ('pending_close', 'pendingclose')
     ''';
-    final countRow = await _database
-        .customSelect(
-          'SELECT COUNT(*) AS count FROM local_documents d WHERE $where',
-          variables: [Variable<String>(businessId)],
-        )
-        .getSingle();
     final rows = await _database
         .customSelect(
           '''
       SELECT d.id, d.document_number, d.job_id, d.customer_id,
+             d.status,d.display_status_code,d.closed_at,
              coalesce(c.display_name,j.customer_name,'Customer') AS customer_name,
              coalesce(j.job_number,'') AS job_number,
              coalesce(j.vehicle_label,'') AS vehicle
@@ -615,17 +648,20 @@ class LocalDocumentRepository {
         AND c.id = d.customer_id
       WHERE $where
       ORDER BY d.document_date DESC, d.created_at DESC
-      LIMIT ?
       ''',
-          variables: [Variable<String>(businessId), Variable<int>(limit)],
+          variables: [Variable<String>(businessId)],
         )
         .get();
-    return {
-      'count': countRow.read<int>('count'),
-      'items': [
+    final snapshot = await projectPendingCloseAttention(businessId, {
+      'counts': {'pending_close_invoices': rows.length},
+      'pending_close_invoices': [
         for (final row in rows)
           <String, dynamic>{
             'id': row.read<String>('id'),
+            'kind': 'invoice',
+            'status': row.readNullable<String>('status'),
+            'display_status_code': row.readNullable<String>('display_status_code'),
+            'closed_at': row.data['closed_at'],
             'document_number': row.readNullable<String>('document_number'),
             'job_id': row.readNullable<String>('job_id'),
             'job_number': row.read<String>('job_number'),
@@ -633,6 +669,10 @@ class LocalDocumentRepository {
             'vehicle': row.read<String>('vehicle'),
           },
       ],
+    });
+    return {
+      'count': (snapshot['counts'] as Map)['pending_close_invoices'],
+      'items': (snapshot['pending_close_invoices'] as List).take(limit < 0 ? 0 : limit).toList(),
     };
   }
 

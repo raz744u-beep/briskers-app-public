@@ -1,3 +1,4 @@
+import '../services/verified_invoice_close_events.dart';
 import '../services/local_warranty_companies.dart';
 import 'dart:async';
 
@@ -135,6 +136,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   StreamSubscription<String>? _homeCustomersSyncSubscription;
   StreamSubscription<int>? _homeEstimatesCountSubscription;
   StreamSubscription<int>? _homeInvoicesCountSubscription;
+  StreamSubscription<VerifiedInvoiceClosed>? _invoiceClosures;
   StreamSubscription<String>? _homeDocumentsSyncSubscription;
 
   @override
@@ -213,6 +215,11 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     _homeEstimatesCountSubscription = _localDocuments
         .watchOpenEstimateCount(widget.businessId)
         .listen(_applyHomeEstimatesCount);
+    _invoiceClosures = VerifiedInvoiceCloseEvents.changes.listen((event) {
+      if (!mounted || event.businessId != widget.businessId) return;
+      _refreshHomeInvoicesCount();
+      setState(() => _homeAttentionRefreshToken++);
+    });
     _refreshHomeInvoicesCount();
     _homeInvoicesCountSubscription = _localDocuments
         .watchOpenInvoiceCount(widget.businessId)
@@ -411,6 +418,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     _homeCustomersSyncSubscription?.cancel();
     _homeEstimatesCountSubscription?.cancel();
     _homeInvoicesCountSubscription?.cancel();
+    _invoiceClosures?.cancel();
     _homeDocumentsSyncSubscription?.cancel();
     super.dispose();
   }
@@ -498,7 +506,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
       if (index == 6) _expensesDockReset++;
       if (index == 0) _homeAttentionRefreshToken++;
     });
-    if (index == 4) _refreshHomeInvoicesCount();
+    if (index == 0 || index == 4) _refreshHomeInvoicesCount();
   }
 
   String get _roleLabel => roleLabel(widget.roleCode);
