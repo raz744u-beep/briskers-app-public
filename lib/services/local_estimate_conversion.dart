@@ -63,7 +63,14 @@ class LocalEstimateConversion {
   Future<void> projectRows(String business, List<Map<String, dynamic>> rows) async {
     await LocalDocumentSqlStore.ensure(db);
     await RecoveryCommitStore.ensure(db);
+    // Join each cache through its primary key. UNIONing complete JSON caches
+    // first materialized every snapshot, including unrelated shops, on every visit.
     final records = await db.customSelect(
+      "WITH scoped AS (SELECT * FROM local_documents d WHERE d.business_id=? "
+      "AND NOT EXISTS(SELECT 1 FROM local_document_detail_deleted x WHERE "
+      "x.cache_key='briskers_document_detail_' || d.business_id || '_' || d.id)), "
+      "snapshots AS (SELECT scoped.*, 'briskers_document_detail_' || business_id || '_' || id AS snapshot_key, 0 AS snapshot_source FROM scoped "
+      "UNION ALL SELECT scoped.*, NULL, 1 FROM scoped) "
       "SELECT d.id,d.kind,d.converted,d.document_number,d.document_date,"
       "CASE WHEN d.kind='estimate' AND d.id IN (SELECT value FROM json_each(?)) THEN c.payload_json END AS payload_json,"
       "CASE WHEN d.kind='invoice' AND json_valid(c.payload_json) THEN "
@@ -72,14 +79,23 @@ class LocalEstimateConversion {
       "AND (json_extract(c.payload_json,'\$.business_id') IS NULL OR json_extract(c.payload_json,'\$.business_id')=d.business_id) "
       "THEN COALESCE(NULLIF(json_extract(c.payload_json,'\$.converted_from_estimate_id'),''), "
       "NULLIF(json_extract(c.payload_json,'\$.source_estimate_id'),'')) END END AS source_estimate_id "
-      "FROM local_documents d LEFT JOIN ("
-      "SELECT cache_key,payload_json FROM local_document_details "
-      "UNION ALL SELECT 'briskers_document_detail_' || business_id || '_' || document_id,payload_json "
-      "FROM recovery_document_cache) c "
-      "ON c.cache_key='briskers_document_detail_' || d.business_id || '_' || d.id "
-      "WHERE d.business_id=? AND NOT EXISTS(SELECT 1 FROM local_document_detail_deleted x "
-      "WHERE x.cache_key='briskers_document_detail_' || d.business_id || '_' || d.id)",
-      variables: [Variable(jsonEncode([for(final row in rows) row['id']?.toString()])),Variable(business)],
+      "FROM snapshots d "
+      "LEFT JOIN local_document_details c ON c.cache_key=d.snapshot_key "
+      "WHERE d.snapshot_source=0 "
+      "UNION ALL "
+      "SELECT d.id,d.kind,d.converted,d.document_number,d.document_date,"
+      "CASE WHEN d.kind='estimate' AND d.id IN (SELECT value FROM json_each(?)) THEN c.payload_json END,"
+      "CASE WHEN d.kind='invoice' AND json_valid(c.payload_json) THEN "
+      "CASE WHEN json_extract(c.payload_json,'\$.id')=d.id "
+      "AND json_extract(c.payload_json,'\$.kind')='invoice' "
+      "AND (json_extract(c.payload_json,'\$.business_id') IS NULL OR json_extract(c.payload_json,'\$.business_id')=d.business_id) "
+      "THEN COALESCE(NULLIF(json_extract(c.payload_json,'\$.converted_from_estimate_id'),''), "
+      "NULLIF(json_extract(c.payload_json,'\$.source_estimate_id'),'')) END END "
+      "FROM snapshots d JOIN recovery_document_cache c "
+      "ON c.business_id=d.business_id AND c.document_id=d.id WHERE d.snapshot_source=1",
+      variables: [Variable(business),
+        Variable(jsonEncode([for(final row in rows) row['id']?.toString()])),
+        Variable(jsonEncode([for(final row in rows) row['id']?.toString()]))],
     ).get();
     final indexes = {for (final record in records) record.read<String>('id'): record.data};
     final estimateIds = {for (final record in records)

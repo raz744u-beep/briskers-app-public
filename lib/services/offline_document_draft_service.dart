@@ -1,3 +1,4 @@
+import 'invoice_labor_work_summary.dart';
 import 'local_warranty_companies.dart';
 import 'local_customer_vehicle_identity.dart';
 import 'invoice_tax_proposal.dart';
@@ -1007,17 +1008,23 @@ class OfflineDocumentDraftService {
     required num unitPrice,
     required num taxRate,
     required String lineKind,
+    String? replacementItemId,
   }) async {
     final detail = await _requireDraft(businessId, documentId);
     final lines = _lines(detail);
     final index =
         lines.indexWhere((line) => line['id']?.toString() == lineId);
     if (index < 0) throw StateError('The estimate line is not saved locally.');
+    if (replacementItemId != null && isInvoiceLaborLine(lines[index]) &&
+        !isInvoiceLaborLine({'name': name, 'line_kind': lineKind})) {
+      throw StateError('Keep labor allocations on a labor line.');
+    }
 
     final netAmount = quantity * unitPrice;
     final taxAmount = netAmount * taxRate;
     lines[index] = <String, dynamic>{
       ...lines[index],
+      if (replacementItemId != null) 'item_id': replacementItemId,
       'name': name,
       'description': description,
       'quantity': quantity,
@@ -1344,6 +1351,7 @@ class OfflineDocumentDraftService {
       final remote = await _api.documentDetail(businessId, invoiceId);
       final existing = _lines(remote);
       bool same(Map<String, dynamic> a, Map<String, dynamic> b) =>
+          (b['item_id'] == null || a['item_id'] == b['item_id']) &&
           (a['name']?.toString() ?? '') == (b['name']?.toString() ?? '') &&
           (a['description']?.toString() ?? '') == (b['description']?.toString() ?? '') &&
           (a['line_kind']?.toString() ?? '') == (b['line_kind']?.toString() ?? '') &&
@@ -1371,26 +1379,27 @@ class OfflineDocumentDraftService {
         final a = existing[i];
         final b = desired[i];
         if (same(a, b)) continue;
-        if (a['name']?.toString() == b['name']?.toString() &&
-            a['line_kind']?.toString() == b['line_kind']?.toString()) {
-          await LocalJobQuarantine.guardReplay(
-            _database,
-            businessId,
+        if (a['name'] == b['name'] && a['line_kind'] == b['line_kind'] &&
+            (b['item_id'] == null || a['item_id'] == b['item_id'])) {
+          await LocalJobQuarantine.guardReplay(_database, businessId,
             () => _api.updateDocumentLine(businessId, a['id'].toString(),
               expectedVersion: version, quantity: _number(b['quantity']),
               unitPrice: _number(b['unit_price']), taxRate: _number(b['tax_rate']),
-              description: b['description']?.toString()),
-            outboxId: outboxId,
-          );
+              description: b['description']?.toString()), outboxId: outboxId);
         } else {
-          // Replace an incompatible line; the next retry sees the deletion.
-          await LocalJobQuarantine.guardReplay(
-            _database,
-            businessId,
-            () => _api.deleteDocumentLine(businessId, a['id'].toString(),
-                expectedVersion: version),
-            outboxId: outboxId,
-          );
+        await LocalJobQuarantine.guardReplay(
+          _database,
+          businessId,
+          () => _api.updateDocumentLineV2(businessId, a['id'].toString(),
+            expectedVersion: version, name: b['name']?.toString() ?? 'Item',
+            quantity: _number(b['quantity']),
+            unitPrice: _number(b['unit_price']), taxRate: _number(b['tax_rate']),
+            description: b['description']?.toString(),
+            lineKind: b['line_kind']?.toString() ?? 'item',
+            replacementItemId: a['item_id'] == b['item_id']
+                ? null : b['item_id']?.toString()),
+          outboxId: outboxId,
+        );
         }
         corrected = true;
         break;

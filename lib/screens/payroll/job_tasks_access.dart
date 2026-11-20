@@ -320,7 +320,10 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
               message:linePeople.map((p) =>
                 '${p['label']} ${((p['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(1)}h'
               ).join(' · '),
-              child:Text(linePeople.map((p) =>
+              child:InkWell(
+                key:ValueKey('manage-line-mechanics-${widget.line}'),
+                onTap:busy?null:open,
+                child:Text(linePeople.map((p) =>
                 '${p['label']} ${((p['estimated_minutes'] as int? ?? 0)/60).toStringAsFixed(1)}h'
               ).join(' · '),
                 maxLines:1,
@@ -328,20 +331,17 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
                 overflow:TextOverflow.ellipsis,
                 textAlign:TextAlign.end,
                 style:const TextStyle(fontSize:15,color:Color(0xFF00897E),
-                  fontWeight:FontWeight.w800)),
+                  fontWeight:FontWeight.w800))),
             )),
             IconButton(
               constraints:const BoxConstraints(minWidth:28,minHeight:28),
               padding:EdgeInsets.zero,
-              icon:Icon(linePeople.every((p)=>p['paid']==true)
-                  ? Icons.lock_outline : Icons.edit_outlined,
-                size:18,color:linePeople.every((p)=>p['paid']==true)
-                  ? const Color(0xFF64748B):const Color(0xFF00897E)),
-              tooltip:linePeople.every((p)=>p['paid']==true)
-                ? 'Paid mechanic labor locked'
-                : 'Edit or split mechanic labor',
-              onPressed:busy || linePeople.every((p)=>p['paid']==true)
-                ? null : open,
+              // Paid allocations stay locked inside the manager. They must
+              // not prevent the owner from adding a separate mechanic.
+              icon:const Icon(Icons.edit_outlined,
+                size:18,color:Color(0xFF00897E)),
+              tooltip:'Edit or split mechanic labor',
+              onPressed:busy?null:open,
             ),
           ] else ...[
             Expanded(child:Text(lineAssignment??'Loading assignments…',

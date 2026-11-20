@@ -63,6 +63,7 @@ import '../../services/email_draft_templates.dart';
 import '../../services/catalog_sync_service.dart';
 import '../settings/catalog_settings_screen.dart';
 import '../../services/local_catalog_repository.dart';
+import '../../widgets/invoice_item_picker.dart';
 import '../../services/local_item_categories_cache.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_document_repository.dart';
@@ -679,18 +680,18 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             cachedTax?['sales_tax_rate']?.toString() ?? '',
           ) ??
           0;
+      var repairedTaxes = 0;
       if (cachedRate > 0) {
         try {
-          await _offlineDocumentEdit.repairPendingCatalogTaxes(
+          repairedTaxes = await _offlineDocumentEdit.repairPendingCatalogTaxes(
             widget.businessId,
             cachedRate,
             documentId: widget.documentId,
           );
         } catch (_) {}
       }
-      final repairedCached =
-          await _detailCache.load(widget.businessId, widget.documentId) ??
-              cached;
+      final repairedCached = repairedTaxes == 0 ? cached :
+          await _detailCache.load(widget.businessId, widget.documentId) ?? cached;
       final paymentProjected = await _withLocalPayments(
         await _withRecoveredDocumentDate(
           await _offlineInvoiceTax.projectPending(
@@ -1311,6 +1312,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     required num unitPrice,
     required num taxRate,
     required String lineKind,
+    String? replacementItemId,
   }) async {
     if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
       await _offlineDocumentDraft.updateLine(
@@ -1323,6 +1325,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         unitPrice: unitPrice,
         taxRate: taxRate,
         lineKind: lineKind,
+        replacementItemId: replacementItemId,
       );
       return;
     }
@@ -1337,6 +1340,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         unitPrice: unitPrice,
         taxRate: taxRate,
         lineKind: lineKind,
+        replacementItemId: replacementItemId,
       );
       return;
     }
@@ -1350,6 +1354,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       taxRate: taxRate,
       description: description,
       lineKind: lineKind,
+      replacementItemId: replacementItemId,
     );
   }
 
@@ -2257,6 +2262,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     });
   }
 
+  Future<Map<String, dynamic>?> _selectReplacementCatalogItem() async {
+    final items = await _localCatalog.items(widget.businessId, includeInactive: false);
+    if (!mounted) return null;
+    final selected = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context, isScrollControlled: true, useSafeArea: true,
+      showDragHandle: true,
+      builder: (_) => InvoiceItemPicker(items: items, accent: _documentActionColor),
+    );
+    if (selected == null) return null;
+    if (selected['taxable'] == true && !_taxSettingsCached) {
+      throw StateError('The shop sales-tax settings are not saved on this device yet. Run Sync now once before selecting a taxable item.');
+    }
+    return {...selected, 'tax_rate': selected['taxable'] == true ? _defaultTaxRate : 0};
+  }
+
   Future<void> _editLine(Map<String, dynamic> line) async {
     if (_readOnly) return;
 
@@ -2275,7 +2295,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         accent: _documentActionColor,
         title: tr('editInvoiceItem'),
         saveLabel: tr('saveChanges'),
-        lockCatalogFields: line['item_id'] != null,
+        lockCatalogFields: true,
+        selectCatalogItem: _selectReplacementCatalogItem,
       ),
     );
     if (result == null) return;
@@ -2291,6 +2312,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         taxRate: translatedResult['tax_rate'] as num,
         description: translatedResult['description']?.toString(),
         lineKind: translatedResult['line_kind'].toString(),
+        replacementItemId: translatedResult['replacement_item_id']?.toString(),
       );
     });
   }
@@ -8669,6 +8691,7 @@ class _EditLineDialog extends StatefulWidget {
     this.title = 'Edit item',
     this.saveLabel = 'Save',
     this.lockCatalogFields = false,
+    this.selectCatalogItem,
     this.lockLineKind = false,
     this.clearNumericOnFirstTap = false,
   });
@@ -8678,6 +8701,7 @@ class _EditLineDialog extends StatefulWidget {
   final String title;
   final String saveLabel;
   final bool lockCatalogFields;
+  final Future<Map<String, dynamic>?> Function()? selectCatalogItem;
   final bool lockLineKind;
   final bool clearNumericOnFirstTap;
 
@@ -8692,6 +8716,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
   late final TextEditingController _price;
   late final TextEditingController _taxPercent;
   late String _lineKind;
+  String? _replacementItemId;
   String? _error;
 
   @override
@@ -8726,6 +8751,36 @@ class _EditLineDialogState extends State<_EditLineDialog> {
     super.dispose();
   }
 
+  Future<void> _replaceCatalogItem() async {
+    try {
+      final item = await widget.selectCatalogItem?.call();
+      if (!mounted || item == null) return;
+      if ((item['id']?.toString() ?? '').isEmpty) {
+        throw StateError('This catalog item does not have a saved identity.');
+      }
+      // A billed-item change must never retire a labor task or its paid wages.
+      final wasLabor = isInvoiceLaborLine(widget.line);
+      final name = item['name']?.toString() ?? '';
+      final nextLabor = isInvoiceLaborLine({'name': name, 'line_kind': 'item'});
+      if (wasLabor && !nextLabor) {
+        setState(() => _error = 'Choose a labor item for this labor line. Manage mechanic assignments separately.');
+        return;
+      }
+      setState(() {
+        _replacementItemId = item['id']?.toString();
+        _name.text = name;
+        // Keep the job's work description when replacing a labor catalog entry.
+        if (!wasLabor) _description.text = item['description']?.toString() ?? '';
+        _price.text = item['selling_price']?.toString() ?? '0';
+        _taxPercent.text = ((num.tryParse(item['tax_rate']?.toString() ?? '') ?? 0) * 100).toString();
+        _lineKind = nextLabor || wasLabor ? 'labor' : 'item';
+        _error = null;
+      });
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
   void _save() {
     final quantity = num.tryParse(_quantity.text.trim());
     final price = num.tryParse(_price.text.trim());
@@ -8745,6 +8800,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
     Navigator.pop(
       context,
       <String, dynamic>{
+        if (_replacementItemId != null) 'replacement_item_id': _replacementItemId,
         'name': _name.text.trim(),
         'line_kind': _lineKind,
         'description': _description.text.trim().isEmpty
@@ -8819,9 +8875,12 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                         scrollPadding: const EdgeInsets.only(bottom: 180),
                         controller: _name,
                         readOnly: widget.lockCatalogFields,
+                        onTap: widget.selectCatalogItem == null ? null : _replaceCatalogItem,
                         textCapitalization: TextCapitalization.words,
                         decoration: InputDecoration(
                           labelText: tr('item'),
+                          suffixIcon: widget.selectCatalogItem == null ? null
+                              : const Icon(Icons.search),
                           border: const OutlineInputBorder(),
                           filled: widget.lockCatalogFields,
                           fillColor: widget.lockCatalogFields

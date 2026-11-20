@@ -84,6 +84,9 @@ jobs:
           node finalization.mjs
           node employee-details.mjs
 
+      - name: Verify indexed estimate conversion reads
+        run: python3 tools/tests/test_estimate_projection_query.py
+
       - name: Analyze Dart
         working-directory: generated
         run: flutter analyze
@@ -95,6 +98,8 @@ jobs:
         working-directory: generated
         run: >-
           flutter test --reporter expanded --timeout 45s
+          test/invoice_catalog_replacement_test.dart
+          test/paid_labor_manager_access_test.dart
           test/expense_filter_preferences_test.dart
           test/expenses_filter_restart_test.dart
           test/invoice_expense_reader_test.dart

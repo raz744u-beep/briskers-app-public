@@ -4294,12 +4294,16 @@ class BriskersApi {
     required num taxRate,
     String? description,
     required String lineKind,
+    String? replacementItemId,
   }) async {
     await networkSupabase.rpc(
-      'briskers_update_document_line_v2',
+      replacementItemId == null
+          ? 'briskers_update_document_line_v2'
+          : 'briskers_replace_document_line_catalog_v1',
       params: {
         'p_business_id': businessId,
         'p_line_id': lineId,
+        if (replacementItemId != null) 'p_item_id': replacementItemId,
         'p_expected_version': expectedVersion,
         'p_name': name,
         'p_quantity': quantity,

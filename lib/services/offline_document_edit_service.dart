@@ -1,3 +1,4 @@
+import 'invoice_labor_work_summary.dart';
 import 'local_warranty_companies.dart';
 import 'dart:convert';
 import 'invoice_tax_proposal.dart';
@@ -126,17 +127,24 @@ class OfflineDocumentEditService {
     required num unitPrice,
     required num taxRate,
     required String lineKind,
+    String? replacementItemId,
   }) async {
+    await _database.transaction(() async {
     final detail = await _requireCached(businessId, documentId);
     final lines = _lines(detail);
     final index =
         lines.indexWhere((line) => line['id']?.toString() == lineId);
     if (index < 0) throw StateError('The estimate line is not saved locally.');
+    if (replacementItemId != null && isInvoiceLaborLine(lines[index]) &&
+        !isInvoiceLaborLine({'name': name, 'line_kind': lineKind})) {
+      throw StateError('Keep labor allocations on a labor line.');
+    }
 
     final netAmount = quantity * unitPrice;
     final taxAmount = netAmount * taxRate;
     lines[index] = <String, dynamic>{
       ...lines[index],
+      if (replacementItemId != null) 'item_id': replacementItemId,
       'name': name,
       'description': description,
       'quantity': quantity,
@@ -154,6 +162,7 @@ class OfflineDocumentEditService {
       'update_line',
       {
         'line_id': lineId,
+        if (replacementItemId != null) 'replacement_item_id': replacementItemId,
         'name': name,
         'description': description,
         'quantity': quantity,
@@ -162,6 +171,7 @@ class OfflineDocumentEditService {
         'line_kind': lineKind,
       },
     );
+    });
   }
 
   Future<void> updateTaxRate(
@@ -758,6 +768,7 @@ class OfflineDocumentEditService {
               taxRate: _number(payload['tax_rate']),
               description: payload['description']?.toString(),
               lineKind: payload['line_kind']?.toString() ?? 'item',
+              replacementItemId: payload['replacement_item_id']?.toString(),
             ),
             outboxId: outboxId,
           );
