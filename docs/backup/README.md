@@ -29,3 +29,7 @@ Restore is deliberately restricted to matching schema/table definitions. Upgrade
 - Restore again and back up again: no duplicate payments; restored cached images still open.
 
 Physical device acceptance is required before describing the S26's data as protected or claiming a production restore has been verified. Development never reads or modifies the S26 database.
+
+## Development verification
+
+Seventeen focused tests run in the matching Flutter engine passed: eleven archive/integrity/identity tests and six real-schema startup/snapshot/restore tests. These cover WAL contents, payment/paid flags, signature bytes and unchanged signed JSON, file relocation, corrupt and missing payloads, missing-original warnings, cancelled restore, retained safety snapshot, commit/restart idempotence, and photo identity across a second backup generation. The native shell wiring test and all 42 existing candidate-gate tests passed. Device filesystem permissions and installation still require the physical-device acceptance above.

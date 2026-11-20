@@ -101,7 +101,20 @@ class LocalBackupService {
     var index = 0;
     Future<void> copyOriginal(String original) async {
       if (sourceFiles.containsKey(original)) return;
-      final relative = 'Originals/file-${index++}';
+      final lower = original.toLowerCase();
+      final area = lower.contains('receipt') || lower.contains('expense')
+          ? 'Receipts'
+          : lower.endsWith('.pdf')
+          ? 'Documents'
+          : RegExp(r'\.(jpg|jpeg|png|webp|heic|gif|img)$').hasMatch(lower) ||
+                lower.contains('photo') ||
+                lower.contains('attachment_cache')
+          ? 'Photos'
+          : 'Originals';
+      final extension =
+          RegExp(r'\.[a-zA-Z0-9]{1,8}$').firstMatch(original)?.group(0) ??
+          '.bin';
+      final relative = '$area/file-${index++}$extension';
       final destination = File('${folder.path}/$relative');
       await destination.parent.create(recursive: true);
       try {
@@ -120,6 +133,9 @@ class LocalBackupService {
             throw StateError('Original unavailable');
           }
           await File(path).copy(destination.path);
+        }
+        if (await destination.length() == 0) {
+          throw StateError('Original is empty');
         }
         sourceFiles[original] = relative;
       } catch (_) {
@@ -147,6 +163,13 @@ class LocalBackupService {
       )) {
         if (entity is! File) continue;
         final relative = entity.path.substring(root.path.length + 1);
+        // Review staging and previous restored generations are not additional
+        // shop originals. The active restored index is included separately.
+        if (relative.startsWith('backup-review-') ||
+            relative.startsWith('backup-safety/') ||
+            relative.startsWith('restored-backup-')) {
+          continue;
+        }
         if (relative.startsWith('briskers_media/') ||
             relative.startsWith('attachment_cache/') ||
             RegExp(
@@ -390,6 +413,9 @@ class LocalBackupService {
               ).readAsString(),
             )
             as Map;
+    for (final key in prefs.getKeys().where(safePreference)) {
+      if (!restoredSettings.containsKey(key)) await prefs.remove(key);
+    }
     for (final entry in restoredSettings.entries) {
       final key = entry.key as String;
       if (!safePreference(key)) continue;

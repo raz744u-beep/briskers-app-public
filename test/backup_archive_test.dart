@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart';
@@ -50,6 +51,14 @@ void main() {
       }),
       3,
     ]);
+    db.execute(
+      'CREATE TABLE signatures(id TEXT PRIMARY KEY,image BLOB,signed_json TEXT)',
+    );
+    db.execute('INSERT INTO signatures VALUES (?,?,?)', [
+      'signature',
+      Uint8List.fromList([0, 255, 8]),
+      '{ "total" : 788211 }',
+    ]);
     db.close();
     await BackupArchive.seal(
       backup,
@@ -95,6 +104,9 @@ void main() {
           788211,
         );
         expect(db.select('SELECT paid FROM runtime_payroll').single['paid'], 1);
+        final signature = db.select('SELECT * FROM signatures').single;
+        expect(signature['image'], [0, 255, 8]);
+        expect(signature['signed_json'], '{ "total" : 788211 }');
         final row = db.select('SELECT * FROM outbox').single;
         expect(row['id'], 'unchanged-operation');
         expect(row['attempt_count'], 3);

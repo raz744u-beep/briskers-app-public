@@ -231,7 +231,10 @@ class BackupArchive {
           if (replacements.containsKey(value)) return replacements[value];
           if (value.startsWith('{') || value.startsWith('[')) {
             try {
-              return jsonEncode(rewrite(jsonDecode(value)));
+              final decoded = jsonDecode(value);
+              final rewritten = rewrite(decoded);
+              final encoded = jsonEncode(rewritten);
+              return encoded == jsonEncode(decoded) ? value : encoded;
             } on FormatException {
               return value;
             }
