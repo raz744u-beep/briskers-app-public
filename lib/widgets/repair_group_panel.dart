@@ -155,7 +155,9 @@ class _RepairGroupPanelState extends State<RepairGroupPanel> {
               border: Border(left: BorderSide(width: 3, color: switch (data.states[group.id]) {
                 RepairDecision.approved => BriskersColors.confirm,
                 RepairDecision.declined => BriskersColors.destructive, _ => BriskersColors.estimates}))),
-            child: ExpansionTile(key: PageStorageKey('repair-group-${widget.estimate}-${group.id}'),
+            child: Material(color: Colors.white, borderRadius: BorderRadius.circular(10),
+              clipBehavior: Clip.antiAlias,
+              child: ExpansionTile(key: PageStorageKey('repair-group-${widget.estimate}-${group.id}'),
               tilePadding: const EdgeInsets.symmetric(horizontal: 12),
               title: Text(group.name, maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
@@ -182,7 +184,7 @@ class _RepairGroupPanelState extends State<RepairGroupPanel> {
                   ])),
                 if (widget.editable) TextButton.icon(onPressed: busy ? null : () => _run(() => _addItems(group.id)),
                   icon: const Icon(Icons.add, color: BriskersColors.confirm), label: const Text('Add parts or labor')),
-              ])),
+              ]))),
       ]);
     });
   String _amount(RepairGroup group) {

@@ -100,6 +100,8 @@ jobs:
           flutter test --reporter expanded --timeout 45s
           test/owner_reports_test.dart
           test/owner_reports_widget_test.dart
+          test/repair_groups_test.dart
+          test/repair_group_widgets_test.dart
           test/invoice_catalog_replacement_test.dart
           test/paid_labor_manager_access_test.dart
           test/bugs31_invoice_mechanic_one_login_test.dart
