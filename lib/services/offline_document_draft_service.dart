@@ -86,6 +86,24 @@ class OfflineDocumentDraftService {
       );
     }
 
+    // Idempotent server create may return a pre-existing estimate whose
+    // date was saved before a queued local header edit. A successful create
+    // acknowledgment alone does not prove that the edited date survived.
+    // Block the outbox before changing warranty identifiers or replacing
+    // the only local estimate detail if the authoritative date differs.
+    String? dateOnly(Object? value) {
+      final raw = value?.toString().trim();
+      if (raw == null || raw.isEmpty) return null;
+      return raw.split('T').first;
+    }
+    final expectedDate = dateOnly(local['document_date']);
+    if (expectedDate == null ||
+        dateOnly(remote['document_date']) != expectedDate) {
+      throw const _EstimateHeaderSyncConflict(
+        'server estimate date differs from the offline version',
+      );
+    }
+
     final desiredClaim = _headerText(local['claim_number']);
     final desiredAuthorization = _headerText(local['authorization_number']);
     String? actualClaim() => _headerText(remote['claim_number']);
