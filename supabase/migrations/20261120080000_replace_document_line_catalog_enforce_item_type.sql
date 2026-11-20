@@ -11,6 +11,9 @@ DECLARE
   old_line briskers.sales_document_lines;
   document briskers.sales_documents;
   catalog briskers.catalog_items;
+  catalog_type text;
+  selected_is_labor boolean;
+  original_is_labor boolean;
 BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'Sign-in required' USING ERRCODE='42501';
@@ -37,23 +40,25 @@ BEGIN
   END IF;
   -- Catalog type, not a friendly display name or caller-provided line kind,
   -- determines whether a replacement may retain a labor/payroll identity.
-  IF lower(btrim(coalesce(catalog.item_type::text,''))) NOT IN
+  catalog_type := lower(btrim(coalesce(catalog.item_type::text,'')));
+  selected_is_labor := catalog_type IN ('labor','labour');
+  original_is_labor :=
+    lower(btrim(coalesce(old_line.line_kind,''))) IN ('labor','labour')
+    OR lower(btrim(coalesce(old_line.name,''))) IN ('labor','labour');
+  IF catalog_type NOT IN
       ('labor','labour','part','non_inventory','service','fee','other') THEN
     RAISE EXCEPTION 'The selected catalog type must be reviewed' USING ERRCODE='22023';
   END IF;
-  IF (catalog.item_type::text IN ('labor','labour'))
-     IS DISTINCT FROM
-     (old_line.line_kind IN ('labor','labour')
-       OR lower(btrim(coalesce(old_line.name,''))) IN ('labor','labour')) THEN
+  IF selected_is_labor IS DISTINCT FROM original_is_labor THEN
     RAISE EXCEPTION 'Changing between labor and non-labor requires the job workflow'
       USING ERRCODE='22023';
   END IF;
-  IF (catalog.item_type::text IN ('labor','labour'))
-      IS DISTINCT FROM (p_line_kind = 'labor') THEN
+  IF selected_is_labor IS DISTINCT FROM
+      (lower(btrim(coalesce(p_line_kind,''))) = 'labor') THEN
     RAISE EXCEPTION 'Catalog item type and invoice line kind disagree'
       USING ERRCODE='22023';
   END IF;
-  IF catalog.item_type::text NOT IN ('labor','labour')
+  IF NOT selected_is_labor
       AND lower(btrim(coalesce(p_name,''))) IN ('labor','labour') THEN
     RAISE EXCEPTION 'A part cannot use a legacy labor label'
       USING ERRCODE='22023';
