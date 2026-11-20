@@ -326,9 +326,15 @@ class LocalRepairGroups {
     final charges = approvedCents > 0 ? (detail['lines'] as List).whereType<Map>()
       .map((line) => Map<String, dynamic>.from(line)).where(RepairGroup.isGeneralCharge).toList()
       : <Map<String, dynamic>>[];
+    var vehicleId = detail['vehicle_id']?.toString() ?? '';
+    if (vehicleId.isEmpty && detail['job_id'] != null) {
+      final job = await db.customSelect('SELECT vehicle_id FROM local_jobs WHERE business_id=? AND id=?',
+        variables: [Variable(business), Variable(detail['job_id'].toString())]).getSingleOrNull();
+      vehicleId = job?.readNullable<String>('vehicle_id') ?? '';
+    }
     final payload = <String, dynamic>{
       'event_id': eventId, 'estimate_id': estimate, 'revision': RepairGroup.hash(scope),
-      'vehicle_id': detail['vehicle_id'], 'customer_id': detail['customer_id'],
+      'vehicle_id': vehicleId.isEmpty ? null : vehicleId, 'customer_id': detail['customer_id'],
       'customer_name': detail['customer_name'], 'vehicle': detail['vehicle'],
       'method': method.name, 'actor': actor.trim(), 'notes': notes.trim(),
       'signature_ref': signed ? eventId : null,

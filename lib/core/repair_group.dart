@@ -46,6 +46,7 @@ class RepairGroup {
   String fingerprint(Map<String, dynamic> document) => hash({
     'group': id, 'name': name, 'description': description, 'evidence': evidence,
     'customer': document['customer_id'], 'vehicle': document['vehicle_id'],
+    'job': document['job_id'],
     'terms': {for (final key in ['memo', 'discount_amount', 'supplies_amount',
       'tax_rate']) key: document[key]},
     'general_charges': [for (final line in _lines(document))

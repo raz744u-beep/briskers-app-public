@@ -170,4 +170,13 @@ void main() {
     await expectLater(db.customStatement('DELETE FROM repair_signatures_v1'), throwsA(anything));
     await expectLater(db.customStatement('DELETE FROM repair_authorization_media_v1'), throwsA(anything));
   });
+  test('job-linked quote remains in the exact vehicle history without duplicated vehicle metadata', () async {
+    await db.customStatement("INSERT INTO local_jobs(id,business_id,access_scope,title,status,vehicle_id) VALUES('job','shop','full','Repair','open','vehicle')");
+    await cache.save('shop', estimate, {...await detail(), 'job_id': 'job', 'vehicle_id': null});
+    final a = await firstGroup();
+    await authorize(a, decision: RepairDecision.declined);
+    expect(await groups.vehicleHistory('shop', 'vehicle'), hasLength(1));
+    expect(await groups.vehicleHistory('other-shop', 'vehicle'), isEmpty);
+    expect(await groups.vehicleHistory('shop', 'unrelated-vehicle'), isEmpty);
+  });
 }
