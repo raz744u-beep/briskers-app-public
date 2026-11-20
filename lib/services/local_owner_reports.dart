@@ -104,6 +104,25 @@ class LocalOwnerReports {
         documents.add(doc);
       }
       final invoices = await LocalInvoiceClosureStore(db).projectRows(business, documents);
+      // A saved close proof records verified coverage, without inventing receipt dates.
+      if (names.contains('local_invoice_closures')) {
+        final closureRows = await db.customSelect(
+          'SELECT invoice_id,payload FROM local_invoice_closures WHERE business_id=? AND reopened_at IS NULL',
+          variables: [Variable(business)]).get();
+        final byId = {for (final invoice in invoices) invoice['id']: invoice};
+        for (final row in closureRows) {
+          try {
+            final proof = jsonDecode(row.read<String>('payload')) as Map;
+            final invoice = byId[row.read<String>('invoice_id')];
+            if (invoice == null) { continue; }
+            final gross = reportCents(invoice['total_amount']);
+            final paid = proof['paid_cents'];
+            if (gross != null && proof['total_cents'] == gross && paid is int && paid >= gross) {
+              invoice['_verified_closed_paid_cents'] = paid;
+            }
+          } catch (_) { issues.add('A saved invoice closure needs review.'); }
+        }
+      }
       final redundantJobs = aliases.where((r) => r.data['alias_job'] != r.data['canonical_job'])
           .map((r) => r.data['alias_job']).whereType<String>().where((id) =>
             !invoices.any((d) => d['job_id'] == id)).toSet();

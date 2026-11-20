@@ -242,7 +242,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
             key: ValueKey('overview-report-tile-$index'),
             subtitle: metric == OwnerReportMetric.projected ? 'Open jobs · known costs' : metric == OwnerReportMetric.net ? 'Received less expenses' :
               metric == OwnerReportMetric.income ? 'By payment date' :
-              const {OwnerReportMetric.sales,OwnerReportMetric.salesTax,OwnerReportMetric.grossSales,OwnerReportMetric.averageSale}.contains(metric) ? 'By payment date' :
+              const {OwnerReportMetric.sales,OwnerReportMetric.salesTax,OwnerReportMetric.grossSales,OwnerReportMetric.averageSale}.contains(metric) ? 'Paid invoices · invoice date' :
               const {OwnerReportMetric.billedSales,OwnerReportMetric.billedTax,OwnerReportMetric.billedGross}.contains(metric)?'By invoice date':null,
             onEdit: () => _chooseTile(index), onTap: () => _metricDetails(metric));
         }),
@@ -268,7 +268,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
   Future<void> _metricDetails(OwnerReportMetric metric) async {
     if(metric==OwnerReportMetric.income) {await _periodTransactions(ReportTransactionBasis.payments);return;}
     if(const {OwnerReportMetric.sales,OwnerReportMetric.salesTax,OwnerReportMetric.grossSales,OwnerReportMetric.averageSale}.contains(metric)) {
-      await _periodTransactions(ReportTransactionBasis.payments);return;
+      await _periodTransactions(ReportTransactionBasis.invoices);return;
     }
     if(const {OwnerReportMetric.billedSales,OwnerReportMetric.billedTax,OwnerReportMetric.billedGross}.contains(metric)){
       await _periodTransactions(ReportTransactionBasis.invoices);return;

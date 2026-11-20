@@ -295,4 +295,25 @@ void main() {
     expect((jsonDecode(stored.read<String>('payload_json')) as Map)['paid_amount'], 0);
   });
 
+  test('reports read matching closed-payment proofs without treating closure dates as payment dates', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    await LocalDocumentSqlStore.ensure(db);
+    await LocalInvoiceClosureStore(db).prepare();
+    final doc = {...invoice(), 'status':'closed', 'paid_amount':0, 'pending_payment':0};
+    await db.customStatement("INSERT INTO local_documents(id,business_id,kind,total,document_date,status) VALUES('invoice','shop','invoice',1080,'2026-11-19','closed')");
+    await db.customStatement('INSERT INTO local_document_details VALUES(?,?)', ['briskers_document_detail_shop_invoice', jsonEncode(doc)]);
+    await db.customStatement('INSERT INTO local_invoice_closures(business_id,invoice_id,closed_at,operation_id,payload) VALUES(?,?,?,?,?)',
+      ['shop','invoice','2026-11-20','close',jsonEncode({'total_cents':108000,'paid_cents':108000})]);
+    final report = await LocalOwnerReports(database:db).load('shop',isOwner:true);
+    final register = OwnerReportPeriod(report,period,ReportTransactionBasis.invoices);
+    expect(register.totals.paid,108000);
+    expect(register.paidInvoices.length,1);
+    expect(report.summary(period).values[OwnerReportMetric.salesTax],8000);
+    expect(report.summary(period).values[OwnerReportMetric.income],0);
+    await db.customStatement("UPDATE local_invoice_closures SET reopened_at='2026-11-21' WHERE invoice_id='invoice'");
+    final reopened = await LocalOwnerReports(database:db).load('shop',isOwner:true);
+    expect(reopened.invoices.single.containsKey('_verified_closed_paid_cents'),isFalse);
+  });
+
 }

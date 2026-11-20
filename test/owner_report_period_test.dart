@@ -471,14 +471,12 @@ void main() {
           cash('second', amount: 55, date: '2026-12-02'),
         ],
       );
-      final nov = d.summary(period).values;
-      final dec = d
-          .summary(ReportPeriod(DateTime(2026, 12), DateTime(2026, 12, 31)))
-          .values;
+      final nov = OwnerReportPeriod(d, period, ReportTransactionBasis.payments).totals;
+      final dec = OwnerReportPeriod(d, ReportPeriod(DateTime(2026, 12), DateTime(2026, 12, 31)), ReportTransactionBasis.payments).totals;
       for (final values in [nov, dec]) {
-        expect(values[OwnerReportMetric.grossSales], 5500);
-        expect(values[OwnerReportMetric.sales], 5000);
-        expect(values[OwnerReportMetric.salesTax], 500);
+        expect(values.gross, 5500);
+        expect(values.net, 5000);
+        expect(values.tax, 500);
       }
       final novRows = OwnerReportPeriod(
         d,
@@ -522,14 +520,14 @@ void main() {
         isEmpty,
       );
       expect(d.summary(period).values[OwnerReportMetric.income], 0);
-      expect(d.summary(period).values[OwnerReportMetric.salesTax], 0);
+      expect(d.summary(period).values[OwnerReportMetric.salesTax], 1000);
       final past = OwnerReportPeriod(
         d,
         period,
         ReportTransactionBasis.invoices,
         now: DateTime(2026, 12, 5),
       );
-      expect(past.entries.single.amountDue, isNull);
+      expect(past.entries.single.amountDue, 0);
     },
   );
   test('historical saved net or complete saved line tax recovers tax without current settings', () {
@@ -557,6 +555,33 @@ void main() {
     expect(register.paidInvoiceTotals.tax, 1000);
     expect(register.totals.gross, 33000);
     expect(register.totals.tax, isNull);
+  });
+
+  test('Overview tax and sales match current paid invoices for an earlier invoice month despite unlinked income', () {
+    final october = ReportPeriod(DateTime(2026, 10), DateTime(2026, 10, 31));
+    final d = data([
+      {...invoice('g', date: '2026-10-29', gross: 7882.11, tax: 700), 'status':'closed', 'paid_amount': 7882.11},
+      {...invoice('r', date: '2026-10-28', gross: 1637.63, tax: 145), 'status':'closed', 'paid_amount': 1637.63},
+      invoice('unpaid', date: '2026-10-20'),
+    ], [cash('unlinked', doc: null, amount: 500, date: '2026-10-10')]);
+    final register = OwnerReportPeriod(d, october, ReportTransactionBasis.invoices);
+    expect(register.paidInvoices.length, 2);
+    expect(register.paidInvoiceTotals.gross, 951974);
+    final summary = d.summary(october).values;
+    expect(summary[OwnerReportMetric.sales], register.paidInvoiceTotals.net);
+    expect(summary[OwnerReportMetric.salesTax], 84500);
+    expect(summary[OwnerReportMetric.grossSales], 951974);
+    expect(summary[OwnerReportMetric.income], 50000);
+  });
+  test('matching verified close proof resolves current paid balance without inventing a receipt date', () {
+    final d = data([{...invoice('a'), 'status':'closed', 'paid_amount':0,
+      '_balance_known':false, '_verified_closed_paid_cents':11000}], []);
+    final register = OwnerReportPeriod(d, period, ReportTransactionBasis.invoices);
+    expect(register.paidInvoices.length, 1);
+    expect(register.totals.paid, 11000);
+    expect(d.summary(period).values[OwnerReportMetric.salesTax], 1000);
+    expect(d.summary(period).values[OwnerReportMetric.income], 0);
+    expect(OwnerReportPeriod(d, period, ReportTransactionBasis.payments).entries, isEmpty);
   });
 
 }
