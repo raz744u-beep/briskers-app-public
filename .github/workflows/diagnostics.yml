@@ -99,6 +99,7 @@ jobs:
         run: >-
           flutter test --reporter expanded --timeout 45s
           test/invoice_catalog_replacement_test.dart
+          test/catalog_replacement_type_guard_test.dart
           test/paid_labor_manager_access_test.dart
           test/bugs31_invoice_mechanic_one_login_test.dart
           test/bugs31_invoice_mechanic_test_row_parity_test.dart
