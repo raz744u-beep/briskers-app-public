@@ -49,8 +49,8 @@ void main() {
     expect(summary.values[OwnerReportMetric.projected], 10000);
     expect(summary.values[OwnerReportMetric.income],5000);
     expect(summary.values[OwnerReportMetric.net],5000);
-    expect(summary.values[OwnerReportMetric.sales],100000);
-    expect(summary.values[OwnerReportMetric.salesTax],8000);
+    expect(summary.values[OwnerReportMetric.billedSales],100000);
+    expect(summary.values[OwnerReportMetric.billedTax],8000);
     expect(summary.values[OwnerReportMetric.openJobs],1);
   });
   test('projection always includes current jobs even outside the selected historical period', () {
@@ -82,7 +82,7 @@ void main() {
       [credit(assigned:60, actual:60, paidMinutes:120, paid:8000)]]) {
       expect(data(credits:credits).summary(period).values[OwnerReportMetric.projected],isNull);
     }
-    expect(data(docs:[invoice(tax:null)]).summary(period).values[OwnerReportMetric.sales],isNull);
+    expect(data(docs:[invoice(tax:null)]).summary(period).values[OwnerReportMetric.billedSales],isNull);
   });
   test('duplicate credit IDs, explicit aliases and inactive unpaid allocations cannot multiply labor', () {
     final report=data(credits:[credit(), credit(), {...credit(id:'alias'),'duplicate_of_task_id':'task'},
@@ -96,7 +96,7 @@ void main() {
       spend:[expense('split',25,allocation:'a'),expense('split',25,allocation:'a'),expense('split',15,allocation:'b'),
         {...expense('foreign',1000),'business_id':'foreign'}, {...expense('void',1000),'status':'void'},
         {...expense('reversed',1000),'sync_state':'reversed'}]);
-    expect(report.summary(period).values[OwnerReportMetric.sales],100000);
+    expect(report.summary(period).values[OwnerReportMetric.billedSales],100000);
     expect(report.summary(period).values[OwnerReportMetric.projected],16000);
   });
   test('cash report distinguishes verified reporting amounts, refunds and expenses', () {
@@ -209,7 +209,7 @@ void main() {
     SharedPreferences.setMockInitialValues({'briskers_document_detail_shop_invoice':jsonEncode(invoice(lines:[]))});
     await db.customStatement("INSERT INTO local_documents(id,business_id,kind,total,document_date) VALUES('invoice','shop','invoice',1080,'2026-11-19')");
     final report=await LocalOwnerReports(database:db).load('shop',isOwner:true);
-    expect(report.summary(period).values[OwnerReportMetric.sales],100000);
+    expect(report.summary(period).values[OwnerReportMetric.billedSales],100000);
     expect(await db.customSelect('SELECT * FROM local_document_details').get(),isEmpty);
   });
   test('SQLite forecast reads assigned hours and frozen paid costs, excluding reversed coverage', () async {

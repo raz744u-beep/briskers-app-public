@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/owner_report_models.dart';
+import 'owner_report_transactions_screen.dart';
 import '../../services/local_owner_reports.dart';
 import '../../services/owner_report_preferences.dart';
 import '../../widgets/briskers_curved_tabs.dart';
@@ -35,7 +36,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
   late ReportPeriod _period;
   List<OwnerReportMetric> _tiles = [...OwnerReportMetric.defaults];
   Timer? _timer;
-  int _revision = -1, _generation = 0;
+  int _revision = -1, _generation = 0, _periodEdits = 0;
   bool _loading = false, _again = false;
   String? _error;
   String _customerQuery = '', _itemQuery = '', _customerRank = 'Sales', _itemRank = 'Revenue', _itemFilter = 'All Items';
@@ -91,14 +92,14 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
     if (!widget.isOwner || !mounted) return;
     if (_loading) { _again = true; return; }
     _loading = true;
-    final generation = _generation, business = widget.businessId;
+    final generation = _generation, business = widget.businessId, periodEdits = _periodEdits;
     try {
       final before = await _repository.revision();
       final data = await _repository.load(business, isOwner: widget.isOwner);
       final tiles = preferences ? await _preferences.tiles() : _tiles;
       final period = preferences ? await _preferences.period(DateTime.now()) : _period;
       if (mounted && generation == _generation && business == widget.businessId && widget.isOwner) {
-        setState(() { _data = data; _tiles = tiles; _period = period; _error = null; _revision = before; });
+        setState(() { _data = data; _tiles = tiles; if (periodEdits == _periodEdits) _period = period; _error = null; _revision = before; });
       }
     } catch (_) {
       if (mounted && generation == _generation) setState(() => _error = 'Saved reports could not be read. Please refresh.');
@@ -112,10 +113,12 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
     if (mounted) await _load();
   }
   Future<void> _setPeriod(ReportPeriod period) async {
+    if (!mounted) return;
+    _periodEdits++;
+    setState(() => _period = period);
     try {
       await _preferences.savePeriod(period);
-      if (mounted) setState(() => _period = period);
-    } catch (_) { if (mounted) _notice('The date selection could not be saved.'); }
+    } catch (_) { if (mounted) _notice('The period changed, but could not be saved for next time.'); }
   }
   void _notice(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   Future<void> _choosePeriod() async {
@@ -123,7 +126,10 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
       title: 'Report period', content: Column(mainAxisSize: MainAxisSize.min, children: [
         for (final entry in const {'thisMonth':'This Month','lastMonth':'Last Month','30days':'Last 30 Days',
           '60days':'Last 60 Days','90days':'Last 90 Days','thisYear':'This Year','custom':'Custom Dates'}.entries)
-          ListTile(title: Text(entry.value), onTap: () => Navigator.pop(context, entry.key)),
+          ListTile(key: ValueKey('report-period-${entry.key}'), selected: _period.preset == entry.key,
+            selectedTileColor: const Color(0xFFDCEBFE), title: Text(entry.value),
+            trailing: _period.preset == entry.key ? const Icon(Icons.check, color: BriskersColors.tabBlue) : null,
+            onTap: () => Navigator.pop(context, entry.key)),
       ]), actions: [OutlinedButton(style: BriskersDialog.cancelStyle,
         onPressed: () => Navigator.pop(context), child: const Text('Cancel'))]));
     if (choice == null || !mounted) return;
@@ -144,6 +150,10 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
     OwnerReportMetric.openJobs => (icon: Icons.build_outlined, color: BriskersColors.jobs),
     OwnerReportMetric.averageSale => (icon: Icons.trending_up, color: BriskersColors.tabPurple),
     OwnerReportMetric.salesTax => (icon: Icons.calculate_outlined, color: BriskersColors.tabGray),
+    OwnerReportMetric.grossSales => (icon: Icons.receipt_long_outlined, color: BriskersColors.invoices),
+    OwnerReportMetric.billedSales => (icon:Icons.sell_outlined,color:BriskersColors.tabPurple),
+    OwnerReportMetric.billedTax => (icon:Icons.calculate_outlined,color:BriskersColors.tabGray),
+    OwnerReportMetric.billedGross => (icon:Icons.receipt_long_outlined,color:BriskersColors.invoices),
   };
 
   Future<void> _chooseTile(int slot) async {
@@ -184,7 +194,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
               Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Padding(padding: const EdgeInsets.only(right: 28), child: Text(title, maxLines: 3,
                   style: const TextStyle(fontSize: 13, height: 1.1, fontWeight: FontWeight.w800))),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 FittedBox(fit: BoxFit.scaleDown, child: Text(value,
                   style: const TextStyle(fontSize: 25, height: 1.1, fontWeight: FontWeight.w800, color: Color(0xFF111A31)))),
                 if (subtitle != null) Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -230,12 +240,17 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
           final style = _style(metric);
           return _tile(metric.label, metric.isCount ? '${value ?? '—'}' : _money(value), style.icon, style.color,
             key: ValueKey('overview-report-tile-$index'),
-            subtitle: metric == OwnerReportMetric.projected ? 'Open jobs · known costs' : metric == OwnerReportMetric.net ? 'Received less expenses' : null,
+            subtitle: metric == OwnerReportMetric.projected ? 'Open jobs · known costs' : metric == OwnerReportMetric.net ? 'Received less expenses' :
+              metric == OwnerReportMetric.income ? 'By payment date' :
+              const {OwnerReportMetric.sales,OwnerReportMetric.salesTax,OwnerReportMetric.grossSales,OwnerReportMetric.averageSale}.contains(metric) ? 'By payment date' :
+              const {OwnerReportMetric.billedSales,OwnerReportMetric.billedTax,OwnerReportMetric.billedGross}.contains(metric)?'By invoice date':null,
             onEdit: () => _chooseTile(index), onTap: () => _metricDetails(metric));
         }),
       const SizedBox(height: 9),
       const Text('Tap a tile for details · pencil to choose its report', textAlign: TextAlign.center,
         style: TextStyle(fontSize: 11, color: BriskersColors.secondaryText)),
+      TextButton.icon(key:const ValueKey('view-period-transactions'),onPressed:()=>_periodTransactions(ReportTransactionBasis.payments),
+        icon:const Icon(Icons.receipt_long_outlined),label:const Text('View period transactions')),
       const SizedBox(height: 14),
       _card(OwnerReportTrend(data: data, period: _period)),
       for (final issue in summary.issues) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(issue,
@@ -243,7 +258,21 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
     ]);
   }
 
+  Future<void> _periodTransactions(ReportTransactionBasis basis) async {
+    final data=_data;if(data==null)return;
+    await _open(OwnerReportTransactionsScreen(businessId:widget.businessId,isOwner:widget.isOwner,data:data,period:_period,
+      initialBasis:basis,sharedBottomNavigationBar:widget.sharedBottomNavigationBar,
+      reload:()=>_repository.load(widget.businessId,isOwner:widget.isOwner)));
+  }
+
   Future<void> _metricDetails(OwnerReportMetric metric) async {
+    if(metric==OwnerReportMetric.income) {await _periodTransactions(ReportTransactionBasis.payments);return;}
+    if(const {OwnerReportMetric.sales,OwnerReportMetric.salesTax,OwnerReportMetric.grossSales,OwnerReportMetric.averageSale}.contains(metric)) {
+      await _periodTransactions(ReportTransactionBasis.payments);return;
+    }
+    if(const {OwnerReportMetric.billedSales,OwnerReportMetric.billedTax,OwnerReportMetric.billedGross}.contains(metric)){
+      await _periodTransactions(ReportTransactionBasis.invoices);return;
+    }
     final data = _data; if (data == null) return;
     await showDialog<void>(context: context, builder: (context) => BriskersDialog(title: metric.label,
       icon: _style(metric).icon, content: SizedBox(width: 520, child: Column(mainAxisSize: MainAxisSize.min,
@@ -452,7 +481,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
     Text(_tabs.index == 1 ? 'Financial reports' : 'Tax reports', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
     const SizedBox(height: 8), Text(_tabs.index == 1
       ? 'Income, expenses and profit are available in Overview.'
-      : 'Choose Sales Tax Billed in the Overview report selector to see invoice tax totals.'),
+      : 'Choose Tax Billed in the Overview report selector to see invoice tax totals.'),
     TextButton.icon(onPressed: () => _tabs.animateTo(0), icon: const Icon(Icons.bar_chart),
       label: const Text('View Overview')),
     if (OwnerPayrollScreen.enabled) TextButton.icon(onPressed: () => _open(OwnerPayrollScreen(businessId: widget.businessId,
@@ -485,8 +514,8 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
               IconButton(tooltip:'Previous period', onPressed: () => _setPeriod(_period.shift(-1)), icon: const Icon(Icons.chevron_left)),
               Expanded(child: InkWell(onTap: _choosePeriod, child: Padding(padding: const EdgeInsets.symmetric(vertical: 14),
                 child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [const Icon(Icons.calendar_month_outlined, size: 21),
-                  const SizedBox(width: 7), Flexible(child: Text('$label: ${DateFormat('MMM d').format(_period.start)} – ${DateFormat('MMM d, yyyy').format(_period.end)}',
-                    maxLines: 2, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800))),
+                  const SizedBox(width: 7), Flexible(child: Semantics(liveRegion: true, child: Text('$label: ${DateFormat('MMM d').format(_period.start)} – ${DateFormat('MMM d, yyyy').format(_period.end)}',
+                    maxLines: 2, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800)))),
                   const Icon(Icons.arrow_drop_down),
                 ])))),
               IconButton(tooltip:'Next period', onPressed: () => _setPeriod(_period.shift(1)), icon: const Icon(Icons.chevron_right)),
