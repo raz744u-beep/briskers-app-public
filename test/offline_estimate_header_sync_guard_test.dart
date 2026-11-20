@@ -20,6 +20,7 @@ class _EstimateHeaderApi extends BriskersApi {
   int creates = 0;
   int claimUpdates = 0;
   int mileageUpdates = 0;
+  String? submittedDate;
 
   @override
   Future<String> syncOfflineStandaloneEstimate(
@@ -33,6 +34,7 @@ class _EstimateHeaderApi extends BriskersApi {
     String? memo,
   }) async {
     creates++;
+    submittedDate = documentDate;
     this.publicNumber = publicNumber;
     expect(lines, hasLength(1));
     return operationId;
@@ -170,6 +172,31 @@ void main() {
     expect(synced['authorization_number'], 'AUTH-002');
     expect(synced['_server_document_id'], isNotNull);
     expect((synced['lines'] as List), hasLength(1));
+  });
+
+  test('stale server date cannot erase a queued estimate header on replay', () async {
+    final id = await create();
+    // Simulate a previously committed idempotent create whose authoritative
+    // date still predates the header edit saved on this phone.
+    await drafts.updatePendingEstimateDetails(
+      'shop', id, documentDate: DateTime(2026, 11, 21),
+      customerId: 'customer-id', customerName: 'Fixture',
+      claimNumber: 'CLAIM-DATE',
+    );
+    await mode.setMode(BriskersConnectionMode.auto);
+    await drafts.flush('shop');
+    expect(api.submittedDate, '2026-11-21');
+    expect((await queue(id))['state'], 'conflict');
+    expect((await queue(id))['last_error']?.toString(), contains('date differs'));
+    expect(api.claimUpdates, 0);
+    expect(api.claimNumber, isNull);
+    final saved = (await cache.load('shop', id))!;
+    expect(saved['document_date'], '2026-11-21');
+    expect(saved['claim_number'], 'CLAIM-DATE');
+    expect(saved['sync_state'], 'conflict');
+    expect(saved['_server_document_id'], isNull);
+    await drafts.flush('shop');
+    expect(api.creates, 1);
   });
 
   test('same revision-guarded receipt survives a lost claim RPC acknowledgment', () async {
