@@ -280,6 +280,13 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
     return rows;
   }
 
+  // Category totals describe all tasks in the current workspace scope,
+  // independent of search and status filters (including Done tasks).
+  int get _serviceCategoryCount => widget.serviceTasks.where((task) =>
+      widget.scopedJob == null || task['job_id'] == widget.scopedJob).length;
+  int get _generalCategoryCount => widget.generalTasks.where((task) =>
+      widget.scopedJob == null || task['job_id'] == widget.scopedJob).length;
+
   List<String> get _employeeChoices => [
     'All Employees',
     for (final id in widget.employeeIds) _employeeLabel(id),
@@ -768,15 +775,31 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
                                 : null,
                             borderRadius: BorderRadius.circular(22),
                           ),
-                          child: Text(
-                            option ? 'General Tasks' : 'Service Tasks',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: _general == option
-                                  ? Colors.white
-                                  : const Color(0xFF344054),
-                            ),
+                          child: Row(
+                            children: [
+                              const SizedBox(width: 8),
+                              Expanded(child: Text(
+                                option ? 'General Tasks' : 'Service Tasks',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: _general == option
+                                      ? Colors.white
+                                      : const Color(0xFF344054),
+                                ),
+                              )),
+                              Padding(
+                                padding: const EdgeInsets.only(right: 10),
+                                child: Text(
+                                  '${option ? _generalCategoryCount : _serviceCategoryCount}',
+                                  key: ValueKey(option ? 'general-tasks-count' : 'service-tasks-count'),
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+                                    color: _general == option ? Colors.white : const Color(0xFF344054)),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
