@@ -211,7 +211,27 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
           valueListenable: LocalBackupService.progress,
           builder: (_, value, _) => Text(value),
         ),
-        if (_busy) const LinearProgressIndicator(),
+        if (_busy)
+          ValueListenableBuilder<Map<String, dynamic>?>(
+            valueListenable: LocalBackupService.transferProgress,
+            builder: (_, value, __) {
+              final copied = value?['copied'] as int? ?? 0;
+              final total = value?['total'] as int? ?? 0;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  LinearProgressIndicator(
+                    value: total > 0 ? (copied / total).clamp(0.0, 1.0) : null,
+                    color: const Color(0xFF008F83),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(total > 0
+                      ? 'Verified $copied of $total files'
+                      : 'Preparing backup files…'),
+                ],
+              );
+            },
+          ),
         if (_message != null)
           Text(_message!, style: const TextStyle(color: Colors.red)),
         const SizedBox(height: 12),
