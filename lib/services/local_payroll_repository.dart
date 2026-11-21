@@ -2165,10 +2165,26 @@ class LocalPayrollRepository {
     await prepare();
     await db.transaction(() async {
       await _assertPaymentAuthority();
+      // Ordinary payroll history does not mean an employee has an advance.
+      // A first opening debt may be entered after wages have been paid, but
+      // never re-open an earlier debt or silently erase any repayments.
+      final priorAdvanceEvents = await _read(
+        "SELECT id FROM regular_payroll_audit WHERE business_id=? AND "
+        "((event='opening_advance' AND operation_id=?) OR "
+        " (event='advance' AND json_extract(payload,'\$.employee')=?)) "
+        'LIMIT 1',
+        [business, 'opening-advance-$employee', employee],
+      );
+      final priorPayrollRepayments = (await history(employee)).any(
+        (payment) => (payment['repayment'] as num? ?? 0) > 0,
+      );
       if (await advance(employee) != 0 ||
-          (await history(employee)).isNotEmpty ||
+          priorAdvanceEvents.isNotEmpty ||
+          priorPayrollRepayments ||
           (await repaymentHistory(employee)).isNotEmpty) {
-        throw StateError('An opening amount cannot replace existing payroll history.');
+        throw StateError(
+          'An opening amount cannot replace an existing advance or repayment.',
+        );
       }
       await db.customStatement(
         'INSERT INTO regular_payroll_advances VALUES(?,?,?) '
