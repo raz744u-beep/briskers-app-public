@@ -52,7 +52,9 @@ void main() {
           week: DateTime(2026, 11, 16),
           employeeId: 'chris',
           employeeName: 'Chris',
-          rows: [labor('oil', 'Open', 150), labor('done', 'Done', 60)],
+          rows: [labor('oil', 'Open', 150),
+            {...labor('done', 'Done', 60), 'work_start_date': '2026-11-09',
+              'work_end_date': '2026-11-13', 'completed_date': '2026-11-13'}],
           generalTasks: [general(71, 'planned'), general(72, 'done'),
             {...general(73, 'planned'), 'employee_id': 'kam'}],
           jobs: const [],
@@ -70,7 +72,7 @@ void main() {
     expect(find.byKey(const ValueKey('assigned-general-task-73')), findsNothing);
     expect(find.textContaining('No payroll hours'), findsOneWidget);
     // The only 2.50 hours counted are the active Labor allocation;
-    // completed Labor and General Tasks do not inflate this week's hours.
+    // old-week completed Labor and General Tasks do not inflate this week's hours.
     expect(find.text('Total assigned: 2.50 hrs'), findsOneWidget);
     await tester.ensureVisible(find.byKey(const ValueKey('assigned-general-task-71')));
     await tester.tap(find.byKey(const ValueKey('assigned-general-task-71')));
