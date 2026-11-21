@@ -239,7 +239,9 @@ class OfflineInvoiceFinalization {
       // Loading an old saved request is never authorization to backfill Income
       // on a historical closed invoice. Explicit Owner review stays separate.
       if (resumeSavedRequest &&
-          DocumentPresentation(await store.project(business, saved)).isClosed) return;
+          DocumentPresentation(await store.project(business, saved)).isClosed) {
+        return;
+      }
       final ledger = OfflineInvoicePaymentLedger(database: db);
       final queued = await ledger.pendingForInvoice(business, invoice);
       late Map<String, dynamic> detail;
