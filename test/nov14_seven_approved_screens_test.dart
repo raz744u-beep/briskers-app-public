@@ -623,11 +623,11 @@ void main() {
         scrollable: find.byType(Scrollable).last,
       );
       await t.pumpAndSettle();
-      expect(find.text('Original amount owed'), findsNothing);
+      expect(find.text('Amount owed'), findsNothing);
       await capture(t, key, 'next-advances-collapsed');
       await t.tap(find.text('Advances & Repayments'));
       await t.pumpAndSettle();
-      await t.ensureVisible(find.text('Original amount owed'));
+      await t.ensureVisible(find.text('Amount owed'));
       await t.pumpAndSettle();
       expect(find.byTooltip('Edit opening balance'), findsOneWidget);
       expect(find.text('Repayment History'), findsWidgets);

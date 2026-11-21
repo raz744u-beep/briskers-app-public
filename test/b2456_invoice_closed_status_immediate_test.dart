@@ -105,7 +105,8 @@ void main() {
     expect(closeService, contains('VerifiedInvoiceCloseEvents.serverConfirmed('));
     expect(detail, contains('OfflineInvoiceFinalization().finalizeLocally('));
     expect(detail, isNot(contains('_autoCloseOwnerInvoiceIfReady(')));
-    expect(docs, contains('await closure.close(widget.businessId, ids, isOwner:widget.isOwner)'));
+    expect(docs, contains('await closure.preview(widget.businessId, ids, isOwner: widget.isOwner)'));
+    expect(docs, contains('await closure.close(widget.businessId, ids, isOwner:widget.isOwner, confirmed: plan)'));
     final localClose=File('lib/services/local_invoice_closure.dart').readAsStringSync();
     expect(localClose.indexOf('VerifiedInvoiceCloseEvents.locallyCommitted('),greaterThan(localClose.indexOf('await db.transaction(')));
     expect(localClose,contains("'receipts':<dynamic>[]"));

@@ -1,3 +1,4 @@
+import '../../widgets/amount_calculator_dialog.dart';
 import '../../services/offline_financial_write_service.dart';
 import '../../core/supabase_config.dart';
 import '../../services/local_recurring_expense_edit.dart';
@@ -1309,10 +1310,15 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                               decimal: true,
                             ),
                             scrollPadding: const EdgeInsets.only(bottom: 160),
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
+                              suffixIcon: IconButton(tooltip: 'Amount calculator', icon: const Icon(Icons.calculate_outlined),
+                                onPressed: () async {
+                                  final cents = await showAmountCalculator(context, initial: amount.text);
+                                  if (cents != null && context.mounted) setSheetState(() => amount.text = (cents / 100).toStringAsFixed(2));
+                                }),
                               labelText: 'Amount',
                               prefixText: r'$',
-                              border: OutlineInputBorder(),
+                              border: const OutlineInputBorder(),
                             ),
                           ),
                           const SizedBox(height: 12),

@@ -230,7 +230,25 @@ class LocalInvoiceClosure {
   final BriskersApi api;
   final bool _enableLegacyReplay;
 
-  Future<void> close(String business,Iterable<String> invoices,{required bool isOwner}) async {
+  Future<Map<String, Map<String, dynamic>>> preview(String business, Iterable<String> invoices, {required bool isOwner}) async {
+    if (!isOwner || business.isEmpty) throw StateError('Owner access required.');
+    final result = <String, Map<String, dynamic>>{};
+    final store = LocalInvoiceClosureStore(db);
+    await store.prepare();
+    for (final id in invoices.toSet()) {
+      final saved = await LocalDocumentDetailCache(database: db).loadReadOnly(business, id);
+      if (saved == null) throw StateError('Open the invoice to verify saved payment details.');
+      if (DocumentPresentation(saved).isClosed) continue;
+      final corrected = await OfflineInvoiceFinalization(database: db)
+          .verifyLocalFinancialDetail(business, id, saved, forClosing: true);
+      result[id] = OfflineInvoiceFinalization.snapshot(
+        await store.projectFinalized(business, corrected), true, local: true);
+    }
+    return result;
+  }
+
+  Future<void> close(String business,Iterable<String> invoices,{required bool isOwner,
+    Map<String, Map<String, dynamic>>? confirmed}) async {
     if(!isOwner || business.isEmpty || invoices.isEmpty) throw StateError('Owner access required.');
     final store=LocalInvoiceClosureStore(db);
     await store.prepare();
@@ -255,7 +273,14 @@ class LocalInvoiceClosure {
         if (receipts == null) {
           throw StateError('Saved receipt amounts need verification before closing.');
         }
-        await store.saveFinalized(business, id, receipts);
+        if (confirmed != null && jsonEncode(confirmed[id]) !=
+            jsonEncode(OfflineInvoiceFinalization.snapshot(detail, true, local: true))) {
+          throw StateError('Payments changed. Review and confirm closure again.');
+        }
+        // Receipt markers, dated Income rows, totals and closure commit or roll
+        // back as one transaction, including every invoice in a batch.
+        await OfflineInvoiceFinalization(database: db).finalizeLocally(
+          business, id, isOwner: isOwner, confirmedDetail: detail);
         final at=DateTime.now().toUtc().toIso8601String();
         await db.customStatement('INSERT OR IGNORE INTO local_invoice_closures(business_id,invoice_id,closed_at,operation_id,payload) VALUES(?,?,?,?,?) ON CONFLICT(business_id,invoice_id) DO UPDATE SET closed_at=excluded.closed_at,operation_id=excluded.operation_id,payload=excluded.payload,sync_state=excluded.sync_state,error=NULL,retry_after=0,reopened_at=NULL',[business,id,at,OfflineInvoiceFinalization.operationId(),jsonEncode({'total_cents':financial.totalCents,'paid_cents':financial.finalizedCents!+financial.pendingCents!,'receipts':<dynamic>[],'close':true})]);
         await db.customStatement("UPDATE local_documents SET status='closed',display_status_code='closed',closed_at=? WHERE business_id=? AND id=? AND kind='invoice'",[DateTime.parse(at).millisecondsSinceEpoch ~/ 1000,business,id]);

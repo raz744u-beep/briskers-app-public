@@ -11,11 +11,13 @@ class TaskMechanicDraft {
     this.minutes, {
     this.originalEmployee,
     this.locked = false,
+    this.hoursEditable = false,
   });
   String employee;
   int minutes;
   final String? originalEmployee;
   final bool locked;
+  final bool hoursEditable;
 }
 
 class ServiceTaskDraft {
@@ -98,6 +100,7 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
             m.minutes,
             originalEmployee: m.originalEmployee,
             locked: m.locked,
+            hoursEditable: m.hoursEditable,
           ),
         )
         .toList();
@@ -655,7 +658,7 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
                             controller: _hours[i],
                             onTapAlwaysCalled:true,
                             onTap:()=>_hours[i].selection=TextSelection(baseOffset:0,extentOffset:_hours[i].text.length),
-                            readOnly: _saving || _mechanics[i].locked,
+                            readOnly: _saving || (_mechanics[i].locked && !_mechanics[i].hoursEditable),
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),

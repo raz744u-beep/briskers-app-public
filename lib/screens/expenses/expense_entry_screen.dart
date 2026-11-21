@@ -1,3 +1,4 @@
+import '../../widgets/amount_calculator_dialog.dart';
 import '../../services/local_recurring_expense_edit.dart';
 import '../../services/receipt_scanning_notice.dart';
 import 'dart:async';
@@ -1944,6 +1945,11 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                   ),
                   decoration: InputDecoration(
                     labelText: tr('amount'),
+                    suffixIcon: IconButton(tooltip: 'Amount calculator', icon: const Icon(Icons.calculate_outlined),
+                      onPressed: _saving ? null : () async {
+                        final cents = await showAmountCalculator(context, initial: _amountController.text);
+                        if (cents != null && mounted) setState(() => _amountController.text = (cents / 100).toStringAsFixed(2));
+                      }),
                     prefixText: '\$',
                     border: const OutlineInputBorder(),
                   ),

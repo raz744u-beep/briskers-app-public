@@ -17,6 +17,7 @@ class _StandaloneApi extends BriskersApi {
   final List<String> operationIds = [];
   var detailAttempts = 0;
   late String syncedNumber;
+  late String syncedDate;
   @override
   Future<String> syncOfflineStandaloneEstimate(
     String businessId, {
@@ -30,6 +31,7 @@ class _StandaloneApi extends BriskersApi {
   }) async {
     operationIds.add(operationId);
     syncedNumber = publicNumber;
+    syncedDate = documentDate;
     expect(customerId, 'customer-id');
     expect(lines, hasLength(1));
     expect(lines.single['name'], 'Labor');
@@ -52,7 +54,8 @@ class _StandaloneApi extends BriskersApi {
       'status': 'draft',
       'customer_id': 'customer-id',
       'customer_name': 'Test Customer',
-      'document_date': '2026-10-10',
+      // Idempotent create returns the date it originally committed.
+      'document_date': syncedDate,
       'row_version': 2,
       'net_amount': 220,
       'tax_amount': 0,

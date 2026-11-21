@@ -127,7 +127,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
             'task_id':data['task_id'],
             'estimated_minutes':data['estimated_minutes'],
             'paid':data['paid_operation']!=null ||
-              (data['paid_minutes'] as int? ?? 0)>0,
+              ((data['paid_minutes'] as int? ?? 0)>0 && data['state']!='In Progress'),
           });
         }
       }
@@ -151,7 +151,7 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
   }
 
   Future<void> editMechanicHours(Map<String,dynamic> allocation)async{
-    if(allocation['paid']==true)return;
+
     final input=TextEditingController(
       text:((allocation['estimated_minutes'] as int? ?? 0)/60)
         .toStringAsFixed(2));
@@ -184,24 +184,6 @@ class _JobTasksAccessState extends State<JobTasksAccess> {
       final task=allocation['task_id']?.toString();
       final employee=allocation['id']?.toString();
       if(task==null || employee==null)return;
-      // Revalidate paid coverage after the Owner-session check; partial payments
-      // are just as immutable as fully settled allocations.
-      await repo.prepare();
-      final settled=await db.customSelect(
-        'SELECT c.paid_operation_id,'
-        '(SELECT COALESCE(SUM(w.minutes),0) '
-        'FROM regular_payroll_work_coverage w '
-        'WHERE w.business_id=p.business_id AND w.credit_id=p.id) AS paid_minutes '
-        'FROM regular_payroll_portions p '
-        'LEFT JOIN local_mechanic_work_credits_v1 c '
-        'ON c.business_id=p.business_id AND c.allocation_id=p.id '
-        'WHERE p.business_id=? AND p.task_id=? AND p.employee_id=?',
-        variables:[widget.business,task,employee].map(Variable<String>.new).toList())
-        .getSingleOrNull();
-      if(settled==null || settled.data['paid_operation_id']!=null ||
-          (settled.data['paid_minutes'] as int? ?? 0)>0){
-        throw StateError('Paid mechanic labor is locked.');
-      }
       await repo.setEstimatedMinutes(task,employee,(hours*60).round());
       await loadLine();
       if(mounted)widget.onChanged?.call();

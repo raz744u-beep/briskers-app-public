@@ -142,11 +142,14 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Edit opening balance'));
         await tester.pump();
-        await tester.enterText(find.widgetWithText(TextField, 'Original amount owed'), '5.00');
+        await tester.enterText(find.widgetWithText(TextField, 'Amount owed'), '5.00');
         await tester.pump();
         await tester.ensureVisible(find.byTooltip('Save opening balance'));
         await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Save opening balance'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Save balance'));
+        await tester.pumpAndSettle();
         await until(find.text(r'Remaining balance: $5.00'));
         await tester.ensureVisible(find.widgetWithText(TextField, 'Amount'));
         await tester.pumpAndSettle();

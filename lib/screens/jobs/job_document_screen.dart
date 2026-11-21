@@ -1,3 +1,4 @@
+import '../../widgets/owner_confirmation_dialog.dart';
 import '../../widgets/customer_identity_marker.dart';
 import '../../services/local_document_party_identity.dart';
 import '../../services/local_document_identity.dart';
@@ -3940,6 +3941,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     var mileageText = (explicitMileageOut
         ? _detail!['mileage_out']
         : _detail!['odometer_in'])?.toString().trim() ?? '';
+    // A header Save is not an explicit Miles In edit. Only pass mileage to
+    // pending-estimate replay when the Owner edited it or selected a different
+    // vehicle with a different mileage. Preserve an intentional blank clear.
+    var mileageTouched = false;
     final claimController = TextEditingController(
       text: _detail!['claim_number']?.toString() ?? '',
     );
@@ -3997,8 +4002,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           customer['display_name']?.toString() ?? '';
                       vehicleId = vehicle?['id']?.toString();
                       vehicleName = _vehicleLabel(vehicle);
-                      mileageText = explicitMileageOut ? '' :
+                      final nextMileage = explicitMileageOut ? '' :
                           (vehicle?['mileage']?.toString().trim() ?? '');
+                      if (nextMileage != mileageText) mileageTouched = true;
+                      mileageText = nextMileage;
                     });
                   },
                 ),
@@ -4018,8 +4025,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           setSheetState(() {
                             vehicleId = vehicle['id']?.toString();
                             vehicleName = _vehicleLabel(vehicle);
-                            mileageText = explicitMileageOut ? '' :
+                            final nextMileage = explicitMileageOut ? '' :
                                 (vehicle['mileage']?.toString().trim() ?? '');
+                            if (nextMileage != mileageText) mileageTouched = true;
+                            mileageText = nextMileage;
                           });
                         },
                 ),
@@ -4082,7 +4091,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                                     MileageWorkflow.parse(raw) != null)
                                 : (raw.isEmpty || num.tryParse(raw) != null);
                             if (valid) {
-                              setSheetState(() => mileageText = raw);
+                              setSheetState(() {
+                                mileageText = raw;
+                                mileageTouched = true;
+                              });
                             } else if (sheetContext.mounted) {
                               ScaffoldMessenger.of(sheetContext).showSnackBar(
                                 const SnackBar(
@@ -4182,13 +4194,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         DateUtils.dateOnly(originalDate) != DateUtils.dateOnly(date);
 
     if (_estimate && _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
-      await _run(() => _offlineDocumentDraft.updatePendingEstimateDetails(
+      final saved = await _run(() => _offlineDocumentDraft.updatePendingEstimateDetails(
         widget.businessId, widget.documentId, documentDate: date,
         customerId: customerId, customerName: customerName,
-        vehicleId: vehicleId, vehicleLabel: vehicleName, mileage: newMileage,
+        vehicleId: vehicleId, vehicleLabel: vehicleName,
+        mileage: mileageTouched ? newMileage : null,
         claimNumber: newClaimNumber.isEmpty ? null : newClaimNumber,
         authorizationNumber: newAuthorizationNumber.isEmpty ? null : newAuthorizationNumber,
+        allowConflictedLocalReview: widget.isOwner,
       ), localOnly: true);
+      if (saved && mounted && _detail?['sync_state'] == 'conflict') {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Changes saved on this phone for Owner review only. '
+              'Estimate sync is still blocked; nothing was sent to the server.'),
+        ));
+      }
       return;
     }
 
@@ -4763,6 +4783,26 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
+  Future<void> _closeInvoice() async {
+    if (_busy || !widget.isOwner) return;
+    try {
+      final closure = LocalInvoiceClosure();
+      final plan = await closure.preview(widget.businessId, [widget.documentId], isOwner: true);
+      final amount = plan.values.fold<int>(0, (sum, invoice) => sum +
+        (invoice['receipts'] as List).fold<int>(0, (n, receipt) => n + (receipt['amount_cents'] as int)));
+      if (!mounted) return;
+      final ok = await showDialog<bool>(context: context, builder: (_) => OwnerConfirmationDialog(
+        title: 'Close Invoice?', confirm: 'Finalize & Close', sections: [
+          Text('Payments to finalize: ${_money(amount / 100)}'),
+          const Text('Original receipt dates are kept. Closing the job alone does not finalize payments.')],
+      ));
+      if (ok != true || !mounted) return;
+      await _run(() => closure.close(widget.businessId, [widget.documentId], isOwner: true, confirmed: plan));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+    }
+  }
+
   Future<void> _showSendMenu() async {
     if (_busy) return;
     final number = _detail?['document_number']?.toString().trim() ?? '';
@@ -4771,10 +4811,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
+      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.8),
       builder: (sheetContext) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          child: Column(
+          child: SingleChildScrollView(child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Align(
@@ -4851,7 +4893,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 onTap: () => Navigator.pop(sheetContext, 'share'),
               ),
             ],
-          ),
+          )),
         ),
       ),
     );
@@ -6241,7 +6283,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   ),
                   _AmountRow(
                     label: pendingPaid > 0.005
-                        ? 'Payments recorded'
+                        ? 'Payment received'
                         : tr('paid'),
                     value: _money(shownPaid),
                     valueColor:
@@ -6249,7 +6291,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   ),
                   if (pendingPaid > 0.005) ...[
                     _AmountRow(
-                      label: 'Finalized paid',
+                      label: 'Finalized payment',
                       value: _money(finalizedPaid),
                     ),
                     _AmountRow(
@@ -6260,7 +6302,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   if (_detail?['_local_pending_payment'] == true &&
                       pendingPaid > 0.005)
                     _AmountRow(
-                      label: 'Payments to sync',
+                      label: 'Waiting to sync',
                       value: _money(_detail?['_local_pending_payment_amount']),
                     ),
                   const Divider(height: 18),
@@ -6479,6 +6521,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ),
             ),
           const SizedBox(height: 16),
+          if (widget.isOwner && DocumentPresentation(_detail!).fullyCovered && !DocumentPresentation(_detail!).isClosed)
+            OutlinedButton.icon(onPressed: _busy ? null : _closeInvoice,
+              icon: const Icon(Icons.lock_outline), label: const Text('Close Invoice')),
           if (pendingPaid > 0.005 && !DocumentPresentation(_detail!).isClosed) ...[
             Card(
               margin: const EdgeInsets.only(bottom: 12),
@@ -8080,6 +8125,55 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 child: Column(
                   children: [
                   _customerHeader(),
+                  if (_estimate && _detail?['sync_state'] == 'conflict')
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface,
+                          border: const Border(
+                            left: BorderSide(
+                              color: BriskersColors.estimates,
+                              width: 4,
+                            ),
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.warning_amber_outlined,
+                                color: BriskersColors.estimates),
+                            const SizedBox(width: 8),
+                            Expanded(child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Estimate sync needs Owner review',
+                                    style: TextStyle(fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 4),
+                                const Text(
+                                  'Saved on this phone. Automatic sync is blocked; '
+                                  'a numbered copy may already exist on the server. '
+                                  'Review before retrying or deleting.'),
+                                if ((_detail?['_offline_estimate_sync_error']
+                                        ?.toString().isNotEmpty ?? false))
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(
+                                      _detail!['_offline_estimate_sync_error'].toString(),
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context).textTheme.bodySmall,
+                                    ),
+                                  ),
+                              ],
+                            )),
+                          ],
+                        ),
+                      ),
+                    ),
                   if (_estimate && number.isEmpty)
                     ListTile(
                       title: const Text('Estimate number needs correction'),

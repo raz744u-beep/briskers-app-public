@@ -25,6 +25,17 @@ import 'local_document_repository.dart';
 import 'local_job_repository.dart';
 import 'offline_invoice_payment_ledger.dart';
 
+/// A remote estimate cannot replace the sole local copy of edited header data.
+/// Leave the outbox in review instead of repeatedly replaying an unsafe write.
+class _EstimateHeaderSyncConflict implements Exception {
+  const _EstimateHeaderSyncConflict(this.reason);
+  final String reason;
+
+  @override
+  String toString() => 'Estimate synchronization needs review: $reason. '
+      'The saved local estimate has been retained.';
+}
+
 class OfflineDocumentDraftService {
   OfflineDocumentDraftService({
     BriskersApi api = const BriskersApi(),
@@ -44,6 +55,111 @@ class OfflineDocumentDraftService {
   // Share each in-flight upload across Auto and manual Sync Now on this device.
   static final Expando<Map<String, Future<void>>> _activeFlushes = Expando();
   final Random _random = Random.secure();
+
+  static const _estimateMileageEditedKey = '_offline_estimate_mileage_was_edited';
+
+  static String? _headerText(Object? value) {
+    final text = value?.toString().trim();
+    return text == null || text.isEmpty ? null : text;
+  }
+
+  /// Only the existing version-guarded estimate claim/authorization RPC is
+  /// safe for replay. Mileage In remains derived from shared job/vehicle
+  /// records on the server; it has no estimate-scoped snapshot/mutation yet.
+  /// A successful estimate create is NOT sufficient to retire the outbox.
+  Future<Map<String, dynamic>> _confirmPendingEstimateHeader(
+    String businessId,
+    String serverId,
+    Map<String, dynamic> local,
+    Map<String, dynamic> remote,
+    int outboxId,
+  ) async {
+    // A vehicle's current mileage or a Job's odometer is NOT a durable
+    // estimate-scoped snapshot. Reject unsupported Mileage In before changing
+    // remote Claim/Authorization fields; otherwise a mixed offline edit can
+    // partially commit and then stop in conflict. The server create remains
+    // idempotent, and this local header/outbox stay available for review.
+    if (local[_estimateMileageEditedKey] == true ||
+        local['odometer_in'] != null) {
+      throw const _EstimateHeaderSyncConflict(
+        'Mileage In requires an estimate-scoped revision-guarded server field',
+      );
+    }
+
+    // Idempotent server create may return a pre-existing estimate whose
+    // date was saved before a queued local header edit. A successful create
+    // acknowledgment alone does not prove that the edited date survived.
+    // Block the outbox before changing warranty identifiers or replacing
+    // the only local estimate detail if the authoritative date differs.
+    String? dateOnly(Object? value) {
+      final raw = value?.toString().trim();
+      if (raw == null || raw.isEmpty) return null;
+      return raw.split('T').first;
+    }
+    final expectedDate = dateOnly(local['document_date']);
+    if (expectedDate == null ||
+        dateOnly(remote['document_date']) != expectedDate) {
+      throw const _EstimateHeaderSyncConflict(
+        'server estimate date differs from the offline version',
+      );
+    }
+
+    final desiredClaim = _headerText(local['claim_number']);
+    final desiredAuthorization = _headerText(local['authorization_number']);
+    String? actualClaim() => _headerText(remote['claim_number']);
+    String? actualAuthorization() => _headerText(remote['authorization_number']);
+
+    if (actualClaim() != desiredClaim ||
+        actualAuthorization() != desiredAuthorization) {
+      // A previously confirmed upload might have been edited on another
+      // device. Never overwrite independently populated server identifiers.
+      if ((actualClaim() != null && actualClaim() != desiredClaim) ||
+          (actualAuthorization() != null &&
+              actualAuthorization() != desiredAuthorization)) {
+        throw const _EstimateHeaderSyncConflict(
+          'server warranty identifiers differ from the offline version',
+        );
+      }
+      final version = int.tryParse(remote['row_version']?.toString() ?? '');
+      if (version == null || version < 1) {
+        throw const _EstimateHeaderSyncConflict(
+          'server estimate revision is unavailable',
+        );
+      }
+      try {
+        await LocalJobQuarantine.guardReplay(
+          _database,
+          businessId,
+          () => _api.updateDocumentClaimInfo(
+            businessId,
+            serverId,
+            expectedVersion: version,
+            claimNumber: desiredClaim,
+            authorizationNumber: desiredAuthorization,
+          ),
+          outboxId: outboxId,
+        );
+      } catch (error) {
+        if (error is SyncReplayDeferred) rethrow;
+        // A lost RPC acknowledgment may follow a committed update.
+        // Verify, never blindly repeat a guessed-revision write.
+        remote = await _api.documentDetail(businessId, serverId);
+        if (actualClaim() != desiredClaim ||
+            actualAuthorization() != desiredAuthorization) {
+          rethrow;
+        }
+      }
+      remote = await _api.documentDetail(businessId, serverId);
+      if (actualClaim() != desiredClaim ||
+          actualAuthorization() != desiredAuthorization) {
+        throw const _EstimateHeaderSyncConflict(
+          'server did not confirm the edited warranty identifiers',
+        );
+      }
+    }
+
+    return remote;
+  }
 
   bool isLocalDraftId(String id) => id.startsWith('local-estimate-') || id.startsWith('local-invoice-');
 
@@ -1134,24 +1250,61 @@ class OfflineDocumentDraftService {
     String? mileage,
     String? claimNumber,
     String? authorizationNumber,
+    bool allowConflictedLocalReview = false,
   }) async {
     if (customerId.isEmpty) throw StateError('Select a saved customer.');
     if (!documentId.startsWith('local-estimate-')) {
       throw StateError('This operation requires a pending local estimate.');
     }
     await _database.transaction(() async {
-      final detail = await _requireDraft(businessId, documentId);
+      // Only a durable conflict may be edited for local Owner review.
+      // An attempted but pending/inflight upload can still be racing a remote
+      // acknowledgment, so it must never enter this local-review path.
+      final outboxes = await _database.customSelect(
+        "SELECT id,state,attempt_count,last_attempt_at,payload_json "
+        "FROM sync_outbox WHERE business_id=? AND entity_id=? "
+        "AND entity_type='document_draft_create' LIMIT 2",
+        variables: [Variable(businessId), Variable(documentId)],
+      ).get();
+      if (outboxes.length != 1) {
+        throw StateError('This estimate is no longer queued. Reopen it.');
+      }
+      final queued = outboxes.single;
+      final state = queued.read<String>('state');
+      final reviewOnly = state == 'conflict';
+      if (reviewOnly && !allowConflictedLocalReview) {
+        throw StateError('Only the Owner can save an estimate header for conflict review.');
+      }
+      if (state != 'pending' && !reviewOnly) {
+        throw StateError('This estimate is synchronizing. Reopen it once sync finishes.');
+      }
+      // The normal strict gate still protects every unattempted draft edit.
+      // Do NOT widen _requireDraft, which also protects invoices and line edits.
+      final detail = reviewOnly
+          ? await _cache.load(businessId, documentId)
+          : await _requireDraft(businessId, documentId);
+      if (detail == null ||
+          (detail['_server_document_id']?.toString().isNotEmpty ?? false)) {
+        throw StateError('This estimate has synced. Reopen its numbered record.');
+      }
       if (detail['kind'] != 'estimate' || detail['converted'] == true ||
           (detail['converted_invoice_id']?.toString().isNotEmpty ?? false)) {
         throw StateError('Converted estimates cannot be edited.');
       }
-      if ((detail['job_id']?.toString().isNotEmpty ?? false) &&
-          (detail['customer_id'] != customerId || detail['vehicle_id'] != vehicleId)) {
-        throw StateError('Change this estimate customer or vehicle after its linked Job has synced.');
-      }
       final identities = LocalCustomerVehicleIdentity(_database);
       final customer = (await identities.resolve(businessId, customerId))!;
       final vehicle = await identities.resolve(businessId, vehicleId);
+      // A conflicted estimate may already exist remotely. Do not alter the
+      // queued create identity or the customer/vehicle linkage for review.
+      if (reviewOnly &&
+          (detail['customer_id'] != customer ||
+           detail['vehicle_id'] != vehicle)) {
+        throw StateError('Keep this conflicted estimate customer and vehicle unchanged until Owner sync resolution.');
+      }
+      if ((detail['job_id']?.toString().isNotEmpty ?? false) &&
+          (detail['customer_id'] != customer || detail['vehicle_id'] != vehicle)) {
+        throw StateError('Change this estimate customer or vehicle after its linked Job has synced.');
+      }
       final date = documentDate.toIso8601String().split('T').first;
       final updated = <String, dynamic>{...detail,
         'customer_id': customer, 'customer_name': customerName,
@@ -1159,20 +1312,27 @@ class OfflineDocumentDraftService {
         'claim_number': claimNumber, 'authorization_number': authorizationNumber,
         'document_date': date,
         if (mileage != null) 'odometer_in': mileage.isEmpty ? null : num.tryParse(mileage),
+        if (mileage != null) _estimateMileageEditedKey: true,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
+        'sync_state': reviewOnly ? 'conflict' : 'pending',
       };
-      final queued = await _database.customSelect(
-        "SELECT id,payload_json FROM sync_outbox WHERE business_id=? AND entity_id=? "
-        "AND entity_type='document_draft_create' AND state='pending'",
-        variables: [Variable(businessId), Variable(documentId)],
-      ).getSingle();
-      final payload = Map<String, dynamic>.from(jsonDecode(queued.read<String>('payload_json')) as Map);
-      await _database.customStatement('UPDATE sync_outbox SET payload_json=? WHERE id=?',
-        [jsonEncode({...payload, 'customer_id': customer, 'vehicle_id': vehicle,
-          'document_date': date}), queued.read<int>('id')]);
+      if (!reviewOnly) {
+        final payload = Map<String, dynamic>.from(
+          jsonDecode(queued.read<String>('payload_json')) as Map);
+        await _database.customStatement(
+          'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+          [jsonEncode({...payload, 'customer_id': customer,
+            'vehicle_id': vehicle, 'document_date': date}),
+            queued.read<int>('id')],
+        );
+      }
+      // Conflict review edits stay solely on this device. Preserve the
+      // original outbox operation ID, state, attempts, payload and last_error;
+      // never schedule a retry or pretend a server save took place.
       await _database.customStatement(
-        'UPDATE local_documents SET customer_id=?,document_date=? WHERE business_id=? AND id=?',
-        [customer,date,businessId,documentId]);
+        'UPDATE local_documents SET customer_id=?,document_date=?,sync_state=? '
+        'WHERE business_id=? AND id=?',
+        [customer,date,reviewOnly ? 'conflict' : 'pending',businessId,documentId]);
       await _cache.save(businessId, documentId, updated);
     });
   }
@@ -1707,6 +1867,8 @@ class OfflineDocumentDraftService {
           if (serverId != operationId || LocalEstimateNumber.existing(serverDetail['document_number']) != expectedNumber) {
             throw StateError('The synchronized estimate number differs from the saved estimate.');
           }
+          serverDetail = await _confirmPendingEstimateHeader(
+            businessId, serverId, localDetail, serverDetail, outboxId);
         }
 
         if ((payload['kind'] == 'invoice' ||
@@ -1873,9 +2035,10 @@ class OfflineDocumentDraftService {
           );
         });
       } catch (error) {
-        final conflict = preflight['kind'] == 'estimate' &&
-            error is PostgrestException &&
-            const {'PT409','23505','42501','22023'}.contains(error.code);
+        final conflict = error is _EstimateHeaderSyncConflict ||
+            (preflight['kind'] == 'estimate' &&
+             error is PostgrestException &&
+             const {'PT409','23505','42501','22023'}.contains(error.code));
         await _database.customStatement(
           '''
           UPDATE sync_outbox
@@ -1887,6 +2050,30 @@ class OfflineDocumentDraftService {
           ''',
           [conflict ? 'conflict' : 'pending', _unixNow(), error.toString(), outboxId],
         );
+        if (conflict && preflight['kind'] == 'estimate') {
+          // Outbox conflict must also be visible when this estimate reopens.
+          // Never replace the sole local header copy with a remote estimate.
+          // If the cache projection fails, the durable outbox stays blocked.
+          try {
+            final retained = await _cache.load(businessId, localId);
+            if (retained != null &&
+                (retained['_server_document_id']?.toString().isEmpty ?? true)) {
+              await _cache.save(businessId, localId, {
+                ...retained,
+                'sync_state': 'conflict',
+                '_offline_estimate_sync_error': error.toString(),
+              });
+              await _database.customStatement(
+                "UPDATE local_documents SET sync_state='conflict' "
+                "WHERE business_id=? AND id=? AND kind='estimate'",
+                [businessId, localId],
+              );
+            }
+          } catch (_) {
+            // The outbox conflict is authoritative even if local UI
+            // projection cannot be refreshed on this attempt.
+          }
+        }
         if (!conflict) break;
       }
     }

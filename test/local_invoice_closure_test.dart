@@ -52,7 +52,7 @@ void main() {
     'paid_amount':pending?0:total,'pending_payment':pending?total:0,
     'lines':[{'id':'line-$id','line_kind':'labor','description':'Replace thermostat and coolant pipe','quantity':1}],
     'payments':[{'id':'receipt-$id','state':pending?'pending':'posted','amount':total,
-      'payment_method_id':'cash','payment_date':'2026-11-10'}],
+      'payment_method_id':'cash','payment_method_name':'Cash','payment_date':'2026-11-10'}],
   };
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
