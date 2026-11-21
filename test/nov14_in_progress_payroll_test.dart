@@ -369,7 +369,9 @@ void main() {
       expect(row['paid_minutes'], 480);
       expect(row['estimated_minutes'], 1200);
       expect(row['actual_minutes'], 0);
-      // RED until the saved-ledger permission path supports this older shape.
+      expect(row['can_finish_paid_progress'], isFalse,
+        reason: 'Legacy plan correction must not silently unlock completion');
+      // Only an active, unfinished legacy partial receipt permits a plan edit.
       // No one may unlock completed/historical allocations merely by removing
       // this metadata guard; active state + payment history must be verified.
       expect(row['can_edit_planned_hours'], isTrue,
@@ -385,9 +387,36 @@ void main() {
       expect(row['actual_minutes'], 0);
       expect(jsonEncode(await repo.historyWithWork('chris')), payrollBefore);
       expect(await repo.taskPaymentHistory(taskId), hasLength(1));
+      // The real Edit Service Task screen saves through this API, not solely
+      // through setEstimatedMinutes. It must preserve payment history too.
+      await repo.saveServiceTask(
+        operation: 'legacy-owner-edits-plan', task: taskId, job: 'legacy-job',
+        description: 'Synthetic engine labor',
+        mechanics: [
+          {'employee': 'chris', 'previous': 'chris', 'name': 'Chris', 'minutes': 1500},
+        ],
+        start: '2026-11-09', end: '2026-11-13', priority: 'Normal',
+        status: 'In Progress', treatment: 'preserve',
+      );
+      row = (await repo.work(employee: 'chris')).single;
+      expect(row['estimated_minutes'], 1500);
+      expect(row['paid_minutes'], 480);
+      expect(row['remaining_minutes'], 1020);
+      expect(row['actual_minutes'], 0);
+      expect(jsonEncode(await repo.historyWithWork('chris')), payrollBefore);
+      expect(await repo.taskPaymentHistory(taskId), hasLength(1));
       await expectLater(
         repo.setEstimatedMinutes(taskId, 'chris', 479), throwsStateError,
       );
+      // A fully covered older receipt must not acquire edit permission.
+      await repo.setEstimatedMinutes(taskId, 'chris', 480);
+      row = (await repo.work(employee: 'chris')).single;
+      expect(row['remaining_minutes'], 0);
+      expect(row['can_edit_planned_hours'], isFalse);
+      await expectLater(
+        repo.setEstimatedMinutes(taskId, 'chris', 1560), throwsStateError,
+      );
+      expect(jsonEncode(await repo.historyWithWork('chris')), payrollBefore);
     },
   );
 }
