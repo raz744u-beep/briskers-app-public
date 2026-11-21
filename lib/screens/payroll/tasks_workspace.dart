@@ -283,9 +283,15 @@ class _TasksWorkspaceState extends State<TasksWorkspace> {
   // Category totals describe all tasks in the current workspace scope,
   // independent of search and status filters (including Done tasks).
   int get _serviceCategoryCount => widget.serviceTasks.where((task) =>
-      widget.scopedJob == null || task['job_id'] == widget.scopedJob).length;
+      (widget.scopedJob == null || task['job_id'] == widget.scopedJob) &&
+      (_job == 'All Jobs' || task['job_id'] == _job) &&
+      _matchesEmployee(task, general: false) &&
+      _matchesServicePeriod(task)).length;
   int get _generalCategoryCount => widget.generalTasks.where((task) =>
-      widget.scopedJob == null || task['job_id'] == widget.scopedJob).length;
+      (widget.scopedJob == null || task['job_id'] == widget.scopedJob) &&
+      (_job == 'All Jobs' || task['job_id'] == _job) &&
+      _matchesEmployee(task, general: true) &&
+      _matchesDate(task)).length;
 
   List<String> get _employeeChoices => [
     'All Employees',
