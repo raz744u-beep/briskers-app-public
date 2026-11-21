@@ -13,6 +13,7 @@ import 'general_task_editor.dart';
 import '../../services/local_task_reminders.dart';
 import '../../widgets/task_schedule_indicator.dart';
 import '../../widgets/owner_confirmation_dialog.dart';
+import '../../widgets/briskers_dialog.dart';
 import 'service_task_editor.dart';
 import '../../services/local_task_schedule.dart';import 'employee_work_review.dart';
 import '../../core/work_status_colors.dart';
@@ -172,6 +173,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   _AdvanceSection? _advanceSection;
   bool _confirmingBalance = false;
   String? _advanceError;
+  bool _advanceNeedsConnection = false;
   int? _openingAdvance;
   List<Map<String, dynamic>> _advanceAdjustments = [];
   String? _balanceOperation;
@@ -1175,13 +1177,16 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
   void _advanceSaveFailed(String action, Object error) {
     final detail = switch (error) {
-      PayrollPending() => 'Use the Owner device with the current payroll ledger '
-          'or connect both Owner devices on shop Wi-Fi and try again.',
+      PayrollPending() => 'This phone could not verify the current payroll ledger. '
+          'Connect to the Owner device that holds it, then review the balance before retrying.',
       StateError(:final message) => message,
       ArgumentError(:final message) => message,
       _ => error.toString(),
     };
-    setState(() => _advanceError = 'Could not save $action. $detail');
+    setState(() {
+      _advanceError = 'Could not save $action. $detail';
+      _advanceNeedsConnection = error is PayrollPending;
+    });
     unawaited(_load());
   }
 
@@ -1599,6 +1604,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                     (_AdvanceSection.history, 'Repayment History', Icons.history),
                   ]) ...[
                     OutlinedButton.icon(
+                      style: BriskersDialog.cancelStyle,
                       icon: Icon(icon, size: 18),
                       label: Text(title),
                       onPressed: _busy || _confirmingBalance ? null : () {
@@ -1629,6 +1635,14 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                       if (_advanceError case final message?) ...[
                         const SizedBox(height: 8),
                         Text(message, style: const TextStyle(color: BriskersColors.destructive)),
+                        if (_advanceNeedsConnection)
+                          OutlinedButton.icon(
+                            style: BriskersDialog.cancelStyle,
+                            onPressed: _busy ? null : () =>
+                                showOwnerPayrollConnection(context, widget.businessId),
+                            icon: const Icon(Icons.wifi, size: 18),
+                            label: const Text('Shop payroll Wi-Fi'),
+                          ),
                       ],
                       const SizedBox(height: 8),
                     ],
@@ -1702,6 +1716,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         ),
         const SizedBox(height: 6),
         FilledButton(
+          style: BriskersDialog.confirmStyle(),
           onPressed: _canSaveAdvance && proposed != null &&
                   proposed != _advanceBalance &&
                   (_isOpeningBalance || _balanceReason.text.trim().isNotEmpty)
@@ -1732,6 +1747,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         ),
       const SizedBox(height: 8),
       OutlinedButton.icon(
+        style: BriskersDialog.cancelStyle,
         onPressed: _busy ? null : () async {
           final date = await showDatePicker(
             context: context,
@@ -1765,6 +1781,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       ),
       const SizedBox(height: 10),
       FilledButton(
+        style: BriskersDialog.confirmStyle(),
         onPressed: _canSaveAdvance && _repaymentCents != null ? _saveRepayment : null,
         child: const Text('Save Repayment'),
       ),
