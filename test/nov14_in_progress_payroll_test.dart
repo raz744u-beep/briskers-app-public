@@ -9,6 +9,7 @@ import 'package:briskers_app/local/briskers_local_database.dart' show BriskersLo
 import 'package:briskers_app/services/local_payroll_repository.dart';
 import 'package:briskers_app/services/verified_paid_labor.dart';
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -496,9 +497,9 @@ void main() {
           reason: 'Every immutable receipt must permit the correction, not only the first');
         final historyBefore = jsonEncode(await repo.historyWithWork('chris'));
         final coverageBefore = jsonEncode((await db.customSelect(
-          'SELECT * FROM regular_payroll_work_coverage WHERE business_id='shop' '
-          'AND credit_id='$allocationId' ORDER BY operation_id',
-          variables: [],
+          "SELECT * FROM regular_payroll_work_coverage WHERE business_id='shop' "
+          'AND credit_id=? ORDER BY operation_id',
+          variables: [Variable<String>(allocationId)],
         ).get()).map((r) => r.data).toList());
         await expectLater(
           repo.setEstimatedMinutes(taskId, 'chris', 1560), throwsStateError,
@@ -508,9 +509,9 @@ void main() {
         expect(row['paid_minutes'], 540);
         expect(jsonEncode(await repo.historyWithWork('chris')), historyBefore);
         final coverageAfter = jsonEncode((await db.customSelect(
-          'SELECT * FROM regular_payroll_work_coverage WHERE business_id='shop' '
-          'AND credit_id='$allocationId' ORDER BY operation_id',
-          variables: [],
+          "SELECT * FROM regular_payroll_work_coverage WHERE business_id='shop' "
+          'AND credit_id=? ORDER BY operation_id',
+          variables: [Variable<String>(allocationId)],
         ).get()).map((r) => r.data).toList());
         expect(coverageAfter, coverageBefore);
       },
