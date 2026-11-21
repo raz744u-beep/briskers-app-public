@@ -365,7 +365,9 @@ class EmployeeWorkReview extends StatelessWidget {
                           padding: const EdgeInsets.only(left: 5),
                           child: ColoredBox(
                             color: Colors.white,
-                            child: ListTile(
+                            child: Material(
+                              color: Colors.transparent,
+                              child: ListTile(
                               key: ValueKey('assigned-general-task-${r['id']}'),
                               onTap: onGeneralTask == null ? null : () => onGeneralTask!(r),
                               title: Text(
@@ -380,6 +382,7 @@ class EmployeeWorkReview extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                               ),
                               trailing: TaskStatusPill(generalStatus(r['status'])),
+                              ),
                             ),
                           ),
                         ),
