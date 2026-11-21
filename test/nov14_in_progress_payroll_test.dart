@@ -314,25 +314,55 @@ void main() {
       await repo.saveTaskSchedule(taskId, '2026-11-09', '2026-11-13', 'Normal');
       await repo.updateWork(allocationId, 'In Progress', 0, '2026-11-09');
       row = (await repo.work(employee: 'chris')).single;
-      expect(await repo.verify(
-        operation: 'legacy-eight', employee: 'chris',
-        week: '2026-11-09', date: '2026-11-13', method: 'Cash',
-        selected: [{...row, 'allow_in_progress': true, 'pay_minutes': 480}],
-        base: 0, hourlyAdjustment: 0,
-        adjustmentReason: 'Synthetic partial-payroll coverage',
-        repayment: 0, confirmedNet: 32000,
-      ), isTrue);
-      final original = (await db.customSelect(
-        "SELECT snapshot FROM regular_payroll_work_coverage "
-        "WHERE business_id='shop' AND operation_id='legacy-eight'",
-      ).getSingle()).read<String>('snapshot');
-      final legacy = jsonDecode(original) as Map<String, dynamic>;
-      expect(legacy.remove('in_progress_payment'), isTrue);
-      await db.customStatement(
-        'UPDATE regular_payroll_work_coverage SET snapshot=? '
-        'WHERE business_id=? AND operation_id=?',
-        [jsonEncode(legacy), 'shop', 'legacy-eight'],
-      );
+      // Seed an OLD-SHAPE synthetic receipt as an initial, append-only
+      // fixture. After verification the SQLite triggers prohibit UPDATE/DELETE
+      // of payment coverage; a modern verify() followed by rewriting its
+      // snapshot is not a valid way to reproduce historical input.
+      final legacy = <String, dynamic>{
+        ...row,
+        'employee_name': 'Chris',
+        'total_credit_minutes': row['actual_minutes'],
+        'credit_revision': row['version'],
+        'actual_minutes': 480,
+        'hours_hundredths': 800,
+        'gross_cents': 32000,
+        'payment_rate_cents': 4000,
+      };
+      expect(legacy.containsKey('in_progress_payment'), isFalse);
+      final legacyPayload = jsonEncode({
+        'employee': 'chris',
+        'week': '2026-11-09',
+        'date': '2026-11-13',
+        'method': 'Cash',
+        'work': [{
+          'id': allocationId,
+          'version': row['version'],
+          'hours': row['hours_hundredths'],
+          'minutes': row['actual_minutes'],
+          'rate': row['rate_cents'],
+          'pay_minutes': 480,
+        }],
+        'base': 0,
+        'adjustment': 0,
+        'reason': 'Synthetic older payroll coverage',
+        'repayment': 0,
+        'confirmed_net': 32000,
+      });
+      await db.transaction(() async {
+        await db.customStatement(
+          'INSERT INTO regular_payroll_payments VALUES(?,?,?,?,?,?,?,?,?,?)',
+          ['shop', 'legacy-eight', 'chris', '2026-11-09', legacyPayload,
+            32000, 0, 32000, 'Cash', '2026-11-13'],
+        );
+        await db.customStatement(
+          'INSERT INTO regular_payroll_work_coverage VALUES(?,?,?,?,?,?)',
+          ['shop', allocationId, 'legacy-eight', 480, 32000,
+            jsonEncode(legacy)],
+        );
+      });
+      // The legacy record is immutable after insertion; test the permission
+      // decision, not a backdated alteration of an existing payment.
+
 
       row = (await repo.work(employee: 'chris')).single;
       expect(row['state'], 'In Progress');
