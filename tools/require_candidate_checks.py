@@ -24,6 +24,8 @@ CANDIDATE_BRANCHES = {CANDIDATE_BRANCH, "fix/post-b2382-ux-polish-20261021", "fi
 PAYROLL_CANDIDATE = "candidate/payroll-enabled"
 PAYROLL_VERIFICATION_BRANCH = "fix/tasks-test-parity-bugs30-20261106"
 CANDIDATE_BRANCHES.add(PAYROLL_CANDIDATE)
+BACKUP_BRANCH = "feature/offline-complete-backup-20261120"
+CANDIDATE_BRANCHES.add(BACKUP_BRANCH)
 # Owner-approved consolidated Bugs 33 phone test candidate. The gate still
 # validates exact source, workflow identity and required successful checks.
 BUGS33_RELEASE_BRANCH = "fix/bugs33-preserve-offline-financial-history-20261108"
@@ -201,7 +203,7 @@ def validate_run(run, context, filename, name, workflow_id):
     # runs the same workflow files on push with the same exact-head checks.
     allowed_events = ALLOWED_EVENTS
     if (context.verification_branch == BUGS38_SOURCE_BRANCH or
-            context.branch == BUGS38_CONSOLIDATED_BRANCH or
+            context.branch in {BUGS38_CONSOLIDATED_BRANCH, BACKUP_BRANCH} or
             (filename == GLORIA_RECOVERY_WORKFLOW[0]
              and context.branch == GLORIA_RECOVERY_BRANCH)):
         allowed_events = ALLOWED_EVENTS | {"push"}
