@@ -1506,7 +1506,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             else
               IconButton(
                 tooltip: 'Edit opening balance',
-                onPressed: _busy || _openingAdvance != null || _history.isNotEmpty ||
+                onPressed: _busy || _openingAdvance != null ||
                     _repayments.isNotEmpty || (_advanceBalance ?? 0) != 0
                   ? null : () => setState(() => _editingOpening = true),
                 icon: const Icon(Icons.edit_outlined),),
