@@ -58,14 +58,14 @@ class LocalBackupService {
   static Future<String?> chooseFolder() =>
       channel.invokeMethod<String>('pickFolder');
 
-  static Future<String?> importExpenseIqOriginals(String businessId) async {
+  static Future<void> importExpenseIqOriginals(String businessId) async {
     await authorize(businessId);
     if (_busy) throw StateError('A backup, restore, or photo import is already running');
     _busy = true;
     Directory? scratch;
     try {
       final tree = await channel.invokeMethod<String>('pickExpenseIqOriginalsFolder');
-      if (tree == null) return null;
+      if (tree == null) return;
       final prefs = await SharedPreferences.getInstance();
       final support = await getApplicationSupportDirectory();
       scratch = await (await getTemporaryDirectory()).createTemp('expenseiq-import-');
@@ -86,9 +86,9 @@ class LocalBackupService {
       }));
       final summary = '${result.scanned} photos found · ${result.copied} copied · '
           '${result.reused} already stored · ${result.unreadable} unreadable. '
-          '${result.linked} receipt links updated · ${result.outstanding} still need review.';
+          '${result.linked} receipt links updated · ${result.outstanding} still need review. '
+          'Create a new backup to include these photos.';
       progress.value = summary;
-      return summary;
     } finally {
       try {
         if (scratch != null && await scratch.exists()) await scratch.delete(recursive: true);

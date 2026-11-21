@@ -204,12 +204,9 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
           'Keep the original folder until you verify a restored backup.',
         ),
         OutlinedButton.icon(
-          onPressed: _busy ? null : () => _run(() async {
-            final summary = await LocalBackupService.importExpenseIqOriginals(widget.businessId);
-            if (summary != null && mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(summary)));
-            }
-          }),
+          onPressed: _busy ? null : () => _run(
+            () => LocalBackupService.importExpenseIqOriginals(widget.businessId),
+          ),
           icon: const Icon(Icons.photo_library_outlined),
           label: const Text('Import Expense IQ Photos'),
         ),

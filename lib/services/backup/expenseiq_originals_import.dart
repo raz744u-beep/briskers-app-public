@@ -129,8 +129,7 @@ class ExpenseIqOriginalsImport {
       } finally {
         if (await staged.exists()) await staged.delete();
       }
-      final installed = destination ?? (throw StateError('Photo import did not finish'));
-      final savedUri = Uri.file(installed.path).toString();
+      final savedUri = Uri.file(destination.path).toString();
       final matching = _legacyPath(uri) == path ? legacyLinks[path] : null;
       final updated = await database.transaction(() async {
         await database.customStatement(
