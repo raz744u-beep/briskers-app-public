@@ -112,8 +112,9 @@ class ExpenseIqOriginalsImport {
         if (size != null && size > 0 && modified != null && modified > 0) {
           for (final prior in byPath[path] ?? const []) {
             if (prior['source_size'] != size ||
-                prior['source_modified'] != modified)
+                prior['source_modified'] != modified) {
               continue;
+            }
             final file = File.fromUri(Uri.parse(prior['file_uri'] as String));
             if (await file.exists() &&
                 await file.length() == size &&

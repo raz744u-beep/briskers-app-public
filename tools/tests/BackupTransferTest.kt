@@ -1,6 +1,7 @@
 package com.briskers.briskers_app
 
 import java.io.File
+import java.io.FilterOutputStream
 import java.io.IOException
 import java.nio.file.Files
 import java.security.MessageDigest
@@ -30,6 +31,7 @@ fun main() {
             entries: List<BackupPayload>,
             change: (File) -> Unit = {},
             beforeWrite: (String) -> Unit = {},
+            interruptWrite: Boolean = false,
         ): List<Map<String, Any>> {
             val target = File(root, name).apply { check(mkdir()) }
             var time = 0L
@@ -41,7 +43,18 @@ fun main() {
                     beforeWrite(path)
                     val file = File(target, path)
                     file.parentFile.mkdirs()
-                    file.outputStream().use(write)
+                    file.outputStream().use { output ->
+                        if (interruptWrite) {
+                            write(object : FilterOutputStream(output) {
+                                override fun write(bytes: ByteArray, offset: Int, length: Int) {
+                                    out.write(bytes, offset, length / 2)
+                                    throw IOException("Interrupted during a file")
+                                }
+                            })
+                        } else {
+                            write(output)
+                        }
+                    }
                     change(file)
                 },
                 openDestination = { File(target, it).inputStream() },
@@ -65,9 +78,10 @@ fun main() {
         }
 
         val interrupted = runCatching {
-            transfer("interrupted", payload, beforeWrite = { if (it == photos.first().path) throw IOException("Interrupted") })
+            transfer("interrupted", payload, interruptWrite = true)
         }.exceptionOrNull()
         check(interrupted is IOException)
+        check(File(root, "interrupted/${database.path}").length() in 1 until database.bytes)
         check(transfer("retry", listOf(database, document)).last()["copied"] == 2)
         check(previous.readText() == "unchanged")
 
