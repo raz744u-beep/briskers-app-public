@@ -274,4 +274,90 @@ void main() {
 
     },
   );
+
+  test(
+    'issue 501: older untagged partial payroll must not block Owner plan edits',
+    () async {
+      // Synthetic-only reproduction of older covered labor: the payment exists
+      // but its snapshot predates the in_progress_payment metadata. Never
+      // change production receipts or mechanic payment evidence to reproduce.
+      SharedPreferences.setMockInitialValues({});
+      final db = BriskersLocalDatabase(NativeDatabase.memory());
+      addTearDown(db.close);
+      final repo = LocalPayrollRepository(
+        db, business: 'shop', owner: true, deviceId: 'owner',
+      );
+      await repo.prepare();
+      await repo.bindPaymentAuthority(
+        writerDeviceId: 'owner', assertVerifiedPairing: () {},
+      );
+      await db.customStatement(
+        "INSERT INTO local_jobs(id,business_id,access_scope,title,status) "
+        "VALUES('legacy-job','shop','owner','Synthetic labor','open')",
+      );
+      await db.customStatement(
+        "INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id,employee_name) "
+        "VALUES('legacy-chris','shop','legacy-job','chris','Chris')",
+      );
+      await repo.saveEmployeeCompensation(
+        employee: 'chris', name: 'Chris', rate: 4000, weeklyBase: false,
+      );
+      await repo.createRecheck(
+        operation: 'legacy-task', job: 'legacy-job',
+        description: 'Synthetic engine labor',
+        employee: 'chris', name: 'Chris', rate: 4000,
+        estimatedMinutes: 1200,
+      );
+      var row = (await repo.work(employee: 'chris')).single;
+      final taskId = row['task_id'] as String;
+      final allocationId = row['id'] as String;
+      await repo.saveTaskSchedule(taskId, '2026-11-09', '2026-11-13', 'Normal');
+      await repo.updateWork(allocationId, 'In Progress', 0, '2026-11-09');
+      row = (await repo.work(employee: 'chris')).single;
+      expect(await repo.verify(
+        operation: 'legacy-eight', employee: 'chris',
+        week: '2026-11-09', date: '2026-11-13', method: 'Cash',
+        selected: [{...row, 'allow_in_progress': true, 'pay_minutes': 480}],
+        base: 0, hourlyAdjustment: 0,
+        adjustmentReason: 'Synthetic partial-payroll coverage',
+        repayment: 0, confirmedNet: 32000,
+      ), isTrue);
+      final original = (await db.customSelect(
+        "SELECT snapshot FROM regular_payroll_work_coverage "
+        "WHERE business_id='shop' AND operation_id='legacy-eight'",
+      ).getSingle()).read<String>('snapshot');
+      final legacy = jsonDecode(original) as Map<String, dynamic>;
+      expect(legacy.remove('in_progress_payment'), isTrue);
+      await db.customStatement(
+        'UPDATE regular_payroll_work_coverage SET snapshot=? '
+        'WHERE business_id=? AND operation_id=?',
+        [jsonEncode(legacy), 'shop', 'legacy-eight'],
+      );
+
+      row = (await repo.work(employee: 'chris')).single;
+      expect(row['state'], 'In Progress');
+      expect(row['paid_minutes'], 480);
+      expect(row['estimated_minutes'], 1200);
+      expect(row['actual_minutes'], 0);
+      // RED until the saved-ledger permission path supports this older shape.
+      // No one may unlock completed/historical allocations merely by removing
+      // this metadata guard; active state + payment history must be verified.
+      expect(row['can_edit_planned_hours'], isTrue,
+        reason: 'An active partially-paid task must permit safe planned-hours corrections');
+
+      final payrollBefore = jsonEncode(await repo.historyWithWork('chris'));
+      await repo.setEstimatedMinutes(taskId, 'chris', 1560);
+      row = (await repo.work(employee: 'chris')).single;
+      expect(row['state'], 'In Progress');
+      expect(row['estimated_minutes'], 1560);
+      expect(row['paid_minutes'], 480);
+      expect(row['remaining_minutes'], 1080);
+      expect(row['actual_minutes'], 0);
+      expect(jsonEncode(await repo.historyWithWork('chris')), payrollBefore);
+      expect(await repo.taskPaymentHistory(taskId), hasLength(1));
+      await expectLater(
+        repo.setEstimatedMinutes(taskId, 'chris', 479), throwsStateError,
+      );
+    },
+  );
 }
