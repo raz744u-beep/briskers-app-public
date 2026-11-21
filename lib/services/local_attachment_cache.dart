@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 import 'briskers_api.dart';
+import 'backup/restored_attachment_lookup.dart';
 
 class LocalAttachmentCache {
   LocalAttachmentCache({BriskersApi api = const BriskersApi()}) : _api = api;
@@ -116,7 +117,8 @@ class LocalAttachmentCache {
     final extension = _extensionFromKey(key);
     final hash = _stableHash('$bucket::$key');
 
-    return File('${directory.path}/$hash$extension');
+    final restored = await RestoredAttachmentLookup.find('attachment_cache/findings/$hash$extension');
+    return restored ?? File('${directory.path}/$hash$extension');
   }
 
   Future<bool> _isUsable(File file) async {
