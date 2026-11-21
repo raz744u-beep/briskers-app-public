@@ -114,9 +114,8 @@ void main() {
         expect(payload['photos'], [
           '${target.path}/Originals/file-0',
           {
-            'source_uri': Uri.file(
-              '${target.path}/Originals/file-1',
-            ).toString(),
+            'source_uri': Uri.file('${target.path}/Originals/file-1')
+                .toString(),
           },
         ]);
         expect(await File('${target.path}/Originals/file-1').readAsBytes(), [
@@ -143,7 +142,13 @@ void main() {
     await File('${backup.path}/Originals/file-1').delete();
     await expectLater(
       BackupArchive.verify(backup),
-      throwsA(isA<FileSystemException>()),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('Originals/file-1'),
+        ),
+      ),
     );
     await File('${backup.path}/${BackupArchive.manifestName}').delete();
     await expectLater(

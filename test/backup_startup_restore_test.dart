@@ -37,6 +37,13 @@ void main() {
   late String request;
 
   setUp(() async {
+    PackageInfo.setMockInitialValues(
+      appName: 'Briskers',
+      packageName: 'test',
+      version: '1',
+      buildNumber: '1',
+      buildSignature: '',
+    );
     SharedPreferences.setMockInitialValues({
       'briskers_language_code': 'en',
       'keep_auth_token': 'device-only',

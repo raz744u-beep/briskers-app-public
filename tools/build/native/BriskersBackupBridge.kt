@@ -7,12 +7,14 @@ import android.provider.DocumentsContract as DC
 import android.os.SystemClock
 import android.system.ErrnoException
 import android.system.OsConstants
+import android.webkit.MimeTypeMap
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.IOException
 import java.security.DigestInputStream
 import java.security.MessageDigest
+import java.util.Locale
 import org.json.JSONObject
 
 /** Stream originals and folder snapshots through Android's persisted folder grant.
@@ -294,7 +296,11 @@ class BriskersBackupBridge(private val activity: Activity, messenger: BinaryMess
                 val parent = folders.getOrPut(area) {
                     create(destination, DC.Document.MIME_TYPE_DIR, area)
                 }
-                val uri = create(parent, "application/octet-stream", path.substringAfter('/'))
+                val filename = path.substringAfter('/')
+                val extension = filename.substringAfterLast('.', "").lowercase(Locale.ROOT)
+                val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+                    ?: "application/octet-stream"
+                val uri = create(parent, mime, filename)
                 currentFile = uri
                 write(uri).use(copy)
             },
@@ -315,8 +321,7 @@ class BriskersBackupBridge(private val activity: Activity, messenger: BinaryMess
             }
         }
 
-        val stagedName = "backup-info-pending"
-        val staged = create(destination, "application/octet-stream", stagedName)
+        val staged = create(destination, "application/json", "backup-info-pending.json")
         write(staged).use { it.write(manifest) }
         val sha = MessageDigest.getInstance("SHA-256").digest(manifest)
             .joinToString("") { "%02x".format(it) }

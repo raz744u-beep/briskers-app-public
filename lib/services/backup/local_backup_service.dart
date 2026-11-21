@@ -85,8 +85,9 @@ class LocalBackupService {
 
   static Future<void> importExpenseIqOriginals(String businessId) async {
     await authorize(businessId);
-    if (_busy)
+    if (_busy) {
       throw StateError('A backup, restore, or photo import is already running');
+    }
     _busy = true;
     Directory? scratch;
     try {
@@ -126,8 +127,9 @@ class LocalBackupService {
       progress.value = summary;
     } finally {
       try {
-        if (scratch != null && await scratch.exists())
+        if (scratch != null && await scratch.exists()) {
           await scratch.delete(recursive: true);
+        }
       } finally {
         _busy = false;
       }
