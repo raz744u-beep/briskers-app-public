@@ -1,81 +1,214 @@
 import 'package:flutter/material.dart';
-import '../core/amount_calculator.dart';
 
-Future<int?> showAmountCalculator(BuildContext context, {
-  String initial = '', int? balanceCents,
-}) => showDialog<int>(context: context, builder: (_) =>
-    _AmountCalculatorDialog(initial: initial, balanceCents: balanceCents));
+import '../core/amount_calculator.dart';
+import '../core/briskers_colors.dart';
+
+Future<int?> showAmountCalculator(
+  BuildContext context, {
+  String initial = '',
+  int? balanceCents,
+}) {
+  FocusManager.instance.primaryFocus?.unfocus();
+  return showDialog<int>(
+    context: context,
+    builder: (_) =>
+        _AmountCalculatorDialog(initial: initial, balanceCents: balanceCents),
+  );
+}
 
 class _AmountCalculatorDialog extends StatefulWidget {
   const _AmountCalculatorDialog({required this.initial, this.balanceCents});
+
   final String initial;
   final int? balanceCents;
+
   @override
   State<_AmountCalculatorDialog> createState() => _AmountCalculatorDialogState();
 }
 
 class _AmountCalculatorDialogState extends State<_AmountCalculatorDialog> {
-  late final input = TextEditingController(text: widget.initial);
-  String? error;
-  int? evaluate() {
+  late final _input = TextEditingController.fromValue(
+    TextEditingValue(
+      text: widget.initial,
+      selection: TextSelection.collapsed(offset: widget.initial.length),
+    ),
+  );
+  String? _error;
+
+  int? _evaluate() {
     try {
-      final result = AmountCalculator.cents(input.text, balanceCents: widget.balanceCents);
-      setState(() => error = null);
+      final result = AmountCalculator.cents(
+        _input.text,
+        balanceCents: widget.balanceCents,
+      );
+      setState(() => _error = null);
       return result;
-    } on FormatException catch (e) {
-      setState(() => error = e.message);
+    } on FormatException catch (error) {
+      setState(() => _error = error.message);
       return null;
     }
   }
+
   @override
-  void dispose() { input.dispose(); super.dispose(); }
-  void key(String value) {
-    setState(() { error = null; });
-    if (value == 'C') { input.clear(); return; }
-    if (value == '⌫') {
-      final end = input.selection.isValid ? input.selection.end : input.text.length;
-      final start = input.selection.isValid ? input.selection.start : end;
-      if (start != end || start > 0) {
-        final from = start == end ? start - 1 : start;
-        input.value = TextEditingValue(text: input.text.replaceRange(from, end, ''),
-          selection: TextSelection.collapsed(offset: from));
+  void dispose() {
+    _input.dispose();
+    super.dispose();
+  }
+
+  void _press(String label) {
+    if (label == '=') {
+      final result = _evaluate();
+      if (result != null) {
+        final text = (result / 100).toStringAsFixed(2);
+        _input.value = TextEditingValue(
+          text: text,
+          selection: TextSelection.collapsed(offset: text.length),
+        );
       }
       return;
     }
-    if (value == '=') {
-      final result = evaluate();
-      if (result != null) input.text = (result / 100).toStringAsFixed(2);
+    setState(() => _error = null);
+    if (label == 'C') {
+      _input.clear();
       return;
     }
-    final selection = input.selection;
-    final start = selection.isValid ? selection.start : input.text.length;
-    final end = selection.isValid ? selection.end : input.text.length;
-    input.value = TextEditingValue(text: input.text.replaceRange(start, end, value),
-      selection: TextSelection.collapsed(offset: start + value.length));
+    final selection = _input.selection;
+    var start = selection.isValid ? selection.start : _input.text.length;
+    final end = selection.isValid ? selection.end : _input.text.length;
+    if (label == '⌫' && start == end && start > 0) start--;
+    final replacement = label == '⌫' ? '' : label;
+    _input.value = TextEditingValue(
+      text: _input.text.replaceRange(start, end, replacement),
+      selection: TextSelection.collapsed(offset: start + replacement.length),
+    );
   }
+
+  Widget _key(String label, {int flex = 1}) {
+    final color = switch (label) {
+      '=' => BriskersColors.customerSave,
+      'C' || '⌫' || '%' || '÷' || '×' || '−' || '+' => const Color(0xFFE5EFFA),
+      _ => const Color(0xFFF1F5F9),
+    };
+    return Expanded(
+      flex: flex,
+      child: Padding(
+        padding: const EdgeInsets.all(2),
+        child: Semantics(
+          label: switch (label) {
+            'C' => 'Clear',
+            '⌫' => 'Backspace',
+            '=' => 'Equals',
+            _ => null,
+          },
+          child: FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: color,
+              foregroundColor: label == '=' ? Colors.white : BriskersColors.text,
+              minimumSize: const Size(0, 44),
+              padding: EdgeInsets.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            onPressed: () => _press(label),
+            child: Text(label, style: const TextStyle(fontSize: 18)),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Amount calculator'),
-    content: SizedBox(width: 300, child: SingleChildScrollView(child: Column(
-      mainAxisSize: MainAxisSize.min, children: [
-        if (widget.balanceCents != null) Text(
-          'Current amount owed: \$${(widget.balanceCents! / 100).toStringAsFixed(2)}\nUse +300 or -140 to adjust the balance.'),
-        TextField(controller: input, keyboardType: TextInputType.text,
-          decoration: InputDecoration(labelText: 'Calculation', errorText: error)),
-        const SizedBox(height: 12),
-        for (final row in const [
-          ['C','⌫','%','÷'], ['7','8','9','×'], ['4','5','6','−'],
-          ['1','2','3','+'], ['0','.','='],
-        ]) Row(children: [for (final label in row) Expanded(child: Padding(
-          padding: const EdgeInsets.all(2), child: OutlinedButton(
-            style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
-            onPressed: () => key(label), child: Text(label)),
-        ))]),
-      ],
-    ))),
-    actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-      FilledButton(onPressed: () { final result = evaluate();
-        if (result != null) Navigator.pop(context, result);
-      }, child: const Text('Use Amount'))],
+  Widget build(BuildContext context) => Dialog(
+    insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    backgroundColor: BriskersColors.surface,
+    surfaceTintColor: Colors.transparent,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    clipBehavior: Clip.antiAlias,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 320),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DecoratedBox(
+              decoration: const BoxDecoration(gradient: BriskersColors.blueHeader),
+              child: Row(
+                children: [
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Text(
+                      'Amount calculator',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Cancel',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, color: Colors.white),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (widget.balanceCents case final balance?) ...[
+                    Text(
+                      'Current amount owed: \$${(balance / 100).toStringAsFixed(2)}',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const Text('Use +300 or -140 to adjust the balance.'),
+                    const SizedBox(height: 8),
+                  ],
+                  TextField(
+                    controller: _input,
+                    textAlign: TextAlign.end,
+                    onChanged: (_) => setState(() => _error = null),
+                    onSubmitted: (_) => _press('='),
+                    decoration: InputDecoration(
+                      labelText: 'Calculation',
+                      hintText: '0.00',
+                      errorText: _error,
+                      errorMaxLines: 2,
+                      filled: true,
+                      fillColor: const Color(0xFFF1F5F9),
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final row in const [
+                    ['C', '⌫', '%', '÷'],
+                    ['7', '8', '9', '×'],
+                    ['4', '5', '6', '−'],
+                    ['1', '2', '3', '+'],
+                  ])
+                    Row(children: [for (final label in row) _key(label)]),
+                  Row(children: [_key('0', flex: 2), _key('.'), _key('=')]),
+                  const SizedBox(height: 8),
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: BriskersColors.customerSave,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: () {
+                      final result = _evaluate();
+                      if (result != null) Navigator.pop(context, result);
+                    },
+                    child: const Text('Use Amount'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
   );
 }

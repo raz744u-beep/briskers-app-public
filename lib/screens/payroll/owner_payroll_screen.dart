@@ -61,6 +61,8 @@ import 'job_scoped_tasks.dart';
 import 'task_selection_dialog.dart';
 import 'payroll_overview.dart';
 
+enum _AdvanceSection { balance, repayment, history }
+
 class OwnerPayrollScreen extends StatefulWidget {
   const OwnerPayrollScreen({
     super.key,
@@ -167,9 +169,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   int _draftRevision = 0;
   String? _carryReview;
   bool? _advanceExpanded;
-  bool _advanceHistoryTab = false;
-  final _repaymentHistoryKey = GlobalKey();
-  bool _editingOpening = false;
+  _AdvanceSection? _advanceSection;
+  bool _confirmingBalance = false;
+  String? _advanceError;
   int? _openingAdvance;
   List<Map<String, dynamic>> _advanceAdjustments = [];
   String? _balanceOperation;
@@ -287,6 +289,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     Future<void> Function() action, {
     bool verifyPayment = false,
     bool rethrowError = false,
+    ValueChanged<Object>? onError,
   }) async {
     if (_busy) {
       if (rethrowError) throw StateError('Payroll is busy. Try again.');
@@ -317,7 +320,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         unawaited(_refreshLan());
       }
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) {
+        if (onError == null) {
+          setState(() => _error = error.toString());
+        } else {
+          onError(error);
+        }
+      }
       if (rethrowError && !actionCompleted) rethrow;
     } finally {
       if (mounted) { setState(() { _busy = false; _authorizing = false; });
@@ -529,8 +538,6 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       _openingAdvance = opening;
       _hasAdvanceHistory = debtHistory;
       _advanceAdjustments = adjustments;
-      if (!_editingOpening) { _opening.text = advance == null ? '' : (advance / 100).toStringAsFixed(2);
-      }
       _generalTasks = job == null ? generalTasks : generalTasks.where((row) => row['job_id'] == job).toList();
       if (!_weeklyDefaultsLoaded) {
         _weeklyDefaultsLoaded = true;
@@ -1152,66 +1159,136 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     );
   }
 
+  bool get _canSaveAdvance =>
+      !_busy && !_loadingLocal && !_confirmingBalance && _advanceBalance != null;
+
+  bool get _isOpeningBalance => !_hasAdvanceHistory && _advanceBalance == 0;
+
+  int? get _proposedBalance {
+    if (_opening.text.trim().isEmpty || _advanceBalance == null) return null;
+    try {
+      return AmountCalculator.cents(_opening.text, balanceCents: _advanceBalance);
+    } on FormatException {
+      return null;
+    }
+  }
+
+  void _advanceSaveFailed(String action, Object error) {
+    final detail = switch (error) {
+      PayrollPending() => 'Use the Owner device with the current payroll ledger '
+          'or connect both Owner devices on shop Wi-Fi and try again.',
+      StateError(:final message) => message,
+      ArgumentError(:final message) => message,
+      _ => error.toString(),
+    };
+    setState(() => _advanceError = 'Could not save $action. $detail');
+    unawaited(_load());
+  }
+
   Future<void> _saveOpening() async {
     final employee = _employee;
-    if (employee == null || _advanceBalance == null) return;
-    final before = _advanceBalance!;
-    late int proposed;
-    try {
-      proposed = AmountCalculator.cents(_opening.text, balanceCents: before);
-    } on FormatException catch (error) {
-      setState(() => _error = error.message);
+    final before = _advanceBalance;
+    final proposed = _proposedBalance;
+    if (!_canSaveAdvance || employee == null || before == null ||
+        proposed == null || proposed == before) {
       return;
     }
-    final opening = !_hasAdvanceHistory && before == 0;
-    if (!opening && _balanceReason.text.trim().isEmpty) {
-      setState(() => _error = 'Enter a reason for the balance adjustment.'); return;
+    final opening = _isOpeningBalance;
+    final reason = _balanceReason.text.trim();
+    if (!opening && reason.isEmpty) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _confirmingBalance = true;
+      _advanceError = null;
+    });
+    bool? confirmed;
+    try {
+      confirmed = await showDialog<bool>(
+        context: context,
+        builder: (_) => OwnerConfirmationDialog(
+          title: opening ? 'Record opening amount owed?' : 'Adjust amount owed?',
+          sections: [
+            Text('Current balance: ${_money(before)}'),
+            Text('Proposed balance: ${_money(proposed)}'),
+            if (reason.isNotEmpty) Text('Reason: $reason'),
+            const SizedBox(height: 10),
+            const Text('This changes the amount owed only.'),
+          ],
+          confirm: 'Confirm Balance',
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _confirmingBalance = false);
     }
-    final ok = await showDialog<bool>(context: context, builder: (_) => OwnerConfirmationDialog(
-      title: opening ? 'Record opening amount owed?' : 'Adjust amount owed?',
-      sections: [Text('Current: ${_money(before)}\nProposed: ${_money(proposed)}'),
-        const SizedBox(height: 10), const Text('This changes debt only. It does not record a cash repayment or change wages.')],
-      confirm: 'Save balance'));
-    if (ok != true || !mounted) return;
-    _balanceOperation ??= _operationId();
+    if (confirmed != true || !mounted || employee != _employee) return;
+
+    final operation = _balanceOperation ??= _operationId();
     await _run(() async {
-      final ledger = await _localPaymentLedger(operation: _balanceOperation);
+      final ledger = await _localPaymentLedger(operation: operation);
       if (opening) {
         await ledger.recordOpeningAdvance(employee, proposed);
       } else {
-        await ledger.adjustAdvance(employee: employee, operation: _balanceOperation!,
-          expectedCents: before, proposedCents: proposed, reason: _balanceReason.text);
+        await ledger.adjustAdvance(
+          employee: employee,
+          operation: operation,
+          expectedCents: before,
+          proposedCents: proposed,
+          reason: reason,
+        );
       }
-      if (mounted) setState(() { _editingOpening = false; _balanceOperation = null; _balanceReason.clear(); });
-    }, verifyPayment: true);
+      if (mounted) {
+        setState(() {
+          _advanceBalance = proposed;
+          _hasAdvanceHistory = true;
+          if (opening) _openingAdvance = proposed;
+          _advanceSection = null;
+          _balanceOperation = null;
+          _balanceReason.clear();
+        });
+      }
+    }, onError: (error) => _advanceSaveFailed('the balance', error));
   }
 
   int? get _repaymentCents {
-    final value = double.tryParse(_repayment.text.trim());
-    if (value == null || !value.isFinite || value <= 0 || value > 1000000) { return null;
+    final value = _repayment.text.trim();
+    if (!RegExp(r'^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$').hasMatch(value)) {
+      return null;
     }
-    final cents = (value * 100).round();
+    final dollars = double.tryParse(value);
+    if (dollars == null || dollars > 1000000) return null;
+    final cents = AmountCalculator.cents(value);
     return cents > 0 && cents <= (_advanceBalance ?? 0) ? cents : null;
   }
 
   Future<void> _saveRepayment() async {
     final amount = _repaymentCents;
     final employee = _employee;
-    if (amount == null || employee == null) return;
-    _repaymentOperation ??= _operationId();
+    if (!_canSaveAdvance || amount == null || employee == null) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _advanceError = null);
+    final operation = _repaymentOperation ??= _operationId();
+    final date = _date(_repaymentDate);
+    final method = _repaymentMethod;
+    final note = _repaymentNote.text.trim();
     await _run(() async {
-      final ledger = await _localPaymentLedger();
+      final ledger = await _localPaymentLedger(operation: operation);
       await ledger.recordRepayment(
-        employee: employee, operation: _repaymentOperation!, amount: amount,
-        date: _date(_repaymentDate), method: _repaymentMethod,
-        note: _repaymentNote.text.trim(),
+        employee: employee,
+        operation: operation,
+        amount: amount,
+        date: date,
+        method: method,
+        note: note,
       );
       if (mounted) {
-        _repaymentOperation = null;
-        _repayment.clear();
-        _repaymentNote.clear();
+        setState(() {
+          _advanceSection = null;
+          _repaymentOperation = null;
+          _repayment.clear();
+          _repaymentNote.clear();
+        });
       }
-    }, verifyPayment: true);
+    }, onError: (error) => _advanceSaveFailed('the repayment', error));
   }
 
   void _openRecordedWork(String id, {required bool invoice}) {
@@ -1481,166 +1558,262 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   );
 
   Widget _advancePanel() {
-    final expanded = _advanceExpanded ?? ((_advanceBalance ?? 0) > 0 || (_repaymentCents ?? 0) > 0);
-    return Card(clipBehavior:Clip.antiAlias,child:Column(
+    final expanded = _advanceExpanded ?? ((_advanceBalance ?? 0) > 0);
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: Ink(
+              decoration: const BoxDecoration(gradient: BriskersColors.blueHeader),
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                leading: const Icon(Icons.handshake_outlined, color: Colors.white),
+                title: const Text(
+                  'Advances & Repayments',
+                  style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white),
+                ),
+                subtitle: Text(
+                  'Current balance: ${_moneyNullable(_advanceBalance)}',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                trailing: Icon(
+                  expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                  color: Colors.white,
+                ),
+                onTap: _busy ? null : () => setState(() => _advanceExpanded = !expanded),
+              ),
+            ),
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final (section, title, icon) in const [
+                    (_AdvanceSection.balance, 'Adjust Amount Owed', Icons.edit_outlined),
+                    (_AdvanceSection.repayment, 'Record Repayment', Icons.add_circle_outline),
+                    (_AdvanceSection.history, 'Repayment History', Icons.history),
+                  ]) ...[
+                    OutlinedButton.icon(
+                      icon: Icon(icon, size: 18),
+                      label: Text(title),
+                      onPressed: _busy || _confirmingBalance ? null : () {
+                        FocusManager.instance.primaryFocus?.unfocus();
+                        setState(() {
+                          _advanceExpanded = true;
+                          if (_advanceSection != section) {
+                            if (section == _AdvanceSection.balance &&
+                                _balanceOperation == null) {
+                              _opening.text = _isOpeningBalance || _advanceBalance == null
+                                  ? '' : (_advanceBalance! / 100).toStringAsFixed(2);
+                            }
+                            _advanceSection = section;
+                          } else {
+                            _advanceSection = null;
+                          }
+                          _advanceError = null;
+                        });
+                      },
+                    ),
+                    if (_advanceSection == section) ...[
+                      const SizedBox(height: 8),
+                      switch (section) {
+                        _AdvanceSection.balance => _balanceForm(),
+                        _AdvanceSection.repayment => _repaymentForm(),
+                        _AdvanceSection.history => _advanceHistory(),
+                      },
+                      if (_advanceError case final message?) ...[
+                        const SizedBox(height: 8),
+                        Text(message, style: const TextStyle(color: BriskersColors.destructive)),
+                      ],
+                      const SizedBox(height: 8),
+                    ],
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _advanceField(String label, {String? prefixText}) =>
+      InputDecoration(
+        labelText: label,
+        prefixText: prefixText,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        border: const OutlineInputBorder(),
+      );
+
+  Widget _balanceForm() {
+    final proposed = _proposedBalance;
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Material(color:Colors.transparent,child:Container(decoration:const BoxDecoration(gradient:BriskersColors.blueHeader),child:ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal:12),
-          leading: const Icon(Icons.handshake_outlined,
-            color: Colors.white,),
-          title: const Text('Advances & Repayments',
-            style: TextStyle(fontWeight: FontWeight.w700,color:Colors.white),),
-          subtitle: Text('Balance: '
-            '${_moneyNullable(_advanceBalance)}',style:const TextStyle(color:Colors.white),),
-          trailing: Icon(expanded
-            ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,color:Colors.white,),
-          onTap: () => setState(() =>
-            _advanceExpanded = !expanded),
-        ))),
-        if (expanded) Padding(padding:const EdgeInsets.all(10),child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-          Row(children:[
-            Expanded(child:OutlinedButton.icon(
-              style:OutlinedButton.styleFrom(backgroundColor:_advanceHistoryTab?const Color(0xFFF0F4FA):const Color(0xFFDFF5DE),foregroundColor:_advanceHistoryTab?const Color(0xFF465D7B):const Color(0xFF087A17),padding:const EdgeInsets.symmetric(horizontal:5,vertical:8),visualDensity:VisualDensity.compact),
-              onPressed:()=>setState(()=>_advanceHistoryTab=false),
-              icon:const Icon(Icons.add_circle_outline,size:17),
-              label:const FittedBox(fit:BoxFit.scaleDown,child:Text('Add Repayment')),
-            )),
-            const SizedBox(width:6),
-            Expanded(child:OutlinedButton.icon(
-              style:OutlinedButton.styleFrom(backgroundColor:_advanceHistoryTab?const Color(0xFFDFF5DE):const Color(0xFFF0F4FA),foregroundColor:_advanceHistoryTab?const Color(0xFF087A17):const Color(0xFF465D7B),padding:const EdgeInsets.symmetric(horizontal:5,vertical:8),visualDensity:VisualDensity.compact),
-              onPressed:()=>setState(()=>_advanceHistoryTab=true),
-              icon:const Icon(Icons.history,size:17),
-              label:const FittedBox(fit:BoxFit.scaleDown,child:Text('Repayment History')),
-            )),
-          ]),
-          const SizedBox(height:8),
-          if (!_advanceHistoryTab) ...[
-          Row(children: [
-            Expanded(child: TextField(
-              controller: _opening,
-              onTapAlwaysCalled: true,
-              onTap: () => _opening.selection = TextSelection(
-                baseOffset: 0, extentOffset: _opening.text.length,
-              ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true,),
-              readOnly: !_editingOpening,
-              decoration: InputDecoration(
-                suffixIcon: _editingOpening ? IconButton(tooltip: 'Amount calculator',
-                  icon: const Icon(Icons.calculate_outlined), onPressed: _busy ? null : () async {
-                    final cents = await showAmountCalculator(context, balanceCents: _advanceBalance ?? 0);
-                    if (cents != null && mounted) setState(() => _opening.text = (cents / 100).toStringAsFixed(2));
-                  }) : null,
-                labelText: 'Amount owed', isDense:true,
-                contentPadding:const EdgeInsets.symmetric(horizontal:12,vertical:12),
-                prefixText: r'$ ', border: const OutlineInputBorder(),),
-            ),),
-            const SizedBox(width: 8),
-            if (_editingOpening)
-              IconButton(
-                tooltip: 'Save opening balance',
-                onPressed: _busy ? null : _saveOpening,
-                icon: const Icon(Icons.save_outlined),)
-            else
-              IconButton(
-                tooltip: 'Edit opening balance',
-                onPressed: _busy || _advanceBalance == null ? null : () => setState(() {
-                    _editingOpening = true; _balanceOperation = null;
-                    _opening.text = ((_advanceBalance ?? 0) / 100).toStringAsFixed(2);
-                  }),
-                icon: const Icon(Icons.edit_outlined),),
-          ],),
-          if (_editingOpening) TextField(controller: _balanceReason, decoration: const InputDecoration(labelText: 'Adjustment reason')),
-          const SizedBox(height: 10),
-          Text('Remaining balance: '
-            '${_moneyNullable(_advanceBalance)}',
-            style: const TextStyle(
-              fontWeight: FontWeight.w800, fontSize: 18),),
-          const SizedBox(height: 9),
+        TextField(
+          controller: _opening,
+          enabled: !_busy && _advanceBalance != null,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          onTapAlwaysCalled: true,
+          onTap: () => _selectAmount(_opening),
+          onChanged: (_) => setState(() => _advanceError = null),
+          decoration: _advanceField(
+            _isOpeningBalance ? 'Opening amount owed' : 'New amount owed',
+            prefixText: r'$ ',
+          ).copyWith(
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.calculate_outlined),
+              tooltip: 'Amount calculator',
+              onPressed: _busy || _advanceBalance == null ? null : () async {
+                final cents = await showAmountCalculator(
+                  context,
+                  initial: _opening.text,
+                  balanceCents: _advanceBalance,
+                );
+                if (cents != null && mounted) {
+                  setState(() {
+                    _opening.text = (cents / 100).toStringAsFixed(2);
+                    _advanceError = null;
+                  });
+                }
+              },
+            ),
+          ),
+        ),
+        if (!_isOpeningBalance) ...[
+          const SizedBox(height: 12),
           TextField(
-            controller: _repayment,
-            onTapAlwaysCalled: true,
-            onTap: () => _repayment.selection = TextSelection(
-              baseOffset: 0, extentOffset: _repayment.text.length,
-            ),
-            onChanged: (_) => setState(() {}),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true,),
-            decoration: const InputDecoration(
-              labelText: 'Amount', prefixText: r'$ ', isDense:true,
-              contentPadding:EdgeInsets.symmetric(horizontal:12,vertical:12),
-              border: OutlineInputBorder(),),
+            controller: _balanceReason,
+            enabled: !_busy,
+            onChanged: (_) => setState(() => _advanceError = null),
+            decoration: _advanceField('Adjustment reason'),
           ),
-          const SizedBox(height: 9),
-          OutlinedButton.icon(
-            onPressed: () async {
-              final date = await showDatePicker(
-                context: context, initialDate: _repaymentDate,
-                firstDate: DateTime(2000), lastDate: DateTime(2100),);
-              if (date != null && mounted) {
-                setState(() => _repaymentDate = date);
-              }
-            },
-            icon: const Icon(Icons.calendar_month),
-            label: Text('Date: ${DateFormat.yMMMd().format(_repaymentDate)}'),
-          ),
-          const SizedBox(height: 9),
-          DropdownButtonFormField<String>(
-            initialValue: _repaymentMethod,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Repayment method', isDense:true,contentPadding:EdgeInsets.symmetric(horizontal:12,vertical:12),border: OutlineInputBorder(),),
-            items: const [
-              DropdownMenuItem(value: 'Cash', child: Text('Cash')),
-              DropdownMenuItem(value: 'Zelle', child: Text('Zelle')),
-              DropdownMenuItem(value: 'Check', child: Text('Check')),
-              DropdownMenuItem(value: 'ACH', child: Text('ACH')),
-            ],
-            onChanged: (value) => setState(() =>
-              _repaymentMethod = value ?? 'Cash'),
-          ),
-          const SizedBox(height: 9),
-          TextField(controller: _repaymentNote, decoration:
-            const InputDecoration(labelText: 'Notes (optional)',isDense:true,contentPadding:EdgeInsets.symmetric(horizontal:12,vertical:12),
-              border: OutlineInputBorder(),),),
-          const SizedBox(height: 10),
-          FilledButton(
-            onPressed: !_busy && _repaymentCents != null ? _saveRepayment : null,
-            child: const Text('Save Repayment'),
-          ),
-          const SizedBox(height: 8),
-          const Text('Payroll deductions are optional during Verify Payment. '
-            'Record separate cash, Zelle, check or ACH repayments here.',
-            style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),),
-          ],
-          if (_advanceHistoryTab) ...[
-          const Divider(height: 16),
-          Text('Repayment History',key:_repaymentHistoryKey,
-            style: const TextStyle(fontWeight: FontWeight.w700),),
-          if (_openingAdvance != null) ListTile(dense: true, contentPadding: EdgeInsets.zero,
-            title: Text('Original opening debt: ${_money(_openingAdvance!)}')),
-          for (final payment in _history.where((p) => (p['repayment'] as num? ?? 0) > 0))
-            ListTile(dense: true, contentPadding: EdgeInsets.zero,
-              title: Text('Payroll deduction: ${_money(payment['repayment'] as int)}'),
-              subtitle: Text('${payment['verified_date']}${payment['reversed_at'] == null ? '' : ' · Reversed'}')),
-          for (final item in _advanceAdjustments) ListTile(dense: true, contentPadding: EdgeInsets.zero,
-            title: Text('Balance adjustment: ${_money(item['before_cents'] as int)} → ${_money(item['after_cents'] as int)}'),
-            subtitle: Text('${item['reason']} · ${item['recorded_at']}\nNot a cash repayment')),
-          if (_repayments.isEmpty)
-            const Padding(padding: EdgeInsets.all(8),
-              child: Text('No repayments recorded'),),
-          for (final item in _repayments)
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              title: Text('${_money(item['cents'] as int)} · '
-                "${item['method']}",),
-              subtitle: Text(item['date'] as String),
-              trailing: Text(_money(item['remaining_after_cents'] as int)),
-            ),
-          ],
-        ])),
+        ],
+        const SizedBox(height: 10),
+        Text(
+          proposed == null && _opening.text.trim().isNotEmpty
+              ? 'Enter a valid amount or use the calculator.'
+              : 'Proposed balance: ${_moneyNullable(proposed)}',
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 6),
+        FilledButton(
+          onPressed: _canSaveAdvance && proposed != null &&
+                  proposed != _advanceBalance &&
+                  (_isOpeningBalance || _balanceReason.text.trim().isNotEmpty)
+              ? _saveOpening
+              : null,
+          child: const Text('Save Balance'),
+        ),
       ],
-    ),);
+    );
+  }
+
+  Widget _repaymentForm() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      TextField(
+        controller: _repayment,
+        enabled: !_busy,
+        onTapAlwaysCalled: true,
+        onTap: () => _selectAmount(_repayment),
+        onChanged: (_) => setState(() => _advanceError = null),
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: _advanceField('Repayment amount', prefixText: r'$ '),
+      ),
+      if (_repayment.text.trim().isNotEmpty && _repaymentCents == null)
+        const Padding(
+          padding: EdgeInsets.only(top: 4),
+          child: Text('Enter a positive amount up to the current balance.'),
+        ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        onPressed: _busy ? null : () async {
+          final date = await showDatePicker(
+            context: context,
+            initialDate: _repaymentDate,
+            firstDate: DateTime(2000),
+            lastDate: DateTime(2100),
+          );
+          if (date != null && mounted) setState(() => _repaymentDate = date);
+        },
+        icon: const Icon(Icons.calendar_month),
+        label: Text('Repayment date: ${DateFormat.yMMMd().format(_repaymentDate)}'),
+      ),
+      const SizedBox(height: 8),
+      DropdownButtonFormField<String>(
+        initialValue: _repaymentMethod,
+        isExpanded: true,
+        decoration: _advanceField('Repayment method'),
+        items: const [
+          for (final method in ['Cash', 'Zelle', 'Check', 'ACH'])
+            DropdownMenuItem(value: method, child: Text(method)),
+        ],
+        onChanged: _busy ? null : (value) => setState(() => _repaymentMethod = value ?? 'Cash'),
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        controller: _repaymentNote,
+        enabled: !_busy,
+        decoration: _advanceField('Notes (optional)'),
+      ),
+      const SizedBox(height: 10),
+      FilledButton(
+        onPressed: _canSaveAdvance && _repaymentCents != null ? _saveRepayment : null,
+        child: const Text('Save Repayment'),
+      ),
+    ],
+  );
+
+  Widget _advanceHistory() {
+    final deductions = _history.where((p) => (p['repayment'] as num? ?? 0) > 0);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_repayments.isEmpty && deductions.isEmpty)
+          const Text('No repayments recorded'),
+        for (final item in _repayments)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: Text("${_money(item['cents'] as int)} · ${item['method']}"),
+            subtitle: Text([
+              item['date'] as String,
+              if ((item['note'] as String?)?.isNotEmpty ?? false) item['note'] as String,
+            ].join('\n')),
+            trailing: Text(_money(item['remaining_after_cents'] as int)),
+          ),
+        for (final payment in deductions)
+          ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: Text('Payroll deduction: ${_money(payment['repayment'] as int)}'),
+            subtitle: Text("${payment['verified_date']}${payment['reversed_at'] == null ? '' : ' · Reversed'}"),
+          ),
+        if (_openingAdvance != null || _advanceAdjustments.isNotEmpty) ...[
+          const Divider(),
+          const Text('Balance history', style: TextStyle(fontWeight: FontWeight.w700)),
+          if (_openingAdvance != null)
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: Text('Original opening debt: ${_money(_openingAdvance!)}'),
+            ),
+          for (final item in _advanceAdjustments)
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: Text('Balance adjustment: ${_money(item['before_cents'] as int)} → '
+                  '${_money(item['after_cents'] as int)}'),
+              subtitle: Text("${item['reason']} · ${item['recorded_at']}"),
+            ),
+        ],
+      ],
+    );
   }
 
   Future<void> _newJobLabor() async {

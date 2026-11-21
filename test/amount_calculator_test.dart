@@ -28,4 +28,41 @@ void main() {
     await tester.tap(find.text('Use Amount')); await tester.pumpAndSettle();
     expect(chosen,10975); expect(tester.takeException(),isNull);
   });
+  testWidgets('compact keypad and relative expression work with keyboard insets', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 640);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+    int? chosen;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: Builder(builder: (context) => TextButton(
+        onPressed: () async {
+          chosen = await showAmountCalculator(context, balanceCents: 160000);
+        },
+        child: const Text('Calculate'),
+      ))),
+    ));
+    await tester.tap(find.text('Calculate'));
+    await tester.pumpAndSettle();
+    for (final label in ['−', '1', '4', '1', '⌫', '0', '=']) {
+      await tester.tap(find.widgetWithText(FilledButton, label));
+      await tester.pump();
+    }
+    final input = find.byType(TextField);
+    expect(tester.widget<TextField>(input).controller!.text, '1460.00');
+    expect(chosen, isNull);
+    await tester.enterText(input, '+300');
+    tester.view.viewInsets = const FakeViewPadding(bottom: 270);
+    await tester.pumpAndSettle();
+    final useAmount = find.text('Use Amount');
+    await tester.ensureVisible(useAmount);
+    await tester.pumpAndSettle();
+    expect(useAmount.hitTestable(), findsOneWidget);
+    await tester.tap(useAmount);
+    await tester.pumpAndSettle();
+    expect(chosen, 190000);
+    expect(tester.takeException(), isNull);
+  });
+
 }
