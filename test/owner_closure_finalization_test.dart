@@ -67,5 +67,11 @@ void main() {
     await finalization.finalizeLocally('test-shop','historical',isOwner:true,resumeSavedRequest:true);
     await closure.close('test-shop',['historical'],isOwner:true);
     expect(await LocalInvoiceClosureStore(db).finalizedIncome('test-shop'),income);
+    // An older local close can outrank an unrefreshed issued detail, too.
+    await cache.save('test-shop','old-local-close',fixture('old-local-close'));
+    await finalization.save('test-shop',['old-local-close'],isOwner:true,close:false);
+    await db.customStatement("INSERT INTO local_invoice_closures(business_id,invoice_id,closed_at,operation_id,payload) VALUES('test-shop','old-local-close','2026-11-01','historical-close','{}')");
+    await finalization.finalizeLocally('test-shop','old-local-close',isOwner:true,resumeSavedRequest:true);
+    expect(await LocalInvoiceClosureStore(db).finalizedIncome('test-shop'),income);
   });
 }
