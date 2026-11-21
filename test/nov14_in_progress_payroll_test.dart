@@ -129,6 +129,29 @@ void main() {
         ], 32000),
         throwsStateError,
       );
+      final paidHistoryBeforeCorrection = jsonEncode(await repo.historyWithWork('chris'));
+      await repo.setEstimatedMinutes(task, 'chris', 1560);
+      chris = (await repo.work(employee: 'chris')).single;
+      expect(chris['estimated_minutes'], 1560);
+      expect(chris['paid_minutes'], 480);
+      expect(chris['remaining_minutes'], 1080);
+      expect(chris['actual_minutes'], 0);
+      expect(chris['state'], 'In Progress');
+      expect(jsonEncode(await repo.historyWithWork('chris')), paidHistoryBeforeCorrection);
+      expect(await repo.taskPaymentHistory(task), hasLength(1));
+      await expectLater(repo.setEstimatedMinutes(task, 'chris', 479), throwsStateError);
+      // Repeating an identical correction neither changes wages nor adds audit.
+      await repo.setEstimatedMinutes(task, 'chris', 1560);
+      expect((await db.customSelect("SELECT * FROM regular_payroll_audit WHERE event='owner_corrected_planned_hours'").get()), hasLength(1));
+      await repo.saveServiceTask(operation: 'editor-plan-correction', task: task, job: 'job',
+        description: 'Replace engine', mechanics: [
+          {'employee': 'chris', 'previous': 'chris', 'name': 'Chris', 'minutes': 1200},
+          {'employee': 'kam', 'previous': 'kam', 'name': 'Kam', 'minutes': 300},
+        ], start: '2026-11-09', end: '2026-11-13', priority: 'Normal',
+        status: 'In Progress', treatment: 'preserve');
+      chris = (await repo.work(employee: 'chris')).single;
+      expect(chris['estimated_minutes'], 1200);
+      expect(jsonEncode(await repo.historyWithWork('chris')), paidHistoryBeforeCorrection);
       expect(chris['actual_minutes'], 0);
       expect(
         await VerifiedPaidLabor(db).allocations('shop'),

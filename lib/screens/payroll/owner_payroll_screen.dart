@@ -1,3 +1,5 @@
+import '../../widgets/amount_calculator_dialog.dart';
+import '../../core/amount_calculator.dart';
 import '../../core/briskers_colors.dart';
 import 'payroll_expense_review.dart';
 import 'payroll_review_widgets.dart';
@@ -169,6 +171,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   final _repaymentHistoryKey = GlobalKey();
   bool _editingOpening = false;
   int? _openingAdvance;
+  List<Map<String, dynamic>> _advanceAdjustments = [];
+  String? _balanceOperation;
+  final _balanceReason = TextEditingController();
   final _opening = TextEditingController();
   final _weeklyBasePreview = TextEditingController(text: '0.00');
   final _hourlySupplementPreview = TextEditingController(text: '0.00');
@@ -253,6 +258,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     _lockCheck?.cancel();
     _historyUnlocked.dispose();
     _opening.dispose();
+    _balanceReason.dispose();
     _weeklyBasePreview.dispose();
     _hourlySupplementPreview.dispose();
     _approvedSupplementHours.dispose();
@@ -487,6 +493,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final advance = employee == null || _jobMode ? null : await repository.advance(employee);
     final repayments = employee == null || widget.employeeId == null || widget.reportsOnly
         ? <Map<String, dynamic>>[] : await repository.repaymentHistory(employee);
+    final adjustments = employee == null || _jobMode ? <Map<String, dynamic>>[] : await repository.advanceAdjustments(employee);
     final opening = employee == null || widget.employeeId == null || widget.reportsOnly
         ? null : await repository.openingAdvance(employee);
     final weeklyDefaults = employee == null || widget.employeeId == null ||
@@ -517,7 +524,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       _advanceBalance = advance;
       _repayments = repayments;
       _openingAdvance = opening;
-      if (!_editingOpening) { _opening.text = opening == null ? '' : (opening / 100).toStringAsFixed(2);
+      _advanceAdjustments = adjustments;
+      if (!_editingOpening) { _opening.text = advance == null ? '' : (advance / 100).toStringAsFixed(2);
       }
       _generalTasks = job == null ? generalTasks : generalTasks.where((row) => row['job_id'] == job).toList();
       if (!_weeklyDefaultsLoaded) {
@@ -1142,16 +1150,35 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
 
   Future<void> _saveOpening() async {
     final employee = _employee;
-    final amount = double.tryParse(_opening.text.trim());
-    if (employee == null || amount == null || !amount.isFinite ||
-        amount <= 0 || amount > 1000000) {
-      setState(() => _error = 'Enter a positive opening amount.');
+    if (employee == null || _advanceBalance == null) return;
+    final before = _advanceBalance!;
+    late int proposed;
+    try {
+      proposed = AmountCalculator.cents(_opening.text, balanceCents: before);
+    } on FormatException catch (error) {
+      setState(() => _error = error.message);
       return;
     }
+    final opening = _openingAdvance == null && before == 0 && _repayments.isEmpty && _advanceAdjustments.isEmpty;
+    if (!opening && _balanceReason.text.trim().isEmpty) {
+      setState(() => _error = 'Enter a reason for the balance adjustment.'); return;
+    }
+    final ok = await showDialog<bool>(context: context, builder: (_) => OwnerConfirmationDialog(
+      title: opening ? 'Record opening amount owed?' : 'Adjust amount owed?',
+      sections: [Text('Current: ${_money(before)}\nProposed: ${_money(proposed)}'),
+        const SizedBox(height: 10), const Text('This changes debt only. It does not record a cash repayment or change wages.')],
+      confirm: 'Save balance'));
+    if (ok != true || !mounted) return;
+    _balanceOperation ??= _operationId();
     await _run(() async {
-      final ledger = await _localPaymentLedger();
-      await ledger.recordOpeningAdvance(employee, (amount * 100).round());
-      if (mounted) setState(() => _editingOpening = false);
+      final ledger = await _localPaymentLedger(operation: _balanceOperation);
+      if (opening) {
+        await ledger.recordOpeningAdvance(employee, proposed);
+      } else {
+        await ledger.adjustAdvance(employee: employee, operation: _balanceOperation!,
+          expectedCents: before, proposedCents: proposed, reason: _balanceReason.text);
+      }
+      if (mounted) setState(() { _editingOpening = false; _balanceOperation = null; _balanceReason.clear(); });
     }, verifyPayment: true);
   }
 
@@ -1492,8 +1519,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
               ),
               keyboardType: const TextInputType.numberWithOptions(decimal: true,),
               readOnly: !_editingOpening,
-              decoration: const InputDecoration(
-                labelText: 'Original amount owed', isDense:true,
+              decoration: InputDecoration(
+                suffixIcon: _editingOpening ? IconButton(tooltip: 'Amount calculator',
+                  icon: const Icon(Icons.calculate_outlined), onPressed: _busy ? null : () async {
+                    final cents = await showAmountCalculator(context, balanceCents: _advanceBalance ?? 0);
+                    if (cents != null && mounted) setState(() => _opening.text = (cents / 100).toStringAsFixed(2));
+                  }) : null,
+                labelText: 'Amount owed', isDense:true,
                 contentPadding:EdgeInsets.symmetric(horizontal:12,vertical:12),
                 prefixText: r'$ ', border: OutlineInputBorder(),),
             ),),
@@ -1506,11 +1538,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             else
               IconButton(
                 tooltip: 'Edit opening balance',
-                onPressed: _busy || _openingAdvance != null || _history.isNotEmpty ||
-                    _repayments.isNotEmpty || (_advanceBalance ?? 0) != 0
-                  ? null : () => setState(() => _editingOpening = true),
+                onPressed: _busy || _advanceBalance == null ? null : () => setState(() {
+                    _editingOpening = true; _balanceOperation = null;
+                    _opening.text = ((_advanceBalance ?? 0) / 100).toStringAsFixed(2);
+                  }),
                 icon: const Icon(Icons.edit_outlined),),
           ],),
+          if (_editingOpening) TextField(controller: _balanceReason, decoration: const InputDecoration(labelText: 'Adjustment reason')),
           const SizedBox(height: 10),
           Text('Remaining balance: '
             '${_moneyNullable(_advanceBalance)}',
@@ -1576,6 +1610,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           const Divider(height: 16),
           Text('Repayment History',key:_repaymentHistoryKey,
             style: const TextStyle(fontWeight: FontWeight.w700),),
+          for (final item in _advanceAdjustments) ListTile(dense: true, contentPadding: EdgeInsets.zero,
+            title: Text('Balance adjustment: ${_money(item['before_cents'] as int)} → ${_money(item['after_cents'] as int)}'),
+            subtitle: Text('${item['reason']} · ${item['recorded_at']}\nNot a cash repayment')),
           if (_repayments.isEmpty)
             const Padding(padding: EdgeInsets.all(8),
               child: Text('No repayments recorded'),),
@@ -1704,6 +1741,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                               r['actual_minutes'] as int? ??
                               0,
                           originalEmployee: r['employee_id'] as String,
+                          hoursEditable: r['can_edit_planned_hours']==true,
                           locked:
                               r['paid'] == 1 ||
                               r['owner_prior_paid'] == 1 ||

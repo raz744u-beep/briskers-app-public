@@ -1269,10 +1269,21 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       if (closing || selected.isEmpty) return;
       setSheetState(() { closing = true; feedback = null; });
       final ids = Set<String>.from(selected);
+      final closure = LocalInvoiceClosure(database: _localDocuments.database, api: _api);
+      late Map<String, Map<String, dynamic>> plan;
+      try {
+        plan = await closure.preview(widget.businessId, ids, isOwner: widget.isOwner);
+      } catch (error) {
+        if (sheetContext.mounted) setSheetState(() { closing = false; feedback = '$error'; });
+        return;
+      }
+      if (!sheetContext.mounted) return;
+      final finalizing = plan.values.fold<int>(0, (sum, invoice) => sum +
+        (invoice['receipts'] as List).fold<int>(0, (n, receipt) => n + (receipt['amount_cents'] as int)));
       final ok = await showDialog<bool>(context: sheetContext,
         builder: (dialogContext) => AlertDialog(
           title: const Text('Close selected invoices?'),
-          content: Text('This will close ${ids.length} selected invoice${ids.length == 1 ? '' : 's'}.'),
+          content: Text('This will close ${ids.length} selected invoice${ids.length == 1 ? '' : 's'}.\nPayments to finalize: \$${(finalizing / 100).toStringAsFixed(2)}\nOriginal receipt dates are kept.'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
             FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Close invoices')),
@@ -1281,8 +1292,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       if (!sheetContext.mounted) return;
       if (!ok) { setSheetState(() => closing = false); return; }
       try {
-        final closure = LocalInvoiceClosure(database:_localDocuments.database,api:_api);
-        await closure.close(widget.businessId, ids, isOwner:widget.isOwner);
+        await closure.close(widget.businessId, ids, isOwner:widget.isOwner, confirmed: plan);
         if (mounted) unawaited(_load());
         if (!sheetContext.mounted) return;
         setSheetState(() {

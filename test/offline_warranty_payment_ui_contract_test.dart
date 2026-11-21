@@ -47,7 +47,7 @@ void main() {
     expect(finalize, contains('OfflineInvoiceFinalization().finalizeLocally('));
     expect(finalize, isNot(contains('.flush(')));
     expect(screen, contains("payment['pending_sync'] == true ||"));
-    expect(screen, contains("label: 'Payments to sync'"));
+    expect(screen, contains("label: 'Waiting to sync'"));
     expect(screen, contains('paymentPendingLabel: _warrantyPaymentProcessed(pendingOnly: true)'));
     final panel = File('lib/screens/jobs/invoice_warranty_panel.dart').readAsStringSync();
     expect(panel, contains("widget.paymentPendingLabel ?? (widget.paymentProcessed"));

@@ -635,7 +635,7 @@ class LocalPayrollRepository {
         }
       }
       for(final paid in before.where((r)=>r['paid']==1 || r['owner_prior_paid']==1 || (r['paid_minutes'] as int? ?? 0)>0)) {
-        if(!mechanics.any((m)=>m['employee']==paid['employee_id'] && (m['previous']??m['employee'])==paid['employee_id'] && m['minutes']==paid['estimated_minutes'])) {
+        if(!mechanics.any((m)=>m['employee']==paid['employee_id'] && (m['previous']??m['employee'])==paid['employee_id'] && (m['minutes']==paid['estimated_minutes'] || paid['can_edit_planned_hours']==true))) {
           throw StateError('Paid labor is protected. Use an explicit payroll adjustment.');
         }
       }
@@ -919,6 +919,11 @@ class LocalPayrollRepository {
     }
     await prepare();
     await db.transaction(() async {
+      final current = (await work()).where((r) => r['task_id'] == task && r['employee_id'] == employee).singleOrNull;
+      if (current != null && (current['paid_minutes'] as int? ?? 0) > 0) {
+        await _correctPaidProgressPlan(current, minutes);
+        return;
+      }
       final assignment = await _read(
         'SELECT p.id,p.state,c.revision,c.completed FROM regular_payroll_portions p '
         'JOIN local_mechanic_work_credits_v1 c ON c.business_id=p.business_id AND c.allocation_id=p.id '
@@ -973,6 +978,37 @@ class LocalPayrollRepository {
       );
       _authorize();
     });
+  }
+
+  /// Changes only the plan. Frozen receipt coverage and earned time are never
+  /// rewritten; finishing work or explicitly verifying payroll remains separate.
+  Future<void> _correctPaidProgressPlan(Map<String, dynamic> row, int minutes) async {
+    final id = row['id'] as String;
+    final coverage = await _read(
+      'SELECT snapshot,minutes FROM regular_payroll_work_coverage WHERE business_id=? AND credit_id=?',
+      [business, id],
+    );
+    final paid = coverage.fold<int>(0, (sum, c) => sum + (c['minutes'] as int));
+    if (row['can_edit_planned_hours'] != true || coverage.isEmpty ||
+        coverage.any((c) => (jsonDecode(c['snapshot'] as String) as Map)['in_progress_payment'] != true) ||
+        minutes < paid || minutes < (row['recorded_actual_minutes'] as int)) {
+      throw StateError('Assigned hours must cover recorded work and paid hours. Completed and historical payroll remain protected.');
+    }
+    if (row['estimated_minutes'] == minutes) return;
+    await assertLanWriter?.call();
+    await db.customStatement(
+      'UPDATE regular_payroll_estimates SET minutes=? WHERE business_id=? AND task_id=? AND employee_id=?',
+      [minutes, business, row['task_id'], row['employee_id']],
+    );
+    await db.customStatement(
+      'INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) VALUES(?,?,?,?)',
+      [business, 'planned-hours-$id-${DateTime.now().microsecondsSinceEpoch}', 'owner_corrected_planned_hours', jsonEncode({
+        'allocation': id, 'employee': row['employee_id'], 'task': row['task_id'],
+        'before_minutes': row['estimated_minutes'], 'after_minutes': minutes,
+        'paid_minutes': paid, 'recorded_at': DateTime.now().toUtc().toIso8601String(),
+      })],
+    );
+    _authorize();
   }
 
   Future<void> setMainMechanic(String job, String? employee, String? name) async {
@@ -1926,6 +1962,9 @@ class LocalPayrollRepository {
         },
         'hours_hundredths': (total * 100 + 30) ~/ 60,
         'paid_minutes': paid,
+        'can_edit_planned_hours': row['state']=='In Progress' && row['credit_completed']!=1 &&
+            !ownerPriorPaid && row['archived_labor']!=1 && row['assignment_conflict']!=1 &&
+            row['source_active']!=0 && coverage?['in_progress_payment']==true,
         'paid_cents': ownerPriorPaid ? ((total * rate + 30) ~/ 60) : row['paid_cents'],
             'can_finish_paid_progress':row['state']=='In Progress' && coverage?['in_progress_payment']==true,
         'payable_minutes': total,
@@ -2165,10 +2204,26 @@ class LocalPayrollRepository {
     await prepare();
     await db.transaction(() async {
       await _assertPaymentAuthority();
+      // Ordinary payroll history does not mean an employee has an advance.
+      // A first opening debt may be entered after wages have been paid, but
+      // never re-open an earlier debt or silently erase any repayments.
+      final priorAdvanceEvents = await _read(
+        "SELECT id FROM regular_payroll_audit WHERE business_id=? AND "
+        "((event='opening_advance' AND operation_id=?) OR "
+        " (event='advance' AND json_extract(payload,'\$.employee')=?)) "
+        'LIMIT 1',
+        [business, 'opening-advance-$employee', employee],
+      );
+      final priorPayrollRepayments = (await history(employee)).any(
+        (payment) => (payment['repayment'] as num? ?? 0) > 0,
+      );
       if (await advance(employee) != 0 ||
-          (await history(employee)).isNotEmpty ||
+          priorAdvanceEvents.isNotEmpty ||
+          priorPayrollRepayments ||
           (await repaymentHistory(employee)).isNotEmpty) {
-        throw StateError('An opening amount cannot replace existing payroll history.');
+        throw StateError(
+          'An opening amount cannot replace an existing advance or repayment.',
+        );
       }
       await db.customStatement(
         'INSERT INTO regular_payroll_advances VALUES(?,?,?) '
@@ -2198,6 +2253,52 @@ class LocalPayrollRepository {
     final row = rows.firstOrNull;
     return row == null ? null :
         (jsonDecode(row['payload'] as String) as Map)['cents'] as int;
+  }
+
+  /// Audited balance correction or additional advance, distinct from money
+  /// actually repaid. A stale balance or conflicting retry never overwrites it.
+  Future<void> adjustAdvance({required String employee, required String operation,
+    required int expectedCents, required int proposedCents, required String reason}) async {
+    _authorize();
+    if (operation.isEmpty || reason.trim().isEmpty || proposedCents < 0 ||
+        proposedCents > 100000000 || expectedCents < 0) {
+      throw ArgumentError('Enter a valid balance and adjustment reason.');
+    }
+    await prepare();
+    await db.transaction(() async {
+      await _assertPaymentAuthority();
+      final fields = {'employee': employee, 'before_cents': expectedCents,
+        'after_cents': proposedCents, 'reason': reason.trim()};
+      final prior = await _read(
+        "SELECT payload FROM regular_payroll_audit WHERE business_id=? AND operation_id=? AND event='advance_adjustment'",
+        [business, operation]);
+      if (prior.isNotEmpty) {
+        final saved = jsonDecode(prior.single['payload'] as String) as Map;
+        if (fields.entries.any((e) => saved[e.key] != e.value)) {
+          throw StateError('Conflicting balance adjustment retry.');
+        }
+        return;
+      }
+      if ((await employees()).every((e) => e['id'] != employee)) throw StateError('Employee missing.');
+      if (await advance(employee) != expectedCents) throw StateError('Balance changed. Refresh before adjusting.');
+      if (proposedCents == expectedCents) return;
+      await db.customStatement('INSERT INTO regular_payroll_advances VALUES(?,?,?) '
+        'ON CONFLICT(business_id,employee_id) DO UPDATE SET balance=excluded.balance',
+        [business, employee, proposedCents]);
+      await db.customStatement(
+        "INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) VALUES(?,?,'advance_adjustment',?)",
+        [business, operation, jsonEncode({...fields, 'recorded_at': DateTime.now().toUtc().toIso8601String()})]);
+      _authorize();
+      await _assertPaymentAuthority();
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> advanceAdjustments(String employee) async {
+    _authorize(); await prepare();
+    final rows = await _read(
+      "SELECT payload FROM regular_payroll_audit WHERE business_id=? AND event='advance_adjustment' "
+      "AND json_extract(payload,'\$.employee')=? ORDER BY id DESC", [business, employee]);
+    return [for (final row in rows) Map<String, dynamic>.from(jsonDecode(row['payload'] as String) as Map)];
   }
 
   Future<void> recordRepayment({
