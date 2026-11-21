@@ -15,6 +15,8 @@ class EmployeeWorkReview extends StatelessWidget {
     required this.onWeekChanged,
     required this.onJob,
     this.onTask,
+    this.onGeneralTask,
+    this.generalTasks = const [],
     this.payrollSummary,
     this.employeeName,
     this.employeeId,
@@ -25,6 +27,8 @@ class EmployeeWorkReview extends StatelessWidget {
   final ValueChanged<DateTime> onWeekChanged;
   final ValueChanged<String> onJob;
   final ValueChanged<Map<String, dynamic>>? onTask;
+  final ValueChanged<Map<String, dynamic>>? onGeneralTask;
+  final List<Map<String, dynamic>> generalTasks;
   final Widget? payrollSummary;
   final String? employeeName, employeeId;
   final int? paidMinutesThisWeek;
@@ -71,6 +75,11 @@ class EmployeeWorkReview extends StatelessWidget {
     'Done' => WorkStatusColors.done,
     'In Progress' => WorkStatusColors.progress,
     _ => WorkStatusColors.open,
+  };
+  static String generalStatus(Object? value) => switch (value?.toString().toLowerCase()) {
+    'done' => 'Done',
+    'in_progress' => 'In Progress',
+    _ => 'Open',
   };
   static bool fallsInWeek(Map<String, dynamic> r, DateTime week) {
     final start = monday(week), end = start.add(const Duration(days: 5));
@@ -161,6 +170,13 @@ class EmployeeWorkReview extends StatelessWidget {
   Widget build(BuildContext context) {
     final start = monday(week);
     final visible = weeklyRows(rows, week);
+    final activeLabor = rows.where((r) =>
+      r['state'] != 'Done' && r['source_active'] != 0 &&
+      r['assignment_conflict'] != 1).toList();
+    final activeGeneral = generalTasks.where((r) =>
+      generalStatus(r['status']) != 'Done' &&
+      (employeeId == null || r['employee_id'] == employeeId)).toList();
+    final assignedCount = activeLabor.length + activeGeneral.length;
     int unpaidAssignment(Map<String, dynamic> row) {
       final assigned = row['estimated_minutes'] as int? ?? 0;
       final paid = row['paid_minutes'] as int? ?? 0;
@@ -252,18 +268,13 @@ class EmployeeWorkReview extends StatelessWidget {
             child: ExpansionTile(
               shape:const Border(),collapsedShape:const Border(),
               key: ValueKey('work-review-assigned-tasks-${employeeId ?? employeeName}-${start.toIso8601String()}'),
-              initiallyExpanded: rows.any((r) => r['state'] != 'Done' && r['source_active'] != 0 && r['assignment_conflict'] != 1),
-              title: Text(
-                'Currently Assigned Tasks (${rows.where((r) => r['state'] != 'Done' && r['source_active'] != 0 && r['assignment_conflict'] != 1).length})',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
+              initiallyExpanded: assignedCount > 0,
+              title: Text('Currently Assigned Tasks ($assignedCount)',
+                style: const TextStyle(fontWeight: FontWeight.w800)),
+              subtitle: Text('Labor: ${activeLabor.length} · General: ${activeGeneral.length}',
+                style: const TextStyle(fontSize: 12)),
               children: [
-                for (final r in rows.where(
-                  (r) =>
-                      r['state'] != 'Done' &&
-                      r['source_active'] != 0 &&
-                      r['assignment_conflict'] != 1,
-                ))
+                for (final r in activeLabor)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                     child: ClipRRect(
@@ -289,7 +300,7 @@ class EmployeeWorkReview extends StatelessWidget {
                                       style: const TextStyle(fontWeight: FontWeight.w800),
                                     ),
                                     subtitle: Text(
-                                      "${r['job_number'] ?? 'Job'} · ${r['customer_name'] ?? ''}\n"
+                                      "Labor · ${r['job_number'] ?? 'Job'} · ${r['customer_name'] ?? ''}\n"
                                       "${employeeName ?? r['employee_name'] ?? 'Mechanic'} · "
                                       "${hrs(r['estimated_minutes'] as int? ?? 0)} h",
                                       maxLines: 2,
@@ -342,12 +353,40 @@ class EmployeeWorkReview extends StatelessWidget {
                       ),
                     ),
                   ),
-                if (!rows.any(
-                  (r) =>
-                      r['state'] != 'Done' &&
-                      r['source_active'] != 0 &&
-                      r['assignment_conflict'] != 1,
-                ))
+                // General Tasks are assignments, never payroll labor credits.
+                for (final r in activeGeneral)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(11),
+                      child: ColoredBox(
+                        color: color(generalStatus(r['status'])),
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 5),
+                          child: ColoredBox(
+                            color: Colors.white,
+                            child: ListTile(
+                              key: ValueKey('assigned-general-task-${r['id']}'),
+                              onTap: onGeneralTask == null ? null : () => onGeneralTask!(r),
+                              title: Text(
+                                '${r['description'] ?? 'General task'}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontWeight: FontWeight.w800),
+                              ),
+                              subtitle: Text(
+                                "General · ${r['job_number'] ?? 'No job'} · ${r['customer_name'] ?? ''}\nNo payroll hours",
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              trailing: TaskStatusPill(generalStatus(r['status'])),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (assignedCount == 0)
                   const ListTile(title: Text('No current assigned tasks.')),
               ],
             ),
