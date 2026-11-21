@@ -16,5 +16,11 @@ void main() {
     expect(code,contains('forceOffline'));
     expect(code,contains('if (!confirmed || !mounted) return;'));
     expect(code,contains('await _api.finalizePendingInvoicePayment('));
+    final confirmed = code.indexOf('if (!confirmed || !mounted) return;');
+    final guard = code.indexOf('InvoiceFinalizationGuard().run<void>(');
+    final rpc = code.indexOf('await _api.finalizePendingInvoicePayment(');
+    expect(guard, greaterThan(confirmed));
+    expect(rpc, greaterThan(guard));
+    expect(code, contains('if (mounted && succeeded)'));
   });
 }

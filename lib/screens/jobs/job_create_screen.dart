@@ -13,6 +13,7 @@ class JobCreateScreen extends StatefulWidget {
     required this.customerName,
     required this.vehicles,
     required this.roleCode,
+    this.bottomNavigationBar,
   });
 
   final String businessId;
@@ -20,6 +21,7 @@ class JobCreateScreen extends StatefulWidget {
   final String customerName;
   final List<dynamic> vehicles;
   final String roleCode;
+  final Widget? bottomNavigationBar;
 
   @override
   State<JobCreateScreen> createState() => _JobCreateScreenState();
@@ -148,6 +150,7 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
             businessId: widget.businessId,
             jobId: jobId,
             roleCode: widget.roleCode,
+            bottomNavigationBar: widget.bottomNavigationBar,
           ),
         ),
       );

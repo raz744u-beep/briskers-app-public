@@ -1,7 +1,11 @@
 import 'dart:async';
+import '../core/navigation_content_timing.dart';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+
+import '../core/module_modal_theme.dart';
+
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
@@ -9,12 +13,17 @@ import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
-import '../services/local_attachment_cache.dart';
+import '../services/warranty_receipt_reporting.dart';
 import '../services/local_financial_cache.dart';
+import '../services/invoice_payment_feed.dart';
+import '../services/expenses_period_totals.dart';
+import '../services/verified_expense_totals_cache.dart';
+import '../services/local_financial_totals_journal.dart';
 import '../services/expenseiq_local_photo_sync.dart';
 import '../services/expenseiq_background_scheduler.dart';
 import '../widgets/briskers_page_header.dart';
 import 'expenses/expense_detail_screen.dart';
+import 'jobs/job_document_screen.dart';
 import 'expenses/expense_entry_screen.dart';
 import 'settings/expense_settings_screen.dart';
 
@@ -23,22 +32,32 @@ class ExpensesScreen extends StatefulWidget {
     super.key,
     required this.businessId,
     required this.roleCode,
+    this.showAppBar = true,
+    this.dockResetToken = 0,
   });
 
   final String businessId;
   final String roleCode;
+  final bool showAppBar;
+  final int dockResetToken;
 
   @override
   State<ExpensesScreen> createState() => _ExpensesScreenState();
 }
 
-class _ExpensesScreenState extends State<ExpensesScreen> {
+class _ExpensesScreenState extends State<ExpensesScreen>
+    with ModuleModalState<ExpensesScreen>, WidgetsBindingObserver {
+  @override
+  Color get modalAccent => BriskersColors.expenses;
   static const _api = BriskersApi();
   static const _expenseIqChannel = MethodChannel('com.briskers/expenseiq');
   final LocalFinancialCache _localFinancial = LocalFinancialCache();
-  final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
+  final InvoicePaymentFeed _invoiceFeed = InvoicePaymentFeed();
+  List<Map<String, dynamic>> _invoiceReceipts = const [];
+  bool _recoveringCachedReceipts = false;
 
   static const int _pageSize = 50;
+  int _visibleCount = _pageSize;
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
 
@@ -70,10 +89,38 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   Timer? _searchDebounce;
   String? _error;
   bool _showingLocal = false;
+  // Cache-first is normal in Auto mode; only an actual transaction-page
+  // refresh failure should produce the saved-data notice.
+  bool _transactionRefreshFailed = false;
+  // Only a server-returned transaction ID is an affirmative cloud receipt.
+  // The API currently omits sync_state: unknown must remain unknown.
+  final Set<String> _serverConfirmedTransactionIds = {};
+  // Recently seen server receipts survive app restarts, but only for the
+  // same business, unchanged transaction fingerprint, and a bounded TTL.
+  Map<String, String> _previousServerTransactionProofs = {};
+  String? _serverConfirmedBusinessId;
+  // A newer search, filter or module entry invalidates older network results.
+  int _loadEpoch = 0;
+  int _receiptEpoch = 0;
+  int _periodEpoch = 0;
+  ExpensesPeriodTotals? _periodTotals;
+  ExpensesPeriodTotals? _serverPeriodBase;
+  bool _periodCalculating = false;
+  String? _periodError;
+  String? _lastPeriodScope;
+  DateTime? _lastPeriodAt;
+  String? _pendingPeriodScope;
+
+  bool _isCurrentReceipt(int epoch, String businessId) =>
+      mounted && epoch == _receiptEpoch && widget.businessId == businessId;
+
+  bool _isCurrentLoad(int epoch, String businessId) =>
+      mounted && epoch == _loadEpoch && widget.businessId == businessId;
 
   bool get _owner => widget.roleCode == 'owner';
-  bool get _showFinancialSummary =>
-      widget.roleCode == 'owner' || widget.roleCode == 'manager';
+  // Financial rollups belong to Owner only. Secretary/office and
+  // mechanic/foreman roles do not fetch or render confidential totals.
+  bool get _showFinancialSummary => _owner;
   bool get _allowRecurring =>
       widget.roleCode == 'owner' || widget.roleCode == 'manager';
 
@@ -81,18 +128,82 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   void initState() {
     super.initState();
     _scrollController.addListener(_handleScroll);
-    _load();
-    _refreshPhotoCounts();
+    WidgetsBinding.instance.addObserver(this);
+    // Allow the first Expenses frame to paint before starting database work.
+    // Running multiple startup queries during initState can make navigation
+    // appear unresponsive, particularly after returning from another module.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_load());
+      unawaited(_refreshPhotoCounts());
+    });
     if (_owner && Platform.isAndroid) {
+      // Photo totals are informational; avoid rebuilding the entire list
+      // every four seconds while the owner is reading transactions.
       _photoCountTimer = Timer.periodic(
-        const Duration(seconds: 4),
-        (_) => _refreshPhotoCounts(),
+        const Duration(seconds: 30),
+        (_) {
+          // Expenses remains mounted between dock visits. Skip cosmetic
+          // photo-count polling while it is hidden; sync runs elsewhere.
+          if (mounted && TickerMode.valuesOf(context).enabled) {
+            unawaited(_refreshPhotoCounts());
+          }
+        },
       );
     }
   }
 
   @override
+  void didUpdateWidget(covariant ExpensesScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.roleCode != widget.roleCode) {
+      // Never reuse an Owner's financial totals or server ID proofs for a
+      // different business/role. Even a transient role swap must fail closed.
+      ++_periodEpoch;
+      _pendingPeriodScope = null;
+      _periodTotals = null;
+      _serverPeriodBase = null;
+      _lastPeriodScope = null;
+      _lastPeriodAt = null;
+      _periodCalculating = false;
+      _periodError = null;
+      _serverConfirmedTransactionIds.clear();
+      _previousServerTransactionProofs = {};
+      _transactionRefreshFailed = false;
+      _serverConfirmedBusinessId = null;
+    }
+    if (oldWidget.dockResetToken != widget.dockResetToken) {
+      _searchDebounce?.cancel();
+      _filter = 'all';
+      _dateRange = '30d';
+      _customStartDate = null;
+      _customEndDate = null;
+      _accountFilterId = null;
+      _categoryFilterId = null;
+      _counterpartyFilterId = null;
+      _searchController.clear();
+      _visibleCount = _pageSize;
+      unawaited(_load());
+      if (_owner && Platform.isAndroid) {
+        unawaited(_refreshPhotoCounts());
+      }
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    // Returning from background may follow a successful app-wide sync.
+    // Refresh the scope automatically without clearing the visible list.
+    // Force Offline is handled by _load and never invokes remote requests.
+    unawaited(_load(showLoading: false));
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchDebounce?.cancel();
     _photoCountTimer?.cancel();
     _scrollController.dispose();
@@ -101,8 +212,21 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   }
 
   void _handleScroll() {
-    if (_scrollController.hasClients &&
-        _scrollController.position.extentAfter < 500) {
+    if (!_scrollController.hasClients ||
+        _scrollController.position.extentAfter >= 500) {
+      return;
+    }
+    final count = InvoicePaymentFeed.combine(
+      financial: _transactions, receipts: _invoiceReceipts,
+      startDate: _rangeStartDate, endDate: _rangeEndDate,
+      search: _searchController.text,
+      direction: _filter == 'all' ? null : _filter,
+      filteredAccount: _accountFilterId != null ||
+          _categoryFilterId != null || _counterpartyFilterId != null,
+    ).length;
+    if (_visibleCount < count) {
+      setState(() => _visibleCount += _pageSize);
+    } else {
       _loadMore();
     }
   }
@@ -115,18 +239,34 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   DateTime _dateOnly(DateTime value) =>
       DateTime(value.year, value.month, value.day);
 
+  // Avoid overflowing dates when a month has fewer days than today.
+  DateTime _monthsAgoClamped(DateTime today, int months) {
+    final first = DateTime(today.year, today.month - months, 1);
+    final lastDay = DateTime(first.year, first.month + 1, 0).day;
+    return DateTime(first.year, first.month,
+        today.day <= lastDay ? today.day : lastDay);
+  }
+
   DateTime? get _rangeStartDate {
     if (_searchController.text.trim().isNotEmpty) return null;
     final today = _dateOnly(DateTime.now());
     switch (_dateRange) {
       case '30d':
-        return today.subtract(const Duration(days: 29));
+        return DateTime(today.year, today.month, today.day - 29);
       case '60d':
-        return today.subtract(const Duration(days: 59));
+        return DateTime(today.year, today.month, today.day - 59);
       case '90d':
-        return today.subtract(const Duration(days: 89));
+        return DateTime(today.year, today.month, today.day - 89);
+      case 'thisMonth':
+        return DateTime(today.year, today.month, 1);
+      case 'lastMonth':
+        return DateTime(today.year, today.month - 1, 1);
+      case '3m':
+        return _monthsAgoClamped(today, 3);
+      case 'ytd':
+        return DateTime(today.year, 1, 1);
       case '6m':
-        return DateTime(today.year, today.month - 6, today.day);
+        return _monthsAgoClamped(today, 6);
       case '1y':
         return DateTime(today.year - 1, today.month, today.day);
       case 'custom':
@@ -141,6 +281,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     if (_searchController.text.trim().isNotEmpty) return null;
     if (_dateRange == 'all') return null;
     if (_dateRange == 'custom') return _customEndDate;
+    if (_dateRange == 'lastMonth') {
+      final today = _dateOnly(DateTime.now());
+      return DateTime(today.year, today.month, 0);
+    }
     return _dateOnly(DateTime.now());
   }
 
@@ -152,6 +296,14 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         return '60 days';
       case '90d':
         return '90 days';
+      case 'thisMonth':
+        return 'this month';
+      case 'lastMonth':
+        return 'last month';
+      case '3m':
+        return 'last 3 months';
+      case 'ytd':
+        return 'year to date';
       case '6m':
         return '6 months';
       case '1y':
@@ -171,8 +323,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
   Future<List<Map<String, dynamic>>> _fetchTransactions({
     required int offset,
-  }) {
-    return _api.transactionsPaged(
+    bool fastFirstPaint = false,
+  }) async {
+    final rows = await _api.transactionsPaged(
       widget.businessId,
       limit: _pageSize,
       offset: offset,
@@ -186,67 +339,167 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       categoryId: _categoryFilterId,
       counterpartyId: _counterpartyFilterId,
     );
+    if (fastFirstPaint) {
+      // Price/fee verification is supplemental. The transaction list cannot
+      // wait for sequential invoice-detail reads to show existing payments.
+      return rows.map(WarrantyReceiptReporting.unverified).toList();
+    }
+    try {
+      return await const WarrantyReceiptReporting().enrich(
+        widget.businessId,
+        rows,
+      );
+    } catch (_) {
+      return rows.map(WarrantyReceiptReporting.unverified).toList();
+    }
+  }
+
+  Future<void> _enrichVisiblePage(
+    int epoch, String businessId, List<Map<String, dynamic>> rows,
+  ) async {
+    try {
+      final checked = await const WarrantyReceiptReporting()
+          .enrich(businessId, rows);
+      if (!_isCurrentLoad(epoch, businessId)) return;
+      final updates = {
+        for (final row in checked)
+          if ((row['id']?.toString() ?? '').isNotEmpty)
+            row['id'].toString(): row,
+      };
+      setState(() {
+        _transactions = [
+          for (final existing in _transactions)
+            if (updates.containsKey(existing['id']?.toString()))
+              updates[existing['id']?.toString()]!
+            else
+              existing,
+        ];
+      });
+    } catch (_) {
+      // Unverified gross amounts remain explicitly labeled, not inferred.
+    }
   }
 
   Future<void> _prefetchReceiptDetails(
     List<Map<String, dynamic>> snapshot,
   ) async {
+    // A large imported history may have thousands of receipts. Do not start
+    // hundreds of photo downloads every time the user opens Expenses.
+    // Download a small number of missing detail *metadata* in foreground;
+    // charging/Wi-Fi WorkManager separately mirrors their photo files.
     final rows = snapshot.where((row) {
-      final count =
-          int.tryParse(row['receipt_count']?.toString() ?? '') ?? 0;
-      return count > 0 && (row['id']?.toString() ?? '').isNotEmpty;
-    }).toList();
+      final count = int.tryParse(row['receipt_count']?.toString() ?? '') ?? 0;
+      return count > 0 &&
+          (row['id']?.toString() ?? '').isNotEmpty &&
+          !row['id'].toString().startsWith('local-') &&
+          row['sync_state'] != 'pending' &&
+          row['sync_state'] != 'conflict';
+    }).take(8).toList();
 
-    for (var index = 0; index < rows.length; index += 3) {
-      final batch = rows.skip(index).take(3).map((row) async {
-        final id = row['id'].toString();
-        try {
-          final detail = await _api.transactionDetail(
-            widget.businessId,
-            id,
-          );
-          await _localFinancial.saveTransactionDetail(
-            widget.businessId,
-            id,
-            detail,
-          );
-          final attachments = List<dynamic>.from(
-            detail['attachments'] ?? const [],
-          ).whereType<Map>().map((raw) {
-            return Map<String, dynamic>.from(raw);
-          }).toList();
-
-          for (final attachment in attachments) {
-            final bucket = attachment['bucket']?.toString() ??
-                'briskers-private';
-            final key = attachment['key']?.toString() ?? '';
-            if (key.isEmpty) continue;
-            await _attachmentCache.getOrDownload(bucket, key);
-          }
-        } catch (_) {
-          // Keep the transaction list usable if an individual receipt fails.
+    for (final row in rows) {
+      final id = row['id'].toString();
+      try {
+        if (await _localFinancial.loadTransactionDetail(
+            widget.businessId, id) != null) {
+          continue;
         }
-      });
-      await Future.wait(batch);
+        final detail = await _api.transactionDetail(widget.businessId, id);
+        if (detail['id']?.toString() != id) continue;
+        // Recheck before writing so a locally edited expense detail cannot be
+        // replaced by the outcome of an older in-flight download.
+        if (await _localFinancial.loadTransactionDetail(
+            widget.businessId, id) == null) {
+          await _localFinancial.saveTransactionDetail(
+              widget.businessId, id, detail);
+        }
+      } catch (_) {
+        // Saved transactions stay usable if metadata prefetch fails.
+      }
     }
   }
 
-  Future<void> _load({bool showLoading = true}) async {
+  Future<void> _load({
+    bool showLoading = true,
+    bool refreshReceipts = false,
+    bool forceTotals = false,
+  }) async {
+    final epoch = ++_loadEpoch;
+    final businessId = widget.businessId;
+    if (_serverConfirmedBusinessId != businessId) {
+      _serverConfirmedTransactionIds.clear();
+      _previousServerTransactionProofs = {};
+      _serverConfirmedBusinessId = businessId;
+    }
+    // Totals are independent of the visible page; never display stale 50-row
+    // sums as though they represented the selected accounting period.
+    if (_showFinancialSummary) {
+      unawaited(_refreshPeriodTotals(force: forceTotals || refreshReceipts));
+    }
     if (showLoading) {
       setState(() {
-        _loading = true;
+        // Never blank a previously displayed financial list while refreshing.
+        _loading = _transactions.isEmpty && _invoiceReceipts.isEmpty;
+        _visibleCount = _pageSize;
+        _transactionRefreshFailed = false;
         _error = null;
       });
     } else {
-      setState(() => _error = null);
+      setState(() {
+        _error = null;
+        _transactionRefreshFailed = false;
+      });
     }
 
-    final forceOnline =
-        BriskersConnectionModeController.instance.forceOnline;
+    // Cached financial rows paint quickly. Restore separately persisted,
+    // previously authenticated server evidence before those rows render.
+    // Absence of a proof remains an unknown gray cloud, never a green guess.
+    try {
+      final proofs = await _localFinancial.loadServerConfirmedTransactions(
+        businessId,
+      );
+      if (_isCurrentLoad(epoch, businessId)) {
+        setState(() => _previousServerTransactionProofs = proofs);
+      }
+    } catch (_) {
+      // A missing/corrupt verification cache must not block the list.
+    }
+
+    // Reload the durable offline payment queue on every entry/refresh.
+    try {
+      final receipts = await _invoiceFeed.load(widget.businessId);
+      if (_isCurrentLoad(epoch, businessId)) {
+        setState(() {
+          // A search must not replace a newly fetched server receipt with
+          // an older on-disk snapshot while background reconciliation runs.
+          // Force Offline: the durable local feed is authoritative.
+          // Merging prior UI rows resurrected deleted test payments until
+          // process restart after Owner Delete.
+          _invoiceReceipts =
+              BriskersConnectionModeController.instance.forceOffline
+                  ? receipts
+                  : (_invoiceReceipts.isEmpty
+                      ? receipts
+                      : InvoicePaymentFeed.mergeReceipts(_invoiceReceipts, receipts));
+          if (_invoiceReceipts.isNotEmpty) _loading = false;
+        });
+      }
+    } catch (_) {
+      // Preserve the existing financial list if cache access fails.
+    }
+
+    if (!_isCurrentLoad(epoch, businessId)) return;
+    // Receipt visibility must never wait on full transaction-history downloads
+    // or expensive cache persistence. The first receipt page paints immediately.
+    if (showLoading || refreshReceipts) {
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        unawaited(_refreshInvoiceReceipts(businessId));
+      }
+    }
+    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
     if (!forceOnline) {
       try {
-        final localRows = await _localFinancial.loadTransactions(
+        var localRows = await _localFinancial.loadTransactions(
           widget.businessId,
           startDate: _rangeStartDate,
           endDate: _rangeEndDate,
@@ -258,19 +511,40 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           categoryId: _categoryFilterId,
           counterpartyId: _counterpartyFilterId,
         );
-        final localOptions =
-            await _localFinancial.loadOptions(widget.businessId);
+        // The first offline frame displays at most 50 transactions.
+        // Enrich only those rows. Enriching the entire ~1,000-row snapshot
+        // first can delay the page and unnecessarily process many receipts.
+        final hasMoreLocal = localRows.length > _pageSize;
+        // Display cached transactions immediately; full processor-fee
+        // verification is asynchronous and scoped to this navigation epoch.
+        localRows = localRows.take(_pageSize).map(
+          WarrantyReceiptReporting.unverified).toList();
+        // Paint locally committed transactions before loading account/category
+        // dropdown options. An options query failure must not blank Expenses.
+        if (_isCurrentLoad(epoch, businessId) && localRows.isNotEmpty) {
+          setState(() {
+            _transactions = localRows;
+            _hasMore = hasMoreLocal;
+            _loading = false;
+            _showingLocal = true;
+            _error = null;
+          });
+        }
+        final localOptions = await _localFinancial.loadOptions(
+          widget.businessId,
+        );
 
-        if (mounted && (localRows.isNotEmpty || localOptions.isNotEmpty)) {
+        if (_isCurrentLoad(epoch, businessId) &&
+            (localRows.isNotEmpty || localOptions.isNotEmpty)) {
           setState(() {
             _transactions = localRows.take(_pageSize).toList();
-            _hasMore = localRows.length > _pageSize;
+            _hasMore = hasMoreLocal;
             _quickTemplates = List<dynamic>.from(
               localOptions['quick_templates'] ?? const [],
             ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-            _accounts = List<dynamic>.from(
-              localOptions['accounts'] ?? const [],
-            ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+            _accounts = List<dynamic>.from(localOptions['accounts'] ?? const [])
+                .map((raw) => Map<String, dynamic>.from(raw as Map))
+                .toList();
             _categories = List<dynamic>.from(
               localOptions['categories'] ?? const [],
             ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
@@ -288,63 +562,79 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     }
 
     if (BriskersConnectionModeController.instance.forceOffline) {
-      if (mounted && !_showingLocal) {
+      if (_isCurrentLoad(epoch, businessId)) {
         setState(() {
-          _transactions = const [];
+          if (!_showingLocal && _transactions.isEmpty) {
+            _transactions = const [];
+          }
           _hasMore = false;
           _loading = false;
           _error = null;
+          _transactionRefreshFailed = false;
           _showingLocal = true;
         });
+        // Existing installations have cached server invoice payments before
+        // the new receipt inventory has ever been pulled. Restore them AFTER
+        // painting, without changing saved payments or requiring a connection.
+        if (_owner || widget.roleCode == 'manager') {
+          unawaited(_recoverCachedInvoiceReceipts());
+        }
       }
       return;
     }
 
     try {
-      final results = await Future.wait<dynamic>([
-        _fetchTransactions(offset: 0),
-        _api.transactionOptions(widget.businessId),
-        _api.transactions(widget.businessId, limit: 1000),
-      ]);
-      final rows = List<Map<String, dynamic>>.from(results[0] as List);
-      final options = Map<String, dynamic>.from(results[1] as Map);
-      final snapshot =
-          List<Map<String, dynamic>>.from(results[2] as List);
-
-      await _localFinancial.saveTransactions(
-        widget.businessId,
-        snapshot,
-      );
-      await _localFinancial.saveOptions(widget.businessId, options);
-      unawaited(_prefetchReceiptDetails(snapshot));
-
-      if (!mounted) return;
+      // Fetch just the visible page first. Waiting for historical 1,000-row
+      // snapshots made newly posted invoice payments appear very late.
+      final rows = await _fetchTransactions(
+        offset: 0, fastFirstPaint: true);
+      if (!_isCurrentLoad(epoch, businessId)) return;
       setState(() {
-        _transactions = rows;
+        _serverConfirmedTransactionIds.addAll(
+          rows.map((row) => row['id']?.toString() ?? '')
+              .where((id) => id.isNotEmpty),
+        );
+        // Retain locally committed, not-yet-synced financial entries if
+        // the authenticated server's first page has not received them.
+        // Identity-scoped replacement avoids duplicate list cards.
+        final localPending = {
+          for (final row in _transactions)
+            if (row['sync_state']?.toString() == 'pending')
+              row['id']?.toString(): row,
+        };
+        final seen = <String>{};
+        _transactions = [
+          for (final row in rows)
+            if (seen.add(row['id']?.toString() ?? ''))
+              localPending[row['id']?.toString()] ?? row,
+          for (final entry in localPending.entries)
+            if (!seen.contains(entry.key)) entry.value,
+        ];
         _hasMore = rows.length == _pageSize;
-        _quickTemplates = List<dynamic>.from(
-          options['quick_templates'] ?? const [],
-        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-        _accounts = List<dynamic>.from(
-          options['accounts'] ?? const [],
-        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-        _categories = List<dynamic>.from(
-          options['categories'] ?? const [],
-        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-        _counterparties = List<dynamic>.from(
-          options['counterparties'] ?? const [],
-        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
         _loading = false;
         _showingLocal = false;
+        _transactionRefreshFailed = false;
         _error = null;
       });
+      unawaited(_enrichVisiblePage(epoch, businessId, rows));
+      // Only the successful authenticated server response can add durable
+      // proof. Saving this first page makes a later app restart stable even
+      // if the optional 1,000-row history download does not finish.
+      unawaited(_localFinancial.saveServerConfirmedTransactions(
+        businessId, rows,
+      ).catchError((Object _) {}));
+      // Options and the complete offline cache are not prerequisites for
+      // showing a transaction or an invoice payment in Expenses & Income.
+      unawaited(_hydrateFinancialHistory(epoch, businessId, rows));
     } catch (error) {
-      if (!mounted) return;
+      if (!_isCurrentLoad(epoch, businessId)) return;
       final forceOffline =
           BriskersConnectionModeController.instance.forceOffline;
       setState(() {
         _loading = false;
-        if (_showingLocal || forceOffline) {
+        _transactionRefreshFailed = !forceOffline;
+        if (_showingLocal || forceOffline ||
+            _transactions.isNotEmpty || _invoiceReceipts.isNotEmpty) {
           _error = null;
         } else {
           _error = error.toString();
@@ -353,11 +643,382 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     }
   }
 
+  Future<void> _refreshPeriodTotals({bool force = false}) async {
+    // Do not even query/report financial totals for secretary or other roles.
+    if (!_showFinancialSummary || !mounted) return;
+    final businessId = widget.businessId;
+    final offline =
+        BriskersConnectionModeController.instance.forceOffline;
+    final startDate = _rangeStartDate;
+    final endDate = _rangeEndDate;
+    final search = _searchController.text.trim();
+    final direction = _filter == 'all' ? null : _filter;
+    final accountId = _accountFilterId;
+    final categoryId = _categoryFilterId;
+    final counterpartyId = _counterpartyFilterId;
+    final scope = [
+      businessId,
+      widget.roleCode,
+      startDate?.toIso8601String() ?? '',
+      endDate?.toIso8601String() ?? '',
+      search,
+      direction ?? '',
+      accountId ?? '',
+      categoryId ?? '',
+      counterpartyId ?? '',
+    ].join('|');
+    // Restore complete stored totals and add all locally committed deltas.
+    // The server is NOT a prerequisite for entering the Expenses screen.
+    if (_pendingPeriodScope == scope) return;
+    final epoch = ++_periodEpoch;
+    final journal = LocalFinancialTotalsJournal();
+    _pendingPeriodScope = scope;
+    final sameScope = _lastPeriodScope == scope && _serverPeriodBase != null;
+    final sqliteSaved = await journal.loadBaseline(businessId, scope);
+    // Migrate an older complete verified snapshot from preferences once.
+    final legacy = sqliteSaved == null
+        ? await const VerifiedExpenseTotalsCache().load(scope) : null;
+    if (sqliteSaved == null && legacy != null) {
+      await journal.saveBaseline(
+          businessId, scope, legacy.totals, legacy.at);
+    }
+    // A rolling 30/60/90-day filter shifts at midnight. Its previous exact
+    // baseline is still valuable: reuse verified daily buckets for the
+    // overlapping days and include local committed changes for today.
+    // The unsynced new day is labeled explicitly, never called verified.
+    final rolling = sqliteSaved == null && legacy == null &&
+            startDate != null && endDate != null
+        ? await journal.loadRollingBaseline(
+            businessId, scope, startDate: startDate, endDate: endDate,
+          ) : null;
+    if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
+        widget.businessId != businessId) {
+      return;
+    }
+    final baseline = sqliteSaved?.totals ?? legacy?.totals ??
+        rolling?.totals ?? (sameScope ? _serverPeriodBase : null);
+    final lastVerified = sqliteSaved?.at ?? legacy?.at ??
+        rolling?.at ?? (sameScope ? _lastPeriodAt : null);
+    final rolloverPending = rolling != null && endDate != null &&
+        rolling.verifiedThrough.isBefore(endDate);
+    ExpensesPeriodTotals? local;
+    int localChanges = 0;
+    try {
+      local = baseline == null ? null : await journal.apply(
+        businessId, baseline,
+        startDate: startDate, endDate: endDate,
+        search: search.isEmpty ? null : search, direction: direction,
+        accountId: accountId, categoryId: categoryId,
+        counterpartyId: counterpartyId,
+      );
+      localChanges = await journal.pendingCount(businessId);
+    } catch (_) {
+      if (mounted && epoch == _periodEpoch) {
+        setState(() {
+          _periodCalculating = false;
+          _pendingPeriodScope = null;
+          _periodError = 'Local totals need verification. Refresh to retry.';
+        });
+      }
+      return;
+    }
+    if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
+        widget.businessId != businessId) {
+      return;
+    }
+    // An upgraded b2468 device may have a perfectly valid exact baseline
+    // saved before daily buckets existed. Keep displaying its totals now, but
+    // seed daily buckets with ONE background reconciliation so tomorrow's
+    // rolling range will not hit the same cold-cache problem.
+    final needsDailySeed = baseline != null && rolling == null &&
+        startDate != null && endDate != null &&
+        await journal.loadRollingBaseline(
+          businessId, scope, startDate: startDate, endDate: endDate,
+        ) == null;
+    if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
+        widget.businessId != businessId) {
+      return;
+    }
+    final fresh = !rolloverPending && !needsDailySeed && lastVerified != null &&
+        DateTime.now().difference(lastVerified) < const Duration(minutes: 30);
+    setState(() {
+      _serverPeriodBase = baseline;
+      _periodTotals = local;
+      _lastPeriodScope = scope;
+      _lastPeriodAt = lastVerified;
+      _periodCalculating = false;
+      _periodError = local == null
+          ? (offline ? 'Complete baseline not yet saved on this device.'
+              : 'Preparing first complete local baseline…')
+          : rolloverPending
+              ? 'Saved local totals through ${DateFormat('MMM d').format(rolling.verifiedThrough)} · today not yet verified'
+              : localChanges > 0
+                  ? 'Includes $localChanges locally saved change(s) · sync pending'
+                  : offline
+                      ? 'Offline · saved totals verified ${DateFormat('MMM d, h:mm a').format(lastVerified!)}'
+                      : 'Saved local totals · verified ${DateFormat('MMM d, h:mm a').format(lastVerified!)}';
+    });
+    if (offline || (fresh && !force)) {
+      _pendingPeriodScope = null;
+      return;
+    }
+    // Only a missing/old snapshot or an explicit refresh runs a full scan.
+    // The previously projected figures remain visible during verification.
+    if (_periodTotals == null) {
+      setState(() => _periodCalculating = true);
+    }
+
+    bool current() =>
+        mounted && epoch == _periodEpoch &&
+        _pendingPeriodScope == scope &&
+        widget.businessId == businessId &&
+        !BriskersConnectionModeController.instance.forceOffline;
+    try {
+      final completeRows = <Map<String, dynamic>>[];
+      final totals = await ExpensesPeriodTotals.calculate(
+        isCurrent: current,
+        readPage: (offset, limit) async {
+          final rows = await _api.transactionsPaged(
+            businessId,
+            offset: offset, limit: limit,
+            startDate: startDate, endDate: endDate,
+            search: search.isEmpty ? null : search,
+            direction: direction,
+            accountId: accountId,
+            categoryId: categoryId,
+            counterpartyId: counterpartyId,
+          );
+          completeRows.addAll(rows);
+          return rows;
+        },
+        enrichPage: (rows) => const WarrantyReceiptReporting().enrich(
+          businessId, rows, refresh: false,
+        ),
+      );
+      if (!current()) return;
+      // Retire only receipts proven identical by the complete authenticated
+      // history and exact operation/transaction identities.
+      final verifiedAt = DateTime.now();
+      await journal.reconcileAndSaveBaseline(
+        businessId, scope, totals, verifiedAt,
+        completeRows, receipts: _invoiceReceipts,
+      );
+      final projected = await journal.apply(
+        businessId, totals,
+        startDate: startDate, endDate: endDate,
+        search: search.isEmpty ? null : search, direction: direction,
+        accountId: accountId, categoryId: categoryId,
+        counterpartyId: counterpartyId,
+      );
+      final remaining = await journal.pendingCount(businessId);
+      if (!current()) return;
+      // Preferences are a legacy fallback; SQLite above is authoritative.
+      try {
+        await const VerifiedExpenseTotalsCache().save(scope, totals, verifiedAt);
+      } catch (_) { /* Keep the in-memory verified baseline. */ }
+      if (!current()) return;
+      setState(() {
+        _serverPeriodBase = totals;
+        _periodTotals = projected;
+        _lastPeriodScope = scope;
+        _lastPeriodAt = verifiedAt;
+        _pendingPeriodScope = null;
+        _periodCalculating = false;
+        _periodError = remaining > 0
+            ? 'Includes $remaining locally saved change(s) · sync pending'
+            : null;
+      });
+    } catch (_) {
+      if (!current()) return;
+      setState(() {
+        _pendingPeriodScope = null;
+        // A previously verified same-scope total is retained only if we
+        // explicitly label it as historical, never silently as current.
+        if (_lastPeriodScope != scope) _periodTotals = null;
+        _periodCalculating = false;
+        _periodError = _periodTotals != null && _lastPeriodScope == scope
+            ? 'Showing last verified totals; refresh failed.'
+            : 'Complete totals are unavailable. Refresh to retry.';
+      });
+    }
+  }
+
+  Future<void> _hydrateFinancialHistory(
+    int epoch,
+    String businessId,
+    List<Map<String, dynamic>> firstPage,
+  ) async {
+    try {
+      final results = await Future.wait<dynamic>([
+        _api.transactionOptions(businessId),
+        _api.transactions(businessId, limit: 1000),
+      ]);
+      if (!_isCurrentLoad(epoch, businessId) ||
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
+      }
+      final options = Map<String, dynamic>.from(results[0] as Map);
+      final verified = {for (final row in firstPage)
+        row['id']?.toString(): row};
+      final snapshot = List<Map<String, dynamic>>.from(results[1] as List)
+          .map((row) => verified[row['id']?.toString()] ?? row)
+          .toList();
+      setState(() {
+        _serverConfirmedTransactionIds.addAll(
+          snapshot.map((row) => row['id']?.toString() ?? '')
+              .where((id) => id.isNotEmpty),
+        );
+        _quickTemplates = List<dynamic>.from(
+          options['quick_templates'] ?? const [],
+        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+        _accounts = List<dynamic>.from(options['accounts'] ?? const [])
+            .map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+        _categories = List<dynamic>.from(options['categories'] ?? const [])
+            .map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+        _counterparties = List<dynamic>.from(
+          options['counterparties'] ?? const [],
+        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+      });
+      // The offline cache remains durable, but does not block first paint.
+      await _localFinancial.mergeServerTransactions(businessId, snapshot);
+      await _localFinancial.saveServerConfirmedTransactions(
+        businessId, snapshot,
+      );
+      if (!_isCurrentLoad(epoch, businessId)) return;
+      await _localFinancial.saveOptions(businessId, options);
+      if (_isCurrentLoad(epoch, businessId)) {
+        unawaited(_prefetchReceiptDetails(snapshot));
+      }
+    } catch (_) {
+      // Keep already visible authoritative rows, receipts and cached options.
+    }
+  }
+
+  Future<void> _recoverCachedInvoiceReceipts() async {
+    if (_recoveringCachedReceipts) return;
+    _recoveringCachedReceipts = true;
+    try {
+      final rows =
+          await _invoiceFeed.pendingFromCachedInvoices(widget.businessId);
+      if (!mounted || rows.isEmpty) return;
+      setState(() => _invoiceReceipts = InvoicePaymentFeed.mergeReceipts(
+        rows, _invoiceReceipts,
+      ));
+    } catch (_) {
+      // Preserve the local outbox and posted financial snapshot unchanged.
+    } finally {
+      _recoveringCachedReceipts = false;
+    }
+  }
+
+  Future<void> _refreshInvoiceReceipts(String businessId) async {
+    // A user searching invoices must not cancel a payment that is still
+    // arriving from the server. Receipt refresh has its own lifecycle.
+    final epoch = ++_receiptEpoch;
+    try {
+      const pageSize = 250;
+      final rows = <Map<String, dynamic>>[];
+      var exhausted = false;
+      // Never replace the saved receipt inventory with a truncated response.
+      for (var offset = 0; offset < 20000; offset += pageSize) {
+        if (!_isCurrentReceipt(epoch, businessId) ||
+            BriskersConnectionModeController.instance.forceOffline) {
+          return;
+        }
+        final page = await _api.invoiceReceipts(
+          businessId, limit: pageSize, offset: offset,
+        );
+        if (!_isCurrentReceipt(epoch, businessId)) return;
+        rows.addAll(page);
+        if (offset == 0) {
+          // Show the latest server payments after the first short page;
+          // continue filling the historical offline snapshot in background.
+          setState(() {
+            _invoiceReceipts = InvoicePaymentFeed.reconcileOnlineFirstPage(
+              page, _invoiceReceipts,
+            );
+            if (_invoiceReceipts.isNotEmpty) _loading = false;
+          });
+        }
+        if (page.length < pageSize) {
+          exhausted = true;
+          break;
+        }
+      }
+      if (!exhausted ||
+          !_isCurrentReceipt(epoch, businessId) ||
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
+      }
+      await _invoiceFeed.saveServerReceipts(businessId, rows);
+      if (!_isCurrentReceipt(epoch, businessId)) return;
+      final merged = await _invoiceFeed.load(businessId);
+      if (_isCurrentReceipt(epoch, businessId)) {
+        setState(() => _invoiceReceipts = merged);
+      }
+    } catch (_) {
+      // Keep locally recorded payments visible on old/unavailable backends.
+    }
+  }
+
+  Future<void> _openInvoiceReceipt(Map<String, dynamic> row) async {
+    final invoiceId = row['document_id']?.toString() ?? '';
+    if (invoiceId.isEmpty) {
+      await _viewInvoiceReceipt(row);
+      return;
+    }
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: invoiceId,
+          isOwner: _owner,
+          roleCode: widget.roleCode,
+          initialTab: 'payment',
+        ),
+      ),
+    );
+    if (mounted) {
+      unawaited(_load(showLoading: false, refreshReceipts: true));
+    }
+  }
+
+  Future<void> _viewInvoiceReceipt(Map<String, dynamic> row) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(row['counterparty']?.toString() ?? 'Customer',
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 8),
+              Text('Invoice #${row['document_number'] ?? '—'}'),
+              Text('Payment method: ${row['payment_method_name'] ?? 'Payment'}'),
+              Text('Amount: ${_money(row['amount'])}'),
+              Text('Date: ${row['transaction_date'] ?? '—'}'),
+              const SizedBox(height: 12),
+              const Text('Payment details and finalization are managed on the invoice.'),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(onPressed: () => Navigator.pop(context),
+                    child: const Text('Close')),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _loadMore() async {
-    if (_showingLocal ||
-        _loading ||
-        _loadingMore ||
-        !_hasMore) {
+    if (_showingLocal || _loading || _loadingMore || !_hasMore) {
       return;
     }
     setState(() => _loadingMore = true);
@@ -365,6 +1026,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       final rows = await _fetchTransactions(offset: _transactions.length);
       if (!mounted) return;
       setState(() {
+        _serverConfirmedTransactionIds.addAll(
+          rows.map((row) => row['id']?.toString() ?? '')
+              .where((id) => id.isNotEmpty),
+        );
         _transactions = [..._transactions, ...rows];
         _hasMore = rows.length == _pageSize;
         _loadingMore = false;
@@ -380,12 +1045,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
   void _searchChanged(String _) {
     _searchDebounce?.cancel();
-    _searchDebounce = Timer(
-      const Duration(milliseconds: 350),
-      () {
-        if (mounted) _load(showLoading: false);
-      },
-    );
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) _load(showLoading: false);
+    });
   }
 
   Future<void> _chooseDirection() async {
@@ -403,9 +1065,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             ])
               ListTile(
                 title: Text(option.$2),
-                trailing: _filter == option.$1
-                    ? const Icon(Icons.check)
-                    : null,
+                trailing: _filter == option.$1 ? const Icon(Icons.check) : null,
                 onTap: () => Navigator.pop(sheetContext, option.$1),
               ),
             const SizedBox(height: 8),
@@ -429,17 +1089,18 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             const ListTile(
               title: Text(
                 'Select date range',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                ),
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
               ),
             ),
             for (final option in const [
               ('30d', 'Last 30 days'),
               ('60d', 'Last 60 days'),
               ('90d', 'Last 90 days'),
+              ('thisMonth', 'This Month'),
+              ('lastMonth', 'Last Month'),
+              ('3m', 'Last 3 Months'),
               ('6m', 'Last 6 months'),
+              ('ytd', 'Year to Date'),
               ('1y', 'Last 1 year'),
               ('custom', 'Custom date range'),
               ('all', 'All history'),
@@ -447,13 +1108,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               ListTile(
                 title: Text(option.$2),
                 trailing: _dateRange == option.$1
-                    ? const Icon(
-                        Icons.check,
-                        color: BriskersColors.invoices,
-                      )
+                    ? const Icon(Icons.check, color: BriskersColors.invoices)
                     : option.$1 == 'custom'
-                        ? const Icon(Icons.chevron_right)
-                        : null,
+                    ? const Icon(Icons.chevron_right)
+                    : null,
                 onTap: () => Navigator.pop(sheetContext, option.$1),
               ),
             const SizedBox(height: 8),
@@ -471,10 +1129,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         firstDate: DateTime(now.year - 10),
         lastDate: now,
         initialDateRange: _customStartDate != null && _customEndDate != null
-            ? DateTimeRange(
-                start: _customStartDate!,
-                end: _customEndDate!,
-              )
+            ? DateTimeRange(start: _customStartDate!, end: _customEndDate!)
             : DateTimeRange(
                 start: now.subtract(const Duration(days: 30)),
                 end: now,
@@ -513,10 +1168,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               children: [
                 const Text(
                   'Transaction filters',
-                  style: TextStyle(
-                    fontSize: 21,
-                    fontWeight: FontWeight.w900,
-                  ),
+                  style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900),
                 ),
                 const SizedBox(height: 14),
                 DropdownButtonFormField<String?>(
@@ -537,8 +1189,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       ),
                     ),
                   ],
-                  onChanged: (value) =>
-                      setSheetState(() => accountId = value),
+                  onChanged: (value) => setSheetState(() => accountId = value),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String?>(
@@ -559,8 +1210,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       ),
                     ),
                   ],
-                  onChanged: (value) =>
-                      setSheetState(() => categoryId = value),
+                  onChanged: (value) => setSheetState(() => categoryId = value),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String?>(
@@ -606,8 +1256,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           backgroundColor: BriskersColors.invoices,
                           foregroundColor: Colors.white,
                         ),
-                        onPressed: () =>
-                            Navigator.pop(sheetContext, true),
+                        onPressed: () => Navigator.pop(sheetContext, true),
                         child: const Text('Apply'),
                       ),
                     ),
@@ -644,7 +1293,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         ),
       ),
     );
-    if (changed == true) await _load();
+    if (changed == true && mounted) {
+      // Keep the existing list visible while the locally saved transaction
+      // is picked up and the authoritative server snapshot reconciles.
+      // A full-screen spinner here made successful saves appear delayed.
+      unawaited(_load(showLoading: false, forceTotals: true));
+    }
   }
 
   Future<void> _chooseQuick() async {
@@ -745,21 +1399,28 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   Future<void> _openTransaction(Map<String, dynamic> transaction) async {
     final id = transaction['id']?.toString() ?? '';
     if (id.isEmpty) return;
+    NavigationContentTiming.start('expense_detail');
+    var changed = false;
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => ExpenseDetailScreen(
           businessId: widget.businessId,
           transactionId: id,
+          onChanged: () => changed = true,
           allowRecurring: _allowRecurring,
           canDeleteTransaction: widget.roleCode == 'owner',
-          cachedDetail: _showingLocal
-              ? Map<String, dynamic>.from(transaction)
-              : null,
+          // The tapped list row is safe to show as a non-editable preview.
+          // Waiting for the server here caused an empty full-screen spinner.
+          cachedDetail: Map<String, dynamic>.from(transaction),
         ),
       ),
     );
-    await _load();
+    // Reading a detail does not invalidate the entire list. Actual mutations
+    // refresh in the background while preserving the existing first frame.
+    if (changed && mounted) {
+      unawaited(_load(showLoading: false, forceTotals: true));
+    }
   }
 
   Future<void> _editTransactionFromList(String transactionId) async {
@@ -773,7 +1434,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         ),
       ),
     );
-    if (changed == true && mounted) await _load();
+    if (changed == true && mounted) {
+      // Transaction changes have already been durably committed to SQLite.
+      // Do not delay returning to the usable local Expenses list for totals
+      // pagination, processor-fee verification or network reconciliation.
+      unawaited(_load(showLoading: false, forceTotals: true));
+    }
   }
 
   Future<void> _copyTransactionFromList(String transactionId) async {
@@ -787,11 +1453,17 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         ),
       ),
     );
-    if (changed == true && mounted) await _load();
+    if (changed == true && mounted) {
+      // Transaction changes have already been durably committed to SQLite.
+      // Do not delay returning to the usable local Expenses list for totals
+      // pagination, processor-fee verification or network reconciliation.
+      unawaited(_load(showLoading: false, forceTotals: true));
+    }
   }
 
   Future<void> _deleteTransactionFromList(String transactionId) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed =
+        await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
             title: const Text('Delete transaction?'),
@@ -819,24 +1491,20 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
     try {
       await _api.voidManualTransaction(widget.businessId, transactionId);
-      if (mounted) await _load();
+      if (mounted) await _load(forceTotals: true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
   }
 
-  Future<void> _showTransactionActions(
-    Map<String, dynamic> transaction,
-  ) async {
+  Future<void> _showTransactionActions(Map<String, dynamic> transaction) async {
     final id = transaction['id']?.toString() ?? '';
     if (id.isEmpty) return;
 
     Map<String, dynamic> detail;
     if (_showingLocal) {
-      detail = await _localFinancial.loadTransactionDetail(
-            widget.businessId,
-            id,
-          ) ??
+      detail =
+          await _localFinancial.loadTransactionDetail(widget.businessId, id) ??
           Map<String, dynamic>.from(transaction);
     } else {
       try {
@@ -849,8 +1517,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     if (!mounted) return;
 
     final editable = _showingLocal ? true : detail['editable'] == true;
-    final deletable =
-        !_showingLocal && _owner && detail['deletable'] == true;
+    final deletable = !_showingLocal && _owner && detail['deletable'] == true;
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -859,6 +1526,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            const _ActionSectionLabel('Transaction'),
             ListTile(
               leading: const Icon(Icons.visibility_outlined),
               title: const Text('View transaction'),
@@ -878,11 +1546,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               ),
             if (deletable) ...[
               const Divider(height: 1),
+              const _ActionSectionLabel('Delete'),
               ListTile(
-                leading: const Icon(
-                  Icons.delete_outline,
-                  color: Colors.red,
-                ),
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
                 title: const Text(
                   'Delete transaction',
                   style: TextStyle(color: Colors.red),
@@ -917,8 +1583,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   /// Safe to restart: the server excludes expenses with finalized photos.
   /// The source photos are never moved or deleted.
   Future<void> _refreshPhotoCounts({bool force = false}) async {
-    if (!_owner || !Platform.isAndroid ||
-        _photoCountsReading || (_importing && !force)) {
+    if (!_owner ||
+        !Platform.isAndroid ||
+        _photoCountsReading ||
+        (_importing && !force)) {
       return;
     }
     _photoCountsReading = true;
@@ -972,7 +1640,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Android will upload when network and battery conditions allow.'),
+            content: Text(
+              'Android will upload when network and battery conditions allow.',
+            ),
           ),
         );
       }
@@ -987,7 +1657,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     if (_importing || !_owner || !Platform.isAndroid) return;
     if (BriskersConnectionModeController.instance.forceOffline) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Connect once to index the photo mappings.')),
+        const SnackBar(
+          content: Text('Connect once to index the photo mappings.'),
+        ),
       );
       return;
     }
@@ -1002,7 +1674,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     if (!mounted) return;
     if (candidates.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('All mapped ExpenseIQ receipts are already uploaded.')),
+        const SnackBar(
+          content: Text('All mapped ExpenseIQ receipts are already uploaded.'),
+        ),
       );
       return;
     }
@@ -1013,16 +1687,27 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         'pickExpenseIqFolder',
       );
     } catch (error) {
-      if (mounted) setState(() => _error = 'Could not scan ExpenseIQ folder: $error');
+      if (mounted) {
+        setState(() => _error = 'Could not scan ExpenseIQ folder: $error');
+      }
       return;
     }
     if (picked == null || !mounted) return;
-    final files = picked.whereType<Map>()
-        .map((x) => Map<String, dynamic>.from(x)).toList();
-    final fileKeys = files.map((x) => _photoKey(x['name']?.toString() ?? ''))
-        .where((key) => key.isNotEmpty).toSet();
-    final matches = candidates.where((candidate) => fileKeys.contains(
-        candidate['photo_id']?.toString().trim().toLowerCase() ?? '')).length;
+    final files = picked
+        .whereType<Map>()
+        .map((x) => Map<String, dynamic>.from(x))
+        .toList();
+    final fileKeys = files
+        .map((x) => _photoKey(x['name']?.toString() ?? ''))
+        .where((key) => key.isNotEmpty)
+        .toSet();
+    final matches = candidates
+        .where(
+          (candidate) => fileKeys.contains(
+            candidate['photo_id']?.toString().trim().toLowerCase() ?? '',
+          ),
+        )
+        .length;
     final missing = candidates.length - matches;
 
     final approved = await showDialog<bool>(
@@ -1100,64 +1785,88 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final income = _transactions
-        .where((x) => x['direction']?.toString() == 'income')
-        .fold<num>(
-          0,
-          (sum, item) =>
-              sum + (num.tryParse(item['amount']?.toString() ?? '') ?? 0),
-        );
-    final expenses = _transactions
-        .where((x) => x['direction']?.toString() != 'income')
-        .fold<num>(
-          0,
-          (sum, item) =>
-              sum + (num.tryParse(item['amount']?.toString() ?? '') ?? 0),
-        );
-
-    final visible = _transactions;
+    final allVisible = InvoicePaymentFeed.combine(
+      financial: _transactions,
+      receipts: _invoiceReceipts,
+      startDate: _rangeStartDate,
+      endDate: _rangeEndDate,
+      search: _searchController.text,
+      direction: _filter == 'all' ? null : _filter,
+      filteredAccount: _accountFilterId != null ||
+          _categoryFilterId != null || _counterpartyFilterId != null,
+    );
+    final visible = allVisible.take(_visibleCount).toList();
+    final moreReceiptPages = allVisible.length > _visibleCount;
+    final receiptsUnverified = _periodTotals?.feesUnverified == true;
+    final unverifiedCount = _periodTotals?.unverifiedIncomeReceipts;
 
     return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 68,
-        backgroundColor: const Color(0xFFC62828).withValues(alpha: 0.08),
-        title: BriskersPageTitle(
-          title: tr('expensesIncome'),
-          logoHeight: 40,
-        ),
-      ),
+      appBar: widget.showAppBar
+          ? AppBar(
+              toolbarHeight: 68,
+              backgroundColor:
+                  const Color(0xFFC62828).withValues(alpha: 0.08),
+              title: BriskersPageTitle(
+                  title: tr('expensesIncome'), logoHeight: 40),
+            )
+          : null,
+      floatingActionButton: MediaQuery.viewInsetsOf(context).bottom == 0
+          ? FloatingActionButton.extended(
+              heroTag: 'expenses-quick-create',
+              tooltip: 'Add transaction',
+              onPressed: _importing || _loading ? null : _showAddMenu,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              backgroundColor: BriskersColors.expenses,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
+            )
+          : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: () => _load(),
+              onRefresh: () => _load(forceTotals: true),
               child: ListView(
                 controller: _scrollController,
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
                 children: [
-                  if (_showingLocal)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: BriskersColors.expenses.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(9),
-                      ),
-                      child: const Row(
+                  if (!widget.showAppBar) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(6, 2, 6, 14),
+                      child: Row(
                         children: [
-                          Icon(Icons.cloud_off_outlined, size: 18),
-                          SizedBox(width: 7),
                           Expanded(
                             child: Text(
-                              'Showing saved transactions • reconnect to refresh, add or edit',
-                              style: TextStyle(fontWeight: FontWeight.w700),
+                              tr('expensesIncome'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.w800),
                             ),
                           ),
+                          // No tall banner in Auto: preserve list position.
+                          // A compact icon still exposes a genuine failure.
+                          if (_showingLocal &&
+                              (BriskersConnectionModeController
+                                      .instance.forceOffline ||
+                                  _transactionRefreshFailed))
+                            Tooltip(
+                              message: BriskersConnectionModeController
+                                      .instance.forceOffline
+                                  ? 'Offline mode • showing saved transactions'
+                                  : 'Unable to refresh transactions • showing saved data',
+                              child: const Padding(
+                                padding: EdgeInsets.only(left: 8),
+                                child: Icon(Icons.cloud_off_outlined, size: 20),
+                              ),
+                            ),
                         ],
                       ),
                     ),
+                  ],
                   if (_showFinancialSummary)
                     Card(
                       margin: EdgeInsets.zero,
@@ -1176,7 +1885,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                     ),
                                   ),
                                   Text(
-                                    _money(income),
+                                    _periodTotals == null
+                                        ? (_periodCalculating
+                                            ? 'Calculating…' : 'Unavailable')
+                                        : _money(_periodTotals!.income),
                                     style: const TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w900,
@@ -1197,7 +1909,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                     ),
                                   ),
                                   Text(
-                                    _money(expenses),
+                                    _periodTotals == null
+                                        ? (_periodCalculating
+                                            ? 'Calculating…' : 'Unavailable')
+                                        : _money(_periodTotals!.expenses),
                                     style: const TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w900,
@@ -1208,6 +1923,39 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                               ),
                             ),
                           ],
+                        ),
+                      ),
+                    ),
+                  if (_showFinancialSummary)
+                    SizedBox(
+                      // The accounting truth may arrive after the first local
+                      // frame or after returning from a transaction. Reserve
+                      // the same space for pending/verified/error states so
+                      // rows below never jump when status text changes.
+                      height: 54,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 4, 8, 2),
+                        child: Align(
+                          alignment: Alignment.topLeft,
+                          child: Text(
+                        _periodError ??
+                            (_periodCalculating
+                                ? _periodTotals == null
+                                    ? 'Calculating complete posted totals…'
+                                    : 'Refreshing previously verified totals…'
+                                : _searchController.text.trim().isNotEmpty
+                                    ? 'Search totals include all dates.'
+                                    : _lastPeriodAt == null
+                                        ? 'Complete posted totals · pending offline entries excluded'
+                                        : 'Posted totals for $_rangeLabel · verified ${DateFormat('h:mm a').format(_lastPeriodAt!)} · pending offline entries excluded'),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          height: 1.25,
+                          color: Color(0xFF667085),
+                        ),
+                          ),
                         ),
                       ),
                     ),
@@ -1226,8 +1974,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
-                        childrenPadding:
-                            const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        childrenPadding: const EdgeInsets.fromLTRB(
+                          16,
+                          0,
+                          16,
+                          12,
+                        ),
                         children: [
                           const Align(
                             alignment: Alignment.centerLeft,
@@ -1273,23 +2025,27 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontWeight: FontWeight.w700),
                         ),
-                        childrenPadding:
-                            const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                        childrenPadding: const EdgeInsets.fromLTRB(
+                          16,
+                          4,
+                          16,
+                          12,
+                        ),
                         children: [
                           Text(
                             _importing
                                 ? 'Indexing locally: $_indexProcessed '
-                                    'of $_indexExpected references saved'
+                                      'of $_indexExpected references saved'
                                 : _photoQueueError != null
-                                    ? 'Local photo queue error: $_photoQueueError'
-                                    : _photoCounts == null
-                                        ? 'Reading local photo queue...'
-                                        : 'Indexed: ${_photoCounts!.indexed}  •  '
-                                            'Uploaded: ${_photoCounts!.uploaded}  •  '
-                                            'Waiting: ${_photoCounts!.pending}\n'
-                                            'Uploading: ${_photoCounts!.uploading}  •  '
-                                            'Failed: ${_photoCounts!.failed}  •  '
-                                            'Unmatched: ${_photoCounts!.missing}',
+                                ? 'Local photo queue error: $_photoQueueError'
+                                : _photoCounts == null
+                                ? 'Reading local photo queue...'
+                                : 'Indexed: ${_photoCounts!.indexed}  •  '
+                                      'Uploaded: ${_photoCounts!.uploaded}  •  '
+                                      'Waiting: ${_photoCounts!.pending}\n'
+                                      'Uploading: ${_photoCounts!.uploading}  •  '
+                                      'Failed: ${_photoCounts!.failed}  •  '
+                                      'Unmatched: ${_photoCounts!.missing}',
                           ),
                           if (_importing && _indexExpected > 0) ...[
                             const SizedBox(height: 8),
@@ -1302,10 +2058,13 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                             dense: true,
                             contentPadding: EdgeInsets.zero,
                             title: const Text('Automatic background sync'),
-                            subtitle: const Text('Android uploads in small batches'),
+                            subtitle: const Text(
+                              'Android uploads in small batches',
+                            ),
                             value: _photoCounts?.enabled ?? true,
                             onChanged: _importing || _photoCounts == null
-                                ? null : _togglePhotoSync,
+                                ? null
+                                : _togglePhotoSync,
                           ),
                           SwitchListTile(
                             dense: true,
@@ -1313,14 +2072,16 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                             title: const Text('Wi-Fi only'),
                             value: _photoCounts?.wifiOnly ?? true,
                             onChanged: _importing || _photoCounts == null
-                                ? null : _toggleWifiOnly,
+                                ? null
+                                : _toggleWifiOnly,
                           ),
                           Row(
                             children: [
                               Expanded(
                                 child: OutlinedButton.icon(
                                   onPressed: _importing
-                                      ? null : _importExpenseIqReceipts,
+                                      ? null
+                                      : _importExpenseIqReceipts,
                                   icon: _importing
                                       ? const SizedBox.square(
                                           dimension: 16,
@@ -1330,22 +2091,27 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                         )
                                       : const Icon(Icons.folder_outlined),
                                   label: Text(
-                                    _importing ? 'Indexing...' : 'Index locally',
+                                    _importing
+                                        ? 'Indexing...'
+                                        : 'Index locally',
                                   ),
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: FilledButton.icon(
-                                  onPressed: _requestingPhotoSync ||
+                                  onPressed:
+                                      _requestingPhotoSync ||
                                           _photoCounts == null ||
                                           _photoCounts?.enabled == false ||
                                           _photoCounts?.pending == 0
-                                      ? null : _requestPhotoSync,
+                                      ? null
+                                      : _requestPhotoSync,
                                   icon: const Icon(Icons.cloud_upload_outlined),
                                   label: Text(
                                     _requestingPhotoSync
-                                        ? 'Scheduling...' : 'Sync now',
+                                        ? 'Scheduling...'
+                                        : 'Sync now',
                                   ),
                                 ),
                               ),
@@ -1382,8 +2148,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           _filter == 'all'
                               ? tr('all')
                               : _filter == 'income'
-                                  ? 'Income'
-                                  : tr('expenses'),
+                              ? 'Income'
+                              : tr('expenses'),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -1401,7 +2167,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         onPressed: _showAdvancedFilters,
                         icon: Icon(
                           Icons.filter_alt_outlined,
-                          color: _accountFilterId != null ||
+                          color:
+                              _accountFilterId != null ||
                                   _categoryFilterId != null ||
                                   _counterpartyFilterId != null
                               ? BriskersColors.invoices
@@ -1411,50 +2178,43 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  Row(children: [
-                    Expanded(
-                      child: SearchBar(
-                        controller: _searchController,
-                        hintText: 'Search transactions…',
-                        leading: const Icon(Icons.search),
-                        elevation: const WidgetStatePropertyAll<double>(3),
-                        shadowColor: const WidgetStatePropertyAll<Color>(
-                          Colors.black26,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SearchBar(
+                          controller: _searchController,
+                          hintText: 'Search transactions…',
+                          leading: const Icon(Icons.search),
+                          elevation: const WidgetStatePropertyAll<double>(3),
+                          shadowColor: const WidgetStatePropertyAll<Color>(
+                            Colors.black26,
+                          ),
+                          onChanged: (value) {
+                            setState(() {});
+                            _searchChanged(value);
+                          },
+                          onSubmitted: (_) {
+                            _searchDebounce?.cancel();
+                            _load(showLoading: false);
+                          },
+                          trailing: [
+                            if (_searchController.text.isNotEmpty)
+                              IconButton(
+                                tooltip: 'Clear search',
+                                onPressed: () {
+                                  _searchDebounce?.cancel();
+                                  _searchController.clear();
+                                  setState(() {});
+                                  _load(showLoading: false);
+                                },
+                                icon: const Icon(Icons.close),
+                              ),
+                          ],
                         ),
-                        onChanged: (value) {
-                          setState(() {});
-                          _searchChanged(value);
-                        },
-                        onSubmitted: (_) {
-                          _searchDebounce?.cancel();
-                          _load(showLoading: false);
-                        },
-                        trailing: [
-                          if (_searchController.text.isNotEmpty)
-                            IconButton(
-                              tooltip: 'Clear search',
-                              onPressed: () {
-                                _searchDebounce?.cancel();
-                                _searchController.clear();
-                                setState(() {});
-                                _load(showLoading: false);
-                              },
-                              icon: const Icon(Icons.close),
-                            ),
-                        ],
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton.filled(
-                      tooltip: 'Add transaction',
-                      style: IconButton.styleFrom(
-                        backgroundColor: BriskersColors.expenses,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: _importing ? null : _showAddMenu,
-                      icon: const Icon(Icons.add),
-                    ),
-                  ]),
+
+                    ],
+                  ),
                   if (_searchController.text.trim().isNotEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 5, left: 4),
@@ -1470,11 +2230,21 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     const SizedBox(height: 10),
                     Text(
                       _error!,
-                      style:
-                          TextStyle(color: Theme.of(context).colorScheme.error),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
                     ),
                   ],
                   const SizedBox(height: 12),
+                  if (receiptsUnverified)
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(
+                        unverifiedCount == null
+                  ? 'Some income receipts lack verified invoice/payment evidence. Gross amounts remain shown; processing-fee adjustments are not assumed.'
+                  : '$unverifiedCount income receipt${unverifiedCount == 1 ? '' : 's'} need${unverifiedCount == 1 ? 's' : ''} verification. Gross amounts remain shown for those rows; no processing fee is assumed.',
+                      ),
+                    ),
                   if (visible.isEmpty)
                     const Card(
                       child: Padding(
@@ -1488,7 +2258,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           transaction['direction']?.toString() == 'income';
                       final counterparty =
                           transaction['counterparty']?.toString() ??
-                              (incomeRow ? 'Income' : 'Expense');
+                          (incomeRow ? 'Income' : 'Expense');
                       final category =
                           transaction['category']?.toString() ?? '';
                       final date =
@@ -1498,9 +2268,11 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       final jobTitle =
                           transaction['job_title']?.toString().trim() ?? '';
                       final customerName =
-                          transaction['job_customer_name']?.toString().trim() ?? '';
+                          transaction['job_customer_name']?.toString().trim() ??
+                          '';
                       final documentNumber =
-                          transaction['document_number']?.toString().trim() ?? '';
+                          transaction['document_number']?.toString().trim() ??
+                          '';
                       final remarks =
                           transaction['remarks']?.toString().trim() ?? '';
                       final contextLine = <String>[
@@ -1513,10 +2285,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         if (documentNumber.isNotEmpty)
                           'Invoice #$documentNumber',
                       ].join(' • ');
-                      final receiptCount = int.tryParse(
+                      final receiptCount =
+                          int.tryParse(
                             transaction['receipt_count']?.toString() ?? '',
                           ) ??
                           0;
+                      final invoiceReceipt = transaction['_invoice_receipt'] == true;
                       final directionColor = incomeRow
                           ? const Color(0xFF169B62)
                           : const Color(0xFFC62828);
@@ -1525,18 +2299,25 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         margin: const EdgeInsets.only(bottom: 8),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(12),
-                          onTap: () => _openTransaction(transaction),
-                          onLongPress: () =>
-                              _showTransactionActions(transaction),
+                          onTap: () => invoiceReceipt
+                              ? _openInvoiceReceipt(transaction)
+                              : _openTransaction(transaction),
+                          onLongPress: invoiceReceipt
+                              ? null
+                              : () => _showTransactionActions(transaction),
                           child: Padding(
                             padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
                                 CircleAvatar(
                                   radius: 20,
-                                  backgroundColor:
-                                      directionColor.withValues(alpha: 0.10),
+                                  backgroundColor: directionColor.withValues(
+                                    alpha: 0.10,
+                                  ),
                                   child: Icon(
                                     incomeRow
                                         ? Icons.south_west
@@ -1569,7 +2350,20 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
-                                      Text(
+                                      if (invoiceReceipt) Text(
+                                        transaction['_receipt_state'] != 'posted'
+                                            ? 'Recorded • awaiting finalization'
+                                            : transaction['_payment_coverage'] == 'paid'
+                                                ? 'Paid' : 'Partial',
+                                        style: TextStyle(
+                                          color: transaction['_receipt_state'] == 'posted' &&
+                                                  transaction['_payment_coverage'] == 'paid'
+                                              ? const Color(0xFF168A4B)
+                                              : const Color(0xFFD56D08),
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      if (!invoiceReceipt) Text(
                                         remarks.isEmpty
                                             ? <String>[
                                                 if (category.isNotEmpty)
@@ -1593,13 +2387,118 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
                                     Text(
-                                      '${incomeRow ? '+' : '-'}${_money(transaction['amount'])}',
+                                      '${incomeRow ? '+' : '-'}${_money(WarrantyReceiptReporting.amount(transaction))}',
                                       style: TextStyle(
                                         fontSize: 17.5,
                                         fontWeight: FontWeight.w900,
                                         color: directionColor,
                                       ),
                                     ),
+                                    if (invoiceReceipt) ...[
+                                      const SizedBox(height: 6),
+                                      Stack(alignment: Alignment.center, children: [
+                                        Icon(
+                                          transaction['_receipt_state'] == 'posted'
+                                              ? Icons.cloud : Icons.cloud_outlined,
+                                          size: 32,
+                                          color: transaction['_receipt_state'] == 'posted'
+                                              ? const Color(0xFF169B62)
+                                              : transaction['_receipt_state'] == 'pending'
+                                                  ? const Color(0xFFD56D08)
+                                                  : const Color(0xFF667085),
+                                        ),
+                                        Icon(
+                                          transaction['_receipt_state'] == 'posted'
+                                              ? Icons.check
+                                              : transaction['_receipt_state'] == 'pending'
+                                                  ? Icons.schedule
+                                                  : Icons.priority_high,
+                                          size: 17,
+                                          color: transaction['_receipt_state'] == 'posted'
+                                              ? Colors.white
+                                              : transaction['_receipt_state'] == 'pending'
+                                                  ? const Color(0xFFD56D08)
+                                                  : const Color(0xFF667085),
+                                        ),
+                                      ]),
+                                    ],
+                                    if (!invoiceReceipt) ...[
+                                      const SizedBox(height: 6),
+                                      Builder(builder: (context) {
+                                        final state = transaction['sync_state']
+                                            ?.toString().toLowerCase() ?? '';
+                                        final pending = state == 'pending' ||
+                                            state == 'pending_sync' ||
+                                            state == 'queued';
+                                        final failed = state == 'error' ||
+                                            state == 'failed' ||
+                                            state == 'conflict';
+                                        // Do not infer transaction sync from
+                                        // the list switching cache -> server.
+                                        // An unreported state stays unknown.
+                                        final verifiedId =
+                                            transaction['id']?.toString() ?? '';
+                                        final previouslyConfirmed =
+                                            verifiedId.isNotEmpty &&
+                                            _previousServerTransactionProofs[
+                                              verifiedId] ==
+                                            LocalFinancialCache
+                                                .serverTransactionSignature(
+                                                  transaction);
+                                        final currentConfirmed =
+                                            _serverConfirmedTransactionIds
+                                                .contains(verifiedId);
+                                        final synced = state == 'synced' ||
+                                            (!pending && !failed &&
+                                                verifiedId.isNotEmpty &&
+                                                (currentConfirmed ||
+                                                    previouslyConfirmed));
+                                        return Tooltip(
+                                          message: failed
+                                              ? 'Transaction sync needs attention'
+                                              : pending
+                                                  ? 'Transaction awaiting sync'
+                                                  : currentConfirmed || state == 'synced'
+                                                      ? 'Transaction confirmed in shop database'
+                                                      : previouslyConfirmed
+                                                          ? 'Previously confirmed on server; refresh to recheck'
+                                                          : 'Transaction sync not verified',
+                                          child: Icon(
+                                            failed
+                                                ? Icons.cloud_off_outlined
+                                                : pending
+                                                    ? Icons.cloud_upload_outlined
+                                                    : synced
+                                                        ? Icons.cloud_done
+                                                        : Icons.cloud_outlined,
+                                            color: failed
+                                                ? const Color(0xFFC62828)
+                                                : synced
+                                                    ? const Color(0xFF169B62)
+                                                    : const Color(0xFF667085),
+                                            size: 26,
+                                          ),
+                                        );
+                                      }),
+                                    ],
+                                    if (!invoiceReceipt && (num.tryParse(
+                                              transaction['reporting_processor_fee']
+                                                      ?.toString() ??
+                                                  '',
+                                            ) ??
+                                            0) >
+                                        0)
+                                      Text(
+                                        'Net · fee ${_money(transaction['reporting_processor_fee'])}',
+                                        style: const TextStyle(fontSize: 11),
+                                      ),
+                                    if (!invoiceReceipt && incomeRow &&
+                                        transaction['reporting_status'] !=
+                                            'verified')
+                                      const Text(
+                                        'Gross · fee unverified',
+                                        style: TextStyle(fontSize: 11),
+                                      ),
                                     const SizedBox(height: 8),
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
@@ -1628,6 +2527,18 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                     ),
                                   ],
                                 ),
+                                  ],
+                                ),
+                                if (!invoiceReceipt) ...[
+                                  const SizedBox(height: 3),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: Text(
+                                      tr('longPressForOptions'),
+                                      style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -1637,19 +2548,15 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                   if (_loadingMore)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 18),
-                      child: Center(
-                        child: CircularProgressIndicator(),
-                      ),
+                      child: Center(child: CircularProgressIndicator()),
                     )
-                  else if (!_hasMore && visible.isNotEmpty)
+                  else if (!_hasMore && !moreReceiptPages && visible.isNotEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
                       child: Center(
                         child: Text(
                           'No more transactions',
-                          style: TextStyle(
-                            color: Color(0xFF667085),
-                          ),
+                          style: TextStyle(color: Color(0xFF667085)),
                         ),
                       ),
                     ),
@@ -1658,4 +2565,18 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             ),
     );
   }
+}
+
+class _ActionSectionLabel extends StatelessWidget {
+  const _ActionSectionLabel(this.label);
+  final String label;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+    child: Align(alignment: Alignment.centerLeft,
+      child: Text(label.toUpperCase(),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          letterSpacing: 0.8, fontWeight: FontWeight.w700))),
+  );
 }

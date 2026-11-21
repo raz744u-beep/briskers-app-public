@@ -11,6 +11,124 @@ class LocalFinancialCache {
 
   static const _transactionsKey = 'transactions_snapshot';
   static const _optionsKey = 'transaction_options';
+  static const _invoiceReceiptsKey = 'invoice_receipts_v1';
+  static const _serverTransactionProofKey = 'server_transaction_proof_v1';
+  static const _proofTtl = Duration(days: 7);
+
+  /// A read-only provenance fingerprint for server-returned transaction rows.
+  /// An edited local amount/date/direction cannot reuse an old green cloud.
+  static String serverTransactionSignature(Map<String, dynamic> row) =>
+      jsonEncode([
+        row['id']?.toString(),
+        row['direction']?.toString(),
+        row['amount']?.toString(),
+        row['transaction_date']?.toString(),
+      ]);
+
+  /// Restores *historical* server evidence, not a fresh sync acknowledgement.
+  /// Business-scoped and short lived. Missing/corrupt/expired proof is unknown.
+  Future<Map<String, String>> loadServerConfirmedTransactions(
+    String businessId,
+  ) async {
+    final raw = await _load(businessId, _serverTransactionProofKey);
+    if (raw == null || raw.isEmpty) return const {};
+    try {
+      final root = jsonDecode(raw);
+      if (root is! Map) return const {};
+      final records = root['entries'];
+      if (records is! Map) return const {};
+      final now = DateTime.now().toUtc().millisecondsSinceEpoch;
+      final restored = <String, String>{};
+      for (final record in records.entries) {
+        if (record.key is! String || record.value is! Map) continue;
+        final stamp = record.value['verified_at'];
+        final signature = record.value['signature'];
+        if (stamp is! int || signature is! String ||
+            signature.isEmpty || stamp > now ||
+            now - stamp > _proofTtl.inMilliseconds) {
+          continue;
+        }
+        restored[record.key as String] = signature;
+      }
+      return restored;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// Persist proofs only from a successful authenticated server result,
+  /// never from previously cached/offline rows or a pending local outbox.
+  Future<void> saveServerConfirmedTransactions(
+    String businessId,
+    List<Map<String, dynamic>> serverRows,
+  ) async {
+    final now = DateTime.now().toUtc().millisecondsSinceEpoch;
+    final records = <String, dynamic>{};
+    final raw = await _load(businessId, _serverTransactionProofKey);
+    if (raw != null) {
+      try {
+        final decoded = jsonDecode(raw);
+        final old = decoded is Map ? decoded['entries'] : null;
+        if (old is Map) {
+          for (final entry in old.entries) {
+            if (entry.key is! String || entry.value is! Map) continue;
+            final stamp = entry.value['verified_at'];
+            if (stamp is int && stamp <= now &&
+                now - stamp <= _proofTtl.inMilliseconds) {
+              records[entry.key as String] = entry.value;
+            }
+          }
+        }
+      } catch (_) {
+        // Corrupt old proof does not stop new authoritative evidence.
+      }
+    }
+    for (final row in serverRows) {
+      final id = row['id']?.toString() ?? '';
+      final state = row['sync_state']?.toString().toLowerCase() ?? '';
+      if (id.isEmpty || row['direction'] == null ||
+          row['amount'] == null ||
+          const {'pending', 'pending_sync', 'queued', 'failed', 'error',
+                 'conflict'}.contains(state)) {
+        continue;
+      }
+      records[id] = {
+        'signature': serverTransactionSignature(row),
+        'verified_at': now,
+      };
+    }
+    // Bound local storage for shops with very large historical archives.
+    final newest = records.entries.toList()
+      ..sort((a, b) =>
+        ((b.value as Map)['verified_at'] as int).compareTo(
+          (a.value as Map)['verified_at'] as int));
+    await _save(
+      businessId,
+      _serverTransactionProofKey,
+      jsonEncode({
+        'entries': {
+          for (final entry in newest.take(2500)) entry.key: entry.value,
+        },
+      }),
+    );
+  }
+
+  Future<void> saveInvoiceReceipts(String businessId, List<Map<String,dynamic>> rows) =>
+      _save(businessId, _invoiceReceiptsKey, jsonEncode(rows));
+
+  /// Distinguish "RPC cache never populated" from "server has no receipts".
+  Future<bool> hasServerInvoiceReceipts(String businessId) async =>
+      await _load(businessId, _invoiceReceiptsKey) != null;
+
+  Future<List<Map<String,dynamic>>> loadInvoiceReceipts(String businessId) async {
+    final raw = await _load(businessId, _invoiceReceiptsKey);
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      return (jsonDecode(raw) as List).whereType<Map>()
+          .map((row) => Map<String,dynamic>.from(row)).toList();
+    } catch (_) { return const []; }
+  }
+
 
   final BriskersLocalDatabase _database;
 
@@ -23,6 +141,35 @@ class LocalFinancialCache {
       _transactionsKey,
       jsonEncode(rows),
     );
+  }
+
+  /// Refresh the server's limited list without erasing locally committed
+  /// transactions/edits that are still queued for synchronization. Both the
+  /// overlay read and persisted result share a single SQLite transaction.
+  Future<void> mergeServerTransactions(
+    String businessId, List<Map<String, dynamic>> serverRows,
+  ) async {
+    await _database.transaction(() async {
+      final saved = await loadTransactions(businessId);
+      final pending = <String, Map<String, dynamic>>{
+        for (final row in saved)
+          if (row['sync_state']?.toString() == 'pending' &&
+              (row['id']?.toString() ?? '').isNotEmpty)
+            row['id'].toString(): row,
+      };
+      final seen = <String>{};
+      final merged = <Map<String, dynamic>>[
+        for (final row in serverRows)
+          if (seen.add(row['id']?.toString() ?? ''))
+            pending[row['id']?.toString()] ?? row,
+        for (final entry in pending.entries)
+          if (!seen.contains(entry.key)) entry.value,
+      ];
+      merged.sort((a, b) =>
+        (b['transaction_date']?.toString() ?? '').compareTo(
+        a['transaction_date']?.toString() ?? ''));
+      await saveTransactions(businessId, merged);
+    });
   }
 
   Future<List<Map<String, dynamic>>> loadTransactions(

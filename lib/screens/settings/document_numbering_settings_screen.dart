@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../core/supabase_config.dart';
+import '../../local/local_database_provider.dart';
+import '../../services/local_number_allocator.dart';
+import '../../services/device_owner_authorization.dart';
 
 import '../../core/briskers_colors.dart';
-import '../../core/connection_mode.dart';
 
-/// Owner-only numbering controls. The server allocates final numbers atomically;
-/// this screen never manufactures document numbers locally.
+
+/// Owner-only device-local numbering controls.
 class DocumentNumberingSettingsScreen extends StatefulWidget {
   const DocumentNumberingSettingsScreen({
     super.key,
@@ -36,10 +37,12 @@ class _DocumentNumberingSettingsScreenState
   Future<void> _reload() async {
     if (mounted) setState(() { _loading = true; _error = null; });
     try {
-      final rows = await networkSupabase.rpc(
-        'briskers_document_counters',
-        params: {'p_business_id': widget.businessId},
-      ) as List<dynamic>;
+      final numbers=LocalNumberAllocator(localDatabase);
+      final rows=<Map<String,dynamic>>[];
+      for(final kind in const ['invoice','job']) {
+        rows.add({'document_kind':kind,'next_number':await numbers.nextNumber(widget.businessId,kind),
+          'prefix':kind=='job' ? 'J-' : ''});
+      }
       if (!mounted) return;
       setState(() {
         _counters.clear();
@@ -56,12 +59,7 @@ class _DocumentNumberingSettingsScreenState
   }
 
   Future<void> _change(String kind) async {
-    if (_saving || BriskersConnectionModeController.instance.forceOffline) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Go online to change numbering safely.'),
-      ));
-      return;
-    }
+    if (_saving) return;
     final data = _counters[kind];
     if (data == null) return;
     final controller = TextEditingController(
@@ -109,14 +107,9 @@ class _DocumentNumberingSettingsScreenState
     }
     setState(() => _saving = true);
     try {
-      await networkSupabase.rpc(
-        'briskers_owner_set_next_number',
-        params: {
-          'p_business_id': widget.businessId,
-          'p_kind': kind,
-          'p_next_number': number,
-        },
-      );
+      final grant=await DeviceOwnerAuthorization.instance.authority.authorizeLocal(widget.businessId);
+      grant.assertValid(widget.businessId,grant.actorId);
+      await LocalNumberAllocator(localDatabase).setNextNumber(widget.businessId,kind,number);
       await _reload();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -150,15 +143,14 @@ class _DocumentNumberingSettingsScreenState
             padding: const EdgeInsets.all(16),
             children: [
               const Text(
-                'The next numbers are shared across devices. Only the owner '
-                'can change them. Previously issued numbers never change.',
+                'These numbers are stored on this device. Only the Owner can change them. Existing invoices keep their numbers.',
               ),
               const SizedBox(height: 16),
               if (_error != null)
                 Text(_error!, style: TextStyle(
                   color: Theme.of(context).colorScheme.error,
                 )),
-              for (final kind in const ['invoice', 'estimate', 'job'])
+              for (final kind in const ['invoice', 'job'])
                 Card(
                   child: ListTile(
                     leading: const Icon(Icons.tag,
@@ -188,9 +180,7 @@ class _DocumentNumberingSettingsScreenState
               if (_saving) const LinearProgressIndicator(),
               const SizedBox(height: 12),
               const Text(
-                'New documents check for collisions before receiving a '
-                'permanent number. Offline drafts must reconcile with the '
-                'server before final numbering.',
+                'Numbers are assigned offline. Existing numbers are skipped. Delete the latest invoice to reuse its number automatically; assign older freed numbers from the invoice menu.',
               ),
               TextButton.icon(
                 onPressed: _saving ? null : _reload,

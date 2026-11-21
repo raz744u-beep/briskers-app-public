@@ -78,7 +78,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
 
     final database = BriskersLocalDatabase(NativeDatabase.memory());
-    const cache = LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database: database);
     final api = _FakeApi();
     final service = OfflineDocumentEditService(
       api: api,
@@ -182,7 +182,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
 
     final database = BriskersLocalDatabase(NativeDatabase.memory());
-    const cache = LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database: database);
     final service = OfflineDocumentEditService(
       api: _FakeApi(),
       cache: cache,
@@ -281,3 +281,4 @@ void main() {
   });
 
 }
+

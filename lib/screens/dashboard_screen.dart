@@ -949,7 +949,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => JobDocumentScreen(
-            businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          businessId: widget.businessId,
             documentId: invoiceId,
             isOwner: widget.roleCode == 'owner',
           ),
@@ -972,7 +973,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => JobDocumentScreen(
-            businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          businessId: widget.businessId,
             documentId: estimateId,
             isOwner: widget.roleCode == 'owner',
           ),

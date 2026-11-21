@@ -82,12 +82,19 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
     ].where((part) => part.isNotEmpty).join(' ');
   }
 
-  Future<void> _pickDate() async {
+  // Both calendar taps and typed entry must commit the SAME appointment date.
+  // Normalize to calendar-only values, leaving the appointment time unchanged.
+  Future<void> _pickDate({
+    DatePickerEntryMode entryMode = DatePickerEntryMode.calendar,
+  }) async {
+    final today = DateUtils.dateOnly(DateTime.now());
     final date = await showDatePicker(
       context: context,
-      initialDate: _startsAt,
-      firstDate: DateTime.now().subtract(const Duration(days: 1)),
-      lastDate: DateTime.now().add(const Duration(days: 730)),
+      initialDate: DateUtils.dateOnly(_startsAt),
+      firstDate: DateUtils.dateOnly(today.subtract(const Duration(days: 1))),
+      lastDate: DateUtils.dateOnly(today.add(const Duration(days: 730))),
+      initialEntryMode: entryMode,
+      helpText: 'Select appointment date',
     );
     if (date == null || !mounted) return;
     setState(() {
@@ -235,7 +242,7 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: _pickDate,
+                  onPressed: () => _pickDate(),
                   icon: const Icon(
                     Icons.event_outlined,
                     color: BriskersColors.appointments,
@@ -243,7 +250,13 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
                   label: Text(DateFormat('EEE, MMM d').format(_startsAt)),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 4),
+              TextButton(
+                key: const ValueKey('appointment-date-type'),
+                onPressed: () => _pickDate(entryMode: DatePickerEntryMode.input),
+                child: const Text('Type date'),
+              ),
+              const SizedBox(width: 4),
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: _pickTime,

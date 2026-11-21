@@ -11,6 +11,9 @@ void main() {
       kind:'estimate',
       initialCustomerId:'customer',
       initialCustomerName:'Test Customer',
+      initialVehicles: [
+        {'id':'synthetic-vehicle','year':2018,'make':'BMW','model':'X3'},
+      ],
     )));
     expect(find.text('New Estimate'),findsOneWidget);
     expect(find.text('Create Estimate & Add Items'),findsOneWidget);

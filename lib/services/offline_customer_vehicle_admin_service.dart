@@ -15,6 +15,8 @@ class OfflineCustomerVehicleAdminService {
 
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
+  // Share each in-flight upload across Auto and manual Sync Now on this device.
+  static final Expando<Map<String, Future<void>>> _activeFlushes = Expando();
 
   Future<String> queueCustomerCreate(
     String businessId, {
@@ -397,7 +399,18 @@ class OfflineCustomerVehicleAdminService {
     });
   }
 
-  Future<void> flush(String businessId) async {
+  Future<void> flush(String businessId) {
+    final active = _activeFlushes[_database] ??= <String, Future<void>>{};
+    final existing = active[businessId];
+    if (existing != null) return existing;
+    final work = _flushInternal(businessId);
+    active[businessId] = work;
+    return work.whenComplete(() {
+      if (identical(active[businessId], work)) active.remove(businessId);
+    });
+  }
+
+  Future<void> _flushInternal(String businessId) async {
     final rows = await _database.customSelect(
       '''
       SELECT id, entity_type, entity_id, payload_json, attempt_count

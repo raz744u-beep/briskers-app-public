@@ -2,10 +2,7 @@
 /// tests. The invoice's saved memo is distinct from the unsaved text field.
 enum InvoiceNoteDraftAction { none, save, clear }
 
-InvoiceNoteDraftAction invoiceNoteDraftAction(
-  String draft,
-  String? saved,
-) {
+InvoiceNoteDraftAction invoiceNoteDraftAction(String draft, String? saved) {
   final current = draft.trim();
   final persisted = (saved ?? '').trim();
   if (current == persisted) return InvoiceNoteDraftAction.none;
@@ -19,18 +16,17 @@ InvoiceNoteDraftAction invoiceNoteDraftAction(
 
 /// Append a standard note to the user's *current editor text* rather than
 /// the older server memo. Never lose an unsaved manual note.
-String mergeStandardNoteIntoDraft(
-  String draft,
-  String standardBody,
-) {
+String mergeStandardNoteIntoDraft(String draft, String standardBody) {
   final current = draft.trim();
   final addition = standardBody.trim();
   if (addition.isEmpty) return current;
   if (current.isEmpty) return addition;
-  final sections = current
-      .split(RegExp(r'\n\s*\n'))
-      .map((section) => section.trim());
-  if (sections.contains(addition)) return current;
+  // A saved note can itself contain blank lines. Compare the entire template
+  // at paragraph boundaries instead of comparing it with individual sections.
+  final alreadyIncluded = RegExp(
+    r'(?:^|\n\s*\n)' + RegExp.escape(addition) + r'(?:\n\s*\n|$)',
+  ).hasMatch(current);
+  if (alreadyIncluded) return current;
   return '$current\n\n$addition';
 }
 

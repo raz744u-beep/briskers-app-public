@@ -9,10 +9,12 @@ import '../local/local_database_provider.dart';
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
+import '../core/navigation_content_timing.dart';
 import '../core/appointment_action_policy.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
+import '../services/job_summary_visibility.dart';
 import '../services/local_appointment_repository.dart';
 import 'appointments/appointment_manage_screen.dart';
 import 'jobs/job_detail_screen.dart';
@@ -22,26 +24,40 @@ class AppointmentsScreen extends StatefulWidget {
     super.key,
     required this.businessId,
     required this.roleCode,
+    this.dockResetToken = 0,
+    this.repository,
+    this.appointmentSync,
+    this.api = const BriskersApi(),
+    this.visibilityFactory,
   });
 
+  final int dockResetToken;
   final String businessId;
   final String roleCode;
+  final LocalAppointmentRepository? repository;
+  final AppointmentSyncService? appointmentSync;
+  final BriskersApi api;
+  final JobSummaryVisibility Function(
+    String businessId,
+    ValueChanged<Set<String>> onQuarantine,
+  )? visibilityFactory;
 
   @override
   State<AppointmentsScreen> createState() => _AppointmentsScreenState();
 }
 
 class _AppointmentsScreenState extends State<AppointmentsScreen> {
-  static const _api = BriskersApi();
+  BriskersApi get _api => widget.api;
   // Avoid full remote reload each time the Appointments tab is reopened.
   static final Map<String, DateTime> _lastSuccessfulPull = {};
   static const _entryRefreshInterval = Duration(minutes: 2);
-  final AppointmentSyncService _appointmentSync =
-      AppointmentSyncService();
-  final JobSyncService _jobSync = JobSyncService();
-  final LocalAppointmentRepository _localAppointments =
-      LocalAppointmentRepository();
+  late final AppointmentSyncService _appointmentSync =
+      widget.appointmentSync ?? AppointmentSyncService();
+  late final JobSyncService _jobSync = JobSyncService();
+  late final LocalAppointmentRepository _localAppointments =
+      widget.repository ?? LocalAppointmentRepository();
 
+  late JobSummaryVisibility _jobVisibility;
   List<Map<String, dynamic>>? _appointments;
   String _filter = 'today';
   final TextEditingController _search = TextEditingController();
@@ -50,6 +66,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   int _pending = 0;
   bool _onlineReady = false;
   bool _showingLocal = false;
+  bool _refreshFailed = false;
+  bool _hasOrphanMock = false;
+  int _localLoadGeneration = 0;
+  int _connectionGeneration = 0;
+  Future<void>? _refreshFuture;
+  late final StreamSubscription<String> _syncSubscription;
 
   bool get _canManage =>
       widget.roleCode == 'owner' ||
@@ -61,6 +83,11 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
   @override
   void dispose() {
+    BriskersConnectionModeController.instance.removeListener(
+      _onConnectionModeChanged,
+    );
+    unawaited(_syncSubscription.cancel());
+    _jobVisibility.dispose();
     _search.dispose();
     super.dispose();
   }
@@ -68,85 +95,277 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   @override
   void initState() {
     super.initState();
+    _listenForQuarantine();
+    _syncSubscription = AppointmentSyncService.syncEvents.listen((businessId) {
+      if (mounted && businessId == widget.businessId) {
+        unawaited(_loadLocal());
+        unawaited(_probeOwnerOrphan());
+      }
+    });
+    BriskersConnectionModeController.instance.addListener(
+      _onConnectionModeChanged,
+    );
     _load(initialEntry: true);
+    unawaited(_probeOwnerOrphan());
   }
 
-  Future<void> _load({bool initialEntry = false}) async {
-    var localAvailable = false;
-    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
+  Future<void> _probeOwnerOrphan() async {
+    if (widget.roleCode != 'owner') {
+      if (mounted) setState(() => _hasOrphanMock = false);
+      return;
+    }
+    final businessId = widget.businessId;
+    try {
+      final rows = await localDatabase.customSelect(
+        "SELECT id FROM local_appointments WHERE business_id=? AND id=? "
+        "AND sync_state='pending' LIMIT 1",
+        variables: [Variable<String>(businessId),
+          const Variable<String>(AppointmentSyncService.orphanMockAppointmentId)],
+      ).get();
+      if (mounted && widget.businessId == businessId) {
+        setState(() => _hasOrphanMock = rows.length == 1);
+      }
+    } catch (_) {
+      // A failed preview must not permit destructive action or block the list.
+      if (mounted && widget.businessId == businessId) {
+        setState(() => _hasOrphanMock = false);
+      }
+    }
+  }
 
-    if (!forceOnline) {
-      try {
-      final localRows =
-          await _localAppointments.appointments(widget.businessId, filter: _filter, search: _search.text.trim().isEmpty ? null : _search.text.trim());
-      final bootstrapped =
-          await _localAppointments.hasBootstrap(widget.businessId);
-      localAvailable = bootstrapped || localRows.isNotEmpty;
+  void _listenForQuarantine() {
+    void onQuarantine(Set<String> jobIds) {
+      if (!mounted) return;
+      _lastSuccessfulPull.remove(widget.businessId);
+      setState(() {
+        if (_appointments != null) {
+          final hidden = _appointments!.where(
+              (row) => jobIds.contains(row['job_id']?.toString()));
+          if (hidden.any((row) => row['id']?.toString() == _checkingInId)) {
+            _checkingInId = null;
+          }
+          _appointments = JobSummaryVisibility.withoutJobs(
+              _appointments!, jobIds, jobIdKey: 'job_id');
+        }
+        _onlineReady = false;
+        _showingLocal = _appointments != null;
+      });
+    }
 
-      if (mounted && localAvailable) {
+    _jobVisibility = widget.visibilityFactory?.call(
+          widget.businessId, onQuarantine,
+        ) ??
+        JobSummaryVisibility(
+          businessId: widget.businessId,
+          onQuarantine: onQuarantine,
+        );
+  }
+
+  void _onConnectionModeChanged() {
+    final generation = ++_connectionGeneration;
+    setState(() {
+      _onlineReady = false;
+      _refreshFailed = false;
+      _showingLocal = _appointments != null;
+    });
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      // A stalled online request must not keep offline cache behind a spinner.
+      unawaited(() async {
+        await _loadLocal(reportError: true);
+        if (!mounted || generation != _connectionGeneration) return;
+        setState(() => _appointments ??= const []);
+      }());
+    }
+    // Let a current replay finish before starting another refresh. Changing
+    // modes must not dispatch concurrent flushes of the same pending work.
+    unawaited(() async {
+      final running = _refreshFuture;
+      await running;
+      if (!mounted || generation != _connectionGeneration) return;
+      if (identical(_refreshFuture, running)) _refreshFuture = null;
+      await _load();
+    }());
+  }
+
+  @override
+  void didUpdateWidget(covariant AppointmentsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId) {
+      _jobVisibility.dispose();
+      _localLoadGeneration++;
+      _refreshFuture = null;
+      _appointments = null;
+      _pending = 0;
+      _onlineReady = false;
+      _showingLocal = false;
+      _refreshFailed = false;
+      _error = null;
+      _checkingInId = null;
+      _hasOrphanMock = false;
+      _listenForQuarantine();
+      unawaited(_probeOwnerOrphan());
+      _load(initialEntry: true);
+    } else if (oldWidget.dockResetToken != widget.dockResetToken) {
+      // Tab re-entry keeps the current filter, search and scroll position.
+      _load(initialEntry: true);
+    }
+  }
+
+  Future<bool> _loadLocal({bool reportError = false}) async {
+    final visibility = _jobVisibility;
+    final generation = visibility.epoch;
+    final localGeneration = ++_localLoadGeneration;
+    final businessId = widget.businessId;
+    final filter = _filter;
+    final search = _search.text.trim();
+    try {
+      final localRows = await visibility.filter(
+        await _localAppointments.appointments(
+          businessId,
+          filter: filter,
+          search: search.isEmpty ? null : search,
+        ),
+        jobIdKey: 'job_id',
+      );
+      final bootstrapped = await _localAppointments.hasBootstrap(businessId);
+      final available = bootstrapped || localRows.isNotEmpty;
+      if (mounted && visibility.isCurrent(generation) &&
+          localGeneration == _localLoadGeneration &&
+          (available || _appointments != null)) {
         setState(() {
           _appointments = localRows;
-          _showingLocal = true;
-          _onlineReady = false;
+          if (!bootstrapped) {
+            _lastSuccessfulPull.remove(businessId);
+            _onlineReady = false;
+            _pending = 0;
+          }
+          _showingLocal = !_onlineReady;
           _error = null;
         });
       }
-    } catch (_) {
-      // Online refresh below can still populate the local appointment cache.
+      return available;
+    } catch (error) {
+      if (reportError && mounted && visibility.isCurrent(generation) &&
+          localGeneration == _localLoadGeneration) {
+        setState(() => _error = error.toString());
+      }
+      return false;
+    }
+  }
+
+  Future<void> _load({
+    bool initialEntry = false,
+    bool afterMutation = false,
+  }) async {
+    final running = _refreshFuture;
+    if (running != null) {
+      if (!afterMutation) return running;
+      final businessId = widget.businessId;
+      await _loadLocal(reportError: true);
+      await running;
+      if (!mounted || businessId != widget.businessId) return;
+      // Work queued after the active flush started needs its own replay.
+      if (identical(_refreshFuture, running)) _refreshFuture = null;
+      return _load();
+    }
+    final refresh = _refresh(initialEntry: initialEntry);
+    _refreshFuture = refresh;
+    try {
+      await refresh;
+    } finally {
+      if (identical(_refreshFuture, refresh)) _refreshFuture = null;
+    }
+  }
+
+  Future<void> _refresh({required bool initialEntry}) async {
+    final visibility = _jobVisibility;
+    // Query changes have their own generation. They must not discard the
+    // result of a background sync, while quarantine/disposal still must.
+    final generation = visibility.epoch;
+    final businessId = widget.businessId;
+    final mode = BriskersConnectionModeController.instance;
+    final forceOnline = mode.forceOnline;
+    final localAvailable = !forceOnline && await _loadLocal();
+    if (!mounted || !visibility.isCurrent(generation)) return;
+
+    if (mode.forceOffline) {
+      setState(() {
+        _onlineReady = false;
+        _showingLocal = localAvailable || _appointments != null;
+        _refreshFailed = false;
+        _appointments ??= const [];
+      });
+      return;
+    }
+
+    // The old mock's deletion may already be absent on the server. Its
+    // tombstone still needs a fresh, Owner-authorized negative existence
+    // receipt; a normal check-in refresh never flushes delete operations.
+    // Attempt reconciliation before the short no-refresh interval.
+    if (widget.roleCode == 'owner') {
+      try {
+        final retired = await _appointmentSync.reconcileAbsentOrphanMock(
+          businessId, isOwner: true,
+        );
+        if (retired && mounted) {
+          unawaited(_probeOwnerOrphan());
+          unawaited(_loadLocal(reportError: true));
+        }
+      } catch (_) {
+        // Offline/unsupported server response must leave the delete queue
+        // untouched. Never report the appointment deleted on an error.
       }
     }
 
-    // Local rows were displayed first. Manual refresh and mutations still sync.
-    final lastPull = _lastSuccessfulPull[widget.businessId];
+    final lastPull = _lastSuccessfulPull[businessId];
     if (initialEntry && !forceOnline && localAvailable && lastPull != null &&
         DateTime.now().difference(lastPull) < _entryRefreshInterval) {
       return;
     }
 
     try {
-      final appliedJobs =
-          await _appointmentSync.flush(widget.businessId);
+      final appliedJobs = await _appointmentSync.flush(businessId);
       if (appliedJobs.isNotEmpty) {
         try {
-          await _jobSync.pull(widget.businessId);
+          await _jobSync.pull(businessId);
         } catch (_) {}
       }
+      await _appointmentSync.pull(businessId);
+      if (!mounted || !visibility.isCurrent(generation)) return;
 
-      await _appointmentSync.pull(widget.businessId);
-      _lastSuccessfulPull[widget.businessId] = DateTime.now();
-      final localRows =
-          await _localAppointments.appointments(widget.businessId, filter: _filter, search: _search.text.trim().isEmpty ? null : _search.text.trim());
-      final bootstrapped =
-          await _localAppointments.hasBootstrap(widget.businessId);
+      // Re-read the latest query, not the query captured before the network
+      // request. Saved cards can render before the dashboard count is ready.
+      await _loadLocal(reportError: true);
+      final bootstrapped = await _localAppointments.hasBootstrap(businessId);
+      if (!mounted || !visibility.isCurrent(generation)) return;
+      setState(() {
+        _lastSuccessfulPull[businessId] = DateTime.now();
+        _onlineReady = bootstrapped && !mode.forceOffline;
+        _appointments ??= const [];
+        _showingLocal = !_onlineReady;
+        _refreshFailed = false;
+      });
 
-      final now = DateTime.now();
-      var pending = 0;
-      if (_canManage) {
+      if (_canManage && !mode.forceOffline) {
         try {
           final dashboard = await _api.dashboard(
-            widget.businessId,
-            DateFormat('yyyy-MM-dd').format(now),
+            businessId,
+            DateFormat('yyyy-MM-dd').format(DateTime.now()),
           );
-          pending = int.tryParse(
-                dashboard['pending_appointment_requests']?.toString() ?? '',
-              ) ??
-              0;
+          if (!mounted || !visibility.isCurrent(generation)) return;
+          setState(() {
+            _pending = int.tryParse(
+                  dashboard['pending_appointment_requests']?.toString() ?? '',
+                ) ?? 0;
+          });
         } catch (_) {}
       }
-
-      if (!mounted) return;
-      setState(() {
-        _appointments = localRows;
-        _pending = pending;
-        _onlineReady = bootstrapped;
-        _showingLocal = !bootstrapped;
-        _error = null;
-      });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
         _onlineReady = false;
-        if (localAvailable && !forceOnline) {
+        _refreshFailed = !mode.forceOffline;
+        if (_appointments != null && !forceOnline) {
           _showingLocal = true;
           _error = null;
         } else {
@@ -215,7 +434,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         ),
       ),
     );
-    if (changed == true) await _load();
+    if (changed == true && mounted) {
+      // New/edited appointments have already committed their local snapshot.
+      // Update the current list first; do not await replay/pull/dashboard.
+      await _loadLocal(reportError: true);
+      if (mounted) unawaited(_load(afterMutation: true));
+    }
   }
 
   Future<void> _editAppointment(Map<String, dynamic> item) async {
@@ -231,7 +455,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         ),
       ),
     );
-    if (changed == true) await _load();
+    if (changed == true && mounted) {
+      // New/edited appointments have already committed their local snapshot.
+      // Update the current list first; do not await replay/pull/dashboard.
+      await _loadLocal(reportError: true);
+      if (mounted) unawaited(_load(afterMutation: true));
+    }
   }
 
   Future<bool> _confirm({
@@ -275,7 +504,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     if (!ok) return;
     try {
       await _api.cancelAppointment(widget.businessId, item['id'].toString());
-      await _load();
+      await _load(afterMutation: true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
@@ -448,6 +677,40 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     if (shouldDelete == true && mounted) await _deleteAppointment(item);
   }
 
+  Future<void> _deleteVerifiedOrphanMock(Map<String, dynamic> item) async {
+    final id = item['id']?.toString() ?? '';
+    if (widget.roleCode != 'owner' ||
+        id != AppointmentSyncService.orphanMockAppointmentId) {
+      return;
+    }
+    final ok = await _confirm(
+      title: 'Delete orphan test appointment?',
+      message: 'This is the disposable mock with missing customer, vehicle '
+          'and job links. Remove only its failed appointment edit and queue '
+          'a server-verified deletion. No jobs, invoices, payments, '
+          'customers or other pending changes will be deleted. '
+          'The appointment stays hidden while the server confirms.',
+      action: 'Delete test appointment',
+      destructive: true,
+    );
+    if (!ok || !mounted) return;
+    try {
+      await _appointmentSync.queueDeleteVerifiedOrphanMock(
+        widget.businessId, id, isOwner: true,
+      );
+      if (!mounted) return;
+      await _loadLocal(reportError: true);
+      await _probeOwnerOrphan();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Test appointment hidden; deletion awaiting server confirmation.'),
+      ));
+      unawaited(_load(afterMutation: true));
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Test appointment not deleted: $error');
+    }
+  }
+
   Future<void> _deleteAppointment(Map<String, dynamic> item) async {
     if (widget.roleCode != 'owner') return;
     final isPendingCreate = item['id']?.toString().startsWith('local-appointment-') == true;
@@ -469,7 +732,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
           widget.businessId,item['id'].toString(),isOwner:true,
         );
       }
-      await _load();
+      await _load(afterMutation: true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
@@ -498,7 +761,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
           widget.businessId,item['id'].toString(),status,
         );
       }
-      await _load();
+      await _load(afterMutation: true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
@@ -516,50 +779,62 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       return;
     }
 
+    final businessId = widget.businessId;
+    final visibility = _jobVisibility;
+    final generation = visibility.epoch;
     final confirmed = await _confirm(
       title: 'Check in vehicle?',
       message:
           'Briskers will save the check-in on this device immediately. If offline, the linked job will be created when the connection returns.',
       action: 'Check In',
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted || !_canCheckIn ||
+        widget.businessId != businessId || !visibility.isCurrent(generation)) {
+      return;
+    }
 
     final appointmentId = item['id'].toString();
     setState(() => _checkingInId = appointmentId);
 
     try {
-      await _appointmentSync.queueCheckIn(
-        widget.businessId,
-        appointmentId,
-      );
-
-      final local = await _localAppointments.appointments(
-        widget.businessId,
-        filter: _filter,
-        search: _search.text.trim().isEmpty ? null : _search.text.trim(),
-      );
-      if (mounted) {
-        setState(() {
-          _appointments = local;
-          _error = null;
-        });
+      await _appointmentSync.queueCheckIn(businessId, appointmentId);
+      if (!mounted || widget.businessId != businessId ||
+          !visibility.isCurrent(generation)) {
+        return;
       }
 
-      Map<String, String> appliedJobs = const {};
-      try {
-        appliedJobs = await _appointmentSync.flush(widget.businessId);
-        await _appointmentSync.pull(widget.businessId);
-        if (appliedJobs.isNotEmpty) {
-          try {
-            await _jobSync.pull(widget.businessId);
-          } catch (_) {}
-        }
-      } catch (_) {
-        // Offline is expected. The check-in stays queued locally.
+      await _loadLocal(reportError: true);
+      if (!mounted || widget.businessId != businessId ||
+          !visibility.isCurrent(generation)) {
+        return;
       }
-
-      final jobId = appliedJobs[appointmentId];
-      if (!mounted) return;
+      // Use the same serialized refresh as mode changes and manual refreshes.
+      // An active replay may already apply this check-in, so recover its Job
+      // from the durable row rather than only the next flush's return value.
+      await _load(afterMutation: true);
+      if (!mounted || widget.businessId != businessId ||
+          !visibility.isCurrent(generation)) {
+        return;
+      }
+      final appointment = await _localAppointments.appointment(
+        businessId, appointmentId,
+      );
+      if (!mounted || widget.businessId != businessId ||
+          !visibility.isCurrent(generation)) {
+        return;
+      }
+      final visible = await visibility.filter(
+        appointment == null ? const [] : [appointment],
+        jobIdKey: 'job_id',
+      );
+      if (!mounted || widget.businessId != businessId ||
+          !visibility.isCurrent(generation)) {
+        return;
+      }
+      final local = visible.isEmpty ? null : visible.single;
+      final jobId = local != null && local['sync_state'] == 'synced'
+          ? local['job_id']?.toString()
+          : null;
 
       if (jobId == null || jobId.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -572,9 +847,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         return;
       }
 
-      await _load();
-      if (!mounted) return;
-
       if (widget.roleCode == 'kiosk') {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Check-in completed.')),
@@ -586,17 +858,25 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => JobDetailScreen(
-            businessId: widget.businessId,
+            businessId: businessId,
             jobId: jobId,
             roleCode: widget.roleCode,
           ),
         ),
       );
-      await _load();
+      if (mounted && widget.businessId == businessId &&
+          visibility.isCurrent(generation)) {
+        await _load(afterMutation: true);
+      }
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted && widget.businessId == businessId) {
+        setState(() => _error = error.toString());
+      }
     } finally {
-      if (mounted) setState(() => _checkingInId = null);
+      if (mounted && widget.businessId == businessId &&
+          _checkingInId == appointmentId) {
+        setState(() => _checkingInId = null);
+      }
     }
   }
 
@@ -707,6 +987,18 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 title: const Text('Inspect J-8 test cleanup'),
                 onTap: () => Navigator.pop(sheetContext, 'repair_j8'),
               ),
+            if (widget.roleCode == 'owner' &&
+                item['id']?.toString() ==
+                    AppointmentSyncService.orphanMockAppointmentId &&
+                queued)
+              ListTile(
+                leading: const Icon(Icons.delete_forever_outlined,
+                    color: Colors.red),
+                title: const Text('Delete orphan test appointment',
+                    style: TextStyle(color: Colors.red)),
+                subtitle: const Text('Includes its one stuck edit; protects linked records'),
+                onTap: () => Navigator.pop(sheetContext, 'delete_orphan_mock'),
+              ),
             if (canDelete)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Colors.red),
@@ -738,6 +1030,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         break;
       case 'dependencies':
         await _showAppointmentDependencies(item);
+        break;
+      case 'delete_orphan_mock':
+        await _deleteVerifiedOrphanMock(item);
         break;
       case 'delete':
         await _deleteAppointment(item);
@@ -833,10 +1128,21 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   @override
   Widget build(BuildContext context) {
     final visible = _visibleAppointments;
-    final total = _appointments?.length ?? 0;
+    // Until local bootstrap or a server pull completes, zero is not a
+    // verified appointment count. Do not label an unresolved load Total 0.
+    final total = _appointments?.length;
+    if (_appointments != null) {
+      NavigationContentTiming.contentVisible(
+        'appointments',
+        context: context,
+        source: _showingLocal ? 'local' : 'retained',
+      );
+    }
 
-    return Column(
+    return Stack(
       children: [
+        Column(
+          children: [
         Material(
           color: Theme.of(context).scaffoldBackgroundColor,
           elevation: 1,
@@ -871,7 +1177,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                       ),
                     const Spacer(),
                     Text(
-                      '${tr('total')} $total',
+                      '${tr('total')} ${total ?? '—'}',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                   color: BriskersColors.appointments,
                                   fontWeight: FontWeight.w700,
@@ -880,50 +1186,64 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Wrap(
-                    spacing: 7,
-                    runSpacing: 6,
-                    children: [
-                      for (final option in const <String>[
-                        'today',
-                        'upcoming',
-                        'past',
-                        'all',
-                      ])
-                        ChoiceChip(
-                          label: Text(
-                            option == 'today'
-                                ? tr('today')
-                                : option == 'upcoming'
-                                    ? tr('upcoming')
-                                    : option == 'past'
-                                        ? tr('past')
-                                        : tr('all'),
-                          ),
-                          selected: _filter == option,
-                          onSelected: (_) {
-                            if (_filter == option) return;
-                            setState(() => _filter = option);
-                            _load();
-                          },
-                          selectedColor:
-                              BriskersColors.actionBlue.withValues(alpha: 0.16),
-                          side: BorderSide(
-                            color: BriskersColors.actionBlue.withValues(
-                              alpha: _filter == option ? 0.75 : 0.34,
+                // Four compact filters stay on one row. "Today" includes all
+                // appointment statuses; confirmed-only remains an internal
+                // query for kiosk and other workflows, not a duplicate tab.
+                Row(
+                  children: [
+                    for (final option in const <String>[
+                      'today',
+                      'upcoming',
+                      'past',
+                      'all',
+                    ])
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          child: ChoiceChip(
+                            label: SizedBox(
+                              width: double.infinity,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  option == 'today'
+                                      ? tr('today')
+                                      : option == 'upcoming'
+                                          ? tr('upcoming')
+                                          : option == 'past'
+                                              ? tr('past')
+                                              : tr('all'),
+                                  maxLines: 1,
+                                ),
+                              ),
+                            ),
+                            labelPadding: const EdgeInsets.symmetric(
+                              horizontal: 3,
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 7),
+                            selected: _filter == option,
+                            onSelected: (_) {
+                              if (_filter == option) return;
+                              setState(() => _filter = option);
+                              unawaited(_loadLocal(reportError: true));
+                            },
+                            selectedColor: BriskersColors.actionBlue
+                                .withValues(alpha: 0.16),
+                            side: BorderSide(
+                              color: BriskersColors.actionBlue.withValues(
+                                alpha: _filter == option ? 0.75 : 0.34,
+                              ),
+                            ),
+                            labelStyle: TextStyle(
+                              color: BriskersColors.actionBlue,
+                              fontWeight: _filter == option
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
                             ),
                           ),
-                          labelStyle: TextStyle(
-                            color: BriskersColors.actionBlue,
-                            fontWeight: _filter == option
-                                ? FontWeight.w800
-                                : FontWeight.w600,
-                          ),
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 10),
                 Row(children: [
@@ -938,27 +1258,17 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                           onPressed: () {
                             _search.clear();
                             setState(() {});
-                            _load();
+                            _loadLocal(reportError: true);
                           },
                           icon: const Icon(Icons.close),
                         ),
                     ],
                     onChanged: (_) {
                       setState(() {});
-                      _load();
+                      _loadLocal(reportError: true);
                     },
                   )),
-                  const SizedBox(width: 8),
-                  if (_canManage)
-                    IconButton.filled(
-                      tooltip: 'Add appointment',
-                      style: IconButton.styleFrom(
-                        backgroundColor: BriskersColors.actionBlue,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: _addAppointment,
-                      icon: const Icon(Icons.add),
-                    ),
+
                 ]),
 
               ],
@@ -969,8 +1279,20 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
           child: RefreshIndicator(
             onRefresh: _load,
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 84),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 100),
               children: [
+                if (widget.roleCode == 'owner' && _hasOrphanMock)
+                  Card(
+                    child: ListTile(
+                      key: const ValueKey('owner-orphan-appointment-cleanup'),
+                      leading: const Icon(Icons.delete_outline, color: Colors.red),
+                      title: const Text('Remove orphan test appointment'),
+                      subtitle: const Text('One stuck edit • owner review required'),
+                      onTap: () => _deleteVerifiedOrphanMock(const {
+                        'id': AppointmentSyncService.orphanMockAppointmentId,
+                      }),
+                    ),
+                  ),
                 if (_canManage && _onlineReady && _pending > 0) ...[
                   const SizedBox(height: 10),
                   Card(
@@ -1008,11 +1330,20 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.cloud_off_outlined, size: 18),
+                        Icon(
+                          BriskersConnectionModeController.instance.forceOffline
+                              ? Icons.cloud_off_outlined
+                              : Icons.storage_outlined,
+                          size: 18,
+                        ),
                         const SizedBox(width: 7),
                         Expanded(
                                 child: Text(
-                                  tr('savedAppointmentsOffline'),
+                                  BriskersConnectionModeController.instance.forceOffline
+                                      ? tr('savedAppointmentsOffline')
+                                      : _refreshFailed
+                                          ? 'Unable to refresh. Showing saved appointments.'
+                                          : 'Showing saved appointments.',
                                   style: const TextStyle(fontWeight: FontWeight.w700),
                                 ),
                         ),
@@ -1029,10 +1360,17 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 ],
                 const SizedBox(height: 10),
                 if (_appointments == null)
-                  const Center(
+                  Card(
+                    key: const ValueKey('appointment-awaiting-server'),
                     child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: CircularProgressIndicator(),
+                      padding: const EdgeInsets.all(20),
+                      child: Text(
+                        BriskersConnectionModeController.instance.forceOffline
+                            ? 'No saved appointments are available offline.'
+                            : _refreshFailed
+                                ? 'Could not refresh appointments. Pull down to retry.'
+                                : 'Checking appointments in the background. No saved list is available yet.',
+                      ),
                     ),
                   )
                 else if (visible.isEmpty)
@@ -1069,9 +1407,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                              : null,
                         child: Padding(
                                 padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
                                   children: [
+                                    Row(
+                                      crossAxisAlignment: CrossAxisAlignment.center,
+                                      children: [
                                     Expanded(
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1143,6 +1484,21 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                                       _statusPill(item),
                                   ],
                                 ),
+                                    if (_canManage || _canCheckIn) ...[
+                                      const SizedBox(height: 3),
+                                      Align(
+                                        alignment: Alignment.centerRight,
+                                        child: Text(
+                                          tr('tapForOptions'),
+                                          style: const TextStyle(
+                                            fontSize: 10.5,
+                                            color: Color(0xFF64748B),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
                         ),
                       ),
                     );
@@ -1152,6 +1508,26 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
             ),
           ),
         ),
+      ],
+        ),
+        if (_canManage && MediaQuery.viewInsetsOf(context).bottom == 0)
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: FloatingActionButton.extended(
+              heroTag: 'appointments_screen-quick-create',
+              tooltip: 'Add appointment',
+              onPressed: _addAppointment,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              backgroundColor: BriskersColors.appointments,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ),
       ],
     );
   }

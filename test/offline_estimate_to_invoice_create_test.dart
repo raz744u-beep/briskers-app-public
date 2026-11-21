@@ -12,7 +12,7 @@ void main() {
   test('offline estimate conversion retains one job and survives local restart', () async {
     SharedPreferences.setMockInitialValues({});
     final db = BriskersLocalDatabase(NativeDatabase.memory());
-    final cache = const LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database: db);
     final service = OfflineDocumentDraftService(
       database: db,
       cache: cache,
@@ -90,3 +90,4 @@ void main() {
     await db.close();
   });
 }
+

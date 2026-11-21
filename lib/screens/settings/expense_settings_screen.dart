@@ -1,7 +1,13 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/module_modal_theme.dart';
+import '../../core/connection_mode.dart';
+import '../../core/supabase_config.dart';
 import '../../services/briskers_api.dart';
 
 class ExpenseSettingsScreen extends StatelessWidget {
@@ -423,7 +429,9 @@ class _AccountDialogState extends State<_AccountDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
+    return Theme(
+      data: moduleModalTheme(Theme.of(context), BriskersColors.expenses),
+      child: AlertDialog(
       title: Text(widget.account == null ? 'Add account' : 'Edit account'),
       content: SingleChildScrollView(
         child: Column(
@@ -501,6 +509,7 @@ class _AccountDialogState extends State<_AccountDialog> {
           child: Text(saving ? 'Saving...' : 'Save'),
         ),
       ],
+      ),
     );
   }
 }
@@ -1208,6 +1217,21 @@ class QuickTransactionsSettingsScreen extends StatefulWidget {
 
   final String businessId;
 
+  @visibleForTesting
+  static Widget dialogForTesting({
+    required String businessId,
+    required List<Map<String, dynamic>> accounts,
+    required List<Map<String, dynamic>> categories,
+    required List<Map<String, dynamic>> counterparties,
+    Map<String, dynamic>? template,
+  }) => _QuickDialog(
+    businessId: businessId,
+    accounts: accounts,
+    categories: categories,
+    counterparties: counterparties,
+    template: template,
+  );
+
   @override
   State<QuickTransactionsSettingsScreen> createState() =>
       _QuickTransactionsSettingsScreenState();
@@ -1430,6 +1454,28 @@ class _QuickDialogState extends State<_QuickDialog> {
     super.dispose();
   }
 
+  Future<void> _pickCounterparty() async {
+    final selected = await showModalBottomSheet<String?>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (_) => _QuickCounterpartyPicker(
+        counterparties: activeCounterparties,
+      ),
+    );
+    if (!mounted || selected == null) return;
+    setState(() => vendorId = selected == '__none__' ? null : selected);
+  }
+
+  String _titleCaseShortcut(String value) {
+    return value.trim().replaceAll(RegExp(r'\s+'), ' ').split(' ').map(
+      (word) => word.isEmpty
+          ? word
+          : '${word[0].toUpperCase()}${word.substring(1)}',
+    ).join(' ');
+  }
+
   Future<void> _save() async {
     if (name.text.trim().isEmpty || accountId == null || categoryId == null) {
       setState(() => error = 'Name, account and category are required.');
@@ -1443,7 +1489,7 @@ class _QuickDialogState extends State<_QuickDialog> {
       await _api.saveQuickTransaction(
         widget.businessId,
         templateId: widget.template?['id']?.toString(),
-        name: name.text.trim(),
+        name: _titleCaseShortcut(name.text),
         direction: direction,
         vendorId: vendorId,
         accountId: accountId!,
@@ -1465,11 +1511,20 @@ class _QuickDialogState extends State<_QuickDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
+    final accent = direction == 'expense' ? Colors.red.shade700 : Colors.green.shade700;
+    return Theme(
+      data: moduleModalTheme(Theme.of(context), accent),
+      child: AlertDialog(
+      backgroundColor: Theme.of(context).brightness == Brightness.dark
+          ? const Color(0xFF202124) : Colors.white,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       title: Text(
         widget.template == null ? 'Add quick transaction' : 'Edit quick transaction',
       ),
-      content: SingleChildScrollView(
+      content: SizedBox(
+        width: MediaQuery.sizeOf(context).width * 0.92,
+        height: MediaQuery.sizeOf(context).height * 0.64,
+        child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1490,33 +1545,34 @@ class _QuickDialogState extends State<_QuickDialog> {
                   : (value) => setState(() => direction = value.first),
             ),
             const SizedBox(height: 10),
-            DropdownButtonFormField<String?>(
-              initialValue: vendorId,
-              decoration: const InputDecoration(labelText: 'Payee / payer'),
-              items: [
-                const DropdownMenuItem<String?>(
-                  value: null,
-                  child: Text('None'),
+            OutlinedButton.icon(
+              onPressed: saving ? null : _pickCounterparty,
+              icon: const Icon(Icons.search),
+              label: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  vendorId == null ? 'Search vendor / payee' :
+                  activeCounterparties
+                    .where((x) => x['id']?.toString() == vendorId)
+                    .map((x) => x['name']?.toString() ?? '')
+                    .firstOrNull ?? 'Search vendor / payee',
                 ),
-                ...activeCounterparties.map(
-                  (x) => DropdownMenuItem<String?>(
-                    value: x['id']?.toString(),
-                    child: Text(x['name']?.toString() ?? ''),
-                  ),
-                ),
-              ],
-              onChanged:
-                  saving ? null : (value) => setState(() => vendorId = value),
+              ),
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
+              isExpanded: true,
               initialValue: categoryId,
               decoration: const InputDecoration(labelText: 'Category'),
               items: activeCategories
                   .map(
                     (x) => DropdownMenuItem(
                       value: x['id']?.toString(),
-                      child: Text(x['name']?.toString() ?? ''),
+                      child: Text(
+                        x['name']?.toString() ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   )
                   .toList(),
@@ -1525,14 +1581,19 @@ class _QuickDialogState extends State<_QuickDialog> {
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
+              isExpanded: true,
               initialValue: accountId,
-              hint: const Text('Choose account'),
+              hint: const Text('Choose account', maxLines: 1, overflow: TextOverflow.ellipsis),
               decoration: const InputDecoration(labelText: 'Account'),
               items: activeAccounts
                   .map(
                     (x) => DropdownMenuItem(
                       value: x['id']?.toString(),
-                      child: Text(x['name']?.toString() ?? ''),
+                      child: Text(
+                        x['name']?.toString() ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   )
                   .toList(),
@@ -1567,6 +1628,7 @@ class _QuickDialogState extends State<_QuickDialog> {
               ),
           ],
         ),
+        ),
       ),
       actions: [
         TextButton(
@@ -1574,10 +1636,81 @@ class _QuickDialogState extends State<_QuickDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: accent),
           onPressed: saving ? null : _save,
           child: Text(saving ? 'Saving...' : 'Save'),
         ),
       ],
+      ),
+    );
+  }
+}
+
+// The sheet owns its controller: showModalBottomSheet resolves when popped,
+// while its TextField can still rebuild during the reverse route animation.
+class _QuickCounterpartyPicker extends StatefulWidget {
+  const _QuickCounterpartyPicker({required this.counterparties});
+
+  final List<Map<String, dynamic>> counterparties;
+
+  @override
+  State<_QuickCounterpartyPicker> createState() => _QuickCounterpartyPickerState();
+}
+
+class _QuickCounterpartyPickerState extends State<_QuickCounterpartyPicker> {
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _search.text.trim().toLowerCase();
+    final results = widget.counterparties.where((item) =>
+        (item['name']?.toString() ?? '').toLowerCase().contains(query)).toList()
+      ..sort((a, b) => (a['name']?.toString() ?? '')
+          .compareTo(b['name']?.toString() ?? ''));
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        20, 18, 20, MediaQuery.viewInsetsOf(context).bottom + 16,
+      ),
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.70,
+        child: Column(
+          children: [
+            Text('Search payees and payers',
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _search,
+              autofocus: true,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search),
+                labelText: 'Vendor / payee name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                children: [
+                  ListTile(
+                    title: const Text('None'),
+                    onTap: () => Navigator.pop(context, '__none__'),
+                  ),
+                  ...results.map((item) => ListTile(
+                    title: Text(item['name']?.toString() ?? ''),
+                    onTap: () => Navigator.pop(context, item['id']?.toString()),
+                  )),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1602,6 +1735,46 @@ class _RecurringTransactionsScreenState
   List<Map<String, dynamic>>? rows;
   Map<String, dynamic>? options;
   String? error;
+  bool _offlineUnavailable = false;
+  bool _showingSavedList = false;
+
+  bool get _canEdit =>
+      !BriskersConnectionModeController.instance.forceOffline &&
+      options != null && error == null;
+
+  // A business alone is not enough to isolate an offline financial snapshot.
+  // Never read another signed-in user's recurring instructions from this phone.
+  String? get _cacheKey {
+    final userId = networkSupabase.auth.currentUser?.id;
+    if (userId == null || userId.isEmpty) return null;
+    return 'briskers_recurring_management_v1_${userId}_${widget.businessId}';
+  }
+
+  Future<List<Map<String, dynamic>>?> _readSavedList() async {
+    final key = _cacheKey;
+    if (key == null) return null;
+    try {
+      final raw = (await SharedPreferences.getInstance()).getString(key);
+      if (raw == null) return null; // No snapshot is not an empty server list.
+      return (jsonDecode(raw) as List)
+          .whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _saveList(List<Map<String, dynamic>> snapshot) async {
+    final key = _cacheKey;
+    if (key == null) return;
+    try {
+      await (await SharedPreferences.getInstance())
+          .setString(key, jsonEncode(snapshot));
+    } catch (_) {
+      // A cache failure must not hide a successfully fetched live list.
+    }
+  }
 
   @override
   void initState() {
@@ -1610,28 +1783,50 @@ class _RecurringTransactionsScreenState
   }
 
   Future<void> _load() async {
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      // Do not start the API requests at all in Force Offline.
+      final saved = await _readSavedList();
+      if (!mounted) return;
+      setState(() {
+        rows = saved ?? <Map<String, dynamic>>[];
+        options = null; // Recurrence edits are server-authoritative.
+        error = null;
+        _offlineUnavailable = saved == null;
+        _showingSavedList = saved != null;
+      });
+      return;
+    }
+
     try {
       final results = await Future.wait<dynamic>([
         _api.recurringTransactions(widget.businessId),
         _api.transactionOptions(widget.businessId),
       ]);
+      final current = List<Map<String, dynamic>>.from(results[0] as List);
       if (!mounted) return;
       setState(() {
-        rows = List<Map<String, dynamic>>.from(results[0] as List);
+        rows = current;
         options = Map<String, dynamic>.from(results[1] as Map);
         error = null;
+        _offlineUnavailable = false;
+        _showingSavedList = false;
       });
-    } catch (e) {
+      await _saveList(current);
+    } catch (_) {
+      final saved = await _readSavedList();
       if (!mounted) return;
       setState(() {
-        rows = const [];
-        options = <String, dynamic>{};
-        error = e.toString();
+        rows = saved ?? <Map<String, dynamic>>[];
+        options = null;
+        _offlineUnavailable = saved == null;
+        _showingSavedList = saved != null;
+        error = 'Could not refresh recurring transactions. Connect and retry.';
       });
     }
   }
 
   Future<void> _edit([Map<String, dynamic>? row]) async {
+    if (!_canEdit) return;
     final changed = await showDialog<bool>(
       context: context,
       builder: (_) => _RecurringDialog(
@@ -1644,6 +1839,7 @@ class _RecurringTransactionsScreenState
   }
 
   Future<void> _stop(Map<String, dynamic> row) async {
+    if (!_canEdit) return;
     await _api.stopRecurringTransaction(
       widget.businessId,
       row['id'].toString(),
@@ -1671,7 +1867,7 @@ class _RecurringTransactionsScreenState
     return Scaffold(
       appBar: AppBar(title: const Text('Recurring transactions')),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: options == null ? null : () => _edit(),
+        onPressed: _canEdit ? () => _edit() : null,
         backgroundColor: BriskersColors.expenses,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add),
@@ -1688,18 +1884,40 @@ class _RecurringTransactionsScreenState
                     'This is only a filtered management list. Turning repeating off does not move or delete any transaction already created.',
                   ),
                   const SizedBox(height: 10),
-                  if (error != null)
+                  if (_showingSavedList)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Text(
+                          'Saved recurring transactions (read-only). '
+                          'Reconnect to refresh or change the schedule.',
+                        ),
+                      ),
+                    ),
+                  if (_offlineUnavailable)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(18),
+                        child: Text(
+                          'Recurring transactions unavailable offline. '
+                          'Connect once to load and save the list.',
+                        ),
+                      ),
+                    ),
+                  if (error != null && !_offlineUnavailable)
                     Text(
                       error!,
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.error,
                       ),
                     ),
-                  if (rows!.isEmpty)
+                  if (rows!.isEmpty && !_offlineUnavailable && error == null)
                     const Card(
                       child: Padding(
                         padding: EdgeInsets.all(18),
-                        child: Text('No transactions are currently repeating.'),
+                        child: Text(
+                          'No recurring transactions in the available list.',
+                        ),
                       ),
                     )
                   else
@@ -1738,7 +1956,8 @@ class _RecurringTransactionsScreenState
                                   fontWeight: FontWeight.w800,
                                 ),
                               ),
-                              PopupMenuButton<String>(
+                              if (_canEdit)
+                                PopupMenuButton<String>(
                                 onSelected: (value) {
                                   if (value == 'edit') _edit(row);
                                   if (value == 'stop') _stop(row);
@@ -1756,7 +1975,7 @@ class _RecurringTransactionsScreenState
                               ),
                             ],
                           ),
-                          onTap: () => _edit(row),
+                          onTap: _canEdit ? () => _edit(row) : null,
                         ),
                       );
                     }),

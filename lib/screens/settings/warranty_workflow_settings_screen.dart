@@ -99,15 +99,22 @@ class _WarrantyWorkflowSettingsScreenState
     final save = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
+      useSafeArea: true,
       isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) => SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: MediaQuery.sizeOf(sheetContext).height * 0.65,
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.91,
+            ),
           child: SingleChildScrollView(
             padding: EdgeInsets.fromLTRB(
-              16,
-              0,
-              16,
-              MediaQuery.viewInsetsOf(sheetContext).bottom + 18,
+              20,
+              12,
+              20,
+              MediaQuery.viewInsetsOf(sheetContext).bottom + 26,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -193,6 +200,7 @@ class _WarrantyWorkflowSettingsScreenState
                 ),
               ],
             ),
+          ),
           ),
         ),
       ),

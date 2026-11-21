@@ -1,0 +1,518 @@
+import 'dart:io';
+import 'dart:convert';
+
+import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/services/local_job_deletion_v3.dart';
+import 'package:briskers_app/services/local_job_graph_delete.dart';
+import 'package:briskers_app/services/local_owner_authorization.dart';
+import 'package:drift/drift.dart' show Variable;
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+const _syntheticOwnerDeleteBuild = bool.fromEnvironment(
+  'BRISKERS_SYNTHETIC_BUILD', defaultValue: false);
+
+const business = '10000000-0000-4000-8000-000000000001';
+const job = '10000000-0000-4000-8000-000000000002';
+const invoice = '10000000-0000-4000-8000-000000000003';
+const otherJob = '10000000-0000-4000-8000-000000000004';
+const actor = '10000000-0000-4000-8000-000000000005';
+
+class _OwnerStore implements OwnerEnrollmentStore {
+  String? record;
+  @override
+  Future<String?> read() async => record;
+  @override
+  Future<void> write(String value) async { record = value; }
+  @override
+  Future<void> clear() async { record = null; }
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  late BriskersLocalDatabase db;
+  late LocalJobGraphDelete deletion;
+
+  setUp(() async {
+    db = BriskersLocalDatabase(NativeDatabase.memory());
+    deletion = LocalJobGraphDelete.forTesting(db,
+      ownerIdentityProvider: () => {
+        'actor_id': actor, 'business_id': business, 'role_code': 'owner',
+      });
+    await db.customStatement(
+      "INSERT INTO local_jobs (id,business_id,access_scope,title,status,sync_state) "
+      "VALUES (?,?,'full','Synced repair','open','synced')",
+      [job, business],
+    );
+    await db.customStatement(
+      "INSERT INTO local_jobs (id,business_id,access_scope,title,status,sync_state) "
+      "VALUES (?,?,'full','Unrelated repair','open','synced')",
+      [otherJob, business],
+    );
+    await db.customStatement(
+      "INSERT INTO local_documents (id,business_id,job_id,kind,document_number,sync_state) "
+      "VALUES (?,?,?,'invoice','6345','synced')",
+      [invoice, business, job],
+    );
+  });
+  tearDown(() async => db.close());
+
+  Future<int> count(String table) async =>
+    (await db.customSelect('SELECT COUNT(*) AS n FROM $table').getSingle())
+      .read<int>('n');
+
+  test('production default must reject an Owner without verified enrollment', () async {
+    final unauthenticated = LocalJobGraphDelete(db);
+    await expectLater(
+      unauthenticated.preview(businessId: business, jobId: job, actorId: actor),
+      throwsStateError,
+    );
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+  });
+
+  test('Owner grant cannot authorize deletion of a synchronized unpaid Job', () async {
+    const identity = OwnerSessionIdentity(actor, 'verified-session');
+    final authorization = LocalOwnerAuthorization(
+      store: _OwnerStore(), currentIdentity: () => identity,
+      verifyOwner: (business) async => VerifiedOwnerEnrollment(identity, business),
+      authenticateDevice: () async => true,
+    );
+    await authorization.enroll(business);
+    final engine = LocalJobGraphDelete(db,
+      ownerGrant: await authorization.unlock(business));
+    await expectLater(engine.preview(
+      businessId: business, jobId: job, actorId: actor), throwsStateError);
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  for (final scenario in ['synced document', 'server timestamp', 'unknown state']) {
+    test('production protects $scenario despite pending Job and Owner unlock', () async {
+      await db.customStatement(
+        "UPDATE local_jobs SET sync_state='pending' WHERE id=?", [job]);
+      if (scenario != 'synced document') {
+        await db.customStatement(
+          "UPDATE local_documents SET sync_state='pending' WHERE id=?", [invoice]);
+      }
+      if (scenario == 'server timestamp') {
+        await db.customStatement(
+          'UPDATE local_documents SET server_updated_at=123 WHERE id=?', [invoice]);
+      }
+      if (scenario == 'unknown state') {
+        await db.customStatement(
+          "UPDATE local_jobs SET sync_state='unknown' WHERE id=?", [job]);
+      }
+      const identity = OwnerSessionIdentity(actor, 'verified-session');
+      final authorization = LocalOwnerAuthorization(
+        store: _OwnerStore(), currentIdentity: () => identity,
+        verifyOwner: (business) async => VerifiedOwnerEnrollment(identity, business),
+        authenticateDevice: () async => true,
+      );
+      await authorization.enroll(business);
+      final engine = LocalJobGraphDelete(db,
+        ownerGrant: await authorization.unlock(business));
+      await expectLater(engine.preview(
+        businessId: business, jobId: job, actorId: actor), throwsStateError);
+      expect(await count('local_jobs'), 2);
+      expect(await count('local_documents'), 1);
+      expect(await count('local_offline_job_purge_entities'), 0);
+    });
+  }
+
+  test('publication after preview blocks commit without deleting records', () async {
+    await db.customStatement(
+      "UPDATE local_jobs SET sync_state='pending' WHERE id=?", [job]);
+    await db.customStatement(
+      "UPDATE local_documents SET sync_state='pending' WHERE id=?", [invoice]);
+    const identity = OwnerSessionIdentity(actor, 'verified-session');
+    final authorization = LocalOwnerAuthorization(
+      store: _OwnerStore(), currentIdentity: () => identity,
+      verifyOwner: (business) async => VerifiedOwnerEnrollment(identity, business),
+      authenticateDevice: () async => true,
+    );
+    await authorization.enroll(business);
+    final engine = LocalJobGraphDelete(db,
+      ownerGrant: await authorization.unlock(business));
+    final reviewed = await engine.preview(
+      businessId: business, jobId: job, actorId: actor);
+    await db.customStatement(
+      "UPDATE local_documents SET sync_state='synced' WHERE id=?", [invoice]);
+    await expectLater(engine.confirm(businessId: business, jobId: job,
+      actorId: actor, reviewed: reviewed), throwsStateError);
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+    expect(await count('local_owner_delete_journal'), 0);
+  });
+
+  test('revoked protected grant rolls back data and markers during deletion', () async {
+    await db.customStatement(
+      "UPDATE local_jobs SET sync_state='pending' WHERE id=?", [job]);
+    await db.customStatement(
+      "UPDATE local_documents SET sync_state='pending' WHERE id=?", [invoice]);
+    const identity = OwnerSessionIdentity(actor, 'verified-session');
+    var insideConfirmation = false;
+    var checks = 0;
+    final authorization = LocalOwnerAuthorization(
+      store: _OwnerStore(), currentIdentity: () {
+        if (insideConfirmation && ++checks >= 4) return null;
+        return identity;
+      },
+      verifyOwner: (business) async => VerifiedOwnerEnrollment(identity, business),
+      authenticateDevice: () async => true,
+    );
+    await authorization.enroll(business);
+    final engine = LocalJobGraphDelete(db,
+      ownerGrant: await authorization.unlock(business));
+    final reviewed = await engine.preview(
+      businessId: business, jobId: job, actorId: actor);
+    insideConfirmation = true;
+    await expectLater(engine.confirm(businessId: business, jobId: job,
+      actorId: actor, reviewed: reviewed), throwsStateError);
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  test('Owner account change during preview does not disclose its inventory', () async {
+    var checks = 0;
+    final engine = LocalJobGraphDelete.forTesting(db,
+      ownerIdentityProvider: () => ++checks < 3
+        ? {'actor_id': actor, 'business_id': business, 'role_code': 'owner'}
+        : null);
+    await expectLater(engine.preview(
+      businessId: business, jobId: job, actorId: actor), throwsStateError);
+    expect(await count('local_jobs'), 2);
+  });
+
+  test('paid synced Job without cached receipts is protected', () async {
+    await db.customStatement(
+      "UPDATE local_jobs SET payment_state='paid' "
+      "WHERE business_id=? AND id=?", [business, job],
+    );
+    await expectLater(
+      deletion.preview(businessId: business, jobId: job, actorId: actor),
+      throwsStateError,
+    );
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  test('unrecognized linked document cannot be orphaned by deletion', () async {
+    await db.customStatement(
+      "INSERT INTO local_documents "
+      "(id,business_id,job_id,kind,document_number,sync_state) "
+      "VALUES ('test-credit',?,?,'credit_note','TEST-CREDIT','synced')",
+      [business, job],
+    );
+    await expectLater(
+      deletion.preview(businessId: business, jobId: job, actorId: actor),
+      throwsStateError,
+    );
+    expect(await count('local_documents'), 2);
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  test('converted estimate requires review before parent deletion', () async {
+    await db.customStatement(
+      "UPDATE local_documents SET kind='estimate', converted=1 "
+      "WHERE business_id=? AND id=?", [business, invoice],
+    );
+    await expectLater(
+      deletion.preview(businessId: business, jobId: job, actorId: actor),
+      throwsStateError,
+    );
+    expect(await count('local_documents'), 1);
+    expect(await count('local_jobs'), 2);
+  });
+
+  test('issued invoice without cached receipts cannot be silently deleted', () async {
+    await db.customStatement(
+      "UPDATE local_documents SET status='issued' "
+      "WHERE business_id=? AND id=?", [business, invoice],
+    );
+    await expectLater(
+      deletion.preview(businessId: business, jobId: job, actorId: actor),
+      throwsStateError,
+    );
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  test('genuine queued payment cannot be silently discarded', () async {
+    await db.customStatement(
+      "INSERT INTO sync_outbox "
+      "(business_id,entity_type,entity_id,operation,payload_json) "
+      "VALUES (?,'invoice_payment_received',?,'record_received_payment',?)",
+      [business, invoice,
+        '{"invoice_id":"$invoice","amount_cents":20000,"method_name":"Cash"}'],
+    );
+    await expectLater(
+      deletion.preview(businessId: business, jobId: job, actorId: actor),
+      throwsStateError,
+    );
+    expect(await count('sync_outbox'), 1);
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+  }, skip: _syntheticOwnerDeleteBuild);
+
+  test('previously synced job deletes offline and records durable markers', () async {
+    final review = await deletion.preview(businessId: business, jobId: job, actorId: actor);
+    expect(review.map((e) => e['kind']), containsAll(['job', 'invoice']));
+    await deletion.confirm(businessId: business, jobId: job, actorId: actor, reviewed: review);
+    expect(await count('local_jobs'), 1);
+    expect(await count('local_documents'), 0);
+    expect(await LocalJobDeletionV3.blockedJobIds(db, business), contains(job));
+    expect(await LocalJobDeletionV3.blockedDocumentIds(db, business), contains(invoice));
+    expect(await count('sync_outbox'), 0);
+  });
+
+  test('deletion records one identity-only reconciliation operation atomically', () async {
+    final review = await deletion.preview(businessId: business, jobId: job, actorId: actor);
+    await deletion.confirm(businessId: business, jobId: job, actorId: actor, reviewed: review);
+    final journal = (await db.customSelect('SELECT * FROM local_owner_delete_journal').getSingle()).data;
+    expect(journal['actor_id'], actor);
+    expect(journal['business_id'], business);
+    expect(journal['job_id'], job);
+    expect(journal['state'], 'awaiting_backend');
+    final identities = jsonDecode(journal['entities_json'] as String) as List;
+    expect(identities, hasLength(2));
+    expect(identities.every((row) => (row as Map).keys.toSet().difference(
+      {'entity_kind', 'entity_id'}).isEmpty), isTrue);
+    final markerOperations = await db.customSelect(
+      'SELECT DISTINCT operation_id FROM local_offline_job_purge_entities').get();
+    expect(markerOperations.single.read<String>('operation_id'), journal['operation_id']);
+    await expectLater(deletion.confirm(businessId: business, jobId: job,
+      actorId: actor, reviewed: review), throwsStateError);
+    expect(await count('local_owner_delete_journal'), 1);
+  });
+
+  test('failure after journal insert rolls back journal, markers, and records', () async {
+    final review = await deletion.preview(businessId: business, jobId: job, actorId: actor);
+    await db.customStatement("CREATE TRIGGER injected_delete_failure BEFORE DELETE ON local_documents "
+      "BEGIN SELECT RAISE(ABORT, 'synthetic rollback test'); END");
+    await expectLater(deletion.confirm(businessId: business, jobId: job,
+      actorId: actor, reviewed: review), throwsA(anything));
+    expect(await count('local_owner_delete_journal'), 0);
+    expect(await count('local_offline_job_purge_entities'), 0);
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+  });
+
+  test('deleted local identifiers remain fenced after app database restart', () async {
+    final directory = await Directory.systemTemp.createTemp('briskers-purge-');
+    final file = File('${directory.path}/briskers.sqlite');
+    BriskersLocalDatabase? first;
+    BriskersLocalDatabase? reopened;
+    try {
+      first = BriskersLocalDatabase(NativeDatabase(file));
+      await first.customStatement(
+        "INSERT INTO local_jobs (id,business_id,access_scope,title,status,sync_state) "
+        "VALUES (?,?,'full','Restart sample','open','synced')",
+        [job, business],
+      );
+      await first.customStatement(
+        "INSERT INTO local_documents (id,business_id,job_id,kind,document_number,sync_state) "
+        "VALUES (?,?,?,'invoice','TEST-8001','synced')",
+        [invoice, business, job],
+      );
+      final engine = LocalJobGraphDelete.forTesting(first, ownerIdentityProvider: () => {
+        'actor_id': actor, 'business_id': business, 'role_code': 'owner',
+      });
+      final reviewed = await engine.preview(
+        businessId: business, jobId: job, actorId: actor,
+      );
+      await engine.confirm(
+        businessId: business, jobId: job,
+        actorId: actor, reviewed: reviewed,
+      );
+      await first.close();
+      first = null;
+
+      reopened = BriskersLocalDatabase(NativeDatabase(file));
+      final persistedJournal = await reopened.customSelect(
+          'SELECT actor_id,state FROM local_owner_delete_journal').getSingle();
+      expect(persistedJournal.read<String>('actor_id'), actor);
+      expect(persistedJournal.read<String>('state'), 'awaiting_backend');
+      expect(await LocalJobDeletionV3.blockedJobIds(reopened, business),
+          contains(job));
+      expect(await LocalJobDeletionV3.blockedDocumentIds(reopened, business),
+          contains(invoice));
+      final rows = await reopened.customSelect(
+          'SELECT COUNT(*) AS n FROM local_jobs WHERE business_id=? AND id=?',
+          variables: [const Variable<String>(business), const Variable<String>(job)]).getSingle();
+      expect(rows.read<int>('n'), 0);
+    } finally {
+      if (first != null) await first.close();
+      if (reopened != null) await reopened.close();
+      await directory.delete(recursive: true);
+    }
+  });
+
+  test('repeat delete cannot silently reassign a removed job identity', () async {
+    final reviewed = await deletion.preview(
+      businessId: business, jobId: job, actorId: actor);
+    await deletion.confirm(
+      businessId: business, jobId: job, actorId: actor, reviewed: reviewed);
+    await expectLater(deletion.confirm(
+      businessId: business, jobId: job, actorId: actor, reviewed: reviewed),
+      throwsStateError);
+    expect(await LocalJobDeletionV3.blockedJobIds(db, business), contains(job));
+    expect(await count('local_jobs'), 1);
+  });
+
+  test('reviewed inventory change rolls back without deleting anything', () async {
+    final review = await deletion.preview(businessId: business, jobId: job, actorId: actor);
+    await db.customStatement(
+      "INSERT INTO local_job_visits (id,business_id,job_id,visit_number,sync_state) "
+      "VALUES ('visit-new',?,?,1,'synced')",
+      [business, job],
+    );
+    await expectLater(deletion.confirm(
+      businessId: business, jobId: job, actorId: actor, reviewed: review), throwsStateError);
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  for (final change in <String, String>{
+    'invoice amount': 'UPDATE local_documents SET total=125 WHERE id=?',
+    'invoice revision': 'UPDATE local_documents SET row_version=2 WHERE id=?',
+    'invoice customer': "UPDATE local_documents SET customer_id='another-customer' WHERE id=?",
+  }.entries) {
+    test('${change.key} change invalidates confirmation without removing data', () async {
+      final reviewed = await deletion.preview(
+        businessId: business, jobId: job, actorId: actor);
+      await db.customStatement(change.value, [invoice]);
+      await expectLater(deletion.confirm(
+        businessId: business, jobId: job, actorId: actor, reviewed: reviewed),
+        throwsStateError);
+      expect(await count('local_jobs'), 2);
+      expect(await count('local_documents'), 1);
+      expect(await count('local_offline_job_purge_entities'), 0);
+    });
+  }
+
+  test('confirmation without a row snapshot fails closed', () async {
+    final reviewed = await deletion.preview(
+      businessId: business, jobId: job, actorId: actor);
+    for (final row in reviewed) {
+      row.remove('snapshot');
+    }
+    await expectLater(deletion.confirm(
+      businessId: business, jobId: job, actorId: actor, reviewed: reviewed),
+      throwsStateError);
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  test('Owner identity change before commit rolls back rows and markers', () async {
+    final reviewed = await deletion.preview(
+      businessId: business, jobId: job, actorId: actor);
+    var checks = 0;
+    final switchingOwner = LocalJobGraphDelete.forTesting(db, ownerIdentityProvider: () {
+      checks++;
+      return checks < 4
+          ? {'actor_id': actor, 'business_id': business, 'role_code': 'owner'}
+          : null;
+    });
+    await expectLater(
+      switchingOwner.confirm(businessId: business, jobId: job,
+          actorId: actor, reviewed: reviewed),
+      throwsStateError,
+    );
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  test('different business Owner cannot preview a synced job', () async {
+    final wrongOwner = LocalJobGraphDelete.forTesting(db,
+      ownerIdentityProvider: () => {
+        'actor_id': actor,
+        'business_id': otherJob,
+        'role_code': 'owner',
+      });
+    await expectLater(wrongOwner.preview(
+      businessId: business, jobId: job, actorId: actor), throwsStateError);
+    expect(await count('local_jobs'), 2);
+  });
+
+  test('TEST-only simulated payment and audit delete atomically', () async {
+    await db.customStatement(
+      "INSERT INTO sync_outbox "
+      "(business_id,entity_type,entity_id,operation,payload_json) "
+      "VALUES (?,'invoice_payment_received',?,'record_received_payment',?)",
+      [business, invoice,
+        '{"synthetic_test_only":true,"invoice_id":"$invoice",'
+        '"operation_id":"10000000-0000-4000-8000-000000000088",'
+        '"amount_cents":20000,"method_name":"TEST cash"}'],
+    );
+    await db.customStatement(
+      'INSERT INTO local_financial_cache '
+      '(business_id,cache_key,payload_json) VALUES (?,?,?)',
+      [business, 'synthetic_payment_audit:$job',
+        '{"synthetic_test_only":true,"job_id":"$job",'
+        '"invoice_id":"$invoice","action":"fake edit"}'],
+    );
+    final reviewed = await deletion.preview(
+      businessId: business, jobId: job, actorId: actor);
+    expect(reviewed.map((r) => r['kind']),
+      containsAll(['job', 'invoice', 'payment', 'payment_edit_audit']));
+    await deletion.confirm(
+      businessId: business, jobId: job, actorId: actor, reviewed: reviewed);
+    expect(await count('sync_outbox'), 0);
+    expect(await count('local_financial_cache'), 0);
+    expect(await count('local_documents'), 0);
+    expect(await count('local_jobs'), 1);
+  }, skip: !_syntheticOwnerDeleteBuild);
+
+  test('linked financial payment cache blocks partial deletion', () async {
+    await db.customStatement(
+      'INSERT INTO local_financial_cache '
+      '(business_id,cache_key,payload_json) VALUES (?,?,?)',
+      [business, 'payments:invoice', '{"invoice_id":"$invoice","payments":[{"amount":3000}]}'],
+    );
+    await expectLater(
+      deletion.preview(businessId: business, jobId: job, actorId: actor),
+      throwsStateError,
+    );
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  test('unrelated financial cache is preserved after local deletion', () async {
+    await db.customStatement(
+      'INSERT INTO local_financial_cache '
+      '(business_id,cache_key,payload_json) VALUES (?,?,?)',
+      [business, 'payments:other', '{"job_id":"$otherJob","amount":125}'],
+    );
+    final reviewed = await deletion.preview(
+      businessId: business, jobId: job, actorId: actor);
+    await deletion.confirm(businessId: business, jobId: job,
+      actorId: actor, reviewed: reviewed);
+    expect(await count('local_jobs'), 1);
+    expect(await count('local_financial_cache'), 1);
+  });
+
+  test('rejects linked queued edits without erasing any rows', () async {
+    await db.customStatement(
+      "INSERT INTO sync_outbox (business_id,entity_type,entity_id,operation,payload_json) "
+      "VALUES (?,'work_summary',?,'update',?)",
+      [business, job, '{"job_id":"$job"}'],
+    );
+    await expectLater(
+      deletion.preview(businessId: business, jobId: job, actorId: actor),
+      throwsStateError,
+    );
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+  });
+}
