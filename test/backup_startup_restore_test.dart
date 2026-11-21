@@ -618,19 +618,14 @@ void main() {
       db.close();
       final uri = payload['source_uri'] as String;
       expect(Uri.parse(uri).scheme, 'file');
-      var reads = 0;
       final bytes = await ExpenseIqLocalPhotoSync(database: database)
           .readOriginalPhoto(
             'shop',
             'receipt-transaction',
             {'filename': 'receipt.jpg', 'source_uri': uri},
-            reader: (value) async {
-              reads++;
-              return File.fromUri(Uri.parse(value)).readAsBytes();
-            },
+            reader: (_) async => throw StateError('External folder permission is unavailable'),
           );
       expect(bytes, [255, 216, 255, 219, 1]);
-      expect(reads, 1);
     },
   );
   Future<void> copyFolder(Directory from, Directory to) async {
