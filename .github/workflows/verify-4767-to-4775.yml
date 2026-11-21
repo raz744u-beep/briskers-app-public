@@ -1,0 +1,101 @@
+name: Verify signed Android upgrade from 4767 to 4775
+
+on:
+  push:
+    branches: [verify/backup-4767-to-4775]
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CI: 'true'
+  FLUTTER_SUPPRESS_ANALYTICS: 'true'
+  DASH__SUPPRESS_ANALYTICS: 'true'
+
+jobs:
+  exact-apk-upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download signed build 4767
+        uses: actions/download-artifact@v4
+        with:
+          name: briskers-android-debug
+          run-id: 44792853657
+          github-token: ${{ github.token }}
+          path: signed-4767
+
+      - name: Download signed build 4775
+        uses: actions/download-artifact@v4
+        with:
+          name: briskers-android-debug
+          run-id: 44955578482
+          github-token: ${{ github.token }}
+          path: signed-4775
+
+      - name: Verify the exact APKs
+        run: |
+          set -euo pipefail
+          for build in 4767 4775; do
+            archive=$(find "signed-$build" -name "Briskers-v0.10.9-b$build.apk" -print -quit)
+            test -n "$archive"
+            if [[ "$archive" != "signed-$build/Briskers-v0.10.9-b$build.apk" ]]; then
+              cp "$archive" "signed-$build/Briskers-v0.10.9-b$build.apk"
+            fi
+          done
+          sha256sum -c <<'SHA256'
+          20b656a668f76d8ed2a32b7dad41ac89f3a8d66a9e9ea9fed1dbc6aa3db4e245  signed-4767/Briskers-v0.10.9-b4767.apk
+          b61ba42f9de2ab96f1ad286f169d40953e19dc0ce8168341897745a87edbdbd7  signed-4775/Briskers-v0.10.9-b4775.apk
+          SHA256
+
+      - name: Install Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.9'
+          channel: stable
+          cache: true
+
+      - name: Generate synthetic records from the exact 4767 source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --depth=1 origin ada91c4f346b4d833f15e2f1f821d62e943b3080
+          mkdir upgrade-source
+          git archive ada91c4f346b4d833f15e2f1f821d62e943b3080 lib assets pubspec.yaml pubspec.lock analysis_options.yaml | tar -x -C upgrade-source
+          cd upgrade-source
+          mkdir test
+          cp ../test/release_upgrade_fixture_test.dart test/
+          flutter pub get
+          bash "$GITHUB_WORKSPACE/tools/ci_sqlite_assets.sh"
+          dart run build_runner build --delete-conflicting-outputs
+          BRISKERS_UPGRADE_FIXTURE="$GITHUB_WORKSPACE/upgrade-fixture/shop.sqlite" flutter test test/release_upgrade_fixture_test.dart --reporter expanded
+
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Test direct install-over and restart with Force Offline
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          BRISKERS_UPGRADE_FIXTURE: ${{ github.workspace }}/upgrade-fixture/shop.sqlite
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          script: bash tools/verify_payroll_bootstrap_install.sh signed-4767/Briskers-v0.10.9-b4767.apk signed-4775/Briskers-v0.10.9-b4775.apk
+
+      - name: Save synthetic upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: briskers-4767-to-4775-offline-upgrade
+          path: generated/build/app/outputs/flutter-apk/upgrade-evidence/
+          if-no-files-found: warn
+          retention-days: 14
