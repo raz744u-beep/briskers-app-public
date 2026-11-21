@@ -18,6 +18,22 @@ import 'restored_attachment_lookup.dart';
 class LocalBackupService {
   static const channel = MethodChannel('com.briskers/backup');
   static final progress = ValueNotifier<String>('');
+  static final transferProgress = ValueNotifier<Map<String, dynamic>?>(null);
+  static void listenForTransferProgress() {
+    channel.setMethodCallHandler((call) async {
+      if (call.method != 'backupProgress') return;
+      final data = Map<String, dynamic>.from(call.arguments as Map);
+      transferProgress.value = data;
+      final copied = data['copied'] as int? ?? 0;
+      final total = data['total'] as int? ?? 0;
+      final bytes = data['bytes'] as int? ?? 0;
+      final verified = data['verified'] as int? ?? 0;
+      final operation = data['operation'] as String? ?? 'Documents';
+      progress.value = '$operation — Copying $copied of $total files; '
+          '${(bytes / 1048576).toStringAsFixed(1)} MB transferred, '
+          '${(verified / 1048576).toStringAsFixed(1)} MB verified';
+    });
+  }
   static bool _busy = false;
   static const rootKey = 'briskers_backup_tree_v1';
   static const statusKey = 'briskers_backup_status_v1';
@@ -60,6 +76,8 @@ class LocalBackupService {
     await authorize(businessId);
     if (_busy) throw StateError('A backup or restore is already running');
     _busy = true;
+    transferProgress.value = null;
+    listenForTransferProgress();
     Directory? scratch;
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -245,6 +263,8 @@ class LocalBackupService {
     final tree = await chooseFolder();
     if (tree == null) return null;
     _busy = true;
+    transferProgress.value = null;
+    listenForTransferProgress();
     Directory? container;
     try {
       final root = await getApplicationSupportDirectory();
