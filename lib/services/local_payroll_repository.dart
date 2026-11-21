@@ -985,11 +985,15 @@ class LocalPayrollRepository {
   }
 
   /// A narrow compatibility exception for older, *untagged* partial receipts.
-  /// Never infer work completion or authorize historical/fully paid edits from
-  /// the mere presence of a payment. The saved receipt remains immutable.
+  /// Recorded earned minutes may already be paid even when the planned work
+  /// remains unfinished. Require the underlying portion to remain In Progress,
+  /// incomplete and partially planned; historical/settled work stays locked.
+  /// This grants only a plan change, never paid-time or receipt mutation.
   static bool _olderPartialPlanOnly(Map<String, dynamic> row, int paid, int remaining) =>
       row['state'] == 'In Progress' && paid > 0 && remaining > 0 &&
-      row['actual_minutes'] == 0 && row['recorded_actual_minutes'] == 0 &&
+      ((row['actual_minutes'] == 0 && row['recorded_actual_minutes'] == 0) ||
+       (row['actual_minutes'] == paid && row['recorded_actual_minutes'] == paid &&
+        row['completed_date'] == null)) &&
       row['credit_completed'] != 1 && row['paid_operation_id'] == null &&
       row['owner_prior_paid'] != 1 && row['archived_labor'] != 1 &&
       row['assignment_conflict'] != 1 && row['source_active'] != 0;
@@ -1027,8 +1031,9 @@ class LocalPayrollRepository {
     );
     final paid = coverage.fold<int>(0, (sum, c) => sum + (c['minutes'] as int));
     // Some older legitimate partial receipts predate in_progress_payment.
-    // They permit ONLY plan changes when the allocation is still active,
-    // unfinished, unpaid in part, and has no recorded earned/completed time.
+    // They permit ONLY plan changes when the allocation remains active and
+    // unfinished, including recorded hours already paid. Earned time and
+    // immutable payment evidence remain untouched.
     // Explicit false metadata, historical settlements and malformed receipts
     // remain blocked. Every coverage record must meet the same evidence rule.
     final olderPartial = _olderPartialPlanOnly(
@@ -2006,13 +2011,18 @@ class LocalPayrollRepository {
       final olderPartial = _olderPartialPlanOnly(row, paid, remaining);
       final allReceiptsAllowEdit =
           _allReceiptsAllowPlanEdit(row['all_coverage_snapshots'], olderPartial);
+      // VerifiedPaidLabor treats actual == covered as evidence of settlement.
+      // For a still-active, incomplete, partially planned portion this can be
+      // only a progress payment. Do not project it Done when every receipt
+      // passes the narrow plan-only guard; retain the raw status instead.
+      final activePaidProgress = olderPartial && allReceiptsAllowEdit;
       // Do not expose the aggregated raw receipt snapshots to UI consumers.
       final visibleRow = Map<String, dynamic>.of(row)
         ..remove('all_coverage_snapshots');
       return {
         ...LocalPayrollTaskIdentity.project(visibleRow, taskAliases),
         if(rate==0 && paymentRate>0) 'payment_rate_cents':paymentRate,
-        if(verifiedPaid.contains(row['id']) || row['archived_labor']==1) 'state':'Done',
+        if((verifiedPaid.contains(row['id']) && !activePaidProgress) || row['archived_labor']==1) 'state':'Done',
         if(row['archived_labor']==1 && notes[row['id']]!=null) ...{
           'employee_id':notes[row['id']]!['employee_id'],
           'employee_name':notes[row['id']]!['employee_name'],
@@ -2021,7 +2031,8 @@ class LocalPayrollRepository {
         },
         'hours_hundredths': (total * 100 + 30) ~/ 60,
         'paid_minutes': paid,
-        'can_edit_planned_hours': row['state']=='In Progress' && row['paid_operation_id']==null && row['credit_completed']!=1 && !verifiedPaid.contains(row['id']) &&
+        'can_edit_planned_hours': row['state']=='In Progress' && row['paid_operation_id']==null && row['credit_completed']!=1 &&
+            (!verifiedPaid.contains(row['id']) || activePaidProgress) &&
             !ownerPriorPaid && row['archived_labor']!=1 && row['assignment_conflict']!=1 &&
             row['source_active']!=0 && allReceiptsAllowEdit,
         'paid_cents': ownerPriorPaid ? ((total * rate + 30) ~/ 60) : row['paid_cents'],
