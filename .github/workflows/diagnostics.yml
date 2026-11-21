@@ -87,6 +87,13 @@ jobs:
       - name: Verify indexed estimate conversion reads
         run: python3 tools/tests/test_estimate_projection_query.py
 
+      - name: Verify backup folder bridge integration
+        run: python3 tools/tests/test_backup_bridge.py
+
+      - name: Verify offline backup, progress, and isolated restore
+        working-directory: generated
+        run: flutter test --reporter expanded test/backup_archive_test.dart test/backup_progress_test.dart test/backup_startup_restore_test.dart
+
       - name: Analyze Dart
         working-directory: generated
         run: flutter analyze

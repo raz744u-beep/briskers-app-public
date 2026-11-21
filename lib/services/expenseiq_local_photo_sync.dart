@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/services.dart' show MethodChannel;
 import 'package:drift/drift.dart' show Variable;
@@ -133,9 +134,11 @@ class ExpenseIqLocalPhotoSync {
       VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?)
       ON CONFLICT(business_id, transaction_id) DO UPDATE SET
         photo_id=excluded.photo_id,
-        filename=CASE WHEN excluded.source_uri IS NOT NULL
+        filename=CASE WHEN $_table.photo_id=excluded.photo_id AND $_table.source_uri LIKE 'file:%'
+                      THEN $_table.filename WHEN excluded.source_uri IS NOT NULL
                       THEN excluded.filename ELSE $_table.filename END,
-        source_uri=coalesce(excluded.source_uri, $_table.source_uri),
+        source_uri=CASE WHEN $_table.photo_id=excluded.photo_id AND $_table.source_uri LIKE 'file:%'
+                        THEN $_table.source_uri ELSE coalesce(excluded.source_uri, $_table.source_uri) END,
         state=CASE
           WHEN $_table.state='uploaded' THEN 'uploaded'
           WHEN coalesce(excluded.source_uri,$_table.source_uri) IS NULL
@@ -266,6 +269,15 @@ class ExpenseIqLocalPhotoSync {
     }
   }
 
+  Future<Uint8List> _readSource(
+    String uri,
+    Future<Uint8List> Function(String) readExternal,
+  ) {
+    final parsed = Uri.tryParse(uri);
+    if (parsed?.scheme == 'file') return File.fromUri(parsed!).readAsBytes();
+    return readExternal(uri);
+  }
+
   Future<Uint8List> readOriginalPhoto(
     String business, String transaction, Map<String, dynamic> photo, {
     Future<Uint8List> Function(String)? reader,
@@ -278,7 +290,7 @@ class ExpenseIqLocalPhotoSync {
     final uri = photo['source_uri']?.toString() ?? '';
     if (uri.isNotEmpty) {
       try {
-        final bytes = await read(uri);
+        final bytes = await _readSource(uri, read);
         if (bytes.isNotEmpty) return bytes;
       } catch (_) {
         // Old per-file URIs may reference a revoked tree grant. Resolve the
@@ -456,7 +468,7 @@ class ExpenseIqLocalPhotoSync {
       try {
         final uri = row['source_uri']?.toString() ?? '';
         if (uri.isEmpty) throw StateError('Original photo URI is missing.');
-        final bytes = await _saf.readFileBytes(uri);
+        final bytes = await _readSource(uri, _saf.readFileBytes);
         if (bytes.isEmpty) throw StateError('Original photo is empty.');
         await _api.uploadExpensePhoto(
           businessId, transactionId,
