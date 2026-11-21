@@ -1853,6 +1853,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         employeeId: widget.employeeId,
         week: week,
         rows: _work,
+        generalTasks: _generalTasks,
         jobs: const [],
         employeeName: _employeeLabel(widget.employeeId),
         paidMinutesThisWeek: _verifiedWeeks == null ? null : recorded?.minutes ?? 0,
@@ -1861,6 +1862,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         onTask: (task) => unawaited(
           _openTaskDetails({...task, 'line_id': task['task_id']}, false),
         ),
+        onGeneralTask: (task) => unawaited(_openTaskDetails(task, true)),
         payrollSummary: WorkPayrollSummary(
           week: week,
           rows: _work,
