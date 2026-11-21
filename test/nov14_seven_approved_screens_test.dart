@@ -630,6 +630,18 @@ void main() {
       expect(find.text('Adjust Amount Owed'), findsOneWidget);
       expect(find.text('Repayment History'), findsOneWidget);
       await capture(t, key, 'next-advances-expanded');
+      await t.ensureVisible(find.text('Adjust Amount Owed'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Adjust Amount Owed'));
+      await t.pumpAndSettle();
+      final calculate = find.byTooltip('Amount calculator');
+      await t.ensureVisible(calculate);
+      await t.pumpAndSettle();
+      await t.tap(calculate);
+      await t.pumpAndSettle();
+      await capture(t, key, 'next-compact-amount-calculator');
+      await t.tap(find.byTooltip('Cancel'));
+      await t.pumpAndSettle();
       await t.ensureVisible(find.text('Record Repayment'));
       await t.pumpAndSettle();
       await t.tap(find.text('Record Repayment'));

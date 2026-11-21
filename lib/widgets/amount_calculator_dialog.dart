@@ -194,7 +194,7 @@ class _AmountCalculatorDialogState extends State<_AmountCalculatorDialog> {
                   const SizedBox(height: 8),
                   FilledButton(
                     style: FilledButton.styleFrom(
-                      backgroundColor: BriskersColors.customerSave,
+                      backgroundColor: BriskersColors.confirm,
                       foregroundColor: Colors.white,
                     ),
                     onPressed: () {
