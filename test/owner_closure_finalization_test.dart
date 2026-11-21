@@ -4,6 +4,7 @@ import 'package:briskers_app/core/document_presentation.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_invoice_closure.dart';
+import 'package:briskers_app/services/offline_invoice_finalization.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -59,7 +60,11 @@ void main() {
     expect(await LocalInvoiceClosureStore(db).finalizedIncome('test-shop'),income);
     expect(DocumentPresentation((await cache.loadReadOnly('test-shop','one'))!).isClosed,isTrue);
     // Historical closed data is not retroactively finalized.
+    await cache.save('test-shop','historical', fixture('historical'));
+    final finalization = OfflineInvoiceFinalization(database: db);
+    await finalization.save('test-shop',['historical'],isOwner:true,close:false);
     await cache.save('test-shop','historical', {...fixture('historical'),'status':'closed','closed_at':'2026-11-01'});
+    await finalization.finalizeLocally('test-shop','historical',isOwner:true,resumeSavedRequest:true);
     await closure.close('test-shop',['historical'],isOwner:true);
     expect(await LocalInvoiceClosureStore(db).finalizedIncome('test-shop'),income);
   });

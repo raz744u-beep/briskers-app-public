@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:drift/drift.dart';
 import '../core/connection_mode.dart';
+import '../core/document_presentation.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
@@ -235,6 +236,9 @@ class OfflineInvoiceFinalization {
         if (resumeSavedRequest) return;
         throw StateError('Open the saved invoice before finalizing its receipts.');
       }
+      // Loading an old saved request is never authorization to backfill Income
+      // on a historical closed invoice. Explicit Owner review stays separate.
+      if (resumeSavedRequest && DocumentPresentation(saved).isClosed) return;
       final ledger = OfflineInvoicePaymentLedger(database: db);
       final queued = await ledger.pendingForInvoice(business, invoice);
       late Map<String, dynamic> detail;
