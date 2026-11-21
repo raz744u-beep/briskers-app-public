@@ -27,6 +27,7 @@ import '../../services/historical_photo_matcher.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../jobs/job_detail_screen.dart';
 import '../jobs/job_document_screen.dart';
+import '../jobs/repair_authorization_history_screen.dart';
 
 class CustomerServiceHistorySection extends StatefulWidget {
   const CustomerServiceHistorySection({
@@ -1154,6 +1155,11 @@ class _CustomerServiceHistorySectionState
               const Divider(height: 1),
             ],
             _vehicleSelector(),
+            if (_canSeeFinancial && _selectedVehicleId != null) Align(alignment: Alignment.centerLeft,
+              child: TextButton.icon(style: TextButton.styleFrom(foregroundColor: BriskersColors.confirm),
+                onPressed: () => Navigator.push<void>(context, MaterialPageRoute(builder: (_) => RepairAuthorizationHistoryScreen(
+                  business: widget.businessId, vehicle: _selectedVehicleId, owner: _roleCode == 'owner'))),
+                icon: const Icon(Icons.fact_check_outlined), label: const Text('Repair decisions and declined quotes'))),
             if(widget.initialVehicleId != null) _historyTypeSelector(),
             if (_view == 'invoices' || _view == 'jobs') Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
