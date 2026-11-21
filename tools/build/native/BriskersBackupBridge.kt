@@ -17,8 +17,12 @@ class BriskersBackupBridge(private val activity: Activity, messenger: BinaryMess
     private val channel = MethodChannel(messenger, "com.briskers/backup")
     private var pending: MethodChannel.Result? = null
     private val requestCode = 7450
+    private var lastProgressAt = 0L
     private val resolver get() = activity.contentResolver
     private fun progress(operation: String, copied: Int, total: Int, bytes: Long, verified: Long) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (operation != "Verification" && copied < total && now - lastProgressAt < 200L) return
+        lastProgressAt = now
         activity.runOnUiThread {
             channel.invokeMethod("backupProgress", mapOf(
                 "operation" to operation, "copied" to copied, "total" to total,
