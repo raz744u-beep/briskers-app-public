@@ -1750,8 +1750,10 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         isExpanded: true,
         decoration: _advanceField('Repayment method'),
         items: const [
-          for (final method in ['Cash', 'Zelle', 'Check', 'ACH'])
-            DropdownMenuItem(value: method, child: Text(method)),
+          DropdownMenuItem(value: 'Cash', child: Text('Cash')),
+          DropdownMenuItem(value: 'Zelle', child: Text('Zelle')),
+          DropdownMenuItem(value: 'Check', child: Text('Check')),
+          DropdownMenuItem(value: 'ACH', child: Text('ACH')),
         ],
         onChanged: _busy ? null : (value) => setState(() => _repaymentMethod = value ?? 'Cash'),
       ),
