@@ -419,4 +419,101 @@ void main() {
       expect(jsonEncode(await repo.historyWithWork('chris')), payrollBefore);
     },
   );
+
+  for (final firstReceipt in ['legacy-untagged', 'modern-tagged']) {
+    test(
+      'issue 501: later explicit denial overrides earlier $firstReceipt receipt',
+      () async {
+        // All records are synthetic, inserted once. A paid coverage snapshot
+        // must never be UPDATEd or DELETEd to construct this scenario.
+        SharedPreferences.setMockInitialValues({});
+        final db = BriskersLocalDatabase(NativeDatabase.memory());
+        addTearDown(db.close);
+        final repo = LocalPayrollRepository(
+          db, business: 'shop', owner: true, deviceId: 'owner',
+        );
+        await repo.prepare();
+        await repo.bindPaymentAuthority(
+          writerDeviceId: 'owner', assertVerifiedPairing: () {},
+        );
+        await db.customStatement(
+          "INSERT INTO local_jobs(id,business_id,access_scope,title,status) "
+          "VALUES('multi-job','shop','owner','Synthetic labor','open')",
+        );
+        await db.customStatement(
+          "INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id,employee_name) "
+          "VALUES('multi-chris','shop','multi-job','chris','Chris')",
+        );
+        await repo.saveEmployeeCompensation(
+          employee: 'chris', name: 'Chris', rate: 4000, weeklyBase: false,
+        );
+        await repo.createRecheck(
+          operation: 'multi-task', job: 'multi-job',
+          description: 'Synthetic engine labor', employee: 'chris',
+          name: 'Chris', rate: 4000, estimatedMinutes: 1200,
+        );
+        var row = (await repo.work(employee: 'chris')).single;
+        final taskId = row['task_id'] as String;
+        final allocationId = row['id'] as String;
+        await repo.updateWork(allocationId, 'In Progress', 0, '2026-11-09');
+        row = (await repo.work(employee: 'chris')).single;
+        final firstSnapshot = <String, dynamic>{
+          ...row,
+          'actual_minutes': 480,
+          'payment_rate_cents': 4000,
+          if (firstReceipt == 'modern-tagged') 'in_progress_payment': true,
+        };
+        final deniedSnapshot = <String, dynamic>{
+          ...row,
+          'actual_minutes': 60,
+          'payment_rate_cents': 4000,
+          'in_progress_payment': false,
+        };
+        await db.transaction(() async {
+          for (final receipt in [
+            ('a-first', 480, 32000, firstSnapshot),
+            ('z-denied', 60, 4000, deniedSnapshot),
+          ]) {
+            await db.customStatement(
+              'INSERT INTO regular_payroll_payments VALUES(?,?,?,?,?,?,?,?,?,?)',
+              ['shop', receipt.$1, 'chris', '2026-11-09',
+                jsonEncode({'employee': 'chris', 'operation': receipt.$1}),
+                receipt.$3, 0, receipt.$3, 'Cash', '2026-11-13'],
+            );
+            await db.customStatement(
+              'INSERT INTO regular_payroll_work_coverage VALUES(?,?,?,?,?,?)',
+              ['shop', allocationId, receipt.$1, receipt.$2, receipt.$3,
+                jsonEncode(receipt.$4)],
+            );
+          }
+        });
+        row = (await repo.work(employee: 'chris')).single;
+        expect(row['state'], 'In Progress');
+        expect(row['paid_minutes'], 540);
+        expect(row['estimated_minutes'], 1200);
+        expect(row['remaining_minutes'], 660);
+        expect(row['can_edit_planned_hours'], isFalse,
+          reason: 'Every immutable receipt must permit the correction, not only the first');
+        final historyBefore = jsonEncode(await repo.historyWithWork('chris'));
+        final coverageBefore = jsonEncode((await db.customSelect(
+          'SELECT * FROM regular_payroll_work_coverage WHERE business_id='shop' '
+          'AND credit_id='$allocationId' ORDER BY operation_id',
+          variables: [],
+        ).get()).map((r) => r.data).toList());
+        await expectLater(
+          repo.setEstimatedMinutes(taskId, 'chris', 1560), throwsStateError,
+        );
+        row = (await repo.work(employee: 'chris')).single;
+        expect(row['estimated_minutes'], 1200);
+        expect(row['paid_minutes'], 540);
+        expect(jsonEncode(await repo.historyWithWork('chris')), historyBefore);
+        final coverageAfter = jsonEncode((await db.customSelect(
+          'SELECT * FROM regular_payroll_work_coverage WHERE business_id='shop' '
+          'AND credit_id='$allocationId' ORDER BY operation_id',
+          variables: [],
+        ).get()).map((r) => r.data).toList());
+        expect(coverageAfter, coverageBefore);
+      },
+    );
+  }
 }
