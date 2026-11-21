@@ -97,6 +97,9 @@ fun main() {
         check(File(source, document.path).delete())
         val missing = runCatching { transfer("missing", listOf(document)) }.exceptionOrNull()
         check(missing is IOException && missing.message!!.contains("Missing backup file"))
+        Files.createSymbolicLink(File(source, document.path).toPath(), previous.toPath())
+        val symlink = runCatching { transfer("symlink", listOf(document)) }.exceptionOrNull()
+        check(symlink is IOException && symlink.message!!.contains("Invalid backup source path"))
         println("5,002 files, large-file progress, retry, permissions, corruption and missing-file checks passed")
     } finally {
         root.deleteRecursively()

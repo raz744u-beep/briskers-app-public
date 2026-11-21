@@ -38,10 +38,13 @@ internal class BriskersBackupTransfer(
 
         progress("Database", force = true)
         val buffer = ByteArray(128 * 1024)
+        val root = source.canonicalFile
         for (entry in payload) {
-            val original = File(source, entry.path)
-            if (!original.isFile || java.nio.file.Files.isSymbolicLink(original.toPath())) {
-                throw IOException("Missing backup file: ${entry.path}")
+            val original = File(root, entry.path)
+            if (!original.isFile) throw IOException("Missing backup file: ${entry.path}")
+            // File.canonicalFile also works on Android 7 (API levels 24–25).
+            if (original.canonicalFile != original) {
+                throw IOException("Invalid backup source path: ${entry.path}")
             }
             val operation = when (entry.path.substringBefore('/')) {
                 "Database" -> "Database"
