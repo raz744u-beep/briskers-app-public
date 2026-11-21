@@ -135,6 +135,8 @@ void main() {
       expect(chris['estimated_minutes'], 1560);
       expect(chris['paid_minutes'], 480);
       expect(chris['remaining_minutes'], 1080);
+      await expectLater(pay('implicit-increase', [{...chris, 'pay_minutes': 1080}], 72000,
+        week: '2026-11-16'), throwsStateError);
       expect(chris['actual_minutes'], 0);
       expect(chris['state'], 'In Progress');
       expect(jsonEncode(await repo.historyWithWork('chris')), paidHistoryBeforeCorrection);
@@ -232,6 +234,8 @@ void main() {
     expect(await bulk.complete(plan,DateTime(2026,11,20)),0);
       chris = (await repo.work(employee: 'chris')).single;
       expect(chris['state'], 'Done');
+      expect(chris['can_edit_planned_hours'], isFalse);
+      await expectLater(repo.setEstimatedMinutes(task, 'chris', 1560), throwsStateError);
       expect(chris['paid_minutes'], 1200);
       expect(chris['remaining_minutes'], 0);
       expect(jsonEncode(await repo.historyWithWork('chris')), paid);

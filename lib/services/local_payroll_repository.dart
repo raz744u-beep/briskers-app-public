@@ -1901,7 +1901,7 @@ class LocalPayrollRepository {
       "d.document_number AS invoice_number,d.document_date AS invoice_date,d.created_at AS invoice_created_at,o.line_position,c.completed AS credit_completed,"
       "s.source_kind,CASE WHEN m.active=0 THEN 1 ELSE 0 END AS assignment_conflict,CASE WHEN m.active=0 OR d.status IN ('void','voided','cancelled','canceled','deleted') THEN 0 ELSE s.active END AS source_active,s.invoice_id,s.line_id AS source_line_id,"
       "COALESCE(est.minutes,0) AS estimated_minutes,"
-      "c.actual_minutes,c.rate_cents,COALESCE(at.minutes,c.actual_minutes) AS recorded_actual_minutes,"
+      "c.actual_minutes,c.rate_cents,c.paid_operation_id,COALESCE(at.minutes,c.actual_minutes) AS recorded_actual_minutes,"
       "(SELECT x.snapshot FROM regular_payroll_active_coverage_v1 x WHERE x.business_id=c.business_id AND x.credit_id=c.allocation_id ORDER BY x.operation_id LIMIT 1) AS coverage_snapshot,"
       "(SELECT MAX(pay.week) FROM regular_payroll_active_coverage_v1 x "
       "JOIN regular_payroll_payments pay ON pay.business_id=x.business_id AND pay.operation_id=x.operation_id "
@@ -1962,7 +1962,7 @@ class LocalPayrollRepository {
         },
         'hours_hundredths': (total * 100 + 30) ~/ 60,
         'paid_minutes': paid,
-        'can_edit_planned_hours': row['state']=='In Progress' && row['credit_completed']!=1 &&
+        'can_edit_planned_hours': row['state']=='In Progress' && row['paid_operation_id']==null && row['credit_completed']!=1 && !verifiedPaid.contains(row['id']) &&
             !ownerPriorPaid && row['archived_labor']!=1 && row['assignment_conflict']!=1 &&
             row['source_active']!=0 && coverage?['in_progress_payment']==true,
         'paid_cents': ownerPriorPaid ? ((total * rate + 30) ~/ 60) : row['paid_cents'],
