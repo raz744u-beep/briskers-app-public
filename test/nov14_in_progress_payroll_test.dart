@@ -160,6 +160,7 @@ void main() {
         isNot(contains(id)),
       );
       final kam = (await repo.work(employee: 'kam')).single;
+      expect(kam['state'], 'Open', reason: 'Editing Chris planned hours must not start another mechanic');
       expect(kam['paid_minutes'], 0);
       expect(kam['estimated_minutes'], 300);
       final replica=BriskersLocalDatabase(NativeDatabase.memory());

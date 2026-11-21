@@ -614,6 +614,10 @@ class LocalPayrollRepository {
         return;
       }
       final before=(await work()).where((r)=>r['task_id']==id).toList();
+      final previousStatus = before.isNotEmpty && before.every((r) => r['state']=='Done')
+          ? 'Done' : before.any((r) => r['state']=='In Progress' || r['state']=='Done')
+          ? 'In Progress' : 'Open';
+      final statusChanged = !existing || status != previousStatus;
       if(!existing) {
         final first=mechanics.first;
         await LocalTaskAssignmentStore(db).linkEmployee(business,job,first['employee'] as String,first['name'] as String);
@@ -654,7 +658,7 @@ class LocalPayrollRepository {
         }
         final row=(await work()).where((r)=>r['task_id']==id && r['employee_id']==employee).single;
         // Existing completed/settled tasks keep their state and payroll coverage.
-        if((!before.any((r)=>r['state']=='Done') || (original==null && before.every((r)=>r['state']=='Done'))) && row['state']!='Done' && row['state']!=status) {
+        if((original==null || statusChanged) && (!before.any((r)=>r['state']=='Done') || (original==null && before.every((r)=>r['state']=='Done'))) && row['state']!='Done' && row['state']!=status) {
           if(status=='Open') {
             throw StateError('Started work cannot be reset in the task editor.');
           }
