@@ -421,6 +421,139 @@ void main() {
     },
   );
 
+  test(
+    'issue 501: eight recorded and eight paid legacy hours remain active for Owner plan edits',
+    () async {
+      // Diagnostic reproduction: an explicitly In Progress allocation with
+      // 20 planned hours, 8 actual recorded hours and 8 already paid. Unlike
+      // the zero-actual fixture above, this is vulnerable to being projected
+      // Done by VerifiedPaidLabor solely because actual == paid.
+      // All records are synthetic, memory-only and append-only.
+      SharedPreferences.setMockInitialValues({});
+      final db = BriskersLocalDatabase(NativeDatabase.memory());
+      addTearDown(db.close);
+      final repo = LocalPayrollRepository(
+        db, business: 'shop', owner: true, deviceId: 'owner',
+      );
+      await repo.prepare();
+      await repo.bindPaymentAuthority(
+        writerDeviceId: 'owner', assertVerifiedPairing: () {},
+      );
+      await db.customStatement(
+        "INSERT INTO local_jobs(id,business_id,access_scope,title,status) "
+        "VALUES('earned-job','shop','owner','Synthetic active labor','open')",
+      );
+      await db.customStatement(
+        "INSERT INTO local_job_assignments(assignment_id,business_id,job_id,employee_id,employee_name) "
+        "VALUES('earned-chris','shop','earned-job','chris','Chris')",
+      );
+      await repo.saveEmployeeCompensation(
+        employee: 'chris', name: 'Chris', rate: 4000, weeklyBase: false,
+      );
+      await repo.createRecheck(
+        operation: 'earned-task', job: 'earned-job',
+        description: 'Synthetic eight hours completed so far',
+        employee: 'chris', name: 'Chris', rate: 4000,
+        estimatedMinutes: 1200,
+      );
+      var row = (await repo.work(employee: 'chris')).single;
+      final taskId = row['task_id'] as String;
+      final allocationId = row['id'] as String;
+      await repo.saveTaskSchedule(taskId, '2026-11-09', '2026-11-13', 'Normal');
+      await repo.updateWork(allocationId, 'In Progress', 800, '2026-11-09');
+      row = (await repo.work(employee: 'chris')).single;
+      expect(row['state'], 'In Progress');
+      expect(row['actual_minutes'], 480);
+      expect(row['recorded_actual_minutes'], 480);
+      expect(row['credit_completed'], 0);
+
+      final legacySnapshot = <String, dynamic>{
+        ...row,
+        'employee_name': 'Chris',
+        'total_credit_minutes': 480,
+        'credit_revision': row['version'],
+        'payment_rate_cents': 4000,
+      };
+      expect(legacySnapshot.containsKey('in_progress_payment'), isFalse);
+      final legacyPayload = jsonEncode({
+        'employee': 'chris',
+        'week': '2026-11-09',
+        'date': '2026-11-13',
+        'method': 'Cash',
+        'work': [{
+          'id': allocationId,
+          'version': row['version'],
+          'hours': row['hours_hundredths'],
+          'minutes': 480,
+          'rate': row['rate_cents'],
+          'pay_minutes': 480,
+        }],
+        'base': 0,
+        'adjustment': 0,
+        'reason': 'Synthetic older earned-hours coverage',
+        'repayment': 0,
+        'confirmed_net': 32000,
+      });
+      await db.transaction(() async {
+        await db.customStatement(
+          'INSERT INTO regular_payroll_payments VALUES(?,?,?,?,?,?,?,?,?,?)',
+          ['shop', 'earned-eight', 'chris', '2026-11-09', legacyPayload,
+            32000, 0, 32000, 'Cash', '2026-11-13'],
+        );
+        await db.customStatement(
+          'INSERT INTO regular_payroll_work_coverage VALUES(?,?,?,?,?,?)',
+          ['shop', allocationId, 'earned-eight', 480, 32000,
+            jsonEncode(legacySnapshot)],
+        );
+      });
+
+      final historyBefore = jsonEncode(await repo.historyWithWork('chris'));
+      final coverageBefore = jsonEncode((await db.customSelect(
+        "SELECT * FROM regular_payroll_work_coverage WHERE business_id='shop' "
+        'AND credit_id=? ORDER BY operation_id',
+        variables: [Variable<String>(allocationId)],
+      ).get()).map((r) => r.data).toList());
+
+      row = (await repo.work(employee: 'chris')).single;
+      expect(row['paid_minutes'], 480);
+      expect(row['estimated_minutes'], 1200);
+      expect(row['actual_minutes'], 480);
+      expect(row['recorded_actual_minutes'], 480);
+      expect(row['state'], 'In Progress',
+        reason: 'Paying earned hours must not silently complete an active task');
+      expect(row['can_edit_planned_hours'], isTrue,
+        reason: 'Owner should edit remaining planned time without rewriting paid work');
+
+      await repo.saveServiceTask(
+        operation: 'earned-owner-edits-plan', task: taskId, job: 'earned-job',
+        description: 'Synthetic eight hours completed so far',
+        mechanics: [
+          {'employee': 'chris', 'previous': 'chris', 'name': 'Chris', 'minutes': 1560},
+        ],
+        start: '2026-11-09', end: '2026-11-13', priority: 'Normal',
+        status: 'In Progress', treatment: 'preserve',
+      );
+      row = (await repo.work(employee: 'chris')).single;
+      expect(row['state'], 'In Progress');
+      expect(row['estimated_minutes'], 1560);
+      expect(row['actual_minutes'], 480);
+      expect(row['recorded_actual_minutes'], 480);
+      expect(row['paid_minutes'], 480);
+      expect(row['remaining_minutes'], 1080);
+      expect(jsonEncode(await repo.historyWithWork('chris')), historyBefore,
+        reason: 'Changing a plan must not create or alter any payroll payment');
+      final coverageAfter = jsonEncode((await db.customSelect(
+        "SELECT * FROM regular_payroll_work_coverage WHERE business_id='shop' "
+        'AND credit_id=? ORDER BY operation_id',
+        variables: [Variable<String>(allocationId)],
+      ).get()).map((r) => r.data).toList());
+      expect(coverageAfter, coverageBefore);
+      await expectLater(
+        repo.setEstimatedMinutes(taskId, 'chris', 479), throwsStateError,
+        reason: 'The Owner cannot reduce planned hours below the 8 paid hours');
+    },
+  );
+
   for (final firstReceipt in ['legacy-untagged', 'modern-tagged']) {
     test(
       'issue 501: later explicit denial overrides earlier $firstReceipt receipt',
