@@ -845,6 +845,7 @@ jobs:
         run: |
           python3 -m unittest tools.tests.test_owner_device_auth_config
           python3 tools/build/configure_owner_device_auth.py generated
+          python3 tools/build/configure_backup_bridge.py generated
 
       - name: Resolve packages
         working-directory: generated

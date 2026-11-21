@@ -7,6 +7,7 @@ import '../../widgets/briskers_page_header.dart';
 import '../../services/customer_workflow_preferences.dart';
 import '../kiosk/kiosk_checkin_screen.dart';
 import 'catalog_settings_screen.dart';
+import 'backup_settings_screen.dart';
 import 'email_templates_settings_screen.dart';
 import 'diagnostics_screen.dart';
 import 'document_numbering_settings_screen.dart';
@@ -111,6 +112,16 @@ class SettingsScreen extends StatelessWidget {
       ),
       body: ListView(
         children: [
+          if (roleCode == 'owner' && Theme.of(context).platform == TargetPlatform.android)
+            ListTile(
+              leading: const Icon(Icons.backup_outlined, color: BriskersColors.settings),
+              title: const Text('Backup & Restore'),
+              subtitle: const Text('Save and verify a complete offline copy'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push<void>(context, MaterialPageRoute(
+                builder: (_) => BackupSettingsScreen(businessId: businessId),
+              )),
+            ),
           if (roleCode == 'owner')
             _CustomerNextActionSetting(businessId: businessId),
           if (roleCode == 'owner')

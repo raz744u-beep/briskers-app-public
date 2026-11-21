@@ -30,7 +30,7 @@ jobs:
           cache: true
       - name: Create temporary Android runner before resolving the release dependencies
         run: |
-          flutter create --no-pub --platforms=android --project-name briskers_app .
+          flutter create --no-pub --platforms=android --org com.briskers --project-name briskers_app .
           git restore -- pubspec.yaml pubspec.lock
       - name: Resolve packages
         env:
@@ -69,6 +69,11 @@ jobs:
           m=m.replace('</application>','<receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" /><receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter></receiver></application>',1)
           manifest.write_text(m)
           PYTHON
+      - name: Wire and test the Android backup bridge
+        run: |
+          python3 tools/build/configure_backup_bridge.py . --production-activity
+          kotlinc tools/build/native/BriskersBackupTransfer.kt tools/tests/BackupTransferTest.kt -include-runtime -d "$RUNNER_TEMP/briskers-backup-tests.jar"
+          java -jar "$RUNNER_TEMP/briskers-backup-tests.jar"
       - name: Compile Android debug APK
         run: flutter build apk --debug
       - name: Verify APK exists
