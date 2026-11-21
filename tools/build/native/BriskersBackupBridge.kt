@@ -8,6 +8,7 @@ import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.InputStream
+import java.io.OutputStream
 import java.security.MessageDigest
 
 /** Stream originals and folder snapshots through Android's persisted folder grant.
@@ -17,6 +18,25 @@ class BriskersBackupBridge(private val activity: Activity, messenger: BinaryMess
     private var pending: MethodChannel.Result? = null
     private val requestCode = 7450
     private val resolver get() = activity.contentResolver
+    private fun progress(operation: String, copied: Int, total: Int, bytes: Long, verified: Long) {
+        activity.runOnUiThread {
+            channel.invokeMethod("backupProgress", mapOf(
+                "operation" to operation, "copied" to copied, "total" to total,
+                "bytes" to bytes, "verified" to verified))
+        }
+    }
+    private fun transfer(input: InputStream, output: OutputStream, onBytes: (Int) -> Unit) {
+        val buffer = ByteArray(128 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            output.write(buffer, 0, count)
+            onBytes(count)
+        }
+    }
+    private fun countFiles(source: File): Int =
+        if (source.isDirectory) (source.listFiles() ?: error("Cannot list backup source"))
+            .sumOf { countFiles(it) } else 1
     init {
         channel.setMethodCallHandler { call, result ->
             if (call.method == "pickFolder") {
@@ -56,7 +76,10 @@ class BriskersBackupBridge(private val activity: Activity, messenger: BinaryMess
                                 val backups = directory(briskers, "Backups")
                                 require(children(backups).none { it.name == name }) { "Backup already exists" }
                                 val destination = DC.createDocument(resolver, backups, DC.Document.MIME_TYPE_DIR, name)!!
-                                export(source, destination)
+                                val totals = longArrayOf(0L, 0L, 0L)
+                                val count = countFiles(source)
+                                progress("Documents", 0, count, 0, 0)
+                                export(source, destination, count, totals)
                                 destination.toString()
                             }
                             "importFolder" -> {
@@ -144,7 +167,7 @@ class BriskersBackupBridge(private val activity: Activity, messenger: BinaryMess
         while(true) { val count = input.read(buffer); if(count < 0) break; digest.update(buffer, 0, count) }
         return digest.digest()
     }
-    private fun export(source: File, target: Uri) {
+    private fun export(source: File, target: Uri, total: Int, totals: LongArray) {
         // Every payload is copied and read back before exposing the completion
         // manifest. A killed/failed copy cannot masquerade as a finished backup.
         val files = source.listFiles()!!.sortedBy { if(it.name == "backup-info.json") 1 else 0 }
@@ -153,13 +176,30 @@ class BriskersBackupBridge(private val activity: Activity, messenger: BinaryMess
             val name = safeName(file.name)
             if(file.isDirectory) {
                 val child = DC.createDocument(resolver, target, DC.Document.MIME_TYPE_DIR, name)!!
-                export(file, child)
+                export(file, child, total, totals)
             } else {
                 val child = DC.createDocument(resolver, target, "application/octet-stream", name)!!
-                file.inputStream().use { input -> resolver.openOutputStream(child, "w")!!.use { input.copyTo(it) } }
+                val operation = when {
+                    file.path.contains("/Database/") -> "Database"
+                    file.path.contains("/App/") -> "APK"
+                    file.path.contains("/Photos/") || file.path.contains("/Receipts/") -> "Photos"
+                    else -> "Documents"
+                }
+                file.inputStream().use { input ->
+                    resolver.openOutputStream(child, "w")!!.use { output ->
+                        transfer(input, output) { n ->
+                            totals[0] += n
+                            progress(operation, totals[2].toInt(), total, totals[0], totals[1])
+                        }
+                    }
+                }
+                progress("Verification", totals[2].toInt(), total, totals[0], totals[1])
                 val originalHash = file.inputStream().use { hash(it) }
                 val copiedHash = resolver.openInputStream(child)!!.use { hash(it) }
-                require(originalHash.contentEquals(copiedHash)) { "Backup copy verification failed" }
+                require(originalHash.contentEquals(copiedHash)) { "Backup copy verification failed: $name" }
+                totals[1] += file.length()
+                totals[2]++
+                progress("Verification", totals[2].toInt(), total, totals[0], totals[1])
             }
         }
     }
