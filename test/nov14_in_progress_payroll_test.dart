@@ -551,6 +551,52 @@ void main() {
       await expectLater(
         repo.setEstimatedMinutes(taskId, 'chris', 479), throwsStateError,
         reason: 'The Owner cannot reduce planned hours below the 8 paid hours');
+
+      // Negative control: another legacy 8h-recorded/8h-paid allocation was
+      // actually completed by the mechanic. It must not gain the edit grant
+      // merely because its original plan was 20h. Neither frozen payroll nor
+      // Done status may be altered by the compatibility exception.
+      await repo.createRecheck(
+        operation: 'finished-task', job: 'earned-job',
+        description: 'Synthetic completed labor',
+        employee: 'chris', name: 'Chris', rate: 4000,
+        estimatedMinutes: 1200,
+      );
+      var finished = (await repo.work(employee: 'chris'))
+          .singleWhere((r) => r['task_id'] != taskId);
+      final finishedTask = finished['task_id'] as String;
+      final finishedAllocation = finished['id'] as String;
+      await repo.updateWork(finishedAllocation, 'In Progress', 800, '2026-11-09');
+      await repo.updateWork(finishedAllocation, 'Done', 800, '2026-11-13');
+      finished = (await repo.work(employee: 'chris'))
+          .singleWhere((r) => r['task_id'] == finishedTask);
+      expect(finished['actual_minutes'], 480);
+      expect(finished['credit_completed'], 1);
+      final completedSnapshot = <String, dynamic>{
+        ...finished,
+        'payment_rate_cents': 4000,
+      };
+      expect(completedSnapshot.containsKey('in_progress_payment'), isFalse);
+      await db.transaction(() async {
+        await db.customStatement(
+          'INSERT INTO regular_payroll_payments VALUES(?,?,?,?,?,?,?,?,?,?)',
+          ['shop', 'completed-eight', 'chris', '2026-11-09',
+            jsonEncode({'employee': 'chris', 'reason': 'Synthetic completed coverage'}),
+            32000, 0, 32000, 'Cash', '2026-11-13'],
+        );
+        await db.customStatement(
+          'INSERT INTO regular_payroll_work_coverage VALUES(?,?,?,?,?,?)',
+          ['shop', finishedAllocation, 'completed-eight', 480, 32000,
+            jsonEncode(completedSnapshot)],
+        );
+      });
+      finished = (await repo.work(employee: 'chris'))
+          .singleWhere((r) => r['task_id'] == finishedTask);
+      expect(finished['state'], 'Done');
+      expect(finished['can_edit_planned_hours'], isFalse);
+      await expectLater(
+        repo.setEstimatedMinutes(finishedTask, 'chris', 1560), throwsStateError,
+        reason: 'Completed covered labor must remain immutable');
     },
   );
 
