@@ -64,6 +64,7 @@ import '../../services/email_draft_templates.dart';
 import '../../services/catalog_sync_service.dart';
 import '../settings/catalog_settings_screen.dart';
 import '../../services/local_catalog_repository.dart';
+import '../../services/catalog_replacement_type_guard.dart';
 import '../../widgets/invoice_item_picker.dart';
 import '../../services/local_item_categories_cache.dart';
 import '../../services/local_document_detail_cache.dart';
@@ -8862,11 +8863,16 @@ class _EditLineDialogState extends State<_EditLineDialog> {
       // A billed-item change must never retire a labor task or its paid wages.
       final wasLabor = isInvoiceLaborLine(widget.line);
       final name = item['name']?.toString() ?? '';
-      final nextLabor = isInvoiceLaborLine({'name': name, 'line_kind': 'item'});
-      if (wasLabor && !nextLabor) {
-        setState(() => _error = 'Choose a labor item for this labor line. Manage mechanic assignments separately.');
+      final typeError = catalogReplacementTypeError(
+        existingLineIsLabor: wasLabor,
+        itemType: item['item_type'],
+        itemName: name,
+      );
+      if (typeError != null) {
+        setState(() => _error = typeError);
         return;
       }
+      final nextLabor = catalogItemIsLabor(item['item_type']);
       setState(() {
         _replacementItemId = item['id']?.toString();
         _replacementPricingUnit = item['pricing_unit']?.toString();

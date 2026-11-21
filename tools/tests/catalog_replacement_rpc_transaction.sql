@@ -9,7 +9,7 @@ CREATE TEMP TABLE sales_document_lines(id uuid,business_id uuid,document_id uuid
 CREATE TEMP TABLE sales_documents(id uuid,business_id uuid,kind text,origin text,
   status text,closed_at timestamptz,source_estimate_id uuid,row_version bigint,
   updated_at timestamptz,net_amount numeric,tax_amount numeric,total_amount numeric);
-CREATE TEMP TABLE catalog_items(id uuid,business_id uuid,active boolean,pricing_unit text);
+CREATE TEMP TABLE catalog_items(id uuid,business_id uuid,active boolean,pricing_unit text,item_type text);
 CREATE FUNCTION pg_temp.require_permission(business uuid, permission text)
 RETURNS void LANGUAGE plpgsql AS $$ BEGIN
   IF business IS DISTINCT FROM '00000000-0000-0000-0000-000000000001'::uuid
@@ -40,9 +40,11 @@ VALUES('00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000
 INSERT INTO pg_temp.sales_document_lines(id,business_id,document_id,item_id,line_kind,name,quantity,unit_price,tax_rate,row_version)
 VALUES('00000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000004','item','Wrong part',2,10,0,1);
 INSERT INTO pg_temp.catalog_items VALUES
-('00000000-0000-0000-0000-000000000005','00000000-0000-0000-0000-000000000001',true,'each'),
-('00000000-0000-0000-0000-000000000006','00000000-0000-0000-0000-000000000008',true,'foreign'),
-('00000000-0000-0000-0000-000000000007','00000000-0000-0000-0000-000000000001',false,'inactive');
+('00000000-0000-0000-0000-000000000005','00000000-0000-0000-0000-000000000001',true,'each','part'),
+('00000000-0000-0000-0000-000000000006','00000000-0000-0000-0000-000000000008',true,'foreign','part'),
+('00000000-0000-0000-0000-000000000007','00000000-0000-0000-0000-000000000001',false,'inactive','part'),
+('00000000-0000-0000-0000-000000000008','00000000-0000-0000-0000-000000000001',true,'hour','LABOR'),
+('00000000-0000-0000-0000-000000000009','00000000-0000-0000-0000-000000000001',true,'each','unknown');
 DO $$ DECLARE
   business uuid:='00000000-0000-0000-0000-000000000001';
   line uuid:='00000000-0000-0000-0000-000000000003';
@@ -70,16 +72,40 @@ BEGIN
   UPDATE pg_temp.sales_documents SET origin='mobilebiz';
   PERFORM pg_temp.briskers_replace_document_line_catalog_v1(business,line,2,'Correct part',2,30,.1,null,'item',item);
   ASSERT (SELECT row_version=3 FROM pg_temp.sales_documents);
+  -- Synthetic forged direct RPC: a part catalog ID with labor line kind
+  -- must be rejected, irrespective of the display name supplied by caller.
+  BEGIN
+    PERFORM pg_temp.briskers_replace_document_line_catalog_v1(business,line,3,'Engine repair',2,30,0,null,'labor',item);
+    RAISE EXCEPTION 'Part catalog accepted as labor';
+  EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
+  BEGIN
+    PERFORM pg_temp.briskers_replace_document_line_catalog_v1(business,line,3,'Unknown catalog type',2,30,0,null,'item','00000000-0000-0000-0000-000000000009');
+    RAISE EXCEPTION 'Unknown catalog type accepted';
+  EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
+  BEGIN
+    PERFORM pg_temp.briskers_replace_document_line_catalog_v1(business,line,3,'Labor',2,30,0,null,'item',item);
+    RAISE EXCEPTION 'Part received legacy labor label';
+  EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
   UPDATE pg_temp.sales_document_lines SET name='Labor',line_kind='item';
   BEGIN
-    PERFORM pg_temp.briskers_replace_document_line_catalog_v1(business,line,3,'Part',2,30,0,null,'item',item);
-    RAISE EXCEPTION 'Labor identity retired';
+    PERFORM pg_temp.briskers_replace_document_line_catalog_v1(business,line,3,'Labor',2,30,0,null,'labor',item);
+    RAISE EXCEPTION 'Legacy labor was linked to a part';
   EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
+  -- A real labor item with a non-Labor display name preserves the same
+  -- invoice line ID and can be substituted without retiring allocations.
+  PERFORM pg_temp.briskers_replace_document_line_catalog_v1(
+    business,line,3,'Engine replacement',2,30,0,null,'labor',
+    '00000000-0000-0000-0000-000000000008');
+  ASSERT (SELECT row_version=4 FROM pg_temp.sales_documents);
+  ASSERT (SELECT id=line AND item_id='00000000-0000-0000-0000-000000000008'::uuid
+    AND line_kind='labor' FROM pg_temp.sales_document_lines);
   UPDATE pg_temp.sales_documents SET closed_at=clock_timestamp();
   BEGIN
-    PERFORM pg_temp.briskers_replace_document_line_catalog_v1(business,line,3,'Labor',2,30,0,null,'labor',item);
+    PERFORM pg_temp.briskers_replace_document_line_catalog_v1(
+      business,line,4,'Engine replacement',2,30,0,null,'labor',
+      '00000000-0000-0000-0000-000000000008');
     RAISE EXCEPTION 'Closed document edited';
   EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
 END $$;
 ROLLBACK;
-SELECT 'Replacement, totals, stable identity, stale version, shop isolation, inactive items, legacy editability, labor and closed guards passed on synthetic relations; rolled back' AS result;
+SELECT 'Catalog item_type, display name mismatch, labor preservation, totals, revision, shop and closed guards passed on synthetic relations; rolled back' AS result;
