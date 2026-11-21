@@ -139,7 +139,8 @@ void main() {
       final start = source.indexOf(startMarker);
       expect(start, greaterThanOrEqualTo(0));
       final next = source.indexOf('\n  }', start);
-      expect(source.substring(start, next), contains('verifyPayment: true'));
+      expect(source.substring(start, next),
+          contains('await _localPaymentLedger(operation: operation)'));
     }
   });
 }
