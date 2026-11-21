@@ -49,12 +49,23 @@ Future<void> showOwnerPayrollConnection(BuildContext context, String business) a
     final grant = await DeviceOwnerAuthorization.instance.authority.authorizeLocal(business);
     if (!context.mounted) return;
     final service = await OwnerPayrollConnections.open(context, business, grant);
+    bool canWritePayroll;
+    try {
+      await service.lease.proof(grant);
+      canWritePayroll = true;
+    } on PayrollPending {
+      canWritePayroll = false;
+    }
     final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
     if (!context.mounted) return;
     await showDialog<void>(context: context, builder: (dialog) => AlertDialog(
       title: const Text('Shop payroll Wi-Fi'),
       content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('Use the same shop Wi-Fi on both Owner devices. Your existing Owner login and unlock are used; no Owner code is needed.'),
+        const SizedBox(height: 12),
+        Text(canWritePayroll
+            ? 'This device holds the current payroll ledger.'
+            : 'This device needs to connect to the current payroll ledger.'),
         const SizedBox(height: 12),
         const Text('This device’s Wi-Fi address:'),
         for (final interface in interfaces)
