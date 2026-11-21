@@ -984,6 +984,43 @@ class LocalPayrollRepository {
     });
   }
 
+  /// A narrow compatibility exception for older, *untagged* partial receipts.
+  /// Recorded earned minutes may already be paid even when the planned work
+  /// remains unfinished. Require the underlying portion to remain In Progress,
+  /// incomplete and partially planned; historical/settled work stays locked.
+  /// This grants only a plan change, never paid-time or receipt mutation.
+  static bool _olderPartialPlanOnly(Map<String, dynamic> row, int paid, int remaining) =>
+      row['state'] == 'In Progress' && paid > 0 && remaining > 0 &&
+      ((row['actual_minutes'] == 0 && row['recorded_actual_minutes'] == 0) ||
+       (row['actual_minutes'] == paid && row['recorded_actual_minutes'] == paid &&
+        row['completed_date'] == null)) &&
+      row['credit_completed'] != 1 && row['paid_operation_id'] == null &&
+      row['owner_prior_paid'] != 1 && row['archived_labor'] != 1 &&
+      row['assignment_conflict'] != 1 && row['source_active'] != 0;
+
+  /// Match the save-side check of every immutable receipt. A malformed,
+  /// non-object, or explicitly denied later receipt cannot grant editing.
+  static bool _allReceiptsAllowPlanEdit(Object? raw, bool olderPartial) {
+    if (raw is! String) return false;
+    try {
+      final entries = jsonDecode(raw);
+      if (entries is! List || entries.isEmpty) return false;
+      for (final encoded in entries) {
+        if (encoded is! String) return false;
+        final snapshot = jsonDecode(encoded);
+        if (snapshot is! Map) return false;
+        if (snapshot['in_progress_payment'] == true) continue;
+        if (olderPartial && !snapshot.containsKey('in_progress_payment')) {
+          continue;
+        }
+        return false;
+      }
+      return true;
+    } catch (_) {
+      return false; // Corrupt payment evidence is never an editing grant.
+    }
+  }
+
   /// Changes only the plan. Frozen receipt coverage and earned time are never
   /// rewritten; finishing work or explicitly verifying payroll remains separate.
   Future<void> _correctPaidProgressPlan(Map<String, dynamic> row, int minutes) async {
@@ -993,9 +1030,25 @@ class LocalPayrollRepository {
       [business, id],
     );
     final paid = coverage.fold<int>(0, (sum, c) => sum + (c['minutes'] as int));
+    // Some older legitimate partial receipts predate in_progress_payment.
+    // They permit ONLY plan changes when the allocation remains active and
+    // unfinished, including recorded hours already paid. Earned time and
+    // immutable payment evidence remain untouched.
+    // Explicit false metadata, historical settlements and malformed receipts
+    // remain blocked. Every coverage record must meet the same evidence rule.
+    final olderPartial = _olderPartialPlanOnly(
+      row, row['paid_minutes'] as int? ?? 0,
+      row['remaining_minutes'] as int? ?? 0,
+    );
+    final validCoverage = coverage.every((c) {
+      final snapshot = jsonDecode(c['snapshot'] as String);
+      return snapshot is Map &&
+          (snapshot['in_progress_payment'] == true ||
+              (olderPartial && !snapshot.containsKey('in_progress_payment')));
+    });
     if (row['can_edit_planned_hours'] != true || coverage.isEmpty ||
-        coverage.any((c) => (jsonDecode(c['snapshot'] as String) as Map)['in_progress_payment'] != true) ||
-        minutes < paid || minutes < (row['recorded_actual_minutes'] as int)) {
+        !validCoverage || minutes < paid ||
+        minutes < (row['recorded_actual_minutes'] as int)) {
       throw StateError('Assigned hours must cover recorded work and paid hours. Completed and historical payroll remain protected.');
     }
     if (row['estimated_minutes'] == minutes) return;
@@ -1907,6 +1960,7 @@ class LocalPayrollRepository {
       "COALESCE(est.minutes,0) AS estimated_minutes,"
       "c.actual_minutes,c.rate_cents,c.paid_operation_id,COALESCE(at.minutes,c.actual_minutes) AS recorded_actual_minutes,"
       "(SELECT x.snapshot FROM regular_payroll_active_coverage_v1 x WHERE x.business_id=c.business_id AND x.credit_id=c.allocation_id ORDER BY x.operation_id LIMIT 1) AS coverage_snapshot,"
+       "(SELECT json_group_array(x.snapshot) FROM regular_payroll_work_coverage x WHERE x.business_id=c.business_id AND x.credit_id=c.allocation_id) AS all_coverage_snapshots,"
       "(SELECT MAX(pay.week) FROM regular_payroll_active_coverage_v1 x "
       "JOIN regular_payroll_payments pay ON pay.business_id=x.business_id AND pay.operation_id=x.operation_id "
       "WHERE x.business_id=c.business_id AND x.credit_id=c.allocation_id "
@@ -1954,10 +2008,21 @@ class LocalPayrollRepository {
             throw StateError('Conflicting payroll coverage.');
           }
           final remaining = total - paid;
+      final olderPartial = _olderPartialPlanOnly(row, paid, remaining);
+      final allReceiptsAllowEdit =
+          _allReceiptsAllowPlanEdit(row['all_coverage_snapshots'], olderPartial);
+      // VerifiedPaidLabor treats actual == covered as evidence of settlement.
+      // For a still-active, incomplete, partially planned portion this can be
+      // only a progress payment. Do not project it Done when every receipt
+      // passes the narrow plan-only guard; retain the raw status instead.
+      final activePaidProgress = olderPartial && allReceiptsAllowEdit;
+      // Do not expose the aggregated raw receipt snapshots to UI consumers.
+      final visibleRow = Map<String, dynamic>.of(row)
+        ..remove('all_coverage_snapshots');
       return {
-        ...LocalPayrollTaskIdentity.project(row, taskAliases),
+        ...LocalPayrollTaskIdentity.project(visibleRow, taskAliases),
         if(rate==0 && paymentRate>0) 'payment_rate_cents':paymentRate,
-        if(verifiedPaid.contains(row['id']) || row['archived_labor']==1) 'state':'Done',
+        if((verifiedPaid.contains(row['id']) && !activePaidProgress) || row['archived_labor']==1) 'state':'Done',
         if(row['archived_labor']==1 && notes[row['id']]!=null) ...{
           'employee_id':notes[row['id']]!['employee_id'],
           'employee_name':notes[row['id']]!['employee_name'],
@@ -1966,9 +2031,10 @@ class LocalPayrollRepository {
         },
         'hours_hundredths': (total * 100 + 30) ~/ 60,
         'paid_minutes': paid,
-        'can_edit_planned_hours': row['state']=='In Progress' && row['paid_operation_id']==null && row['credit_completed']!=1 && !verifiedPaid.contains(row['id']) &&
+        'can_edit_planned_hours': row['state']=='In Progress' && row['paid_operation_id']==null && row['credit_completed']!=1 &&
+            (!verifiedPaid.contains(row['id']) || activePaidProgress) &&
             !ownerPriorPaid && row['archived_labor']!=1 && row['assignment_conflict']!=1 &&
-            row['source_active']!=0 && coverage?['in_progress_payment']==true,
+            row['source_active']!=0 && allReceiptsAllowEdit,
         'paid_cents': ownerPriorPaid ? ((total * rate + 30) ~/ 60) : row['paid_cents'],
             'can_finish_paid_progress':row['state']=='In Progress' && coverage?['in_progress_payment']==true,
         'payable_minutes': total,
