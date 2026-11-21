@@ -100,7 +100,7 @@ void main() {
         employeeIds: const ['chris'],
         serviceTaskCard: (_) => const SizedBox(height: 32),
         onAddGeneral: () {},
-        onGeneralStatus: (_, __) async {},
+        onGeneralStatus: (task, status) async {},
         onOpenJob: (_) {},
         onEmployeeTap: (_) {},
       )),
