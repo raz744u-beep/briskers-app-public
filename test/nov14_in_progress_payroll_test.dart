@@ -169,12 +169,21 @@ void main() {
     Future<void> receipt(String op,String week,int net)async{await mechanicRepo.applyLanChange(PayrollLanOperation.payment,{'operation':op,'employee':'chris','week':week,'date':week=='2026-11-09'?'2026-11-13':'2026-11-20','method':'Cash','gross':net,'net':net,'repayment':0,'work':[id],'coverage':await repo.recordedCoverage('chris',op)},employee:'chris',assertLink:(){});}
     await replicaLedger.mergeSnapshot(await PayrollOwnerLedger(db,'shop').export(),canonical:true);
     await assignment(1);await receipt('eight-hours','2026-11-09',32000);await receipt('eight-hours','2026-11-09',32000);
+    await repo.setEstimatedMinutes(task, 'chris', 1560);
+    await replicaLedger.mergeSnapshot(await PayrollOwnerLedger(db,'shop').export(),canonical:true);
+    await assignment(2);
+    expect((await LocalPayrollRepository(replica,business:'shop',owner:true).work(employee:'chris')).single['estimated_minutes'],1560);
+    expect((await mechanic.customSelect('SELECT minutes FROM regular_payroll_estimates').getSingle()).data['minutes'],1560);
+    await repo.setEstimatedMinutes(task, 'chris', 1200);
+    await replicaLedger.mergeSnapshot(await PayrollOwnerLedger(db,'shop').export(),canonical:true);
+    await assignment(3);
+
     expect((await mechanic.customSelect('SELECT state FROM regular_payroll_portions').getSingle()).data['state'],'In Progress');
     final original = jsonEncode(await repo.historyWithWork('chris'));
       expect((await repo.taskPaymentHistory(task)).single['amount'], 32000);
       expect((await repo.historyWithWork('chris')).single['net'], 32000);
       await expectLater(
-        repo.setEstimatedMinutes(task, 'chris', 600),
+        repo.setEstimatedMinutes(task, 'chris', 479),
         throwsStateError,
       );
       await expectLater(pay('stale', request, 32000), throwsStateError);
@@ -226,7 +235,7 @@ void main() {
       expect(chris['paid_minutes'], 1200);
       expect(chris['remaining_minutes'], 0);
       expect(jsonEncode(await repo.historyWithWork('chris')), paid);
-    await assignment(2);
+    await assignment(4);
     await replicaLedger.mergeSnapshot(await PayrollOwnerLedger(db,'shop').export(),canonical:true);
     expect((await mechanic.customSelect('SELECT state FROM regular_payroll_portions').getSingle()).data['state'],'Done');
     expect((await LocalPayrollRepository(replica,business:'shop',owner:true).work(employee:'chris')).single['remaining_minutes'],0);

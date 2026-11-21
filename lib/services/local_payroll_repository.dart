@@ -2198,6 +2198,16 @@ class LocalPayrollRepository {
     });
   }
 
+  Future<bool> hasAdvanceHistory(String employee) async {
+    _authorize(); await prepare();
+    final rows = await _read(
+      "SELECT id FROM regular_payroll_audit WHERE business_id=? AND "
+      "((event='opening_advance' AND operation_id=?) OR "
+      "(event IN ('advance','advance_adjustment','standalone_repayment') AND json_extract(payload,'\$.employee')=?)) LIMIT 1",
+      [business, 'opening-advance-$employee', employee]);
+    return rows.isNotEmpty || (await history(employee)).any((p) => (p['repayment'] as num? ?? 0) > 0);
+  }
+
   Future<void> recordOpeningAdvance(String employee, int cents) async {
     _authorize();
     if (cents <= 0) throw ArgumentError('Enter a positive opening amount.');
@@ -2210,7 +2220,7 @@ class LocalPayrollRepository {
       final priorAdvanceEvents = await _read(
         "SELECT id FROM regular_payroll_audit WHERE business_id=? AND "
         "((event='opening_advance' AND operation_id=?) OR "
-        " (event='advance' AND json_extract(payload,'\$.employee')=?)) "
+        " (event IN ('advance','advance_adjustment') AND json_extract(payload,'\$.employee')=?)) "
         'LIMIT 1',
         [business, 'opening-advance-$employee', employee],
       );

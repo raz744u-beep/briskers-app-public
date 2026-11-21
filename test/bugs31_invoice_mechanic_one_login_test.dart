@@ -13,7 +13,12 @@ void main() {
     expect(grant, contains('authorizeSession(widget.business)'));
     expect(grant, isNot(contains('authorizeLocal(widget.business)')));
     expect(grant, contains('scope?.debugAllowOwnerView==true'));
-    expect(source, contains('Paid mechanic labor is locked.'));
+    expect(source, contains('await repo.setEstimatedMinutes'));
+    // The repository revalidates paid coverage; planned In Progress hours are editable.
+    final repository = File('lib/services/local_payroll_repository.dart').readAsStringSync();
+    expect(repository, contains('_correctPaidProgressPlan'));
+    expect(repository, contains('minutes < paid'));
+    expect(repository, contains('Completed and historical payroll remain protected.'));
     expect(source, contains('regular_payroll_work_coverage'));
     expect(source, contains('estimated_minutes'));
     expect(source, contains("linePeople.map((p) =>"));

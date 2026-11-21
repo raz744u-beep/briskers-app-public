@@ -3941,6 +3941,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     var mileageText = (explicitMileageOut
         ? _detail!['mileage_out']
         : _detail!['odometer_in'])?.toString().trim() ?? '';
+    // A header Save is not an explicit Miles In edit. Only pass mileage to
+    // pending-estimate replay when the Owner edited it or selected a different
+    // vehicle with a different mileage. Preserve an intentional blank clear.
+    var mileageTouched = false;
     final claimController = TextEditingController(
       text: _detail!['claim_number']?.toString() ?? '',
     );
@@ -3998,8 +4002,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           customer['display_name']?.toString() ?? '';
                       vehicleId = vehicle?['id']?.toString();
                       vehicleName = _vehicleLabel(vehicle);
-                      mileageText = explicitMileageOut ? '' :
+                      final nextMileage = explicitMileageOut ? '' :
                           (vehicle?['mileage']?.toString().trim() ?? '');
+                      if (nextMileage != mileageText) mileageTouched = true;
+                      mileageText = nextMileage;
                     });
                   },
                 ),
@@ -4019,8 +4025,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           setSheetState(() {
                             vehicleId = vehicle['id']?.toString();
                             vehicleName = _vehicleLabel(vehicle);
-                            mileageText = explicitMileageOut ? '' :
+                            final nextMileage = explicitMileageOut ? '' :
                                 (vehicle['mileage']?.toString().trim() ?? '');
+                            if (nextMileage != mileageText) mileageTouched = true;
+                            mileageText = nextMileage;
                           });
                         },
                 ),
@@ -4083,7 +4091,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                                     MileageWorkflow.parse(raw) != null)
                                 : (raw.isEmpty || num.tryParse(raw) != null);
                             if (valid) {
-                              setSheetState(() => mileageText = raw);
+                              setSheetState(() {
+                                mileageText = raw;
+                                mileageTouched = true;
+                              });
                             } else if (sheetContext.mounted) {
                               ScaffoldMessenger.of(sheetContext).showSnackBar(
                                 const SnackBar(
@@ -4183,13 +4194,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         DateUtils.dateOnly(originalDate) != DateUtils.dateOnly(date);
 
     if (_estimate && _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
-      await _run(() => _offlineDocumentDraft.updatePendingEstimateDetails(
+      final saved = await _run(() => _offlineDocumentDraft.updatePendingEstimateDetails(
         widget.businessId, widget.documentId, documentDate: date,
         customerId: customerId, customerName: customerName,
-        vehicleId: vehicleId, vehicleLabel: vehicleName, mileage: newMileage,
+        vehicleId: vehicleId, vehicleLabel: vehicleName,
+        mileage: mileageTouched ? newMileage : null,
         claimNumber: newClaimNumber.isEmpty ? null : newClaimNumber,
         authorizationNumber: newAuthorizationNumber.isEmpty ? null : newAuthorizationNumber,
+        allowConflictedLocalReview: widget.isOwner,
       ), localOnly: true);
+      if (saved && mounted && _detail?['sync_state'] == 'conflict') {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Changes saved on this phone for Owner review only. '
+              'Estimate sync is still blocked; nothing was sent to the server.'),
+        ));
+      }
       return;
     }
 
@@ -8106,6 +8125,55 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 child: Column(
                   children: [
                   _customerHeader(),
+                  if (_estimate && _detail?['sync_state'] == 'conflict')
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface,
+                          border: const Border(
+                            left: BorderSide(
+                              color: BriskersColors.estimates,
+                              width: 4,
+                            ),
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.warning_amber_outlined,
+                                color: BriskersColors.estimates),
+                            const SizedBox(width: 8),
+                            Expanded(child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Estimate sync needs Owner review',
+                                    style: TextStyle(fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 4),
+                                const Text(
+                                  'Saved on this phone. Automatic sync is blocked; '
+                                  'a numbered copy may already exist on the server. '
+                                  'Review before retrying or deleting.'),
+                                if ((_detail?['_offline_estimate_sync_error']
+                                        ?.toString().isNotEmpty ?? false))
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(
+                                      _detail!['_offline_estimate_sync_error'].toString(),
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context).textTheme.bodySmall,
+                                    ),
+                                  ),
+                              ],
+                            )),
+                          ],
+                        ),
+                      ),
+                    ),
                   if (_estimate && number.isEmpty)
                     ListTile(
                       title: const Text('Estimate number needs correction'),

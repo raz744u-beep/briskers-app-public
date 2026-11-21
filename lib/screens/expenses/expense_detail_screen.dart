@@ -1318,7 +1318,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                                 }),
                               labelText: 'Amount',
                               prefixText: r'$',
-                              border: OutlineInputBorder(),
+                              border: const OutlineInputBorder(),
                             ),
                           ),
                           const SizedBox(height: 12),

@@ -173,6 +173,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   int? _openingAdvance;
   List<Map<String, dynamic>> _advanceAdjustments = [];
   String? _balanceOperation;
+  String? _repaymentOperation;
+  bool _hasAdvanceHistory = false;
   final _balanceReason = TextEditingController();
   final _opening = TextEditingController();
   final _weeklyBasePreview = TextEditingController(text: '0.00');
@@ -494,6 +496,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final repayments = employee == null || widget.employeeId == null || widget.reportsOnly
         ? <Map<String, dynamic>>[] : await repository.repaymentHistory(employee);
     final adjustments = employee == null || _jobMode ? <Map<String, dynamic>>[] : await repository.advanceAdjustments(employee);
+    final debtHistory = employee != null && !_jobMode && await repository.hasAdvanceHistory(employee);
     final opening = employee == null || widget.employeeId == null || widget.reportsOnly
         ? null : await repository.openingAdvance(employee);
     final weeklyDefaults = employee == null || widget.employeeId == null ||
@@ -524,6 +527,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       _advanceBalance = advance;
       _repayments = repayments;
       _openingAdvance = opening;
+      _hasAdvanceHistory = debtHistory;
       _advanceAdjustments = adjustments;
       if (!_editingOpening) { _opening.text = advance == null ? '' : (advance / 100).toStringAsFixed(2);
       }
@@ -1159,7 +1163,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       setState(() => _error = error.message);
       return;
     }
-    final opening = _openingAdvance == null && before == 0 && _repayments.isEmpty && _advanceAdjustments.isEmpty;
+    final opening = !_hasAdvanceHistory && before == 0;
     if (!opening && _balanceReason.text.trim().isEmpty) {
       setState(() => _error = 'Enter a reason for the balance adjustment.'); return;
     }
@@ -1194,14 +1198,16 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     final amount = _repaymentCents;
     final employee = _employee;
     if (amount == null || employee == null) return;
+    _repaymentOperation ??= _operationId();
     await _run(() async {
       final ledger = await _localPaymentLedger();
       await ledger.recordRepayment(
-        employee: employee, operation: _operationId(), amount: amount,
+        employee: employee, operation: _repaymentOperation!, amount: amount,
         date: _date(_repaymentDate), method: _repaymentMethod,
         note: _repaymentNote.text.trim(),
       );
       if (mounted) {
+        _repaymentOperation = null;
         _repayment.clear();
         _repaymentNote.clear();
       }
@@ -1526,8 +1532,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                     if (cents != null && mounted) setState(() => _opening.text = (cents / 100).toStringAsFixed(2));
                   }) : null,
                 labelText: 'Amount owed', isDense:true,
-                contentPadding:EdgeInsets.symmetric(horizontal:12,vertical:12),
-                prefixText: r'$ ', border: OutlineInputBorder(),),
+                contentPadding:const EdgeInsets.symmetric(horizontal:12,vertical:12),
+                prefixText: r'$ ', border: const OutlineInputBorder(),),
             ),),
             const SizedBox(width: 8),
             if (_editingOpening)
@@ -1610,6 +1616,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           const Divider(height: 16),
           Text('Repayment History',key:_repaymentHistoryKey,
             style: const TextStyle(fontWeight: FontWeight.w700),),
+          if (_openingAdvance != null) ListTile(dense: true, contentPadding: EdgeInsets.zero,
+            title: Text('Original opening debt: ${_money(_openingAdvance!)}')),
+          for (final payment in _history.where((p) => (p['repayment'] as num? ?? 0) > 0))
+            ListTile(dense: true, contentPadding: EdgeInsets.zero,
+              title: Text('Payroll deduction: ${_money(payment['repayment'] as int)}'),
+              subtitle: Text('${payment['verified_date']}${payment['reversed_at'] == null ? '' : ' · Reversed'}')),
           for (final item in _advanceAdjustments) ListTile(dense: true, contentPadding: EdgeInsets.zero,
             title: Text('Balance adjustment: ${_money(item['before_cents'] as int)} → ${_money(item['after_cents'] as int)}'),
             subtitle: Text('${item['reason']} · ${item['recorded_at']}\nNot a cash repayment')),
