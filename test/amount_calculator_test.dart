@@ -46,7 +46,9 @@ void main() {
     await tester.tap(find.text('Calculate'));
     await tester.pumpAndSettle();
     for (final label in ['−', '1', '4', '1', '⌫', '0', '=']) {
-      await tester.tap(find.widgetWithText(FilledButton, label));
+      await tester.tap(label == '⌫'
+          ? find.widgetWithIcon(FilledButton, Icons.backspace_outlined)
+          : find.widgetWithText(FilledButton, label));
       await tester.pump();
     }
     final input = find.byType(TextField);

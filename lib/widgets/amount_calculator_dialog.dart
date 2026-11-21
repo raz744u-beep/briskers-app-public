@@ -112,7 +112,9 @@ class _AmountCalculatorDialogState extends State<_AmountCalculatorDialog> {
               ),
             ),
             onPressed: () => _press(label),
-            child: Text(label, style: const TextStyle(fontSize: 18)),
+            child: label == '⌫'
+                ? const Icon(Icons.backspace_outlined, size: 19)
+                : Text(label, style: const TextStyle(fontSize: 18)),
           ),
         ),
       ),
@@ -174,6 +176,7 @@ class _AmountCalculatorDialogState extends State<_AmountCalculatorDialog> {
                     decoration: InputDecoration(
                       labelText: 'Calculation',
                       hintText: '0.00',
+                      floatingLabelBehavior: FloatingLabelBehavior.always,
                       errorText: _error,
                       errorMaxLines: 2,
                       filled: true,
@@ -196,6 +199,9 @@ class _AmountCalculatorDialogState extends State<_AmountCalculatorDialog> {
                     style: FilledButton.styleFrom(
                       backgroundColor: BriskersColors.confirm,
                       foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                     onPressed: () {
                       final result = _evaluate();
