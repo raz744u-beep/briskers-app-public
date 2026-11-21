@@ -29,7 +29,7 @@ CANDIDATE_BRANCHES.add(PAYROLL_CANDIDATE)
 BUGS33_RELEASE_BRANCH = "fix/bugs33-preserve-offline-financial-history-20261108"
 BUGS38_SOURCE_BRANCH = "fix/bugs38-round1-historical-edit-guard"
 BUGS38_CONSOLIDATED_BRANCH = "fix/bugs38-consolidated"
-BACKUP_PAYROLL_CANDIDATE_BRANCH = "candidate/backup-payroll-note9"
+BACKUP_PAYROLL_CANDIDATE_BRANCH = "candidate/expenseiq-photo-import-note9"
 CANDIDATE_BRANCHES.update({BUGS33_RELEASE_BRANCH, BUGS38_CONSOLIDATED_BRANCH, BACKUP_PAYROLL_CANDIDATE_BRANCH})
 BUILD_WORKFLOW = ".github/workflows/android-debug.yml"
 REQUIRED_WORKFLOWS = {

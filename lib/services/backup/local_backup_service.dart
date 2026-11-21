@@ -13,6 +13,7 @@ import '../../core/connection_mode.dart';
 import '../device_owner_authorization.dart';
 import '../offline_attachment_mirror_service.dart';
 import 'backup_archive.dart';
+import 'expenseiq_originals_import.dart';
 import 'restored_attachment_lookup.dart';
 
 class LocalBackupService {
@@ -21,6 +22,7 @@ class LocalBackupService {
   static bool _busy = false;
   static const rootKey = 'briskers_backup_tree_v1';
   static const statusKey = 'briskers_backup_status_v1';
+  static const _expenseIqImportStatus = 'briskers_backup_expenseiq_import_status_v1';
   static const automaticKey = 'briskers_backup_automatic_v1';
   static const restoreRequest = 'briskers_backup_restore_request_v1';
   static Future<File> _restoreRequestFile() async => File(
@@ -55,6 +57,46 @@ class LocalBackupService {
 
   static Future<String?> chooseFolder() =>
       channel.invokeMethod<String>('pickFolder');
+
+  static Future<String?> importExpenseIqOriginals(String businessId) async {
+    await authorize(businessId);
+    if (_busy) throw StateError('A backup, restore, or photo import is already running');
+    _busy = true;
+    Directory? scratch;
+    try {
+      final tree = await channel.invokeMethod<String>('pickExpenseIqOriginalsFolder');
+      if (tree == null) return null;
+      final prefs = await SharedPreferences.getInstance();
+      final support = await getApplicationSupportDirectory();
+      scratch = await (await getTemporaryDirectory()).createTemp('expenseiq-import-');
+      await prefs.setString(_expenseIqImportStatus, jsonEncode({
+        'business_id': businessId, 'complete': false,
+      }));
+      final result = await ExpenseIqOriginalsImport(
+        localDatabase,
+        Directory('${support.path}/briskers_media/expenseiq_originals'),
+        scratch,
+        channel,
+      ).run(businessId, tree, (message) => progress.value = message);
+      await prefs.setString(_expenseIqImportStatus, jsonEncode({
+        'business_id': businessId,
+        'complete': result.unreadable == 0 && result.outstanding == 0,
+        'unreadable': result.unreadable,
+        'outstanding': result.outstanding,
+      }));
+      final summary = '${result.scanned} photos found · ${result.copied} copied · '
+          '${result.reused} already stored · ${result.unreadable} unreadable. '
+          '${result.linked} receipt links updated · ${result.outstanding} still need review.';
+      progress.value = summary;
+      return summary;
+    } finally {
+      try {
+        if (scratch != null && await scratch.exists()) await scratch.delete(recursive: true);
+      } finally {
+        _busy = false;
+      }
+    }
+  }
 
   static Future<Map<String, dynamic>> create(String businessId) async {
     await authorize(businessId);
@@ -111,6 +153,7 @@ class LocalBackupService {
     await localDatabase.customStatement('VACUUM INTO ?', [dbFile.path]);
     final sourceFiles = <String, String>{};
     final warnings = <String>[];
+    final localPaths = <String, String>{};
     var index = 0;
     Future<void> copyOriginal(String original) async {
       if (sourceFiles.containsKey(original)) return;
@@ -140,6 +183,11 @@ class LocalBackupService {
           final path = original.startsWith('file://')
               ? Uri.parse(original).toFilePath()
               : original;
+          final alreadyCopied = localPaths[path];
+          if (alreadyCopied != null) {
+            sourceFiles[original] = alreadyCopied;
+            return;
+          }
           final type = await FileSystemEntity.type(path, followLinks: false);
           if (type == FileSystemEntityType.directory) return;
           if (type != FileSystemEntityType.file) {
@@ -151,6 +199,11 @@ class LocalBackupService {
           throw StateError('Original is empty');
         }
         sourceFiles[original] = relative;
+        if (!original.startsWith('content://')) {
+          final path = original.startsWith('file://')
+              ? Uri.parse(original).toFilePath() : original;
+          localPaths[path] = relative;
+        }
       } catch (_) {
         warnings.add('Original unavailable: $original');
         if (await destination.exists()) await destination.delete();
@@ -211,6 +264,14 @@ class LocalBackupService {
       final copied = sourceFiles[entry.value.path];
       if (copied != null) sourceFiles[entry.key] = copied;
     }
+    progress.value = 'Checking attachment coverage';
+    final importStatus = prefs.getString(_expenseIqImportStatus);
+    if (importStatus != null) {
+      final status = jsonDecode(importStatus) as Map<String, dynamic>;
+      if (status['business_id'] == businessId && status['complete'] != true) {
+        warnings.add('Expense IQ photo import is incomplete or has receipt links to review.');
+      }
+    }
     final inventory = await OfflineAttachmentMirrorService().inventory(
       businessId,
     );
@@ -223,11 +284,13 @@ class LocalBackupService {
     await settingsFile.parent.create(recursive: true);
     await settingsFile.writeAsString(jsonEncode(settings), flush: true);
     if (Platform.isAndroid) {
+      progress.value = 'Copying Briskers installer';
       await channel.invokeMethod<void>('copyApk', {
         'destination': '${folder.path}/App/Briskers.apk',
       });
     }
     final info = await PackageInfo.fromPlatform();
+    progress.value = 'Verifying the database and copied files';
     return BackupArchive.seal(
       folder,
       businessId: businessId,

@@ -15,6 +15,7 @@ import 'package:briskers_app/services/local_job_deletion_v3.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/local/local_database_provider.dart';
 import 'package:briskers_app/services/backup/backup_archive.dart';
+import 'package:briskers_app/services/backup/expenseiq_originals_import.dart';
 import 'package:briskers_app/services/backup/local_backup_service.dart';
 
 class _Paths extends PathProviderPlatform {
@@ -131,6 +132,106 @@ void main() {
     await database.close();
     PathProviderPlatform.instance = previousPaths;
     await root.delete(recursive: true);
+  });
+
+  test('legacy import preserves newer photos and restores both offline', () async {
+    PackageInfo.setMockInitialValues(
+      appName: 'Briskers', packageName: 'com.briskers.briskers_app',
+      version: '0.10.9', buildNumber: '4772', buildSignature: '',
+    );
+    String legacyUri(String path, {String folder = 'photos'}) => Uri(
+      scheme: 'content', host: 'com.android.externalstorage.documents',
+      pathSegments: ['document', 'primary:ExpenseIQ/$folder/$path'],
+    ).toString();
+    final current = File('${root.path}/briskers_media/current.jpg');
+    await current.parent.create(recursive: true);
+    await current.writeAsBytes([1, 2, 3]);
+    Future<void> link(String id, String? uri) => database.customStatement(
+      'INSERT INTO local_expense_iq_photos '
+      '(business_id, transaction_id, photo_id, filename, source_uri, state, updated_at) '
+      "VALUES ('shop', ?, 'receipt', 'receipt.jpg', ?, 'uploaded', 1)",
+      [id, uri],
+    );
+    await link('old', legacyUri('receipt.jpg', folder: 'Photos'));
+    await link('new', current.uri.toString());
+    await link('unmatched', legacyUri('absent/receipt.jpg'));
+    final fixtures = {
+      legacyUri('receipt.jpg'): [4, 5, 6],
+      legacyUri('extra/receipt.jpg'): [7, 8, 9],
+      legacyUri('duplicate.jpg'): [4, 5, 6],
+      legacyUri('unreadable.jpg'): <int>[],
+    };
+    final media = Directory('${root.path}/briskers_media/expenseiq_originals');
+    final scratch = await Directory('${root.path}/cache').createTemp();
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    var copies = 0;
+    messenger.setMockMethodCallHandler(LocalBackupService.channel, (call) async {
+      if (call.method == 'listExpenseIqOriginals') {
+        return [
+          for (final entry in fixtures.entries)
+            {
+              'path': Uri.parse(entry.key).pathSegments.last
+                  .substring('primary:ExpenseIQ/photos/'.length),
+              'uri': entry.key,
+              'size': entry.value.length,
+              'modified': 1,
+            },
+        ];
+      }
+      if (call.method == 'copyExpenseIqOriginal') {
+        copies++;
+        final args = call.arguments as Map;
+        final bytes = fixtures[args['uri']]!;
+        if (bytes.isEmpty) throw PlatformException(code: 'unreadable');
+        final target = await File(args['destination'] as String).writeAsBytes(bytes);
+        return BackupArchive.digest(target);
+      }
+      throw StateError('Unexpected channel operation ${call.method}');
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(LocalBackupService.channel, null));
+    final importer = ExpenseIqOriginalsImport(database, media, scratch, LocalBackupService.channel);
+    final first = await importer.run('shop', 'test-tree', (_) {});
+    expect(first, (scanned: 4, copied: 2, reused: 1, unreadable: 1,
+      linked: 1, outstanding: 1));
+    final second = await importer.run('shop', 'test-tree', (_) {});
+    expect(second, (scanned: 4, copied: 0, reused: 3, unreadable: 1,
+      linked: 0, outstanding: 1));
+    expect(copies, 5);
+    expect(await media.list().length, 2);
+    var reader = ExpenseIqLocalPhotoSync(database: database);
+    expect((await reader.localForExpense('shop', 'new'))?['source_uri'], current.uri.toString());
+    expect((await reader.localForExpense('shop', 'old'))?['state'], 'uploaded');
+    expect((await reader.localForExpense('shop', 'unmatched'))?['source_uri'],
+        legacyUri('absent/receipt.jpg'));
+    // Remove the deliberately unresolved legacy test link so the remaining
+    // backup can be verified without the external folder or its SAF grant.
+    await database.customStatement(
+      "DELETE FROM local_expense_iq_photos WHERE transaction_id='unmatched'",
+    );
+    final export = Directory('${root.path}/backup-review-photo-export/import');
+    await export.create(recursive: true);
+    final manifest = await LocalBackupService.snapshot('shop', export);
+    final sources = manifest['source_files'] as Map;
+    expect(sources[current.path], sources[current.uri.toString()]);
+    final restored = await BackupArchive.restoreTo(
+      export, Directory('${root.path}/restored-backup-photo-test'), businessId: 'shop',
+    );
+    await media.delete(recursive: true);
+    await current.delete();
+    final restoredDb = BriskersLocalDatabase(NativeDatabase(restored));
+    addTearDown(restoredDb.close);
+    reader = ExpenseIqLocalPhotoSync(database: restoredDb);
+    Future<List<int>> read(String id) async {
+      final photo = (await reader.localForExpense('shop', id))!;
+      return reader.readOriginalPhoto('shop', id, photo,
+          reader: (_) async => throw StateError('External folder is unavailable'));
+    }
+    expect(await read('old'), [4, 5, 6]);
+    expect(await read('new'), [1, 2, 3]);
+    final unlinked = await restoredDb.customSelect(
+      "SELECT file_uri FROM local_expense_iq_imported_files WHERE relative_path='extra/receipt.jpg'",
+    ).getSingle();
+    expect(await File.fromUri(Uri.parse(unlinked.read<String>('file_uri'))).readAsBytes(), [7, 8, 9]);
   });
 
   test(

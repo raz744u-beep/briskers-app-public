@@ -199,6 +199,22 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
         ),
         const Divider(),
         const Text(
+          'Copy the original Expense IQ photos into Briskers for offline access '
+          'and future backups. Select Internal storage / ExpenseIQ / photos. '
+          'Keep the original folder until you verify a restored backup.',
+        ),
+        OutlinedButton.icon(
+          onPressed: _busy ? null : () => _run(() async {
+            final summary = await LocalBackupService.importExpenseIqOriginals(widget.businessId);
+            if (summary != null && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(summary)));
+            }
+          }),
+          icon: const Icon(Icons.photo_library_outlined),
+          label: const Text('Import Expense IQ Photos'),
+        ),
+        const Divider(),
+        const Text(
           'To restore, select a dated backup folder containing backup-info.json. Briskers checks its files and tests a separate restored copy first.',
         ),
         OutlinedButton.icon(

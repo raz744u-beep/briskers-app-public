@@ -8,6 +8,7 @@ import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.InputStream
+import java.security.DigestInputStream
 import java.security.MessageDigest
 
 /** Stream originals and folder snapshots through Android's persisted folder grant.
@@ -19,13 +20,16 @@ class BriskersBackupBridge(private val activity: Activity, messenger: BinaryMess
     private val resolver get() = activity.contentResolver
     init {
         channel.setMethodCallHandler { call, result ->
-            if (call.method == "pickFolder") {
+            if (call.method == "pickFolder" || call.method == "pickExpenseIqOriginalsFolder") {
                 if (pending != null) { result.error("busy", "Folder picker is open", null) }
                 else {
                     pending = result
                     val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+                    if (call.method == "pickFolder") {
+                        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    }
                     activity.startActivityForResult(intent, requestCode)
                 }
             } else {
@@ -39,6 +43,23 @@ class BriskersBackupBridge(private val activity: Activity, messenger: BinaryMess
                                 target.parentFile!!.mkdirs()
                                 resolver.openInputStream(uri)!!.use { input -> target.outputStream().use { input.copyTo(it) } }
                                 null
+                            }
+                            "listExpenseIqOriginals" ->
+                                listExpenseIqOriginals(Uri.parse(call.argument<String>("tree")!!))
+                            "copyExpenseIqOriginal" -> {
+                                val uri = Uri.parse(call.argument<String>("uri")!!)
+                                require(uri.authority == "com.android.externalstorage.documents" &&
+                                    DC.getTreeDocumentId(uri).equals("primary:ExpenseIQ/Photos", ignoreCase = true) &&
+                                    DC.getDocumentId(uri).startsWith("primary:ExpenseIQ/Photos/", ignoreCase = true))
+                                val target = ownedFile(call.argument<String>("destination")!!)
+                                require(!target.exists())
+                                val digest = MessageDigest.getInstance("SHA-256")
+                                resolver.openInputStream(uri)!!.use { original ->
+                                    DigestInputStream(original, digest).use { input ->
+                                        target.outputStream().use { input.copyTo(it, 128 * 1024) }
+                                    }
+                                }
+                                digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
                             }
                             "copyApk" -> {
                                 val target = ownedFile(call.argument<String>("destination")!!)
@@ -120,6 +141,45 @@ class BriskersBackupBridge(private val activity: Activity, messenger: BinaryMess
                 cursor.getString(2) == DC.Document.MIME_TYPE_DIR))
         }
         return children
+    }
+    private fun listExpenseIqOriginals(tree: Uri): List<Map<String, Any?>> {
+        val rootId = DC.getTreeDocumentId(tree)
+        require(tree.authority == "com.android.externalstorage.documents" &&
+            rootId.equals("primary:ExpenseIQ/Photos", ignoreCase = true)) {
+            "Select Internal storage / ExpenseIQ / photos"
+        }
+        val files = mutableListOf<Map<String, Any?>>()
+        val folders = java.util.ArrayDeque<Pair<String, String>>()
+        folders.add(rootId to "")
+        val visited = mutableSetOf<String>()
+        val extensions = setOf("jpg", "jpeg", "png", "webp", "heic", "heif", "gif", "bmp", "tif", "tiff", "avif")
+        while (folders.isNotEmpty()) {
+            val (id, prefix) = folders.removeFirst()
+            check(visited.add(id)) { "Duplicate folder returned by Android" }
+            val query = DC.buildChildDocumentsUriUsingTree(tree, id)
+            val columns = arrayOf(DC.Document.COLUMN_DOCUMENT_ID, DC.Document.COLUMN_DISPLAY_NAME,
+                DC.Document.COLUMN_MIME_TYPE, DC.Document.COLUMN_SIZE, DC.Document.COLUMN_LAST_MODIFIED)
+            checkNotNull(resolver.query(query, columns, null, null, null)) { "Could not read the photo folder" }
+                .use { cursor ->
+                    while (cursor.moveToNext()) {
+                        val childId = cursor.getString(0)
+                        val name = safeName(cursor.getString(1))
+                        val type = cursor.getString(2).orEmpty()
+                        val path = if (prefix.isEmpty()) name else "$prefix/$name"
+                        if (type == DC.Document.MIME_TYPE_DIR) {
+                            folders.add(childId to path)
+                        } else if (type.startsWith("image/") || name.substringAfterLast('.').lowercase() in extensions) {
+                            files.add(mapOf(
+                                "path" to path,
+                                "uri" to DC.buildDocumentUriUsingTree(tree, childId).toString(),
+                                "size" to if (cursor.isNull(3)) null else cursor.getLong(3),
+                                "modified" to if (cursor.isNull(4)) null else cursor.getLong(4),
+                            ))
+                        }
+                    }
+                }
+        }
+        return files
     }
     private fun directory(parent: Uri, name: String): Uri {
         val found = children(parent).singleOrNull { it.name == name }

@@ -5,7 +5,7 @@ on:
       - fix/gloria-rounding-preflight-20261030
       - fix/bugs38-round1-historical-edit-guard
       - fix/bugs38-consolidated
-      - candidate/backup-payroll-note9
+      - candidate/expenseiq-photo-import-note9
   pull_request:
     paths:
       - "tools/recovery/offline_invoice_exact_total_v2_DRAFT.sql"

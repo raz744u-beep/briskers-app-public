@@ -2,7 +2,7 @@ name: Offline recurring component
 
 on:
   push:
-    branches: [fix/bugs38-round1-historical-edit-guard, fix/bugs38-consolidated, candidate/backup-payroll-note9]
+    branches: [fix/bugs38-round1-historical-edit-guard, fix/bugs38-consolidated, candidate/expenseiq-photo-import-note9]
   pull_request:
     paths:
       - 'lib/services/offline_recurring_repository.dart'
