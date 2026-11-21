@@ -32,6 +32,7 @@ fun main() {
             change: (File) -> Unit = {},
             beforeWrite: (String) -> Unit = {},
             interruptWrite: Boolean = false,
+            fullDestination: String? = null,
         ): List<Map<String, Any>> {
             val target = File(root, name).apply { check(mkdir()) }
             var time = 0L
@@ -41,6 +42,11 @@ fun main() {
                 entries,
                 copyToDestination = { path, write ->
                     beforeWrite(path)
+                    if (path == fullDestination) {
+                        // Linux provides a real ENOSPC write failure without filling the runner.
+                        File("/dev/full").outputStream().use { write(it) }
+                        error("Expected the destination to reject the write")
+                    }
                     val file = File(target, path)
                     file.parentFile.mkdirs()
                     file.outputStream().use { output ->
@@ -85,6 +91,14 @@ fun main() {
         check(transfer("retry", listOf(database, document)).last()["copied"] == 2)
         check(previous.readText() == "unchanged")
 
+        val diskFull = runCatching {
+            transfer("full-destination", listOf(database, document), fullDestination = document.path)
+        }.exceptionOrNull()
+        check(diskFull is IOException && diskFull.message!!.contains("No space left", ignoreCase = true))
+        check(File(root, "full-destination/${database.path}").length() == database.bytes)
+        check(transfer("retry-after-full", listOf(database, document)).last()["verified"] == database.bytes + document.bytes)
+        check(previous.readText() == "unchanged")
+
         val badHash = runCatching {
             transfer("corrupt", listOf(document), change = { it.writeBytes(byteArrayOf(1, 2, 4)) })
         }.exceptionOrNull()
@@ -100,7 +114,7 @@ fun main() {
         Files.createSymbolicLink(File(source, document.path).toPath(), previous.toPath())
         val symlink = runCatching { transfer("symlink", listOf(document)) }.exceptionOrNull()
         check(symlink is IOException && symlink.message!!.contains("Invalid backup source path"))
-        println("5,002 files, large-file progress, retry, permissions, corruption and missing-file checks passed")
+        println("5,002 files, large-file progress, retry, insufficient storage, permissions, corruption and missing-file checks passed")
     } finally {
         root.deleteRecursively()
     }
