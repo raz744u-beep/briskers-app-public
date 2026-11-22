@@ -61,6 +61,61 @@ class LocalBackupService {
         caseSensitive: false,
       ).hasMatch(key);
 
+  /// Describes what the local Expense IQ import status actually establishes.
+  /// This is informational: a valid snapshot of known files stays valid even
+  /// when an unrelated device's external photo folder has not been inventoried.
+  static String expenseIqCoverageMessage(
+    SharedPreferences prefs,
+    String businessId,
+  ) {
+    const notChecked =
+        'Expense IQ originals have not been imported or checked on this '
+        'device. A verified backup does not include unknown originals '
+        'in an external folder or on another phone.';
+    final raw = prefs.getString(_expenseIqImportStatus);
+    if (raw == null) return notChecked;
+    try {
+      final status = jsonDecode(raw);
+      if (status is! Map<String, dynamic> ||
+          status['business_id'] != businessId) {
+        return notChecked;
+      }
+      if (status['complete'] == true) {
+        return 'Expense IQ import completed on this device. Compare the '
+            'original folder inventory before deleting any originals.';
+      }
+      return 'Expense IQ import is incomplete on this device. Review unreadable '
+          'photos and outstanding receipt links before relying on this copy.';
+    } on FormatException {
+      return 'Expense IQ import status could not be checked. Keep the '
+          'original photos and review the source folder.';
+    }
+  }
+
+  /// Import status should never prevent copying otherwise healthy shop data.
+  /// Return an incomplete-coverage warning when saved status is malformed.
+  static String? expenseIqImportBackupWarning(
+    SharedPreferences prefs,
+    String businessId,
+  ) {
+    final raw = prefs.getString(_expenseIqImportStatus);
+    if (raw == null) return null;
+    const unreadable =
+        'Expense IQ photo import status is unreadable. Check the original '
+        'photo folder before treating this backup as complete.';
+    try {
+      final status = jsonDecode(raw);
+      if (status is! Map<String, dynamic>) return unreadable;
+      if (status['business_id'] != businessId) return null;
+      if (status['complete'] != true) {
+        return 'Expense IQ photo import is incomplete or has receipt links to review.';
+      }
+      return null;
+    } on FormatException {
+      return unreadable;
+    }
+  }
+
   @visibleForTesting
   static Future<void> Function(String)? debugOwnerAuthorization;
 
@@ -328,15 +383,8 @@ class LocalBackupService {
       if (copied != null) sourceFiles[entry.key] = copied;
     }
     progress.value = 'Checking attachment coverage';
-    final importStatus = prefs.getString(_expenseIqImportStatus);
-    if (importStatus != null) {
-      final status = jsonDecode(importStatus) as Map<String, dynamic>;
-      if (status['business_id'] == businessId && status['complete'] != true) {
-        warnings.add(
-          'Expense IQ photo import is incomplete or has receipt links to review.',
-        );
-      }
-    }
+    final importWarning = expenseIqImportBackupWarning(prefs, businessId);
+    if (importWarning != null) warnings.add(importWarning);
     final inventory = await OfflineAttachmentMirrorService().inventory(
       businessId,
     );
