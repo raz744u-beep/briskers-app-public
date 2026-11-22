@@ -207,7 +207,12 @@ void main() {
         expect(tester.widget<FilledButton>(saveBalance).onPressed, isNull);
         await tester.ensureVisible(reason);
         await tester.enterText(reason, 'Advance correction');
+        await until(find.byWidgetPredicate(
+          (widget) => widget is FilledButton && widget.onPressed != null &&
+              widget.child is Text && (widget.child as Text).data == 'Save Balance',
+        ));
         await tester.ensureVisible(saveBalance);
+        await tester.pumpAndSettle();
         await tester.tap(saveBalance);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Confirm Balance'));
