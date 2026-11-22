@@ -10,6 +10,8 @@ Point OneSync or another folder-copy utility at Briskers_Backup, and verify a da
 
 Automatic daily backups are opt-in and run while Briskers is open, checked every fifteen minutes. A missed run retries on a later open/check. Closed-app background execution is not claimed. Keep enough free space for a database snapshot, originals, APK, and external dated copy; no existing backups are deleted on failure.
 
+The Backup & Restore screen displays Expense IQ original-photo import coverage separately from checksum success: an absent, mismatched or incomplete import status does not prove that an external Expense IQ photo folder was backed up. The status is informational, not a claim that the saved snapshot is corrupt. Check each device's original folder independently, including unlinked photos, and keep source originals until inventory and off-device backup are verified.
+
 A backup covers records and files known on this device. Missing referenced local/SAF originals and known cloud-only attachments produce explicit incomplete warnings. No network download is attempted. A missing database or settings file, a failed checksum, or a transfer failure prevents completion. Split APK installs produce a warning to keep the matching installer separately. Authentication tokens, secure storage, Owner enrollment, device identity, and gateway credentials are not exported as preferences. Re-enter credentials on a replacement device; complete Owner sign-in/setup before invoking restore there. No claim is made that unknown or never-downloaded server history is present.
 
 ## Restore
