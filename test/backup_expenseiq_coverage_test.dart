@@ -7,8 +7,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('unimported Expense IQ originals cannot be implied by a verified backup',
-      () async {
+  test(
+    'unimported Expense IQ originals cannot be implied by a verified backup',
+    () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
     expect(
@@ -61,5 +62,6 @@ void main() {
       LocalBackupService.expenseIqCoverageMessage(prefs, 'shop-a'),
       contains('could not be checked'),
     );
-  });
+    },
+  );
 }
