@@ -642,9 +642,9 @@ void main() {
       await capture(t, key, 'next-compact-amount-calculator');
       await t.tap(find.byTooltip('Cancel'));
       await t.pumpAndSettle();
-      await t.ensureVisible(find.text('Record Repayment'));
+      await t.ensureVisible(find.text('Record separate repayment'));
       await t.pumpAndSettle();
-      await t.tap(find.text('Record Repayment'));
+      await t.tap(find.text('Record separate repayment'));
       await t.pumpAndSettle();
       expect(find.text('Repayment method'), findsOneWidget);
       await t.ensureVisible(find.text('Save Repayment'));

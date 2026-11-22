@@ -135,9 +135,14 @@ void main() {
           scrollable: find.byType(Scrollable).last);
         await tester.ensureVisible(find.text('Advances & Repayments'));
         await tester.pumpAndSettle();
-        expect(headerGradient('Advances & Repayments'), weeklyGradient);
+        expect(headerGradient('Outstanding balance'), weeklyGradient);
         await tester.tap(find.text('Advances & Repayments'));
         await tester.pumpAndSettle();
+        Finder outstanding(String amount) => find.byWidgetPredicate(
+          (widget) => widget is Text &&
+              widget.key == const Key('outstanding-advance-balance') &&
+              widget.data == amount,
+        );
         final adjust = find.text('Adjust Amount Owed');
         await tester.ensureVisible(adjust);
         await tester.pumpAndSettle();
@@ -149,7 +154,7 @@ void main() {
         await tester.enterText(opening, '1600.00');
         await tester.pumpAndSettle();
         await until(find.text(r'Proposed balance: $1,600.00'));
-        expect(find.text(r'Current balance: $0.00'), findsOneWidget);
+        expect(outstanding(r'$0.00'), findsOneWidget);
         expect(find.text('Save Repayment'), findsNothing);
 
         final previousSize = tester.view.physicalSize;
@@ -175,9 +180,9 @@ void main() {
         await tester.tap(saveBalance);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Confirm Balance'));
-        await until(find.text(r'Current balance: $1,600.00'));
+        await until(outstanding(r'$1,600.00'));
 
-        final record = find.text('Record Repayment');
+        final record = find.text('Record separate repayment');
         await tester.ensureVisible(record);
         await tester.pumpAndSettle();
         await tester.tap(record);
@@ -193,10 +198,40 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(saveRepayment);
         await tester.tap(saveRepayment, warnIfMissed: false);
-        await until(find.text(r'Current balance: $1,460.00'));
+        await until(outstanding(r'$1,460.00'));
         await tester.tap(find.text('Payroll'));
         await tester.pumpAndSettle();
         await until(find.byKey(const Key('verify-weekly-payment')));
+        expect(find.text('Adjustments & repayment'), findsNothing);
+        final paycheck = find.text('Deduct from paycheck');
+        await tester.ensureVisible(paycheck);
+        await tester.tap(paycheck);
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(
+            of: find.byWidgetPredicate((widget) => widget is SegmentedButton<Object>),
+            matching: find.byIcon(Icons.check_circle),
+          ),
+          findsOneWidget,
+        );
+
+        final deduction = find.widgetWithText(TextField, 'Repayment amount');
+        final apply = find.widgetWithText(FilledButton, 'Apply to payment');
+        await tester.ensureVisible(deduction);
+        await tester.enterText(deduction, '45.00');
+        await tester.pumpAndSettle();
+        expect(tester.widget<FilledButton>(apply).onPressed, isNull);
+        await tester.enterText(deduction, '10.00');
+        await tester.pumpAndSettle();
+        expect(find.text(r'Payment Total: $30.00'), findsOneWidget);
+        await tester.ensureVisible(apply);
+        await tester.tap(apply);
+        await tester.pumpAndSettle();
+        await tester.runAsync(() async {
+          expect(await fixture.advance('a'), 146000);
+          expect(await fixture.history('a'), isEmpty);
+          expect(await fixture.repaymentHistory('a'), hasLength(1));
+        });
       }
       // The recorded-labor review above WeeklyLaborReview makes the footer
       // scrollable on short phones; bring the existing payment action into
@@ -213,6 +248,7 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Record payment'));
       if (currentHolder) {
         await until(find.text('Payment Recorded'));
+        expect(find.text(r'Transferred: $30.00'), findsOneWidget);
         await tester.tap(find.widgetWithText(FilledButton, 'Done'));
         await tester.pump(const Duration(milliseconds: 500));
         await tester.runAsync(() async {
@@ -241,10 +277,11 @@ void main() {
       if (currentHolder) {
         await tester.runAsync(() async {
           final saved = await LocalPayrollRepository(db, business: 'shop', owner: true).history('a');
-          expect(saved, hasLength(1)); expect(saved.single['net'], 4000);
+          expect(saved, hasLength(1)); expect(saved.single['net'], 3000);
+          expect(saved.single['repayment'], 1000);
           final reopened = LocalPayrollRepository(db, business: 'shop', owner: true);
           expect(await reopened.openingAdvance('a'), 160000);
-          expect(await reopened.advance('a'), 146000);
+          expect(await reopened.advance('a'), 145000);
           expect(await reopened.repaymentHistory('a'), hasLength(1));
         });
       } else {

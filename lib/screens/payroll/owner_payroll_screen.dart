@@ -61,7 +61,7 @@ import 'job_scoped_tasks.dart';
 import 'task_selection_dialog.dart';
 import 'payroll_overview.dart';
 
-enum _AdvanceSection { balance, repayment, history }
+enum _AdvanceSection { balance, paycheck, repayment, history }
 
 class OwnerPayrollScreen extends StatefulWidget {
   const OwnerPayrollScreen({
@@ -1532,7 +1532,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         if (mounted) setState(() => _draftRevision++);
       },
       loadDraft:(week)=>_viewRepository.payrollDraftDetails(widget.employeeId!,_date(week)),
-      extra: _advancePanel(),
+      profileAdvanceBalance: _advanceBalance,
+      advancePanel: _advancePanel,
     );
   }
 
@@ -1557,85 +1558,153 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     ],
   );
 
-  Widget _advancePanel() {
+  void _selectAdvanceSection(_AdvanceSection? section) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      final next = _advanceSection == section ? null : section;
+      if (next == _AdvanceSection.balance && _balanceOperation == null) {
+        final balance = _advanceBalance;
+        _opening.text = _isOpeningBalance || balance == null
+            ? ''
+            : (balance / 100).toStringAsFixed(2);
+      }
+      _advanceSection = next;
+      _advanceError = null;
+    });
+  }
+
+  Widget _advancePanel([Widget Function(VoidCallback cancel)? paycheckEditor]) {
     final expanded = _advanceExpanded ?? ((_advanceBalance ?? 0) > 0);
+    final enabled = !_busy && !_confirmingBalance;
+    final section = _advanceSection;
+    final selectedMode = section == _AdvanceSection.paycheck ||
+            section == _AdvanceSection.repayment
+        ? section
+        : null;
     return Card(
+      color: Colors.white,
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Material(
-            color: Colors.transparent,
-            child: Ink(
-              decoration: const BoxDecoration(gradient: BriskersColors.blueHeader),
-              child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                leading: const Icon(Icons.handshake_outlined, color: Colors.white),
-                title: const Text(
-                  'Advances & Repayments',
-                  style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white),
-                ),
-                subtitle: Text(
-                  'Current balance: ${_moneyNullable(_advanceBalance)}',
-                  style: const TextStyle(color: Colors.white),
-                ),
-                trailing: Icon(
-                  expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                  color: Colors.white,
-                ),
-                onTap: _busy ? null : () => setState(() => _advanceExpanded = !expanded),
-              ),
+          ListTile(
+            leading: const Icon(Icons.payments_outlined, color: taskGreen),
+            title: const Text(
+              'Advances & Repayments',
+              style: TextStyle(fontWeight: FontWeight.w800),
             ),
+            trailing: Icon(
+              expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+            ),
+            onTap: enabled ? () {
+              FocusManager.instance.primaryFocus?.unfocus();
+              setState(() => _advanceExpanded = !expanded);
+            } : null,
           ),
-          if (expanded)
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final (section, title, icon) in const [
-                    (_AdvanceSection.balance, 'Adjust Amount Owed', Icons.edit_outlined),
-                    (_AdvanceSection.repayment, 'Record Repayment', Icons.add_circle_outline),
-                    (_AdvanceSection.history, 'Repayment History', Icons.history),
-                  ]) ...[
-                    OutlinedButton.icon(
-                      icon: Icon(icon, size: 18),
-                      label: Text(title),
-                      onPressed: _busy || _confirmingBalance ? null : () {
-                        FocusManager.instance.primaryFocus?.unfocus();
-                        setState(() {
-                          _advanceExpanded = true;
-                          if (_advanceSection != section) {
-                            if (section == _AdvanceSection.balance &&
-                                _balanceOperation == null) {
-                              _opening.text = _isOpeningBalance || _advanceBalance == null
-                                  ? '' : (_advanceBalance! / 100).toStringAsFixed(2);
-                            }
-                            _advanceSection = section;
-                          } else {
-                            _advanceSection = null;
-                          }
-                          _advanceError = null;
-                        });
-                      },
-                    ),
-                    if (_advanceSection == section) ...[
-                      const SizedBox(height: 8),
-                      switch (section) {
-                        _AdvanceSection.balance => _balanceForm(),
-                        _AdvanceSection.repayment => _repaymentForm(),
-                        _AdvanceSection.history => _advanceHistory(),
-                      },
-                      if (_advanceError case final message?) ...[
-                        const SizedBox(height: 8),
-                        Text(message, style: const TextStyle(color: BriskersColors.destructive)),
-                      ],
-                      const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    gradient: BriskersColors.blueHeader,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 12,
+                    runSpacing: 4,
+                    children: [
+                      const Text(
+                        'Outstanding balance',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF061A2E),
+                        ),
+                      ),
+                      Text(
+                        _moneyNullable(_advanceBalance),
+                        key: const Key('outstanding-advance-balance'),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
                     ],
+                  ),
+                ),
+                if (expanded) ...[
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    children: [
+                      TextButton(
+                        onPressed: enabled
+                            ? () => _selectAdvanceSection(_AdvanceSection.balance)
+                            : null,
+                        child: const Text('Adjust Amount Owed'),
+                      ),
+                      TextButton(
+                        onPressed: enabled
+                            ? () => _selectAdvanceSection(_AdvanceSection.history)
+                            : null,
+                        child: const Text('Repayment History'),
+                      ),
+                    ],
+                  ),
+                  if (paycheckEditor != null)
+                    SegmentedButton<_AdvanceSection>(
+                      segments: [
+                        ButtonSegment(
+                          value: _AdvanceSection.paycheck,
+                          label: const Text('Deduct from paycheck', textAlign: TextAlign.center),
+                          enabled: enabled,
+                        ),
+                        ButtonSegment(
+                          value: _AdvanceSection.repayment,
+                          label: const Text('Record separate repayment', textAlign: TextAlign.center),
+                          enabled: enabled,
+                        ),
+                      ],
+                      selected: {if (selectedMode != null) selectedMode},
+                      emptySelectionAllowed: true,
+                      selectedIcon: const Icon(Icons.check_circle, color: taskGreen),
+                      onSelectionChanged: (selection) =>
+                          _selectAdvanceSection(selection.firstOrNull),
+                    )
+                  else
+                    OutlinedButton.icon(
+                      onPressed: enabled
+                          ? () => _selectAdvanceSection(_AdvanceSection.repayment)
+                          : null,
+                      icon: Icon(
+                        section == _AdvanceSection.repayment
+                            ? Icons.check_circle
+                            : Icons.add_circle_outline,
+                      ),
+                      label: const Text('Record separate repayment'),
+                    ),
+                  if (section != null &&
+                      (section != _AdvanceSection.paycheck || paycheckEditor != null)) ...[
+                    const SizedBox(height: 12),
+                    switch (section) {
+                      _AdvanceSection.balance => _balanceForm(),
+                      _AdvanceSection.paycheck =>
+                        paycheckEditor!(() => _selectAdvanceSection(null)),
+                      _AdvanceSection.repayment => _repaymentForm(),
+                      _AdvanceSection.history => _advanceHistory(),
+                    },
+                  ],
+                  if (_advanceError case final message?) ...[
+                    const SizedBox(height: 8),
+                    Text(message, style: const TextStyle(color: BriskersColors.destructive)),
                   ],
                 ],
-              ),
+              ],
             ),
+          ),
         ],
       ),
     );

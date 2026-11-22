@@ -34,7 +34,8 @@ class WeeklyLaborReview extends StatefulWidget {
     this.onOpenJob,
     this.onOpenTask,
     this.reviewMessage,
-    this.extra,
+    this.advancePanel,
+    this.profileAdvanceBalance,
     this.saveDraft,
     this.loadDraft,
     this.onCancel,
@@ -62,7 +63,9 @@ class WeeklyLaborReview extends StatefulWidget {
   final ValueChanged<String>? onOpenJob;
   final Future<void> Function(Map<String, dynamic>)? onOpenTask;
   final String? reviewMessage;
-  final Widget? extra;
+  final Widget Function(Widget Function(VoidCallback cancel)? paycheckEditor)?
+      advancePanel;
+  final int? profileAdvanceBalance;
   final Future<void> Function(DateTime,Map<String,double>,int,int,String)? saveDraft;
   final Future<Map<String,dynamic>?> Function(DateTime)? loadDraft;
   final VoidCallback? onCancel;
@@ -743,6 +746,16 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       _excluded..clear()..addAll(available.keys.where((id) => !_selected.containsKey(id)));
     });
   }
+  Future<void> _applyPreparation(_PayrollPreparation value) async {
+    setState(() {
+      _preparedAdjustment = value.adjustment;
+      _preparedRepayment = value.repayment;
+      _preparedReason = value.reason;
+      _error = null;
+    });
+    await _savePreparationDraft();
+  }
+
   Future<void> _editPreparation(int labor) async {
     final debt=await widget.advanceBalance();
     if(!mounted)return;
@@ -834,6 +847,24 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     }
     Future<void>.delayed(const Duration(milliseconds:400),(){adjustment.dispose();repayment.dispose();reason.dispose();});
   }
+
+  _PayrollPreparation get _preparedValues => (
+    adjustment: _preparedAdjustment,
+    repayment: _preparedRepayment,
+    reason: _preparedReason,
+  );
+
+  Widget _inlinePreparation(int gross, VoidCallback cancel) =>
+      _PayrollPreparationEditor(
+        key: ValueKey((widget.employeeId, _week)),
+        initial: _preparedValues,
+        gross: gross,
+        debt: widget.profileAdvanceBalance,
+        enabled: !_saving,
+        onCancel: cancel,
+        onApply: _applyPreparation,
+      );
+
   int _rate(Map<String,dynamic> task)=>widget.settlementRateCents ?? task['payment_rate_cents'] as int? ?? task['rate_cents'] as int? ?? 0;
   int _amount(Map<String,dynamic> task,double hours) {
     return selectedLaborCents(task, hours,rate: _rate(task));
@@ -1060,14 +1091,28 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                       ),
                       child: summary('Payment Total', money(net), total: true),
                     ),
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(onPressed:_saving?null:()=>_editPreparation(labor+widget.weeklyAdjustmentCents,),
-                      icon: const Icon(Icons.tune, size: 18),
-                      label:const Text('Adjustments & repayment'),),],),
+                    if (widget.advancePanel == null) ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: _saving
+                            ? null
+                            : () => _editPreparation(labor + widget.weeklyAdjustmentCents),
+                        icon: const Icon(Icons.tune, size: 18),
+                        label: const Text('Adjustments & repayment'),
+                      ),
+                    ],
+                  ],),
               ),
             ],
           ),),
-      if(widget.extra!=null)widget.extra!,
+      if (widget.advancePanel case final buildAdvancePanel?)
+        buildAdvancePanel(
+          preparing && !_future
+              ? (cancel) => _inlinePreparation(
+                    labor + widget.weeklyAdjustmentCents, cancel,
+                  )
+              : null,
+        ),
       if(preparing) Wrap(spacing:10,runSpacing:8,alignment:WrapAlignment.spaceBetween,children:[OutlinedButton(onPressed:_saving||widget.saveDraft==null?null:()async {await widget.saveDraft!(_start(_week),Map<String,double>.from(_selected),_preparedAdjustment,_preparedRepayment,_preparedReason,);if(mounted) {ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Payroll draft saved locally.'),),);
                       }},child:const Text('Save (Draft)'),),
         FilledButton.icon(key:const Key('verify-weekly-payment'),style:FilledButton.styleFrom(backgroundColor:const Color(0xFF0A8F53),),onPressed:_saving||_future||gross<=0||net<0||(_totalHours<=0&&widget.weeklyBaseCents<=0)?null:_verifyPayment,icon:const Icon(Icons.check),label:const Text('Verify Weekly Payment'),),
@@ -1329,6 +1374,174 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
             ),
           ],
         ),),
+    );
+  }
+}
+
+
+typedef _PayrollPreparation = ({int adjustment, int repayment, String reason});
+
+class _PayrollPreparationEditor extends StatefulWidget {
+  const _PayrollPreparationEditor({
+    super.key,
+    required this.initial,
+    required this.gross,
+    required this.debt,
+    required this.onCancel,
+    required this.onApply,
+    this.enabled = true,
+  });
+
+  final _PayrollPreparation initial;
+  final int gross;
+  final int? debt;
+  final VoidCallback onCancel;
+  final ValueChanged<_PayrollPreparation> onApply;
+  final bool enabled;
+
+  @override
+  State<_PayrollPreparationEditor> createState() => _PayrollPreparationEditorState();
+}
+
+class _PayrollPreparationEditorState extends State<_PayrollPreparationEditor> {
+  late final TextEditingController _adjustment;
+  late final TextEditingController _repayment;
+  late final TextEditingController _reason;
+
+  @override
+  void initState() {
+    super.initState();
+    _adjustment = TextEditingController(text: _dollars(widget.initial.adjustment));
+    _repayment = TextEditingController(text: _dollars(widget.initial.repayment));
+    _reason = TextEditingController(text: widget.initial.reason);
+  }
+
+  @override
+  void dispose() {
+    _adjustment.dispose();
+    _repayment.dispose();
+    _reason.dispose();
+    super.dispose();
+  }
+
+  String _dollars(int cents) => (cents / 100).toStringAsFixed(2);
+
+  int? _cents(String text) {
+    final input = text.trim();
+    if (input.isEmpty) return 0;
+    if (!RegExp(r'^[+-]?(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$').hasMatch(input)) {
+      return null;
+    }
+    final amount = double.tryParse(input);
+    if (amount == null || !amount.isFinite || amount.abs() > 1000000) return null;
+    return (amount * 100).round();
+  }
+
+  Widget _amountField(String label, TextEditingController controller, {bool signed = false}) {
+    return _field(
+      label,
+      controller,
+      keyboard: TextInputType.numberWithOptions(decimal: true, signed: signed),
+    );
+  }
+
+  Widget _field(String label, TextEditingController controller, {TextInputType? keyboard}) {
+    return TextField(
+      controller: controller,
+      enabled: widget.enabled,
+      keyboardType: keyboard,
+      onChanged: (_) => setState(() {}),
+      decoration: InputDecoration(
+        labelText: label,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(9)),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final adjustment = _cents(_adjustment.text);
+    final repayment = _cents(_repayment.text);
+    final reason = _reason.text.trim();
+    final debt = widget.debt;
+    final net = widget.gross + (adjustment ?? 0) - (repayment ?? 0);
+    final preparation = adjustment != null &&
+        repayment != null &&
+        repayment >= 0 &&
+        debt != null &&
+        repayment <= debt &&
+        net >= 0 &&
+        (adjustment == 0 || reason.isNotEmpty)
+        ? (adjustment: adjustment, repayment: repayment, reason: reason)
+        : null;
+    final money = NumberFormat.simpleCurrency(locale: 'en_US');
+    final payAdjustment = _amountField(
+      'Pay adjustment (+/−)',
+      _adjustment,
+      signed: true,
+    );
+    final payRepayment = _amountField(
+      'Repayment amount',
+      _repayment,
+    );
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth >= 320 &&
+                MediaQuery.textScalerOf(context).scale(14) <= 16) {
+              return Row(children: [
+                Expanded(child: payAdjustment),
+                const SizedBox(width: 8),
+                Expanded(child: payRepayment),
+              ]);
+            }
+            return Column(children: [
+              payAdjustment,
+              const SizedBox(height: 8),
+              payRepayment,
+            ]);
+          },
+        ),
+        const SizedBox(height: 10),
+        _field('Reason for pay adjustment', _reason),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE3F7DE),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            preparation != null
+                ? 'Payment Total: ${money.format(net / 100)}'
+                : 'Check the amounts, outstanding balance and adjustment reason.',
+            style: const TextStyle(fontWeight: FontWeight.w800, color: taskGreen),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 8,
+          children: [
+            TextButton(onPressed: widget.onCancel, child: const Text('Cancel')),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: taskGreen),
+              onPressed: preparation != null && widget.enabled
+                  ? () {
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      widget.onApply(preparation);
+                      widget.onCancel();
+                    }
+                  : null,
+              child: const Text('Apply to payment'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
