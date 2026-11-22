@@ -913,6 +913,9 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     bool? signed,
   }) {
     return TextField(
+      // Keep the text field scroll offset separate from the enclosing
+      // ExpansionTile's stored expanded state.
+      key: PageStorageKey('payroll-input-$label'),
       controller: controller,
       enabled: !_saving,
       keyboardType: signed == null
