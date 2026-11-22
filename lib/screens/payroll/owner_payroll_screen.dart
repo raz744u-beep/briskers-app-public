@@ -1668,7 +1668,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                           enabled: enabled,
                         ),
                       ],
-                      selected: {if (selectedMode != null) selectedMode},
+                      selected: {?selectedMode},
                       emptySelectionAllowed: true,
                       selectedIcon: const Icon(Icons.check_circle, color: taskGreen),
                       onSelectionChanged: (selection) =>
