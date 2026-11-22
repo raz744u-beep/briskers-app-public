@@ -114,6 +114,12 @@ void main() {
       expect(find.text('Work'), findsOneWidget);
       expect(find.text('Payroll'), findsOneWidget);
       expect(find.text('Reports'), findsOneWidget);
+      final payrollList = find.descendant(
+        of: find.byKey(const Key('employee-payroll-preparation')),
+        matching: find.byWidgetPredicate(
+          (widget) => widget is Scrollable && widget.axisDirection == AxisDirection.down,
+        ),
+      ).first;
       if (currentHolder) {
         // Owner bookkeeping must not require the employee to own a paired phone.
         await tester.tap(find.text('Payroll'));
@@ -125,14 +131,14 @@ void main() {
             matching:find.byType(Ink))).map((w)=>w.decoration),
         ].whereType<BoxDecoration>().map((d)=>d.gradient).whereType<LinearGradient>().first;
         await tester.scrollUntilVisible(find.text('Weekly Payment Summary'), 160,
-          scrollable: find.byType(Scrollable).last);
+          scrollable: payrollList);
         await tester.pumpAndSettle();
         final weeklyGradient = headerGradient('Weekly Payment Summary');
         expect(weeklyGradient.colors, const [
           Color(0xFF31A9D9), Color(0xFF2075BC), Color(0xFF174B92),
         ]);
         await tester.scrollUntilVisible(find.text('Advances & Repayments'), 220,
-          scrollable: find.byType(Scrollable).last);
+          scrollable: payrollList);
         await tester.ensureVisible(find.text('Advances & Repayments'));
         await tester.pumpAndSettle();
         expect(headerGradient('Outstanding balance'), weeklyGradient);
@@ -204,10 +210,6 @@ void main() {
         expect(find.text('Adjustments & repayment'), findsNothing);
         final calculated = find.text('Calculated payroll');
         final adjustment = find.widgetWithText(TextField, 'Pay adjustment (+/−)');
-        final payrollList = find.descendant(
-          of: find.byKey(const Key('employee-payroll-preparation')),
-          matching: find.byType(Scrollable),
-        ).first;
         tester.state<ScrollableState>(payrollList).position.jumpTo(0);
         await tester.pumpAndSettle();
         await tester.scrollUntilVisible(calculated, 120, scrollable: payrollList);
@@ -264,7 +266,7 @@ void main() {
       // scrollable on short phones; bring the existing payment action into
       // view before tapping it.
       final verify = find.byKey(const Key('verify-weekly-payment'));
-      await tester.scrollUntilVisible(find.byKey(const Key('verify-weekly-payment')),150,scrollable:find.descendant(of:find.byKey(const Key('employee-payroll-preparation')),matching:find.byType(Scrollable)).first);
+      await tester.scrollUntilVisible(verify, 150, scrollable: payrollList);
       await tester.ensureVisible(verify);
       await tester.pumpAndSettle();
       expect(tester.widget<FilledButton>(verify).onPressed, isNotNull);
