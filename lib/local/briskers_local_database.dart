@@ -1,6 +1,8 @@
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 
+import '../services/repair_group_schema.dart';
+
 part 'briskers_local_database.g.dart';
 
 class LocalSyncStates extends Table {
@@ -443,7 +445,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 22;
+  int get schemaVersion => 23;
 
   // v18 introduced the ExpenseIQ photo queue but omitted its onUpgrade
   // migration, so user_version may be 18 while the tables are missing.
@@ -673,6 +675,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
           // A previous APK may have advanced user_version without making the
           // tables. Self-heal without dropping any local records.
           await ensureExpenseIqSchema();
+          await RepairGroupSchema.ensure(this);
         },
       );
 }

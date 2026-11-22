@@ -1,4 +1,5 @@
 import 'invoice_labor_work_summary.dart';
+import 'local_repair_groups.dart';
 import 'local_warranty_companies.dart';
 import 'local_customer_vehicle_identity.dart';
 import 'invoice_tax_proposal.dart';
@@ -1969,6 +1970,11 @@ class OfflineDocumentDraftService {
           );
           await LocalInvoiceTaskStore(_database).remapDraft(
             businessId, localId, localDetail, serverDetail);
+          if (payload['kind'] == 'estimate') {
+            await LocalRepairGroups(database: _database).remapDraft(
+              businessId, localId, serverId, _lines(localDetail), _lines(serverDetail),
+            );
+          }
           await _cache.save(businessId, serverId, serverDetail);
           await _cache.save(
             businessId,

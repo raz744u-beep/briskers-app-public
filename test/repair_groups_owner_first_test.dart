@@ -1,0 +1,143 @@
+import 'package:briskers_app/core/repair_group.dart';
+import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/services/local_document_detail_cache.dart';
+import 'package:briskers_app/services/local_repair_groups.dart';
+import 'package:briskers_app/services/offline_document_draft_service.dart';
+import 'package:briskers_app/widgets/repair_group_panel.dart';
+import 'package:drift/native.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  late BriskersLocalDatabase db;
+  late LocalDocumentDetailCache cache;
+  late OfflineDocumentDraftService drafts;
+  late LocalRepairGroups groups;
+  late String estimate;
+
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+    db = BriskersLocalDatabase(NativeDatabase.memory());
+    LocalDocumentDetailCache.sqliteWritesEnabled = true;
+    cache = LocalDocumentDetailCache(database: db);
+    drafts = OfflineDocumentDraftService(database: db, cache: cache);
+    groups = LocalRepairGroups(database: db, cache: cache);
+    estimate = await drafts.createStandaloneEstimate(
+      'shop', customerId: 'customer', customerName: 'Customer',
+    );
+    await drafts.addLine('shop', estimate, name: 'Brake pads', quantity: 1,
+      unitPrice: 100, taxRate: 0.1, lineKind: 'item');
+    await drafts.addLine('shop', estimate, name: 'Installation', quantity: 2,
+      unitPrice: 40, taxRate: 0, lineKind: 'labor');
+  });
+
+  tearDown(() async {
+    await db.close();
+    LocalDocumentDetailCache.sqliteWritesEnabled = false;
+  });
+
+  Future<Map<String, dynamic>> detail() async => (await cache.load('shop', estimate))!;
+  List<Map<String, dynamic>> lines(Map<String, dynamic> estimate) =>
+      (estimate['lines'] as List).cast<Map<String, dynamic>>();
+  Future<String> namedGroup(String name) async {
+    await groups.add('shop', estimate, name: name, description: '');
+    return (await groups.groups('shop', estimate, await detail()))
+        .singleWhere((group) => group.name == name).id;
+  }
+
+  test('group changes preserve line IDs, prices, totals and ordinary conversion', () async {
+    final before = await detail();
+    final quotedLines = lines(before);
+    final brakeGroup = await namedGroup('Brake service');
+    final second = await namedGroup('Later');
+    await groups.move('shop', estimate, {quotedLines.first['id'] as String}, brakeGroup);
+    await groups.edit('shop', estimate, brakeGroup, name: 'Front brakes', description: '');
+    await groups.reorder('shop', estimate, [second, brakeGroup]);
+
+    final reopened = LocalRepairGroups(database: db, cache: cache);
+    final sections = await reopened.groups('shop', estimate, await detail());
+    expect(sections.map((group) => group.name), ['Later', 'Front brakes', 'Other Items']);
+    expect(sections[1].lines.single['name'], 'Brake pads');
+    expect(sections[2].lines.single['name'], 'Installation');
+    await groups.remove('shop', estimate, brakeGroup);
+    expect((await reopened.groups('shop', estimate, await detail())).last.lines, quotedLines);
+    expect((await detail())['total_amount'], 190);
+    expect(lines(await detail()), quotedLines);
+
+    await groups.move('shop', estimate, {quotedLines.first['id'] as String}, second);
+    final invoice = await drafts.convertEstimateOffline('shop', estimate);
+    final saved = (await cache.load('shop', invoice))!;
+    expect(lines(saved).map((line) => line['name']), ['Brake pads', 'Installation']);
+    expect(saved['total_amount'], 190);
+  });
+
+  test('sync ID replacement preserves group membership and rejects changed content', () async {
+    final original = await detail();
+    final before = lines(original);
+    final front = await namedGroup('Front brakes');
+    await groups.move('shop', estimate, {before.first['id'] as String}, front);
+    final after = [
+      for (final (index, line) in before.indexed)
+        {...line, 'id': 'server-line-$index', 'position': index + 1},
+    ];
+    await expectLater(groups.remapDraft('shop', estimate, 'server-estimate', before, [
+      {...after.first, 'unit_price': 101},
+      after.last,
+    ]), throwsStateError);
+    expect((await groups.groups('shop', estimate, original)).first.lines.single['id'],
+        before.first['id']);
+
+    await groups.remapDraft('shop', estimate, 'server-estimate', before, after.reversed.toList());
+    await groups.remapLine('shop', 'server-estimate', 'server-line-0', 'replacement-line');
+    final sections = await groups.groups('shop', 'server-estimate', {
+      'lines': [{...after.first, 'id': 'replacement-line'}, after.last],
+    });
+    expect(sections.first.lines.single['id'], 'replacement-line');
+    expect(sections.last.id, RepairGroup.otherId);
+    expect(sections.last.lines.single['id'], 'server-line-1');
+    expect((await groups.groups('shop', estimate, original)).single.isOther, isTrue);
+  });
+
+  testWidgets('an owner can expand a group and use the existing item action', (tester) async {
+    final (saved, groupId) = await tester.runAsync(() async {
+      final saved = await detail();
+      final groupId = await namedGroup('Front brakes');
+      await groups.move('shop', estimate, {lines(saved).first['id'] as String}, groupId);
+      return (saved, groupId);
+    }) ?? (throw StateError('Could not prepare the estimate fixture'));
+    tester.view.physicalSize = const Size(320, 740);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    String? edited;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ListView(children: [
+      RepairGroupPanel(
+        store: groups,
+        business: 'shop',
+        estimate: estimate,
+        editable: true,
+        lines: lines(saved),
+        buildLine: (line) => ListTile(
+          title: Text(line['name'] as String),
+          onTap: () => edited = line['id'] as String,
+        ),
+      ),
+    ]))));
+    final card = find.byKey(PageStorageKey('repair-group-$estimate-$groupId'));
+    for (var i = 0; i < 30 && card.evaluate().isEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+    }
+    expect(card, findsOneWidget);
+    expect(find.widgetWithText(ListTile, 'Brake pads').hitTestable(), findsNothing);
+    await tester.tap(find.text('Front brakes'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Brake pads'));
+    expect(edited, lines(saved).first['id']);
+    expect(find.text('Record authorization'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+}
