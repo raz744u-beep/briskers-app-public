@@ -204,8 +204,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(r'Calculated labor: $400.00'), findsOneWidget);
       expect(recorded, 0);
-      await tester.ensureVisible(find.text('Record payment'));
-      await tester.tap(find.text('Record payment'));
+      await tester.ensureVisible(find.text('Review payment'));
+      await tester.tap(find.text('Review payment'));
+      await tester.pumpAndSettle();
+      final recordPayment = find.byKey(const Key('record-confirmed-payroll'));
+      await tester.ensureVisible(recordPayment);
+      await tester.tap(recordPayment);
       await tester.pumpAndSettle();
       expect(recorded, 1);
       await tester.pumpWidget(const SizedBox.shrink());

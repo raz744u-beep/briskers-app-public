@@ -2,7 +2,7 @@ import '../../services/recorded_payroll_week.dart';
 import 'recorded_weekly_payment_card.dart';
 import '../../core/briskers_colors.dart';
 import '../../widgets/amount_calculator_dialog.dart';
-import 'approved_tasks_ui.dart' show taskBlue, taskCanvas, taskGreen, taskNavy;
+import 'approved_tasks_ui.dart' show taskBlue, taskCanvas, taskGreen;
 import 'payroll_review_widgets.dart';
 import 'employee_work_review.dart';
 import '../../services/payroll_owner_lease.dart';
@@ -110,6 +110,10 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
 
   bool get _deductionIsApplied => !_usesInlinePayroll ||
       _inputCents(_deductionInput.text) == _preparedRepayment;
+
+  static void _selectAmount(TextEditingController controller) {
+    controller.selection = TextSelection(baseOffset: 0, extentOffset: controller.text.length);
+  }
 
   static String _amountText(int cents) => (cents / 100).toStringAsFixed(2);
 
@@ -418,7 +422,9 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     var deduct=_preparedRepayment>0;
     // Optional repayment is collapsed until explicitly expanded.
     var showDebtOptions=_preparedRepayment>0;
-    final confirmed=await showDialog<bool>(
+    var confirmed = false;
+    while (mounted) {
+      final ready = await showDialog<bool>(
       context:context,
       builder:(outer)=>StatefulBuilder(
         builder:(dialog,update)=>AlertDialog(
@@ -433,29 +439,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
             vertical: 20,
           ),
           contentPadding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-          title: Container(
-            color: taskNavy,
-            padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
-            child: Row(
-              children: [
-                const Icon(Icons.payments_outlined, color: Colors.white),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text('Verify Payment',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.pop(dialog, false),
-                  icon: const Icon(Icons.close, color: Colors.white),
-                ),
-              ],
-            ),
-          ),
+          title: _paymentDialogTitle(dialog, 'Payment Details'),
           content:SizedBox(width:double.maxFinite,child:SingleChildScrollView(child:Column(
             mainAxisSize:MainAxisSize.min,
             crossAxisAlignment:CrossAxisAlignment.start,
@@ -482,20 +466,18 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   key: const Key('verify-final-gross'),
                   controller:amount,
                   style: const TextStyle(
-                    fontSize: 25,
-                    fontWeight: FontWeight.w800,
-                    color: taskGreen,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
                   ),
                   keyboardType:const TextInputType.numberWithOptions(
                   decimal:true,),
                 decoration:const InputDecoration(
                   labelText:'Final gross payment',
-                    filled: true,
-                    fillColor: Color(0xFFECF8E9),
                   prefixText:r'$ ',border:OutlineInputBorder(),),
                 onChanged:(value)=>update((){}),
-                onTap:()=>amount.selection=TextSelection(
-                  baseOffset:0,extentOffset:amount.text.length,),
+                selectAllOnFocus: true,
+                onTapAlwaysCalled: true,
+                onTap: () => _selectAmount(amount),
               ),
               const SizedBox(height:9),
               Row(crossAxisAlignment:CrossAxisAlignment.start,children:[Expanded(child:DropdownButtonFormField<String>(
@@ -566,9 +548,9 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                       labelText:'Debt repayment',
                       prefixText:r'$ ',border:OutlineInputBorder(),),
                     onChanged:(value)=>update((){}),
-                    onTapAlwaysCalled:true,
-                    onTap:()=>debtInput.selection=TextSelection(
-                      baseOffset:0,extentOffset:debtInput.text.length,),
+                    selectAllOnFocus: true,
+                    onTapAlwaysCalled: true,
+                    onTap: () => _selectAmount(debtInput),
                   ),
                 ],
               ],
@@ -592,8 +574,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   labelText:'Payment note or adjustment reason',
                   border:OutlineInputBorder(),),),
               const SizedBox(height:7),
-              const Text('This records the payment in Briskers.',
-                style:TextStyle(fontSize:11),),
+
             ],
           ),)),
           actions:[
@@ -615,12 +596,32 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                 return;
               }
               Navigator.pop(dialog,true);
-            },child:const Text('Record payment'),),
+            },child:const Text('Review payment'),),
           ],
         ),
       ),
     );
-    if(confirmed==true&&mounted) {
+      if (ready != true || !mounted) break;
+      final grossCents = (double.parse(amount.text.trim()) * 100).round();
+      final repaymentCents = deduct ? (double.parse(debtInput.text.trim()) * 100).round() : 0;
+      final result = await _confirmPayment(
+        week: week,
+        date: paidDate,
+        method: method,
+        taskCount: selected.length,
+        hours: hours,
+        laborCents: laborCents,
+        grossCents: grossCents,
+        adjustmentCents: grossCents - laborCents - widget.weeklyBaseCents,
+        debtCents: repaymentCents,
+        balanceCents: debt,
+        note: note.text.trim(),
+      );
+      if (result == false) continue;
+      confirmed = result == true;
+      break;
+    }
+    if (confirmed && mounted) {
       setState(()=>_saving=true);
       try {
         final grossCents=(double.parse(amount.text.trim())*100).round();
@@ -700,9 +701,184 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       }
     }
     if (mounted && _saving) setState(() => _saving = false);
-    amount.dispose();
-    debtInput.dispose();
-    note.dispose();
+    // The input route can still be animating out after a dismissal.
+    unawaited(Future<void>.delayed(const Duration(milliseconds: 400), () {
+      amount.dispose();
+      debtInput.dispose();
+      note.dispose();
+    }));
+  }
+
+  Widget _paymentDialogTitle(BuildContext dialog, String title) {
+    return Container(
+      decoration: const BoxDecoration(gradient: BriskersColors.blueHeader),
+      padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
+      child: Row(
+        children: [
+          const Icon(Icons.payments_outlined, color: Colors.white),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Close',
+            onPressed: () => Navigator.pop(dialog),
+            icon: const Icon(Icons.close, color: Colors.white),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool?> _confirmPayment({
+    required DateTime week,
+    required DateTime date,
+    required String method,
+    required int taskCount,
+    required double hours,
+    required int laborCents,
+    required int grossCents,
+    required int adjustmentCents,
+    required int debtCents,
+    required int balanceCents,
+    required String note,
+  }) {
+    final money = NumberFormat.simpleCurrency(locale: 'en_US');
+    String dollars(int cents) => money.format(cents / 100);
+
+    Widget paymentDetail(String label, String value) => Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F4F9),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: BriskersColors.secondaryText)),
+          const SizedBox(height: 4),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w800)),
+        ],
+      ),
+    );
+
+    final net = dollars(grossCents - debtCents);
+    return showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        key: const Key('verify-payment-confirmation'),
+        backgroundColor: Colors.white,
+        titlePadding: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        clipBehavior: Clip.antiAlias,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+        contentPadding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+        title: _paymentDialogTitle(dialog, 'Verify Payment'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(widget.employeeName,
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+                Text('Week of ${DateFormat.MMMd().format(week)} – '
+                    '${DateFormat.yMMMd().format(week.add(const Duration(days: 4)))}'),
+                Text('$taskCount tasks · ${hours.toStringAsFixed(2)} hours'),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE7F4E9),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text('Send to ${widget.employeeName}',
+                        style: const TextStyle(
+                          color: BriskersColors.tabGreen, fontWeight: FontWeight.w800,
+                        )),
+                      Text(net, key: const Key('verify-amount-to-send'),
+                        style: const TextStyle(
+                          fontSize: 34,
+                          color: BriskersColors.tabGreen,
+                          fontWeight: FontWeight.w900,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        )),
+                      const Divider(),
+                      _paymentTotalRow('Gross payment', dollars(grossCents)),
+                      _paymentTotalRow('Advance repayment', debtCents == 0
+                          ? dollars(0) : '−${dollars(debtCents)}'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _paymentTotalRow('Calculated labor', dollars(laborCents)),
+                if (widget.weeklyBaseCents != 0)
+                  _paymentTotalRow('Weekly base', dollars(widget.weeklyBaseCents)),
+                if (adjustmentCents != 0)
+                  _paymentTotalRow('Pay adjustment',
+                    adjustmentCents > 0 ? '+${dollars(adjustmentCents)}' : dollars(adjustmentCents)),
+                const SizedBox(height: 10),
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(child: paymentDetail('Payment method', method)),
+                      const SizedBox(width: 8),
+                      Expanded(child: paymentDetail('Payment date', DateFormat.yMMMd().format(date))),
+                    ],
+                  ),
+                ),
+                if (debtCents > 0) ...[
+                  const SizedBox(height: 8),
+                  _paymentTotalRow('Advance balance after payment', dollars(balanceCents - debtCents)),
+                ],
+                if (note.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  paymentDetail('Payment note or adjustment reason', note),
+                ],
+                const SizedBox(height: 8),
+                const Text('Recording saves the payment in Briskers.',
+                  style: TextStyle(color: BriskersColors.secondaryText, fontSize: 12)),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(dialog, false),
+            child: const Text('Back to edit'),
+          ),
+          FilledButton(
+            key: const Key('record-confirmed-payroll'),
+            style: FilledButton.styleFrom(backgroundColor: BriskersColors.tabGreen),
+            onPressed: () => Navigator.pop(dialog, true),
+            child: Text('Record $net payment'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _paymentTotalRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Expanded(child: Text(label)),
+          const SizedBox(width: 8),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w800)),
+        ],
+      ),
+    );
   }
 
   Widget _weekSelector() {
@@ -869,11 +1045,27 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   const SizedBox(height: 14),
                   const Text('Adjustment (+/−)'),
                   const SizedBox(height: 6),
-        TextField(controller:adjustment,keyboardType:const TextInputType.numberWithOptions(decimal:true,signed:true,),decoration: field('Adjustment (+/−)',),onChanged:(_)=>update((){}),),
+                  TextField(
+                    controller: adjustment,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                    selectAllOnFocus: true,
+                    onTapAlwaysCalled: true,
+                    onTap: () => _selectAmount(adjustment),
+                    decoration: field('Adjustment (+/−)'),
+                    onChanged: (_) => update(() {}),
+                  ),
                   const SizedBox(height: 12),
                   const Text('Repayment from this payment'),
                   const SizedBox(height: 6),
-        TextField(controller:repayment,keyboardType:const TextInputType.numberWithOptions(decimal:true,),decoration: field('Repayment from this payment',),onChanged:(_)=>update((){}),),
+                  TextField(
+                    controller: repayment,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    selectAllOnFocus: true,
+                    onTapAlwaysCalled: true,
+                    onTap: () => _selectAmount(repayment),
+                    decoration: field('Repayment from this payment'),
+                    onChanged: (_) => update(() {}),
+                  ),
                   const SizedBox(height: 12),
                   const Text('Adjustment reason'),
                   const SizedBox(height: 6),
@@ -918,6 +1110,9 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       key: PageStorageKey('payroll-input-$label'),
       controller: controller,
       enabled: !_saving,
+      selectAllOnFocus: signed != null,
+      onTapAlwaysCalled: signed != null,
+      onTap: signed == null ? null : () => _selectAmount(controller),
       keyboardType: signed == null
           ? null
           : TextInputType.numberWithOptions(decimal: true, signed: signed),

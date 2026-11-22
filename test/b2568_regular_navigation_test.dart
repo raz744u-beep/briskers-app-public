@@ -276,7 +276,8 @@ void main(){
     await tester.scrollUntilVisible(find.byKey(const Key('verify-weekly-payment')),150,scrollable:find.descendant(of:find.byKey(const Key('employee-payroll-preparation')),matching:find.byType(Scrollable)).first);
     await click(find.byKey(const Key('verify-weekly-payment')));
     await until(find.text(r'Calculated labor: $200.00'));
-    await click(find.widgetWithText(FilledButton,'Record payment'));
+    await click(find.text('Review payment'));
+    await click(find.byKey(const Key('record-confirmed-payroll')));
     await until(find.text('Payment Recorded'));await click(find.widgetWithText(FilledButton,'Done'));
     await click(find.text('Reports'));await until(find.text('Payroll History'));
     await tester.runAsync(()async{

@@ -278,6 +278,11 @@ void main() {
         final deduction = find.widgetWithText(TextField, 'Amount to deduct');
         final apply = find.widgetWithText(FilledButton, 'Apply to payment');
         await tester.ensureVisible(deduction);
+        final deductionController = tester.widget<TextField>(deduction).controller!;
+        await tester.tap(deduction);
+        await tester.pumpAndSettle();
+        expect(deductionController.selection,
+          TextSelection(baseOffset: 0, extentOffset: deductionController.text.length));
         await tester.enterText(deduction, '46.00');
         await tester.pumpAndSettle();
         expect(tester.widget<FilledButton>(apply).onPressed, isNull);
@@ -303,10 +308,22 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.widget<FilledButton>(verify).onPressed, isNotNull);
       await tester.tap(verify);
-      await until(find.widgetWithText(FilledButton, 'Record payment'));
+      final reviewPayment = find.text('Review payment');
+      await until(reviewPayment);
       expect(find.text(r'Calculated labor: $40.00'), findsOneWidget);
-      await tester.ensureVisible(find.widgetWithText(FilledButton, 'Record payment'));
-      await tester.tap(find.widgetWithText(FilledButton, 'Record payment'));
+      await tester.ensureVisible(reviewPayment);
+      await tester.tap(reviewPayment);
+      final recordPayment = find.byKey(const Key('record-confirmed-payroll'));
+      await until(recordPayment);
+      await tester.pumpAndSettle();
+      final confirmation = find.byKey(const Key('verify-payment-confirmation'));
+      expect(find.descendant(of: confirmation, matching: find.byType(TextField)), findsNothing);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('verify-amount-to-send'))).data,
+        currentHolder ? r'$35.00' : r'$40.00',
+      );
+      await tester.ensureVisible(recordPayment);
+      await tester.tap(recordPayment);
       if (currentHolder) {
         await until(find.text('Payment Recorded'));
         expect(find.text(r'Transferred: $35.00'), findsOneWidget);

@@ -208,6 +208,7 @@ class _PayableHoursDialogState extends State<PayableHoursDialog> {
                         decimal: true,
                       ),
                       onChanged: (_) => setState(() {}),
+                      selectAllOnFocus: true,
                       onTapAlwaysCalled: true,
                       onTap: () => input.selection = TextSelection(
                         baseOffset: 0,

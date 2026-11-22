@@ -67,8 +67,12 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Verify Payment'));
     await tester.pumpAndSettle();
     expect(find.text(r'Calculated labor: $3.33'), findsOneWidget);
-    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Record payment'));
-    await tester.tap(find.widgetWithText(FilledButton, 'Record payment'));
+    await tester.ensureVisible(find.text('Review payment'));
+    await tester.tap(find.text('Review payment'));
+    await tester.pumpAndSettle();
+    final recordPayment = find.byKey(const Key('record-confirmed-payroll'));
+    await tester.ensureVisible(recordPayment);
+    await tester.tap(recordPayment);
     await tester.pumpAndSettle();
     expect(selection!.single['pay_minutes'], 20);
     expect(selection!.single['paid_minutes'], 20);

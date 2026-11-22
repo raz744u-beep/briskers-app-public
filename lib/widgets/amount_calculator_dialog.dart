@@ -38,7 +38,7 @@ class _AmountCalculatorDialogState extends State<_AmountCalculatorDialog> {
   late final _input = TextEditingController.fromValue(
     TextEditingValue(
       text: widget.initial,
-      selection: TextSelection.collapsed(offset: widget.initial.length),
+      selection: TextSelection(baseOffset: 0, extentOffset: widget.initial.length),
     ),
   );
   String? _error;
@@ -84,6 +84,13 @@ class _AmountCalculatorDialogState extends State<_AmountCalculatorDialog> {
     final selection = _input.selection;
     var start = selection.isValid ? selection.start : _input.text.length;
     final end = selection.isValid ? selection.end : _input.text.length;
+    // An operator can continue a calculation from the selected starting
+    // amount. Digits and the decimal point replace that selection.
+    if (start == 0 &&
+        end == _input.text.length &&
+        const {'+', '−', '×', '÷', '%'}.contains(label)) {
+      start = end;
+    }
     if (label == '⌫' && start == end && start > 0) start--;
     final replacement = label == '⌫' ? '' : label;
     _input.value = TextEditingValue(
@@ -179,6 +186,12 @@ class _AmountCalculatorDialogState extends State<_AmountCalculatorDialog> {
                   ],
                   TextField(
                     controller: _input,
+                    selectAllOnFocus: true,
+                    onTapAlwaysCalled: true,
+                    onTap: () => _input.selection = TextSelection(
+                      baseOffset: 0,
+                      extentOffset: _input.text.length,
+                    ),
                     textAlign: TextAlign.end,
                     onChanged: (_) => setState(() => _error = null),
                     onSubmitted: (_) => _press('='),

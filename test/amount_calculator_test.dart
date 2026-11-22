@@ -21,9 +21,20 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
     int? chosen;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(builder: (context) =>
-      TextButton(onPressed: () async { chosen = await showAmountCalculator(context); }, child: const Text('Calculate'))))));
+      TextButton(onPressed: () async {
+        chosen = await showAmountCalculator(context, initial: '0.00');
+      }, child: const Text('Calculate'))))));
     await tester.tap(find.text('Calculate')); await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField),'100+9.75%');
+    final input = find.byType(TextField);
+    final controller = tester.widget<TextField>(input).controller!;
+    await tester.tap(find.widgetWithText(FilledButton, '1'));
+    await tester.tap(find.widgetWithText(FilledButton, '0'));
+    await tester.pump();
+    expect(controller.text, '10');
+    await tester.tap(input);
+    await tester.pumpAndSettle();
+    expect(controller.selection, const TextSelection(baseOffset: 0, extentOffset: 2));
+    await tester.enterText(input,'100+9.75%');
     expect(chosen,isNull);
     await tester.tap(find.text('Use Amount')); await tester.pumpAndSettle();
     expect(chosen,10975); expect(tester.takeException(),isNull);

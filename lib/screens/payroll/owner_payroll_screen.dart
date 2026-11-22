@@ -1457,6 +1457,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         controller: controller,
         keyboardType: const TextInputType.numberWithOptions(
           signed: true, decimal: true,),
+        selectAllOnFocus: true,
+        onTapAlwaysCalled: true,
         onTap: () => _selectAmount(controller),
         onChanged: (_) => setState(() {}),
         decoration: InputDecoration(labelText: label,
@@ -1479,6 +1481,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         TextField(
           controller: _approvedSupplementHours,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          selectAllOnFocus: true,
+          onTapAlwaysCalled: true,
           onTap: () => _selectAmount(_approvedSupplementHours),
           onChanged: (_) => setState(() {}),
           decoration: const InputDecoration(
@@ -1748,6 +1752,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           controller: _opening,
           enabled: !_busy && _advanceBalance != null,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          selectAllOnFocus: true,
           onTapAlwaysCalled: true,
           onTap: () => _selectAmount(_opening),
           onChanged: (_) => setState(() => _advanceError = null),
@@ -1811,6 +1816,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       TextField(
         controller: _repayment,
         enabled: !_busy,
+        selectAllOnFocus: true,
         onTapAlwaysCalled: true,
         onTap: () => _selectAmount(_repayment),
         onChanged: (_) => setState(() => _advanceError = null),
