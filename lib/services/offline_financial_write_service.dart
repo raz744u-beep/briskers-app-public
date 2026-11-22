@@ -511,7 +511,8 @@ class OfflineFinancialWriteService {
     }
 
     final changes = {
-      'id': id, 'amount': net / 100, 'sync_state': 'pending',
+      'id': id, 'amount': net / 100, 'signed_amount': -net / 100,
+      'sync_state': 'pending',
       if (!local) 'payroll_amount_pending': true,
     };
     final rows = await _allTransactions(businessId);

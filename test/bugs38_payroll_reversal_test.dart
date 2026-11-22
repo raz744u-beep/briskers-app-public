@@ -249,22 +249,28 @@ void main() {
           {'id': 'original-photo'},
         ],
       });
-      Future<bool> edit(int revision, int amount, {bool owner = true}) =>
+      Future<bool> edit(int revision, int amount, {bool owner = true, String? reason}) =>
           ledger(owner: owner).editPaymentAmount(
             operation: 'original',
             employee: 'employee',
             actorId: 'owner',
             expectedRevision: revision,
             net: amount,
+            adjustmentReason: reason,
           );
       await expectLater(edit(0, 35000, owner: false), throwsStateError);
       mayEdit = false;
       await expectLater(edit(0, 35000), throwsStateError);
       mayEdit = true;
-      expect(await edit(0, 35000), isTrue);
-      expect(await edit(0, 35000), isFalse);
+      expect(await edit(0, 35000, reason: 'Corrected adjustment'), isTrue);
+      expect(await edit(0, 35000, reason: 'Corrected adjustment'), isFalse);
+      await expectLater(edit(0, 35000, reason: 'Stale reason'), throwsStateError);
+      final corrected = (await repo.history('employee')).single;
+      expect(corrected['effective_adjustment'], -5000);
+      expect(corrected['adjustment_reason'], 'Corrected adjustment');
       await expectLater(edit(0, 36000), throwsStateError);
       expect((await cache.loadTransactions('shop')).single['amount'], 350);
+      expect((await cache.loadTransactions('shop')).single['signed_amount'], -350);
       expect((await repo.history('employee')).single['gross'], 45000);
       expect((await repo.history('employee')).single['original_net'], 40000);
       expect(await repo.advance('employee'), 10000);
@@ -283,7 +289,9 @@ void main() {
       db = BriskersLocalDatabase(NativeDatabase(file));
       cache = LocalFinancialCache(database: db);
       repo = ledger();
-      expect((await repo.paymentForExpense(id))!['net'], 35000);
+      final linkedPayment = (await repo.paymentForExpense(id))!;
+      expect(linkedPayment['net'], 35000);
+      expect(linkedPayment['adjustment_reason'], 'Corrected adjustment');
       expect((await cache.loadTransactionDetail('shop', id))!['attachments'], [
         {'id': 'original-photo'},
       ]);
@@ -296,14 +304,21 @@ void main() {
       expect(await edit(1, 37500), isTrue);
       await cache.mergeServerTransactions('shop', [canonical]);
       expect((await cache.loadTransactions('shop')).single['amount'], 375);
+      expect((await repo.history('employee')).single['adjustment_reason'],
+        'Corrected adjustment');
+      expect(await edit(2, 37500, reason: 'Clarified adjustment'), isTrue);
+      expect((await repo.history('employee')).single['adjustment_reason'],
+        'Clarified adjustment');
+      expect((await cache.loadTransactions('shop')).single['amount'], 375);
 
       await repo.reversePayment(
         operation: 'original',
         employee: 'employee',
         actorId: 'owner',
-        expectedRevision: 2,
+        expectedRevision: 3,
         reason: 'Fixture deletion',
       );
+      await expectLater(edit(3, 37500, reason: 'After reversal'), throwsStateError);
       expect(await cache.loadTransactions('shop'), isEmpty);
       expect(await repo.advance('employee'), 20000);
       expect(await repo.verifiedPayrollWeeks('employee'), isEmpty);

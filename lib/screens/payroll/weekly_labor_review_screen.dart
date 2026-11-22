@@ -187,6 +187,9 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       _week=widget.week; _selectUnpaid(); unawaited(_restoreDraft());
       return;
     }
+    if (_weekPaymentIds(widget).difference(_weekPaymentIds(oldWidget)).isNotEmpty) {
+      _resetPreparation();
+    }
     final available = {
       for (final task in _eligible)
         if (_available(task) > 0) _id(task): _available(task),
@@ -962,16 +965,29 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     );
   }
 
+  Set<String> _weekPaymentIds(WeeklyLaborReview source) {
+    final week = _start(_week).toIso8601String().substring(0, 10);
+    return source.paymentHistory
+        .where((row) => row['week'] == week)
+        .map((row) => row['operation_id'])
+        .whereType<String>()
+        .toSet();
+  }
+
   Future<void> _restoreDraft() async {
     if(!widget.profileLayout || widget.loadDraft==null)return;
     final week=_start(_week);
+    final paymentIds = _weekPaymentIds(widget);
     final Map<String,dynamic> savedDraft;
     try { savedDraft=await widget.loadDraft!(week) ?? <String,dynamic>{}; } catch(error) {
       if(mounted) {setState(()=>_error='Could not load the saved draft: $error');
       }
       return;
     }
-    if(!mounted || _start(_week)!=week || savedDraft.isEmpty)return;
+    if (!mounted || _start(_week) != week || savedDraft.isEmpty ||
+        _weekPaymentIds(widget).difference(paymentIds).isNotEmpty) {
+      return;
+    }
     final available = {
       for (final task in _eligible)
         if ((task['paid_minutes'] as int? ?? 0) == 0) _id(task): _available(task),
@@ -1403,8 +1419,8 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     final review=EmployeeWorkReview.weeklyReviewRows(widget.tasks,_week,rate:_rate);
     final recorded=RecordedPayrollWeek.fromHistory(widget.paymentHistory,employeeId:widget.employeeId,week:start);
     final paid=recorded.work;
-    final preparing=tasks.isNotEmpty || (!recorded.hasPayments && widget.weeklyBaseCents>0) ||
-        _preparedAdjustment!=0 || _preparedRepayment!=0;
+    final preparing = tasks.isNotEmpty ||
+        (!recorded.hasPayments && widget.weeklyBaseCents > 0);
     final labor=tasks.fold<int>(widget.weeklyBaseCents,(n,r)=>n+_amount(r,_selected[_id(r)]??0),);
     final beforeAdjustment = labor + widget.weeklyAdjustmentCents;
     final payAdjustment = _payAdjustment;

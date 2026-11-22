@@ -1123,6 +1123,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     final business = widget.businessId;
     final correction = await PayrollPaymentCorrection.confirm(
       context, payment, payment['employee_name'] as String, action,
+      editAmountPaid: true,
     );
     if (correction == null || !mounted || record != _recordGeneration || _busy) return;
     setState(() => _busy = true);

@@ -126,6 +126,71 @@ class _OwnerReportTransactionsScreenState
       ),
     );
   }
+  void _showTotals(OwnerReportPeriod report) {
+    final payments = report.basis == ReportTransactionBasis.payments;
+    final totals = report.totals;
+    final paidTotals = report.paidInvoiceTotals;
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => FractionallySizedBox(
+        heightFactor: 0.80,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          children: [
+            Text(payments ? 'Payments received totals' : 'Register totals',
+              style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            if (report.basis == ReportTransactionBasis.invoices)
+              _totalsCard('${report.paidInvoices.length} paid invoices', [
+                ('Paid excluding tax', paidTotals.net),
+                ('Tax on paid invoices', paidTotals.tax),
+                ('Paid including tax', paidTotals.gross),
+              ]),
+            _totalsCard(
+              '${report.entries.length} ${payments ? 'payments' : 'invoices'}',
+              [
+                ('Total excluding tax', totals.net),
+                (payments ? 'Tax collected' : 'Tax billed', totals.tax),
+                (payments ? 'Total received' : 'Total including tax', totals.gross),
+                if (!payments) ('Total paid', totals.paid),
+                ('Outstanding balance', totals.amountDue),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _totalsCard(String title, List<(String, int?)> rows) => Card(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+          for (final (label, amount) in rows)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Expanded(child: Text(label)),
+                  const SizedBox(width: 12),
+                  Flexible(
+                    child: Text(_money(amount), textAlign: TextAlign.right,
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     if (!widget.isOwner || widget.data.business != widget.businessId) {
@@ -134,9 +199,8 @@ class _OwnerReportTransactionsScreenState
       );
     }
     final report = OwnerReportPeriod(_data, widget.period, _basis);
-    final entries = report.entries, totals = report.totals;
+    final entries = report.entries;
     final payments = _basis == ReportTransactionBasis.payments;
-    final paidTotals = report.paidInvoiceTotals;
     final paidCount = report.paidInvoices.length;
     final range =
         '${DateFormat('MMM d').format(widget.period.start)} – ${DateFormat('MMM d, yyyy').format(widget.period.end)}';
@@ -217,25 +281,24 @@ class _OwnerReportTransactionsScreenState
               ],
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: () => _showTotals(report),
+                icon: const Icon(Icons.summarize_outlined),
+                label: const Text('View totals'),
+              ),
+            ),
+          ),
           Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal,
             child: SizedBox(width: 910, child: Column(children: [
               _registerRow(['Date', 'Invoice', 'Customer', 'Status', payments ? 'Received' : 'Amount', 'Paid', 'Balance'], header: true),
               Expanded(child: ListView.builder(
                 key: ValueKey('period-transaction-list-${_basis.name}'),
-                itemCount: entries.length + 1,
+                itemCount: entries.length,
                 itemBuilder: (context, index) {
-                  if (index == entries.length) {
-                    return Column(children: [
-                      if (!payments) ...[
-                        _registerRow(['', '', '$paidCount paid invoices', 'Paid totals', _money(paidTotals.gross), '', ''], header: true),
-                        _registerRow(['', '', 'Paid excluding tax', '', _money(paidTotals.net), '', ''], header: true),
-                        _registerRow(['', '', 'Tax on paid invoices', '', _money(paidTotals.tax), '', ''], header: true),
-                      ],
-                      _registerRow(['', '', '${entries.length} ${payments ? 'payments' : 'invoices'}', 'Totals', _money(totals.gross), _money(totals.paid), _money(totals.amountDue)], header: true),
-                      _registerRow(['', '', 'Total excluding tax', '', _money(totals.net), '', ''], header: true),
-                      _registerRow(['', '', payments ? 'Tax collected' : 'Tax billed', '', _money(totals.tax), '', ''], header: true),
-                    ]);
-                  }
                   final entry = entries[index];
                   final status = entry.paid == null || entry.amountDue == null ? 'Needs review'
                     : entry.amountDue == 0 ? 'Paid' : entry.paid! > 0 ? 'Partly paid' : 'Open';

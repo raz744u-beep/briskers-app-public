@@ -119,6 +119,24 @@ class LocalPayrollRepository {
           ON e.business_id=p.business_id AND e.operation_id=p.operation_id
           AND e.revision=(SELECT MAX(revision) FROM regular_payroll_amount_edits_v1
             WHERE business_id=p.business_id AND operation_id=p.operation_id)""",
+      """CREATE INDEX IF NOT EXISTS regular_payroll_payment_correction_audit_v1
+        ON regular_payroll_audit(business_id,operation_id,id)
+        WHERE event='payment_correction'""",
+      """CREATE VIEW IF NOT EXISTS regular_payroll_corrected_payments_v1 AS
+        SELECT p.*, COALESCE(
+          (SELECT json_extract(a.payload,'\$.new_reason')
+            FROM regular_payroll_audit a
+            WHERE a.business_id=p.business_id AND a.operation_id=p.operation_id
+              AND a.event='payment_correction'
+              AND json_extract(a.payload,'\$.revision')<=p.amount_revision
+            ORDER BY json_extract(a.payload,'\$.revision') DESC LIMIT 1),
+          CASE WHEN json_valid(p.payload) THEN json_extract(p.payload,'\$.reason') END,
+          ''
+        ) AS adjustment_reason,
+        CASE WHEN json_valid(p.payload) THEN
+          json_extract(p.payload,'\$.adjustment') + p.net - p.original_net
+        END AS effective_adjustment
+        FROM regular_payroll_effective_payments_v1 p""",
       """CREATE VIEW IF NOT EXISTS regular_payroll_active_coverage_v1 AS
         SELECT w.* FROM regular_payroll_work_coverage w WHERE NOT EXISTS (
           SELECT 1 FROM regular_payroll_reversals_v1 r
@@ -445,22 +463,65 @@ class LocalPayrollRepository {
     }
   }
 
-  Future<void> savePayrollDraft(String employee,String week,Map<String,double> selected,{int adjustment=0,int repayment=0,String reason=''}) async {
-    _authorize(); await prepare(); _date(week);
-    if(selected.values.any((h)=>!h.isFinite||h<=0) || repayment<0 || adjustment.abs()>100000000 || (adjustment!=0 && reason.trim().isEmpty)) {
+  Future<String> _payrollDraftPaymentIds(String employee, String week) async {
+    final rows = await _read(
+      'SELECT operation_id FROM regular_payroll_payments '
+      'WHERE business_id=? AND employee_id=? AND week=? ORDER BY operation_id',
+      [business, employee, week],
+    );
+    return jsonEncode(rows.map((row) => row['operation_id']).toList());
+  }
+
+  Future<void> savePayrollDraft(
+    String employee, String week, Map<String, double> selected, {
+    int adjustment = 0, int repayment = 0, String reason = '',
+  }) async {
+    _authorize();
+    await prepare();
+    _date(week);
+    if (selected.values.any((h) => !h.isFinite || h <= 0) ||
+        repayment < 0 || adjustment.abs() > 100000000 ||
+        (adjustment != 0 && reason.trim().isEmpty)) {
       throw ArgumentError('Invalid payroll draft');
     }
-    await db.customStatement('INSERT INTO regular_payroll_drafts_v1 VALUES(?,?,?,?) ON CONFLICT(business_id,employee_id,week) DO UPDATE SET payload=excluded.payload',
-      [business,employee,week,jsonEncode({'hours':selected,'adjustment':adjustment,'repayment':repayment,'reason':reason})]);
+    await db.transaction(() async {
+      final paymentIds = await _payrollDraftPaymentIds(employee, week);
+      await db.customStatement(
+        'INSERT INTO regular_payroll_drafts_v1 VALUES(?,?,?,?) '
+        'ON CONFLICT(business_id,employee_id,week) DO UPDATE SET payload=excluded.payload',
+        [business, employee, week, jsonEncode({
+          'hours': selected,
+          'adjustment': adjustment,
+          'repayment': repayment,
+          'reason': reason,
+          'saved_after_payments': paymentIds,
+        })],
+      );
+      _authorize();
+    });
+  }
+
+  Future<Map<String, dynamic>?> payrollDraftDetails(String employee, String week) async {
     _authorize();
+    await prepare();
+    return db.transaction(() async {
+      final rows = await _read(
+        'SELECT payload FROM regular_payroll_drafts_v1 '
+        'WHERE business_id=? AND employee_id=? AND week=?',
+        [business, employee, week],
+      );
+      if (rows.isEmpty) return null;
+      final value = Map<String, dynamic>.from(jsonDecode(rows.single['payload'] as String) as Map);
+      final paymentIds = await _payrollDraftPaymentIds(employee, week);
+      // Drafts predating this marker are safe to restore only before any
+      // payment for that week has been recorded.
+      if ((value['saved_after_payments'] ?? '[]') != paymentIds) return null;
+      return value['hours'] is Map
+          ? value
+          : {'hours': value, 'adjustment': 0, 'repayment': 0, 'reason': ''};
+    });
   }
-  Future<Map<String,dynamic>?> payrollDraftDetails(String employee,String week) async {
-    _authorize(); await prepare();
-    final rows=await _read('SELECT payload FROM regular_payroll_drafts_v1 WHERE business_id=? AND employee_id=? AND week=?',[business,employee,week]);
-    if(rows.isEmpty)return null;
-    final value=Map<String,dynamic>.from(jsonDecode(rows.single['payload'] as String) as Map);
-    return value['hours'] is Map ? value : {'hours':value,'adjustment':0,'repayment':0,'reason':''};
-  }
+
   Future<Map<String,double>?> payrollDraft(String employee,String week) async {
     final value=await payrollDraftDetails(employee,week);
     return (value?['hours'] as Map?)?.map((k,v)=>MapEntry(k as String,(v as num).toDouble()));
@@ -2385,7 +2446,7 @@ class LocalPayrollRepository {
     await prepare();
     return _read(
       'SELECT p.*, o.state AS reconciliation_state, r.reason AS reversal_reason, '
-      'r.recorded_at AS reversed_at FROM regular_payroll_effective_payments_v1 p '
+      'r.recorded_at AS reversed_at FROM regular_payroll_corrected_payments_v1 p '
       'LEFT JOIN regular_payroll_reversals_v1 r ON r.business_id=p.business_id AND r.operation_id=p.operation_id '
       'LEFT JOIN regular_payroll_sync_outbox o ON o.business_id=p.business_id '
       'AND o.operation_id=p.operation_id WHERE p.business_id=? AND p.employee_id=? '
@@ -2620,7 +2681,7 @@ class LocalPayrollRepository {
     await prepare();
     await PayrollExpenseLinkStore(db).prepare();
     final rows = await _read(
-      'SELECT p.*,e.name AS employee_name FROM regular_payroll_effective_payments_v1 p '
+      'SELECT p.*,e.name AS employee_name FROM regular_payroll_corrected_payments_v1 p '
       'JOIN payroll_expense_links_v1 l ON l.business_id=p.business_id AND l.payroll_operation_id=p.operation_id '
       'JOIN regular_payroll_employees e ON e.business_id=p.business_id AND e.id=p.employee_id '
       'WHERE p.business_id=? AND l.transaction_id=? AND NOT EXISTS ('
@@ -2638,21 +2699,24 @@ class LocalPayrollRepository {
     required String actorId,
     required int expectedRevision,
     required int net,
+    String? adjustmentReason,
   }) async {
     _authorize();
     if (assertOwnerGrant == null || actorId.isEmpty) {
       throw StateError('An active signed-in Owner session is required.');
     }
-    if (net <= 0 || net > 100000000) {
+    if (net < 0 || net > 100000000) {
       throw ArgumentError('Enter a positive payment amount up to \$1,000,000.');
     }
     await prepare();
     return db.transaction(() async {
       await _assertPaymentAuthority();
       final payment = (await _read(
-        'SELECT p.*,o.state FROM regular_payroll_effective_payments_v1 p '
+        'SELECT p.*,o.state FROM regular_payroll_corrected_payments_v1 p '
         'JOIN regular_payroll_sync_outbox o ON o.business_id=p.business_id AND o.operation_id=p.operation_id '
-        'WHERE p.business_id=? AND p.operation_id=? AND p.employee_id=?',
+        'WHERE p.business_id=? AND p.operation_id=? AND p.employee_id=? AND NOT EXISTS ('
+        'SELECT 1 FROM regular_payroll_reversals_v1 r WHERE r.business_id=p.business_id '
+        'AND r.operation_id=p.operation_id)',
         [business, operation, employee],
       )).singleOrNull;
       if (payment == null || payment['state'] != 'held_local') {
@@ -2660,19 +2724,38 @@ class LocalPayrollRepository {
       }
       final revision = payment['amount_revision'] as int;
       final previous = payment['net'] as int;
+      final previousReason = payment['adjustment_reason'] as String;
+      final reason = adjustmentReason?.trim() ?? previousReason;
+      final unchanged = previous == net && previousReason == reason;
       if (revision != expectedRevision) {
-        if (revision == expectedRevision + 1 && previous == net) return false;
-        throw StateError('The payment changed. Reopen it to edit the amount.');
+        if (revision == expectedRevision + 1 && unchanged) return false;
+        throw StateError('The payment changed. Reopen it before editing.');
       }
-      if (previous == net) return false;
-      await OfflineFinancialWriteService(database: db).editPayrollExpenseAmount(
-        business, operation, previous: previous, net: net,
-        verifiedDate: payment['verified_date'] as String, revision: revision + 1,
-      );
+      if (unchanged) return false;
+      if (previous != net) {
+        if (net == 0) throw ArgumentError('Enter a positive payment amount.');
+        await OfflineFinancialWriteService(database: db).editPayrollExpenseAmount(
+          business, operation, previous: previous, net: net,
+          verifiedDate: payment['verified_date'] as String, revision: revision + 1,
+        );
+      }
+      final recordedAt = DateTime.now().toUtc().toIso8601String();
       await db.customStatement(
         'INSERT INTO regular_payroll_amount_edits_v1 VALUES(?,?,?,?,?,?,?)',
-        [business, operation, revision + 1, previous, net, actorId, DateTime.now().toUtc().toIso8601String()],
+        [business, operation, revision + 1, previous, net, actorId, recordedAt],
       );
+      if (reason != previousReason) {
+        await db.customStatement(
+          'INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) VALUES(?,?,?,?)',
+          [business, operation, 'payment_correction', jsonEncode({
+            'revision': revision + 1,
+            'old_reason': previousReason,
+            'new_reason': reason,
+            'actor_id': actorId,
+            'recorded_at': recordedAt,
+          })],
+        );
+      }
       await _assertPaymentAuthority();
       _authorize();
       return true;
@@ -3028,6 +3111,10 @@ class LocalPayrollRepository {
       await db.customStatement(
         'INSERT INTO regular_payroll_audit(business_id,operation_id,event,payload) VALUES(?,?,?,?)',
         [business, operation, 'verify_payment', payload],
+      );
+      await db.customStatement(
+        'DELETE FROM regular_payroll_drafts_v1 WHERE business_id=? AND employee_id=? AND week=?',
+        [business, employee, week],
       );
       // Keep payroll reconciliation separate from ordinary shop sync.
       await db.customStatement(

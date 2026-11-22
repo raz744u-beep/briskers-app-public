@@ -268,10 +268,15 @@ void main() {
       (id: 'reginald', number: '6357', gross: 1637.63, tax: 145.00),
     ]) {
       final recovered = {...invoice(id: entry.id, total: entry.gross, tax: entry.tax, lines: []),
-        'document_number': entry.number, 'status': 'closed', 'paid_amount': entry.gross};
+        'document_number': entry.id == 'gloria' ? null : entry.number,
+        'status': 'closed', 'paid_amount': entry.gross};
       final stale = {...recovered, 'paid_amount': 0, 'tax_amount': null, 'document_number': null};
       for (final id in [entry.id, 'old-${entry.id}']) {
-        await db.customStatement("INSERT INTO local_documents(id,business_id,kind,total,document_date,status) VALUES(?,'shop','invoice',?,'2026-11-19','closed')", [id, entry.gross]);
+        await db.customStatement(
+          "INSERT INTO local_documents(id,business_id,kind,total,document_date,status,document_number) "
+          "VALUES(?,'shop','invoice',?,'2026-11-19','closed',?)",
+          [id, entry.gross, id == 'gloria' ? entry.number : null],
+        );
         await db.customStatement('INSERT INTO local_document_details VALUES(?,?)', ['briskers_document_detail_shop_$id', jsonEncode({...stale, 'id': id})]);
       }
       await db.customStatement('INSERT INTO recovery_document_cache VALUES(?,?,?)', ['shop', entry.id, jsonEncode(recovered)]);

@@ -309,7 +309,8 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
                           ListTile(
                             title: Text('${payment['reversed_at'] == null ? 'Payment' : 'Reversed payment'} · ${_money(payment['net'] as int)}'),
                             subtitle: Text('${payment['method']} · ${payment['verified_date']}'
-                                '${payment['reversal_reason'] == null ? '' : '\n${payment['reversal_reason']}'}'),
+                                '${payment['reversal_reason'] == null ? '' : '\n${payment['reversal_reason']}'}'
+                                '${(payment['adjustment_reason'] as String?)?.isNotEmpty == true ? '\n${payment['adjustment_reason']}' : ''}'),
                             trailing: widget.onPaymentAction == null || payment['reversed_at'] != null
                                 ? null
                                 : PopupMenuButton<PayrollPaymentAction>(
@@ -322,7 +323,7 @@ class _PayrollHistoryPanelState extends State<PayrollHistoryPanel> {
                                     itemBuilder: (_) => const [
                                       PopupMenuItem(
                                         value: PayrollPaymentAction.edit,
-                                        child: Text('Edit'),
+                                        child: Text('Edit recorded payment'),
                                       ),
                                       PopupMenuItem(
                                         value: PayrollPaymentAction.delete,

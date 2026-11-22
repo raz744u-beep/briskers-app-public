@@ -93,7 +93,14 @@ class LocalOwnerReports {
             detail = Map<String, dynamic>.from(decoded);
           }
         } catch (_) { issues.add('Some saved invoice details could not be read.'); }
+        final detailNumber = detail['document_number']?.toString().trim() ?? '';
+        final indexNumber = index['document_number']?.toString().trim() ?? '';
+        final documentNumber = indexNumber.isNotEmpty &&
+                (detailNumber.isEmpty ||
+                 (index['sync_state'] == 'pending' && index['recovery_id'] == null))
+            ? indexNumber : detailNumber;
         final doc = <String, dynamic>{...index, ...detail, 'id': id, 'kind': 'invoice', 'business_id': business,
+          'document_number': documentNumber,
           'total_amount': detail['total_amount'] ?? index['total'],
           'customer_name': index['customer_name'] ?? detail['customer_name'] ?? 'Customer'}..remove('detail_json')..remove('detail_key');
         final projected = OfflineInvoicePaymentLedger.projectPendingPayments(doc, queued[id] ?? const []);
@@ -141,6 +148,41 @@ class LocalOwnerReports {
       // This journal contribution is represented by finalizedIncome in the
       // receipt feed. Adding it a second time would double-count local cash.
       final receipts = (await InvoicePaymentFeed(database: db, cache: cache).load(business)).where(inScope).toList();
+      final numbersByInvoice = <String, Set<String>>{};
+      final invoiceIdsByNumber = <String, Set<String>>{};
+      String? canonicalInvoice(Object? value) {
+        final id = value?.toString();
+        return invoiceAliases[id] ?? id;
+      }
+      for (final doc in invoices) {
+        final id = doc['id']?.toString();
+        final number = doc['document_number']?.toString().trim() ?? '';
+        if (id != null && number.isNotEmpty) {
+          (invoiceIdsByNumber[number] ??= {}).add(id);
+        }
+      }
+      for (final row in [
+        ...receipts,
+        ...ledger.where((row) => inScope(row) && row['direction'] == 'income'),
+      ]) {
+        final invoice = canonicalInvoice(row['invoice_id']);
+        final document = canonicalInvoice(row['document_id']);
+        if (invoice != null && document != null && invoice != document) continue;
+        final id = invoice ?? document;
+        final number = row['document_number']?.toString().trim() ?? '';
+        if (id != null && number.isNotEmpty) {
+          (numbersByInvoice[id] ??= {}).add(number);
+          (invoiceIdsByNumber[number] ??= {}).add(id);
+        }
+      }
+      for (final doc in invoices) {
+        final numbers = numbersByInvoice[doc['id']];
+        if ((doc['document_number']?.toString().trim().isEmpty ?? true) &&
+            numbers != null && numbers.length == 1 &&
+            invoiceIdsByNumber[numbers.single]?.length == 1) {
+          doc['document_number'] = numbers.single;
+        }
+      }
       final localNewOperations = {for(final batch in queued.values) for(final p in batch)
         if(p['replay_attempted']!=true && p['operation_id']!=null) p['operation_id'].toString()};
       final financial = OwnerReportPaymentMerge.combine(

@@ -103,6 +103,18 @@ void main() {
       );
       expect(await pay('eight-hours', request, 32000), true);
       expect(await pay('eight-hours', request, 32000), false);
+      expect(await repo.payrollDraftDetails('chris', '2026-11-09'), isNull);
+      // A legacy draft may have survived payment on earlier app builds.
+      await db.customStatement(
+        'INSERT INTO regular_payroll_drafts_v1 VALUES(?,?,?,?)',
+        ['shop', 'chris', '2026-11-09', jsonEncode({
+          'hours': {id: 8}, 'adjustment': 12000, 'repayment': 14000,
+          'reason': 'Already recorded',
+        })],
+      );
+      expect(await repo.payrollDraftDetails('chris', '2026-11-09'), isNull);
+      await repo.savePayrollDraft('chris', '2026-11-09', {id: 1});
+      expect(await repo.payrollDraft('chris', '2026-11-09'), {id: 1.0});
       final cache = LocalFinancialCache(database: db);
       await cache.saveOptions('shop', {
         'accounts': [{'id': 'checking', 'name': 'Business Checking - 9858'}],
