@@ -21,6 +21,7 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
   Map<String, dynamic>? _status;
   bool _automatic = false, _busy = false;
   String? _message;
+  String? _expenseIqCoverageMessage;
 
   @override
   void initState() {
@@ -36,6 +37,10 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
       final raw = prefs.getString(LocalBackupService.statusKey);
       _status = raw == null ? null : jsonDecode(raw) as Map<String, dynamic>;
       _automatic = prefs.getBool(LocalBackupService.automaticKey) ?? false;
+      _expenseIqCoverageMessage = LocalBackupService.expenseIqCoverageMessage(
+        prefs,
+        widget.businessId,
+      );
     });
   }
 
@@ -167,6 +172,14 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
               padding: const EdgeInsets.only(bottom: 8),
               child: Text('$warning'),
             ),
+        if (_expenseIqCoverageMessage != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              _expenseIqCoverageMessage!,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
         OutlinedButton.icon(
           style: BriskersDialog.cancelStyle,
           onPressed: _busy ? null : () => _run(_choose),
