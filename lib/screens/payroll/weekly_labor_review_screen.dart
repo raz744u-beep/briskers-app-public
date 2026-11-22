@@ -423,7 +423,8 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     // Optional repayment is collapsed until explicitly expanded.
     var showDebtOptions=_preparedRepayment>0;
     var confirmed = false;
-    while (mounted) {
+    while (true) {
+      if (!mounted) break;
       final ready = await showDialog<bool>(
       context:context,
       builder:(outer)=>StatefulBuilder(
