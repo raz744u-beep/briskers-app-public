@@ -143,7 +143,7 @@ void main() {
               widget.key == const Key('outstanding-advance-balance') &&
               widget.data == amount,
         );
-        final adjust = find.text('Adjust Amount Owed');
+        final adjust = find.text('Correct amount owed');
         await tester.ensureVisible(adjust);
         await tester.pumpAndSettle();
         await tester.tap(adjust);
@@ -192,7 +192,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.enterText(repayment, '140.00');
         await tester.pumpAndSettle();
-        expect(find.byTooltip('Amount calculator'), findsNothing);
+        expect(find.byTooltip('Calculator for separate repayment'), findsOneWidget);
         final saveRepayment = find.widgetWithText(FilledButton, 'Save Repayment');
         await tester.ensureVisible(saveRepayment);
         await tester.pumpAndSettle();
@@ -203,6 +203,26 @@ void main() {
         await tester.pumpAndSettle();
         await until(find.byKey(const Key('verify-weekly-payment')));
         expect(find.text('Adjustments & repayment'), findsNothing);
+        final calculated = find.text('Calculated payroll');
+        final adjustment = find.widgetWithText(TextField, 'Pay adjustment (+/−)');
+        await tester.ensureVisible(calculated);
+        await tester.tap(calculated);
+        await tester.pumpAndSettle();
+        expect(adjustment, findsNothing);
+        await tester.tap(calculated);
+        await tester.pumpAndSettle();
+        final calculator = find.byTooltip('Calculator for Pay adjustment (+/−)');
+        await tester.ensureVisible(calculator);
+        await tester.tap(calculator);
+        await tester.pumpAndSettle();
+        await tester.enterText(find.widgetWithText(TextField, 'Calculation'), '15 - 10');
+        await tester.tap(find.text('Use Amount'));
+        await tester.pumpAndSettle();
+        expect(tester.widget<TextField>(adjustment).controller?.text, '5.00');
+        await tester.enterText(find.widgetWithText(TextField, 'Reason for adjustment'), 'Bonus');
+        await tester.pumpAndSettle();
+        expect(find.text(r'Adjusted payroll · $45.00'), findsOneWidget);
+
         final paycheck = find.text('Deduct from paycheck');
         await tester.ensureVisible(paycheck);
         await tester.tap(paycheck);
@@ -215,15 +235,16 @@ void main() {
           findsOneWidget,
         );
 
-        final deduction = find.widgetWithText(TextField, 'Repayment amount');
+        final deduction = find.widgetWithText(TextField, 'Amount to deduct');
         final apply = find.widgetWithText(FilledButton, 'Apply to payment');
         await tester.ensureVisible(deduction);
-        await tester.enterText(deduction, '45.00');
+        await tester.enterText(deduction, '46.00');
         await tester.pumpAndSettle();
         expect(tester.widget<FilledButton>(apply).onPressed, isNull);
         await tester.enterText(deduction, '10.00');
         await tester.pumpAndSettle();
-        expect(find.text(r'Payment Total: $30.00'), findsOneWidget);
+        expect(find.text('This paycheck'), findsOneWidget);
+        expect(find.text(r'$35.00'), findsOneWidget);
         await tester.ensureVisible(apply);
         await tester.tap(apply);
         await tester.pumpAndSettle();
@@ -248,7 +269,7 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Record payment'));
       if (currentHolder) {
         await until(find.text('Payment Recorded'));
-        expect(find.text(r'Transferred: $30.00'), findsOneWidget);
+        expect(find.text(r'Transferred: $35.00'), findsOneWidget);
         await tester.tap(find.widgetWithText(FilledButton, 'Done'));
         await tester.pump(const Duration(milliseconds: 500));
         await tester.runAsync(() async {
@@ -277,7 +298,7 @@ void main() {
       if (currentHolder) {
         await tester.runAsync(() async {
           final saved = await LocalPayrollRepository(db, business: 'shop', owner: true).history('a');
-          expect(saved, hasLength(1)); expect(saved.single['net'], 3000);
+          expect(saved, hasLength(1)); expect(saved.single['net'], 3500);
           expect(saved.single['repayment'], 1000);
           final reopened = LocalPayrollRepository(db, business: 'shop', owner: true);
           expect(await reopened.openingAdvance('a'), 160000);

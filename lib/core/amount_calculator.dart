@@ -1,6 +1,10 @@
 /// Small arithmetic parser; never evaluates code or writes financial records.
 class AmountCalculator {
-  static int cents(String expression, {int? balanceCents}) {
+  static int cents(
+    String expression, {
+    int? balanceCents,
+    bool allowNegative = false,
+  }) {
     var source = expression.trim().replaceAll('×', '*').replaceAll('÷', '/')
         .replaceAll('−', '-').replaceAll(RegExp(r'\s+'), '');
     if (balanceCents != null && (source.startsWith('+') || source.startsWith('-'))) {
@@ -8,11 +12,14 @@ class AmountCalculator {
     }
     final parser = _Arithmetic(source);
     final value = parser.sum();
-    if (parser.index != source.length || !value.isFinite || value < 0 || value > 1000000) {
-      throw const FormatException('Enter a valid amount from 0 to 1,000,000.');
+    final minimum = allowNegative ? -1000000 : 0;
+    if (parser.index != source.length || !value.isFinite || value < minimum || value > 1000000) {
+      throw FormatException(allowNegative
+          ? 'Enter a valid amount from −1,000,000 to 1,000,000.'
+          : 'Enter a valid amount from 0 to 1,000,000.');
     }
     // Absorb floating representation noise only at the final cent boundary.
-    return (value * 100 + 0.00000001).round();
+    return (value * 100 + value.sign * 0.00000001).round();
   }
 }
 

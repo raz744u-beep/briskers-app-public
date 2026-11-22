@@ -7,20 +7,28 @@ Future<int?> showAmountCalculator(
   BuildContext context, {
   String initial = '',
   int? balanceCents,
+  bool allowNegative = false,
 }) {
   FocusManager.instance.primaryFocus?.unfocus();
   return showDialog<int>(
     context: context,
     builder: (_) =>
-        _AmountCalculatorDialog(initial: initial, balanceCents: balanceCents),
+        _AmountCalculatorDialog(
+          initial: initial, balanceCents: balanceCents, allowNegative: allowNegative,
+        ),
   );
 }
 
 class _AmountCalculatorDialog extends StatefulWidget {
-  const _AmountCalculatorDialog({required this.initial, this.balanceCents});
+  const _AmountCalculatorDialog({
+    required this.initial,
+    required this.balanceCents,
+    required this.allowNegative,
+  });
 
   final String initial;
   final int? balanceCents;
+  final bool allowNegative;
 
   @override
   State<_AmountCalculatorDialog> createState() => _AmountCalculatorDialogState();
@@ -40,6 +48,7 @@ class _AmountCalculatorDialogState extends State<_AmountCalculatorDialog> {
       final result = AmountCalculator.cents(
         _input.text,
         balanceCents: widget.balanceCents,
+        allowNegative: widget.allowNegative,
       );
       setState(() => _error = null);
       return result;

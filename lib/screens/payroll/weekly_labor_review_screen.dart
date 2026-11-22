@@ -1,6 +1,7 @@
 import '../../services/recorded_payroll_week.dart';
 import 'recorded_weekly_payment_card.dart';
 import '../../core/briskers_colors.dart';
+import '../../widgets/amount_calculator_dialog.dart';
 import 'approved_tasks_ui.dart' show taskBlue, taskCanvas, taskGreen, taskNavy;
 import 'payroll_review_widgets.dart';
 import 'employee_work_review.dart';
@@ -94,6 +95,43 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   int _preparedAdjustment=0,_preparedRepayment=0;
   String _preparedReason='';
   String? _error;
+  final _adjustmentInput = TextEditingController();
+  final _adjustmentReason = TextEditingController();
+  final _deductionInput = TextEditingController();
+
+  bool get _usesInlinePayroll => widget.profileLayout && widget.advancePanel != null;
+  String get _payAdjustmentReason =>
+      _usesInlinePayroll ? _adjustmentReason.text.trim() : _preparedReason;
+  int? get _payAdjustment {
+    if (!_usesInlinePayroll) return _preparedAdjustment;
+    final amount = _inputCents(_adjustmentInput.text);
+    return amount == 0 || _payAdjustmentReason.isNotEmpty ? amount : null;
+  }
+
+  bool get _deductionIsApplied => !_usesInlinePayroll ||
+      _inputCents(_deductionInput.text) == _preparedRepayment;
+
+  static String _amountText(int cents) => (cents / 100).toStringAsFixed(2);
+
+  static int? _inputCents(String text) {
+    final input = text.trim().replaceAll('−', '-');
+    if (input.isEmpty) return 0;
+    if (!RegExp(r'^[+-]?(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$').hasMatch(input)) {
+      return null;
+    }
+    final amount = double.tryParse(input);
+    if (amount == null || amount.abs() > 1000000) return null;
+    return (amount * 100).round();
+  }
+
+  void _resetPreparation() {
+    _preparedAdjustment = 0;
+    _preparedRepayment = 0;
+    _preparedReason = '';
+    _adjustmentInput.clear();
+    _adjustmentReason.clear();
+    _deductionInput.clear();
+  }
 
   static DateTime _start(DateTime date) =>
       DateTime(date.year, date.month, date.day,)
@@ -127,6 +165,9 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   @override
   void dispose() {
     _tipTimer?.cancel();
+    _adjustmentInput.dispose();
+    _adjustmentReason.dispose();
+    _deductionInput.dispose();
     super.dispose();
   }
 
@@ -179,7 +220,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   }
 
   void _selectUnpaid() {
-    _preparedAdjustment=0;_preparedRepayment=0;_preparedReason='';
+    _resetPreparation();
     _selected.clear();
     _excluded.clear();
     for (final task in _eligible) {
@@ -269,16 +310,20 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       await _savePreparationDraft();
     }
   }
-    Future<void> _savePreparationDraft() async {
-    if (!widget.profileLayout || widget.saveDraft == null) return;
+  Future<bool> _savePreparationDraft() async {
+    final adjustment = _payAdjustment;
+    if (!widget.profileLayout || widget.saveDraft == null || adjustment == null) {
+      return false;
+    }
     try {
       await widget.saveDraft!(
         _start(_week),
         Map<String, double>.from(_selected),
-        _preparedAdjustment,
+        adjustment,
         _preparedRepayment,
-        _preparedReason,
+        _payAdjustmentReason,
       );
+      return true;
     } catch (_) {
       if (mounted) {
         setState(
@@ -286,6 +331,7 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
               'Could not save the payroll draft. Please retry Save (Draft).',
         );
       }
+      return false;
     }
   }
 
@@ -350,10 +396,18 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       return;
     }
     final calculatedGross = laborCents + widget.weeklyBaseCents + widget.weeklyAdjustmentCents;
+    if (_usesInlinePayroll && (_preparedRepayment > debt ||
+        _preparedRepayment > calculatedGross + adjustment)) {
+      setState(() {
+        _saving = false;
+        _error = 'Update the paycheck deduction to match the current payroll and advance balance.';
+      });
+      return;
+    }
     final amount=TextEditingController(
-      text:((calculatedGross+_preparedAdjustment)/100).toStringAsFixed(2),);
+      text:_amountText(calculatedGross + adjustment),);
     final debtInput=TextEditingController(text:_preparedRepayment>0?(_preparedRepayment/100).toStringAsFixed(2):'',);
-    final note=TextEditingController(text:_preparedReason);
+    final note=TextEditingController(text:adjustmentReason);
     var method='Zelle';
     var paidDate = DateTime.now();
     var deduct=_preparedRepayment>0;
@@ -617,7 +671,10 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
           );
           if(mounted) {
             if(widget.embedded) {
-              setState((){_selected.clear();_preparedAdjustment=0;_preparedRepayment=0;_preparedReason='';});
+              setState(() {
+                _selected.clear();
+                _resetPreparation();
+              });
               await widget.onPaymentSaved?.call();
             } else {
               Navigator.pop(context,true);
@@ -737,7 +794,14 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       for (final task in _eligible)
         if ((task['paid_minutes'] as int? ?? 0) == 0) _id(task): _available(task),
     };
-    setState(() { _selected.clear(); _preparedAdjustment=savedDraft['adjustment'] as int? ?? 0;_preparedRepayment=savedDraft['repayment'] as int? ?? 0;_preparedReason=savedDraft['reason'] as String? ?? '';
+    setState(() {
+      _selected.clear();
+      _preparedAdjustment = savedDraft['adjustment'] as int? ?? 0;
+      _preparedRepayment = savedDraft['repayment'] as int? ?? 0;
+      _preparedReason = savedDraft['reason'] as String? ?? '';
+      _adjustmentInput.text = _amountText(_preparedAdjustment);
+      _adjustmentReason.text = _preparedReason;
+      _deductionInput.text = _amountText(_preparedRepayment);
       for(final entry in (savedDraft['hours'] as Map).entries) {
       final remaining=available[entry.key]??0;
       if(remaining>0 && entry.value>0) {_selected[entry.key]=(entry.value as num).clamp(0,remaining).toDouble();
@@ -746,16 +810,6 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       _excluded..clear()..addAll(available.keys.where((id) => !_selected.containsKey(id)));
     });
   }
-  Future<void> _applyPreparation(_PayrollPreparation value) async {
-    setState(() {
-      _preparedAdjustment = value.adjustment;
-      _preparedRepayment = value.repayment;
-      _preparedReason = value.reason;
-      _error = null;
-    });
-    await _savePreparationDraft();
-  }
-
   Future<void> _editPreparation(int labor) async {
     final debt=await widget.advanceBalance();
     if(!mounted)return;
@@ -848,22 +902,205 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     Future<void>.delayed(const Duration(milliseconds:400),(){adjustment.dispose();repayment.dispose();reason.dispose();});
   }
 
-  _PayrollPreparation get _preparedValues => (
-    adjustment: _preparedAdjustment,
-    repayment: _preparedRepayment,
-    reason: _preparedReason,
-  );
+  Widget _preparationField(
+    String label,
+    TextEditingController controller, {
+    bool? signed,
+  }) {
+    return TextField(
+      controller: controller,
+      enabled: !_saving,
+      keyboardType: signed == null
+          ? null
+          : TextInputType.numberWithOptions(decimal: true, signed: signed),
+      onChanged: (_) => setState(() => _error = null),
+      decoration: InputDecoration(
+        labelText: label,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(9)),
+        suffixIcon: signed == null ? null : IconButton(
+          icon: const Icon(Icons.calculate_outlined),
+          tooltip: 'Calculator for $label',
+          onPressed: _saving ? null : () async {
+            final week = _start(_week);
+            final employee = widget.employeeId;
+            final cents = await showAmountCalculator(
+              context,
+              initial: controller.text,
+              allowNegative: signed,
+            );
+            if (cents == null || !mounted || _saving ||
+                _start(_week) != week || widget.employeeId != employee) {
+              return;
+            }
+            setState(() {
+              controller.text = _amountText(cents);
+              _error = null;
+            });
+          },
+        ),
+      ),
+    );
+  }
 
-  Widget _inlinePreparation(int gross, VoidCallback cancel) =>
-      _PayrollPreparationEditor(
-        key: ValueKey((widget.employeeId, _week)),
-        initial: _preparedValues,
-        gross: gross,
-        debt: widget.profileAdvanceBalance,
-        enabled: !_saving,
-        onCancel: cancel,
-        onApply: _applyPreparation,
-      );
+  Widget _inlineDeduction(int? gross, VoidCallback close) {
+    final amount = _inputCents(_deductionInput.text);
+    final balance = widget.profileAdvanceBalance;
+    final preview = amount != null && amount >= 0 && gross != null &&
+        gross >= amount && (amount == 0 || (balance != null && amount <= balance))
+        ? (gross: gross, amount: amount)
+        : null;
+    final money = NumberFormat.simpleCurrency(locale: 'en_US');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _preparationField('Amount to deduct', _deductionInput, signed: false),
+        const SizedBox(height: 12),
+        if (preview != null) ...[
+          _payrollSummary(
+            title: 'This paycheck',
+            rows: [
+              ('Adjusted payroll', money.format(preview.gross / 100)),
+              ('Advance repayment', '−${money.format(preview.amount / 100)}'),
+              ('Payment total', money.format((preview.gross - preview.amount) / 100)),
+            ],
+            color: const Color(0xFFEAF6EC),
+          ),
+          if (balance != null) ...[
+            const SizedBox(height: 8),
+            _payrollSummary(
+              rows: [('Advance balance after payment', money.format((balance - preview.amount) / 100))],
+              color: const Color(0xFFE7F0FD),
+            ),
+          ],
+        ] else
+          const Text('Check adjusted payroll and enter a deduction up to the paycheck and advance balance.'),
+        const SizedBox(height: 8),
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 8,
+          children: [
+            TextButton(
+              onPressed: _saving ? null : () {
+                setState(() => _deductionInput.text = _amountText(_preparedRepayment));
+                close();
+              },
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: taskGreen),
+              onPressed: preview != null && !_saving ? () async {
+                FocusManager.instance.primaryFocus?.unfocus();
+                setState(() {
+                  _preparedRepayment = preview.amount;
+                  _error = null;
+                });
+                await _savePreparationDraft();
+              } : null,
+              child: const Text('Apply to payment'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _payrollSummary({
+    String? title,
+    required List<(String, String)> rows,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(10)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (title != null) Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+          for (final (label, value) in rows)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(
+                children: [
+                  Expanded(child: Text(label)),
+                  const SizedBox(width: 8),
+                  Text(value, style: const TextStyle(fontWeight: FontWeight.w800)),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _calculatedPayroll(
+    List<Map<String, dynamic>> tasks,
+    int beforeAdjustment,
+    int? adjusted,
+  ) {
+    final money = NumberFormat.simpleCurrency(locale: 'en_US');
+    final rates = {
+      for (final task in tasks)
+        if (_selected.containsKey(_id(task))) _rate(task),
+    };
+    final adjustedValue = adjusted == null
+        ? 'Check pay adjustment'
+        : money.format(adjusted / 100);
+    final adjustmentField = _preparationField(
+      'Pay adjustment (+/−)', _adjustmentInput, signed: true,
+    );
+    final reasonField = _preparationField('Reason for adjustment', _adjustmentReason);
+    return Card(
+      child: ExpansionTile(
+        key: const PageStorageKey('calculated-payroll'),
+        initiallyExpanded: true,
+        title: const Text('Calculated payroll', style: TextStyle(fontWeight: FontWeight.w800)),
+        subtitle: Text('Adjusted payroll · $adjustedValue'),
+        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _payrollSummary(
+            rows: [
+              ('Payable hours', '${_totalHours.toStringAsFixed(2)} hrs'),
+              if (rates.length == 1)
+                ('Hourly rate', '${money.format(rates.single / 100)} / hr')
+              else if (rates.length > 1)
+                ('Hourly rate', 'Varies by task'),
+              ('Pay before adjustments', money.format(beforeAdjustment / 100)),
+            ],
+            color: const Color(0xFFEAF0F9),
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth >= 350 &&
+                  MediaQuery.textScalerOf(context).scale(14) <= 16) {
+                return Row(children: [
+                  Expanded(child: adjustmentField),
+                  const SizedBox(width: 8),
+                  Expanded(child: reasonField),
+                ]);
+              }
+              return Column(children: [
+                adjustmentField,
+                const SizedBox(height: 8),
+                reasonField,
+              ]);
+            },
+          ),
+          const SizedBox(height: 8),
+          _payrollSummary(
+            rows: [('Adjusted payroll', adjustedValue)],
+            color: const Color(0xFFEAF6EC),
+          ),
+          if (adjusted == null)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('Enter a valid adjustment and a reason for any change to pay.'),
+            ),
+        ],
+      ),
+    );
+  }
 
   int _rate(Map<String,dynamic> task)=>widget.settlementRateCents ?? task['payment_rate_cents'] as int? ?? task['rate_cents'] as int? ?? 0;
   int _amount(Map<String,dynamic> task,double hours) {
@@ -961,8 +1198,12 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     final preparing=tasks.isNotEmpty || (!recorded.hasPayments && widget.weeklyBaseCents>0) ||
         _preparedAdjustment!=0 || _preparedRepayment!=0;
     final labor=tasks.fold<int>(widget.weeklyBaseCents,(n,r)=>n+_amount(r,_selected[_id(r)]??0),);
-    final adjustment=widget.weeklyAdjustmentCents+_preparedAdjustment,gross=labor+widget.weeklyAdjustmentCents+_preparedAdjustment;
-    final net=gross-_preparedRepayment;
+    final beforeAdjustment = labor + widget.weeklyAdjustmentCents;
+    final payAdjustment = _payAdjustment;
+    final adjusted = payAdjustment == null ? null : beforeAdjustment + payAdjustment;
+    final gross = adjusted ?? beforeAdjustment;
+    final adjustment = widget.weeklyAdjustmentCents + (payAdjustment ?? 0);
+    final net = gross - _preparedRepayment;
     final total=tasks.fold<double>(0,(n,r)=>n+_available(r));
     String money(int n)=>NumberFormat.simpleCurrency(locale:'en_US').format(n/100);
     Widget metric(String label,String value,Color color)=>Expanded(child:Container(
@@ -1042,6 +1283,36 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
         ),
       ),
       if(_error!=null)Text(_error!,style:const TextStyle(color:Colors.red)),
+      if (_usesInlinePayroll)
+      Card(
+        child: ExpansionTile(
+          key: const PageStorageKey('payroll-unpaid-labor'),
+          initiallyExpanded: true,
+          title: Text('Unpaid Labor (${tasks.length})',
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          subtitle: Text(
+            '${tasks.where((task) => _selected.containsKey(_id(task))).length} selected · '
+            '${_totalHours.toStringAsFixed(2)} hrs',
+          ),
+          expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+          childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+          children: [
+            if (tasks.isEmpty)
+              const ListTile(title: Text('No verified unpaid labor for this week.'))
+            else
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton(
+                  onPressed: _saving ? null : _selectAll,
+                  child: Text(tasks.every((task) => _selected.containsKey(_id(task)))
+                      ? 'Deselect All' : 'Select All'),
+                ),
+              ),
+            for (final task in tasks) _payableCard(task),
+          ],
+        ),
+      )
+      else ...[
       Padding(padding:const EdgeInsets.fromLTRB(8,12,8,2),child:Row(children:[
         Expanded(child:Text('Unpaid Labor (${tasks.length})',style:const TextStyle(fontSize:17,fontWeight:FontWeight.w800))),
         FilledButton.icon(onPressed:_saving||tasks.isEmpty?null:_selectAll,
@@ -1051,10 +1322,13 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       ])),
       if(tasks.isEmpty)const ListTile(title:Text('No verified unpaid labor for this week.')),
       for(final task in tasks)_payableCard(task),
+      ],
       if(review.isNotEmpty)Card(child:ExpansionTile(key:PageStorageKey('payroll-review-${widget.employeeId}-${_week.toIso8601String()}',),title:Text('Needs Review (${review.length})'),children:[
         if(widget.reviewMessage!=null)ListTile(title:Text(widget.reviewMessage!)),
         for(final r in review)ListTile(title:Text('${r['job_number']} · ${r['description']}'),subtitle:const Text('Pay status or compensation requires review; excluded from payment.',),),],),),
-      if(preparing) Card(
+      if (preparing && _usesInlinePayroll)
+        _calculatedPayroll(tasks, beforeAdjustment, adjusted)
+      else if (preparing) Card(
           key:const Key('new-weekly-payment-preparation'),
           clipBehavior: Clip.antiAlias,
           child: Column(
@@ -1108,16 +1382,56 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       if (widget.advancePanel case final buildAdvancePanel?)
         buildAdvancePanel(
           preparing && !_future
-              ? (cancel) => _inlinePreparation(
-                    labor + widget.weeklyAdjustmentCents, cancel,
-                  )
+              ? (close) => _inlineDeduction(adjusted, close)
               : null,
         ),
-      if(preparing) Wrap(spacing:10,runSpacing:8,alignment:WrapAlignment.spaceBetween,children:[OutlinedButton(onPressed:_saving||widget.saveDraft==null?null:()async {await widget.saveDraft!(_start(_week),Map<String,double>.from(_selected),_preparedAdjustment,_preparedRepayment,_preparedReason,);if(mounted) {ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Payroll draft saved locally.'),),);
-                      }},child:const Text('Save (Draft)'),),
-        FilledButton.icon(key:const Key('verify-weekly-payment'),style:FilledButton.styleFrom(backgroundColor:const Color(0xFF0A8F53),),onPressed:_saving||_future||gross<=0||net<0||(_totalHours<=0&&widget.weeklyBaseCents<=0)?null:_verifyPayment,icon:const Icon(Icons.check),label:const Text('Verify Weekly Payment'),),
-    ],
+      if (preparing) ...[
+        if (!_deductionIsApplied)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text('Apply or cancel the paycheck deduction before continuing.'),
+          )
+        else if (_usesInlinePayroll && adjusted != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: _payrollSummary(
+              rows: [('Payment total', money(net))],
+              color: const Color(0xFFEAF6EC),
+            ),
+          ),
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          alignment: WrapAlignment.spaceBetween,
+          children: [
+            OutlinedButton(
+              onPressed: _saving || widget.saveDraft == null ||
+                      payAdjustment == null || !_deductionIsApplied
+                  ? null
+                  : () async {
+                      final saved = await _savePreparationDraft();
+                      if (mounted && saved) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Payroll draft saved locally.')),
+                        );
+                      }
+                    },
+              child: const Text('Save (Draft)'),
+            ),
+            FilledButton.icon(
+              key: const Key('verify-weekly-payment'),
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0A8F53)),
+              onPressed: _saving || _future || adjusted == null ||
+                      !_deductionIsApplied || gross <= 0 || net < 0 ||
+                      (_totalHours <= 0 && widget.weeklyBaseCents <= 0)
+                  ? null
+                  : _verifyPayment,
+              icon: const Icon(Icons.check),
+              label: const Text('Verify Weekly Payment'),
+            ),
+          ],
         ),
+      ],
       ],);
   }
 
@@ -1374,174 +1688,6 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
             ),
           ],
         ),),
-    );
-  }
-}
-
-
-typedef _PayrollPreparation = ({int adjustment, int repayment, String reason});
-
-class _PayrollPreparationEditor extends StatefulWidget {
-  const _PayrollPreparationEditor({
-    super.key,
-    required this.initial,
-    required this.gross,
-    required this.debt,
-    required this.onCancel,
-    required this.onApply,
-    this.enabled = true,
-  });
-
-  final _PayrollPreparation initial;
-  final int gross;
-  final int? debt;
-  final VoidCallback onCancel;
-  final ValueChanged<_PayrollPreparation> onApply;
-  final bool enabled;
-
-  @override
-  State<_PayrollPreparationEditor> createState() => _PayrollPreparationEditorState();
-}
-
-class _PayrollPreparationEditorState extends State<_PayrollPreparationEditor> {
-  late final TextEditingController _adjustment;
-  late final TextEditingController _repayment;
-  late final TextEditingController _reason;
-
-  @override
-  void initState() {
-    super.initState();
-    _adjustment = TextEditingController(text: _dollars(widget.initial.adjustment));
-    _repayment = TextEditingController(text: _dollars(widget.initial.repayment));
-    _reason = TextEditingController(text: widget.initial.reason);
-  }
-
-  @override
-  void dispose() {
-    _adjustment.dispose();
-    _repayment.dispose();
-    _reason.dispose();
-    super.dispose();
-  }
-
-  String _dollars(int cents) => (cents / 100).toStringAsFixed(2);
-
-  int? _cents(String text) {
-    final input = text.trim();
-    if (input.isEmpty) return 0;
-    if (!RegExp(r'^[+-]?(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$').hasMatch(input)) {
-      return null;
-    }
-    final amount = double.tryParse(input);
-    if (amount == null || !amount.isFinite || amount.abs() > 1000000) return null;
-    return (amount * 100).round();
-  }
-
-  Widget _amountField(String label, TextEditingController controller, {bool signed = false}) {
-    return _field(
-      label,
-      controller,
-      keyboard: TextInputType.numberWithOptions(decimal: true, signed: signed),
-    );
-  }
-
-  Widget _field(String label, TextEditingController controller, {TextInputType? keyboard}) {
-    return TextField(
-      controller: controller,
-      enabled: widget.enabled,
-      keyboardType: keyboard,
-      onChanged: (_) => setState(() {}),
-      decoration: InputDecoration(
-        labelText: label,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(9)),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final adjustment = _cents(_adjustment.text);
-    final repayment = _cents(_repayment.text);
-    final reason = _reason.text.trim();
-    final debt = widget.debt;
-    final net = widget.gross + (adjustment ?? 0) - (repayment ?? 0);
-    final preparation = adjustment != null &&
-        repayment != null &&
-        repayment >= 0 &&
-        debt != null &&
-        repayment <= debt &&
-        net >= 0 &&
-        (adjustment == 0 || reason.isNotEmpty)
-        ? (adjustment: adjustment, repayment: repayment, reason: reason)
-        : null;
-    final money = NumberFormat.simpleCurrency(locale: 'en_US');
-    final payAdjustment = _amountField(
-      'Pay adjustment (+/−)',
-      _adjustment,
-      signed: true,
-    );
-    final payRepayment = _amountField(
-      'Repayment amount',
-      _repayment,
-    );
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        LayoutBuilder(
-          builder: (context, constraints) {
-            if (constraints.maxWidth >= 320 &&
-                MediaQuery.textScalerOf(context).scale(14) <= 16) {
-              return Row(children: [
-                Expanded(child: payAdjustment),
-                const SizedBox(width: 8),
-                Expanded(child: payRepayment),
-              ]);
-            }
-            return Column(children: [
-              payAdjustment,
-              const SizedBox(height: 8),
-              payRepayment,
-            ]);
-          },
-        ),
-        const SizedBox(height: 10),
-        _field('Reason for pay adjustment', _reason),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: const Color(0xFFE3F7DE),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            preparation != null
-                ? 'Payment Total: ${money.format(net / 100)}'
-                : 'Check the amounts, outstanding balance and adjustment reason.',
-            style: const TextStyle(fontWeight: FontWeight.w800, color: taskGreen),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          alignment: WrapAlignment.end,
-          spacing: 8,
-          children: [
-            TextButton(onPressed: widget.onCancel, child: const Text('Cancel')),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: taskGreen),
-              onPressed: preparation != null && widget.enabled
-                  ? () {
-                      FocusManager.instance.primaryFocus?.unfocus();
-                      widget.onApply(preparation);
-                      widget.onCancel();
-                    }
-                  : null,
-              child: const Text('Apply to payment'),
-            ),
-          ],
-        ),
-      ],
     );
   }
 }

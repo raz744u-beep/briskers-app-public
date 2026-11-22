@@ -1637,23 +1637,6 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                   ),
                 ),
                 if (expanded) ...[
-                  Wrap(
-                    alignment: WrapAlignment.spaceBetween,
-                    children: [
-                      TextButton(
-                        onPressed: enabled
-                            ? () => _selectAdvanceSection(_AdvanceSection.balance)
-                            : null,
-                        child: const Text('Adjust Amount Owed'),
-                      ),
-                      TextButton(
-                        onPressed: enabled
-                            ? () => _selectAdvanceSection(_AdvanceSection.history)
-                            : null,
-                        child: const Text('Repayment History'),
-                      ),
-                    ],
-                  ),
                   if (paycheckEditor != null)
                     SegmentedButton<_AdvanceSection>(
                       segments: [
@@ -1697,6 +1680,23 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                       _AdvanceSection.history => _advanceHistory(),
                     },
                   ],
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    children: [
+                      TextButton(
+                        onPressed: enabled
+                            ? () => _selectAdvanceSection(_AdvanceSection.balance)
+                            : null,
+                        child: const Text('Correct amount owed'),
+                      ),
+                      TextButton(
+                        onPressed: enabled
+                            ? () => _selectAdvanceSection(_AdvanceSection.history)
+                            : null,
+                        child: const Text('Repayment history'),
+                      ),
+                    ],
+                  ),
                   if (_advanceError case final message?) ...[
                     const SizedBox(height: 8),
                     Text(message, style: const TextStyle(color: BriskersColors.destructive)),
@@ -1792,7 +1792,22 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         onTap: () => _selectAmount(_repayment),
         onChanged: (_) => setState(() => _advanceError = null),
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        decoration: _advanceField('Repayment amount', prefixText: r'$ '),
+        decoration: _advanceField('Repayment amount', prefixText: r'$ ').copyWith(
+          suffixIcon: IconButton(
+            icon: const Icon(Icons.calculate_outlined),
+            tooltip: 'Calculator for separate repayment',
+            onPressed: _busy ? null : () async {
+              final employee = _employee;
+              final cents = await showAmountCalculator(context, initial: _repayment.text);
+              if (cents != null && mounted && !_busy && employee == _employee) {
+                setState(() {
+                  _repayment.text = (cents / 100).toStringAsFixed(2);
+                  _advanceError = null;
+                });
+              }
+            },
+          ),
+        ),
       ),
       if (_repayment.text.trim().isNotEmpty && _repaymentCents == null)
         const Padding(

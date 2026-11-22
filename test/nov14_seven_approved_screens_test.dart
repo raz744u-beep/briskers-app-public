@@ -623,16 +623,16 @@ void main() {
         scrollable: find.byType(Scrollable).last,
       );
       await t.pumpAndSettle();
-      expect(find.text('Adjust Amount Owed'), findsNothing);
+      expect(find.text('Correct amount owed'), findsNothing);
       await capture(t, key, 'next-advances-collapsed');
       await t.tap(find.text('Advances & Repayments'));
       await t.pumpAndSettle();
-      expect(find.text('Adjust Amount Owed'), findsOneWidget);
-      expect(find.text('Repayment History'), findsOneWidget);
+      expect(find.text('Correct amount owed'), findsOneWidget);
+      expect(find.text('Repayment history'), findsOneWidget);
       await capture(t, key, 'next-advances-expanded');
-      await t.ensureVisible(find.text('Adjust Amount Owed'));
+      await t.ensureVisible(find.text('Correct amount owed'));
       await t.pumpAndSettle();
-      await t.tap(find.text('Adjust Amount Owed'));
+      await t.tap(find.text('Correct amount owed'));
       await t.pumpAndSettle();
       final calculate = find.byTooltip('Amount calculator');
       await t.ensureVisible(calculate);
@@ -650,9 +650,9 @@ void main() {
       await t.ensureVisible(find.text('Save Repayment'));
       await t.pumpAndSettle();
       expect(find.text('Notes (optional)'), findsOneWidget);
-      await t.ensureVisible(find.text('Repayment History'));
+      await t.ensureVisible(find.text('Repayment history'));
       await t.pumpAndSettle();
-      await t.tap(find.text('Repayment History'));
+      await t.tap(find.text('Repayment history'));
       await t.pumpAndSettle();
       await capture(t, key, 'next-advances-history');
       await t.tap(find.byKey(const ValueKey('profile-tab-Taxes')));
