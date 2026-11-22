@@ -16,6 +16,10 @@ void main() {
         LocalBackupService.expenseIqCoverageMessage(prefs, 'shop-a'),
         contains('have not been imported or checked'),
       );
+      expect(
+        LocalBackupService.expenseIqImportBackupWarning(prefs, 'shop-a'),
+        isNull,
+      );
 
       const key = 'briskers_backup_expenseiq_import_status_v1';
       await prefs.setString(
@@ -25,6 +29,10 @@ void main() {
       expect(
         LocalBackupService.expenseIqCoverageMessage(prefs, 'shop-a'),
         contains('have not been imported or checked'),
+      );
+      expect(
+        LocalBackupService.expenseIqImportBackupWarning(prefs, 'shop-a'),
+        isNull,
       );
 
       await prefs.setString(
@@ -38,6 +46,10 @@ void main() {
       );
       expect(
         LocalBackupService.expenseIqCoverageMessage(prefs, 'shop-a'),
+        contains('incomplete'),
+      );
+      expect(
+        LocalBackupService.expenseIqImportBackupWarning(prefs, 'shop-a'),
         contains('incomplete'),
       );
 
@@ -56,11 +68,24 @@ void main() {
       );
       expect(message, contains('completed on this device'));
       expect(message, contains('Compare the original folder inventory'));
+      expect(
+        LocalBackupService.expenseIqImportBackupWarning(prefs, 'shop-a'),
+        isNull,
+      );
 
       await prefs.setString(key, '{invalid');
       expect(
         LocalBackupService.expenseIqCoverageMessage(prefs, 'shop-a'),
         contains('could not be checked'),
+      );
+      expect(
+        LocalBackupService.expenseIqImportBackupWarning(prefs, 'shop-a'),
+        contains('unreadable'),
+      );
+      await prefs.setString(key, '[]');
+      expect(
+        LocalBackupService.expenseIqImportBackupWarning(prefs, 'shop-a'),
+        contains('unreadable'),
       );
     },
   );
