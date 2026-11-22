@@ -1058,8 +1058,12 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
     );
     final reasonField = _preparationField('Reason for adjustment', _adjustmentReason);
     return Card(
+      color: BriskersColors.surface,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
         key: const PageStorageKey('calculated-payroll'),
+        shape: const Border(),
         initiallyExpanded: true,
         title: const Text('Calculated payroll', style: TextStyle(fontWeight: FontWeight.w800)),
         subtitle: Text('Adjusted payroll · $adjustedValue'),
@@ -1293,8 +1297,12 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
       if(_error!=null)Text(_error!,style:const TextStyle(color:Colors.red)),
       if (_usesInlinePayroll)
       Card(
+        color: BriskersColors.surface,
+        surfaceTintColor: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
         child: ExpansionTile(
           key: const PageStorageKey('payroll-unpaid-labor'),
+          shape: const Border(),
           initiallyExpanded: true,
           title: Text('Unpaid Labor (${tasks.length})',
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
@@ -1311,6 +1319,10 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
               Align(
                 alignment: Alignment.centerRight,
                 child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: BriskersColors.tabGreen,
+                    foregroundColor: Colors.white,
+                  ),
                   onPressed: _saving ? null : _selectAll,
                   child: Text(tasks.every((task) => _selected.containsKey(_id(task)))
                       ? 'Deselect All' : 'Select All'),

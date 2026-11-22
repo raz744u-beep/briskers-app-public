@@ -141,7 +141,11 @@ void main() {
           scrollable: payrollList);
         await tester.ensureVisible(find.text('Advances & Repayments'));
         await tester.pumpAndSettle();
-        expect(headerGradient('Outstanding balance'), weeklyGradient);
+        final balanceGradient = headerGradient('Outstanding balance');
+        expect(tester.widget<Text>(find.text('Outstanding balance')).style?.color, Colors.white);
+        for (final color in balanceGradient.colors) {
+          expect(1.05 / (color.computeLuminance() + 0.05), greaterThanOrEqualTo(4.5));
+        }
         await tester.tap(find.text('Advances & Repayments'));
         await tester.pumpAndSettle();
         Finder outstanding(String amount) => find.byWidgetPredicate(
@@ -187,6 +191,29 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Confirm Balance'));
         await until(outstanding(r'$1,600.00'));
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
+
+        await tester.ensureVisible(adjust);
+        await tester.tap(adjust);
+        await tester.pumpAndSettle();
+        final corrected = find.widgetWithText(TextField, 'New amount owed');
+        final reason = find.widgetWithText(TextField, 'Adjustment reason (required)');
+        await tester.ensureVisible(corrected);
+        await tester.enterText(corrected, '1740.00');
+        await tester.pumpAndSettle();
+        expect(outstanding(r'$1,600.00'), findsOneWidget);
+        expect(find.text(r'Proposed balance: $1,740.00'), findsOneWidget);
+        expect(tester.widget<FilledButton>(saveBalance).onPressed, isNull);
+        await tester.ensureVisible(reason);
+        await tester.enterText(reason, 'Advance correction');
+        await tester.ensureVisible(saveBalance);
+        await tester.tap(saveBalance);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Confirm Balance'));
+        await until(outstanding(r'$1,740.00'));
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
 
         final record = find.text('Record separate repayment');
         await tester.ensureVisible(record);
@@ -204,7 +231,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(saveRepayment);
         await tester.tap(saveRepayment, warnIfMissed: false);
-        await until(outstanding(r'$1,460.00'));
+        await until(outstanding(r'$1,600.00'));
         await tester.tap(find.text('Payroll'));
         await tester.pumpAndSettle();
         expect(find.text('Adjustments & repayment'), findsNothing);
@@ -257,7 +284,7 @@ void main() {
         await tester.tap(apply);
         await tester.pumpAndSettle();
         await tester.runAsync(() async {
-          expect(await fixture.advance('a'), 146000);
+          expect(await fixture.advance('a'), 160000);
           expect(await fixture.history('a'), isEmpty);
           expect(await fixture.repaymentHistory('a'), hasLength(1));
         });
@@ -310,7 +337,8 @@ void main() {
           expect(saved.single['repayment'], 1000);
           final reopened = LocalPayrollRepository(db, business: 'shop', owner: true);
           expect(await reopened.openingAdvance('a'), 160000);
-          expect(await reopened.advance('a'), 145000);
+          expect(await reopened.advance('a'), 159000);
+          expect((await reopened.advanceAdjustments('a')).single['reason'], 'Advance correction');
           expect(await reopened.repaymentHistory('a'), hasLength(1));
         });
       } else {

@@ -163,6 +163,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
   String? _employee;
   DateTime _week = DateTime.now();
   int? _advanceBalance;
+  int _advanceWriteRevision = 0;
   List<Map<String, dynamic>> _repayments = [];
   List<Map<String, dynamic>> _generalTasks = [];
 
@@ -501,6 +502,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         }
       }
     }
+    final advanceWriteRevision = _advanceWriteRevision;
     final advance = employee == null || _jobMode ? null : await repository.advance(employee);
     final repayments = employee == null || widget.employeeId == null || widget.reportsOnly
         ? <Map<String, dynamic>>[] : await repository.repaymentHistory(employee);
@@ -533,11 +535,13 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       _work = work;
       _taskSources = sources;
       _history = history;
-      _advanceBalance = advance;
-      _repayments = repayments;
-      _openingAdvance = opening;
-      _hasAdvanceHistory = debtHistory;
-      _advanceAdjustments = adjustments;
+      if (advanceWriteRevision == _advanceWriteRevision) {
+        _advanceBalance = advance;
+        _repayments = repayments;
+        _openingAdvance = opening;
+        _hasAdvanceHistory = debtHistory;
+        _advanceAdjustments = adjustments;
+      }
       _generalTasks = job == null ? generalTasks : generalTasks.where((row) => row['job_id'] == job).toList();
       if (!_weeklyDefaultsLoaded) {
         _weeklyDefaultsLoaded = true;
@@ -1238,6 +1242,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       }
       if (mounted) {
         setState(() {
+          _advanceWriteRevision++;
           _advanceBalance = proposed;
           _hasAdvanceHistory = true;
           if (opening) _openingAdvance = proposed;
@@ -1245,6 +1250,20 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           _balanceOperation = null;
           _balanceReason.clear();
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Balance saved: ${_money(proposed)}')),
+        );
+        // A refresh started during confirmation may hold the old balance.
+        // Let it finish before fetching updated balance history.
+        final pendingRead = _localRead;
+        if (pendingRead != null) {
+          unawaited(pendingRead.then<void>(
+            (_) {},
+            onError: (Object _, StackTrace _) {},
+          ).whenComplete(() {
+            if (mounted) return _load();
+          }));
+        }
       }
     }, onError: (error) => _advanceSaveFailed('the balance', error));
   }
@@ -1609,7 +1628,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    gradient: BriskersColors.blueHeader,
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF166F9D), BriskersColors.customerSave, Color(0xFF174B92)],
+                    ),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Wrap(
@@ -1622,7 +1643,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                         'Outstanding balance',
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF061A2E),
+                          color: Colors.white,
                         ),
                       ),
                       Text(
@@ -1759,7 +1780,9 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
             controller: _balanceReason,
             enabled: !_busy,
             onChanged: (_) => setState(() => _advanceError = null),
-            decoration: _advanceField('Adjustment reason'),
+            decoration: _advanceField('Adjustment reason (required)').copyWith(
+              helperText: 'Enter a reason to enable Save Balance.',
+            ),
           ),
         ],
         const SizedBox(height: 10),
