@@ -140,7 +140,7 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
   for (final width in [320.0, 400.0]) {
-    testWidgets('transaction page shows received totals and due then paid at $width pixels', (tester) async {
+    testWidgets('transaction totals are available without horizontal scrolling at $width pixels', (tester) async {
       tester.view.physicalSize = Size(width, 950); tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
       await open(tester);
@@ -153,17 +153,33 @@ void main() {
       expect(find.text('Amount'), findsOneWidget);
       expect(find.text('Paid'), findsOneWidget);
       expect(find.text('Balance'), findsOneWidget);
-      expect(find.text(r'$108.00'), findsNWidgets(2));
-      expect(find.text(r'$50.00'), findsNWidgets(2));
-      expect(find.text(r'$58.00'), findsNWidgets(2));
+      expect(find.text(r'$108.00'), findsOneWidget);
+      expect(find.text(r'$50.00'), findsOneWidget);
+      expect(find.text(r'$58.00'), findsOneWidget);
       expect(find.byKey(const ValueKey('installed-dock')), findsOneWidget);
-      expect(tester.takeException(), isNull);
+
+      Finder total(String value) => find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.text(value),
+      );
+      await tester.tap(find.text('View totals'));
+      await tester.pumpAndSettle();
+      expect(total('Register totals'), findsOneWidget);
+      expect(total('Total paid'), findsOneWidget);
+      expect(total(r'$108.00'), findsOneWidget);
+      expect(total(r'$50.00'), findsOneWidget);
+      expect(total(r'$58.00'), findsOneWidget);
+      Navigator.of(tester.element(total('Register totals'))).pop();
+      await tester.pumpAndSettle();
+
       await tester.tap(find.byKey(const ValueKey('report-transaction-basis')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Unpaid / Needs Review').last);
       await tester.pumpAndSettle();
-      expect(find.text('Tax billed'), findsOneWidget);
-      expect(find.text(r'$108.00'), findsNWidgets(2));
+      await tester.tap(find.text('View totals'));
+      await tester.pumpAndSettle();
+      expect(total('Tax billed'), findsOneWidget);
+      expect(total(r'$108.00'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     });
