@@ -201,11 +201,17 @@ void main() {
         await until(outstanding(r'$1,460.00'));
         await tester.tap(find.text('Payroll'));
         await tester.pumpAndSettle();
-        await until(find.byKey(const Key('verify-weekly-payment')));
         expect(find.text('Adjustments & repayment'), findsNothing);
         final calculated = find.text('Calculated payroll');
         final adjustment = find.widgetWithText(TextField, 'Pay adjustment (+/−)');
-        await tester.ensureVisible(calculated);
+        final payrollList = find.descendant(
+          of: find.byKey(const Key('employee-payroll-preparation')),
+          matching: find.byType(Scrollable),
+        ).first;
+        tester.state<ScrollableState>(payrollList).position.jumpTo(0);
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(calculated, 120, scrollable: payrollList);
+        await tester.pumpAndSettle();
         await tester.tap(calculated);
         await tester.pumpAndSettle();
         expect(adjustment, findsNothing);

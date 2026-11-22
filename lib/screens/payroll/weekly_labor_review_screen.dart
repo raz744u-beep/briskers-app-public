@@ -356,8 +356,13 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
   }
 
   Future<void> _verifyPayment() async {
-    if (_saving || _future || (_totalHours <= 0 && widget.weeklyBaseCents <= 0)) { return;
+    final adjustment = _payAdjustment;
+    final adjustmentReason = _payAdjustmentReason;
+    if (_saving || _future || adjustment == null || !_deductionIsApplied ||
+        (_totalHours <= 0 && widget.weeklyBaseCents <= 0)) {
+      return;
     }
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() { _saving = true; _error = null; });
     late final int debt;
     try {
