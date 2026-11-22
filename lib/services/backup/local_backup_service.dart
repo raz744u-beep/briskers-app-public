@@ -64,7 +64,6 @@ class LocalBackupService {
   /// Describes what the local Expense IQ import status actually establishes.
   /// This is informational: a valid snapshot of known files stays valid even
   /// when an unrelated device's external photo folder has not been inventoried.
-  @visibleForTesting
   static String expenseIqCoverageMessage(
     SharedPreferences prefs,
     String businessId,
