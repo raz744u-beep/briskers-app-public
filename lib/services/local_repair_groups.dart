@@ -154,7 +154,9 @@ class LocalRepairGroups {
   static bool _matchingLine(Map<String, dynamic> first, Map<String, dynamic> second) {
     for (final field in ['name', 'line_kind', 'item_id', 'description']) {
       if ((first[field] ?? '').toString().trim() !=
-          (second[field] ?? '').toString().trim()) return false;
+          (second[field] ?? '').toString().trim()) {
+        return false;
+      }
     }
     for (final field in ['quantity', 'unit_price', 'tax_rate']) {
       if (num.tryParse('${first[field]}') != num.tryParse('${second[field]}')) return false;
