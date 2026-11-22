@@ -49,7 +49,7 @@ void main() {
         case 'copyExpenseIqOriginal':
           final args = call.arguments as Map;
           final bytes = originals[args['uri'] as String];
-          if (bytes == null) throw const PlatformException(code: 'missing');
+          if (bytes == null) throw PlatformException(code: 'missing');
           final target = File(args['destination'] as String);
           await target.parent.create(recursive: true);
           await target.writeAsBytes(bytes, flush: true);
