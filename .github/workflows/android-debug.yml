@@ -991,7 +991,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: briskers-android-debug
-          run-id: ${{ github.ref_name == 'fix/payroll-unified-repayment-4775' && '44955578482' || (github.ref_name == 'candidate/payroll-enabled' || (github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && inputs.payroll_candidate) || github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108' || (github.ref_name == 'fix/bugs38-consolidated' || github.ref_name == 'candidate/backup-512-note9')) && '41997297822' || '41925087962' }}
+          run-id: ${{ (github.ref_name == 'candidate/payroll-enabled' || (github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && inputs.payroll_candidate) || github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108' || (github.ref_name == 'fix/bugs38-consolidated' || github.ref_name == 'candidate/backup-512-note9' || github.ref_name == 'fix/payroll-unified-repayment-4775')) && '41997297822' || '41925087962' }}
           github-token: ${{ github.token }}
           path: upgrade-baseline
 
