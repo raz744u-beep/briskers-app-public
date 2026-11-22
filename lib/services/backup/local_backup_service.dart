@@ -92,6 +92,30 @@ class LocalBackupService {
     }
   }
 
+  /// Import status should never prevent copying otherwise healthy shop data.
+  /// Return an incomplete-coverage warning when saved status is malformed.
+  static String? expenseIqImportBackupWarning(
+    SharedPreferences prefs,
+    String businessId,
+  ) {
+    final raw = prefs.getString(_expenseIqImportStatus);
+    if (raw == null) return null;
+    const unreadable =
+        'Expense IQ photo import status is unreadable. Check the original '
+        'photo folder before treating this backup as complete.';
+    try {
+      final status = jsonDecode(raw);
+      if (status is! Map<String, dynamic>) return unreadable;
+      if (status['business_id'] != businessId) return null;
+      if (status['complete'] != true) {
+        return 'Expense IQ photo import is incomplete or has receipt links to review.';
+      }
+      return null;
+    } on FormatException {
+      return unreadable;
+    }
+  }
+
   @visibleForTesting
   static Future<void> Function(String)? debugOwnerAuthorization;
 
@@ -359,15 +383,8 @@ class LocalBackupService {
       if (copied != null) sourceFiles[entry.key] = copied;
     }
     progress.value = 'Checking attachment coverage';
-    final importStatus = prefs.getString(_expenseIqImportStatus);
-    if (importStatus != null) {
-      final status = jsonDecode(importStatus) as Map<String, dynamic>;
-      if (status['business_id'] == businessId && status['complete'] != true) {
-        warnings.add(
-          'Expense IQ photo import is incomplete or has receipt links to review.',
-        );
-      }
-    }
+    final importWarning = expenseIqImportBackupWarning(prefs, businessId);
+    if (importWarning != null) warnings.add(importWarning);
     final inventory = await OfflineAttachmentMirrorService().inventory(
       businessId,
     );
