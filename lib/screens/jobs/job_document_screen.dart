@@ -57,6 +57,9 @@ import '../../services/invoice_expense_reader.dart';
 import '../../services/document_pdf_service.dart';
 import '../../core/invoice_warranty_pdf_projection.dart';
 import '../../services/local_invoice_signature_store.dart';
+import '../../core/repair_group.dart';
+import '../../services/local_repair_groups.dart';
+import '../../widgets/repair_group_panel.dart';
 import '../../services/invoice_performance_metrics.dart';
 import '../../services/invoice_labor_work_summary.dart';
 import '../../services/gmail_compose_service.dart';
@@ -272,6 +275,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   final GlobalKey _workspaceHeaderKey = GlobalKey();
   final TextEditingController _notesController = TextEditingController();
   final FocusNode _notesFocusNode = FocusNode();
+  final _repairGroups = LocalRepairGroups();
 
   Map<String, dynamic>? _detail;
   Map<String, dynamic> _identifixMeta = const {};
@@ -2426,6 +2430,76 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     await _run(() => _moveLineLocalAware(line, direction));
   }
 
+  /// Only local estimate organization is changed: no item amount, tax, or
+  /// invoice line is rewritten by this shortcut.
+  Future<void> _moveEstimateLineToRepairGroup(Map<String, dynamic> line) async {
+    if (!widget.isOwner || !_estimate || _readOnly || _busy) return;
+    final lineId = line['id']?.toString().trim() ?? '';
+    if (lineId.isEmpty || RepairGroup.isGeneralCharge(line)) return;
+    final detail = _detail;
+    if (detail == null) return;
+    final serverId = detail['_server_document_id']?.toString().trim() ?? '';
+    final estimateId = serverId.isNotEmpty ? serverId : widget.documentId;
+
+    List<RepairGroup> groups;
+    try {
+      groups = await _repairGroups.groups(widget.businessId, estimateId, detail);
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Could not load repair groups: $error');
+      return;
+    }
+    if (!mounted || !_estimate || _readOnly || _busy) return;
+    if (groups.every((group) => group.isOther)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Add a repair group first.'),
+      ));
+      return;
+    }
+    final current = groups.firstWhere(
+      (group) => group.lines.any((item) => item['id']?.toString() == lineId),
+      orElse: () => groups.last,
+    );
+    final target = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => BriskersDialog(
+        title: 'Move to repair group',
+        icon: Icons.drive_file_move_outline,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final group in groups)
+              ListTile(
+                leading: Icon(group.isOther
+                    ? Icons.inventory_2_outlined : Icons.folder_outlined),
+                title: Text(group.name),
+                trailing: group.id == current.id ? const Icon(Icons.check) : null,
+                enabled: group.id != current.id,
+                onTap: group.id == current.id
+                    ? null : () => Navigator.pop(dialogContext, group.id),
+              ),
+          ],
+        ),
+        actions: [
+          OutlinedButton(
+            style: BriskersDialog.cancelStyle,
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || target == null || !_estimate || _readOnly || _busy) return;
+    final saved = await _run(
+      () => _repairGroups.move(widget.businessId, estimateId, {lineId}, target),
+      localOnly: true,
+    );
+    if (saved && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Repair group updated.'),
+      ));
+    }
+  }
+
   Future<void> _showLineActions(
     Map<String, dynamic> line, {
     required bool canMoveUp,
@@ -2449,6 +2523,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               title: const Text('Copy item'),
               onTap: () => Navigator.pop(sheetContext, 'copy'),
             ),
+            if (_estimate && widget.isOwner &&
+                !RepairGroup.isGeneralCharge(line) &&
+                (line['id']?.toString().trim().isNotEmpty ?? false))
+              ListTile(
+                leading: const Icon(Icons.drive_file_move_outline),
+                title: const Text('Move to repair group'),
+                onTap: () => Navigator.pop(sheetContext, 'repair_group'),
+              ),
             ListTile(
               enabled: canMoveUp,
               leading: const Icon(Icons.arrow_upward),
@@ -2479,6 +2561,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     if (!mounted || action == null) return;
     if (action == 'edit') await _editLine(line);
     if (action == 'copy') await _copyLine(line);
+    if (action == 'repair_group') await _moveEstimateLineToRepairGroup(line);
     if (action == 'up') await _moveLine(line, 'up');
     if (action == 'down') await _moveLine(line, 'down');
     if (action == 'delete') await _deleteLine(line);
@@ -5895,6 +5978,167 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         )
         .length;
 
+    Widget buildLine(Map<String, dynamic> line) {
+        final description =
+            line['description']?.toString().trim() ?? '';
+        final amount = _lineNetAmount(line);
+        final importMeta =
+            importByLine[line['id']?.toString()] ?? const {};
+        final partNumber =
+            importMeta['part_number']?.toString().trim() ?? '';
+        final verification =
+            importMeta['verification_status']?.toString() ?? '';
+        final dealerList = importMeta['dealer_list_price'];
+        final importedPrice = importMeta['imported_unit_price'];
+        return InkWell(
+          onTap: _readOnly || _busy ? null : () => _editLine(line),
+          onLongPress: _readOnly || _busy
+              ? null
+              : () => _showLineActions(
+                    line,
+                    canMoveUp:
+                        line['position'] != lines.first['position'],
+                    canMoveDown:
+                        line['position'] != lines.last['position'],
+                  ),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(16, 11, 16, 11),
+            decoration: const BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Color(0xFFE1E6E9)),
+              ),
+            ),
+            // TEST parity: title and mechanic badges share a full
+            // invoice-width header. Qty and Amount occupy their own
+            // columns below, so phone widths do not push mechanics
+            // beneath the labor name.
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (OwnerPayrollScreen.enabled && widget.isOwner &&
+                    !_estimate && isInvoiceLaborLine(line) &&
+                    line['id'] is String && _detail?['job_id'] is String)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Text(line['name']?.toString() ?? '',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF0D1528),
+                        )),
+                      const SizedBox(width: 10),
+                      Expanded(child: Align(
+                        alignment: Alignment.centerRight,
+                        child: JobTasksAccess(
+                          business: widget.businessId,
+                          job: _detail!['job_id'] as String,
+                          invoice: widget.documentId,
+                          line: line['id'] as String,
+                          revision: _loadGeneration,
+                          onChanged: () => unawaited(_load()),
+                        ),
+                      )),
+                    ],
+                  ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (!(OwnerPayrollScreen.enabled &&
+                              widget.isOwner && !_estimate &&
+                              isInvoiceLaborLine(line) &&
+                              line['id'] is String &&
+                              _detail?['job_id'] is String))
+                            Text(
+                              line['name']?.toString() ?? '',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF0D1528),
+                              ),
+                            ),
+                      if (description.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          description,
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            height: 1.25,
+                            color: Color(0xFF405064),
+                          ),
+                        ),
+                      ],
+                      if (partNumber.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          'Part # $partNumber',
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF405064),
+                          ),
+                        ),
+                      ],
+                      if (verification.isNotEmpty &&
+                          verification != 'not_applicable') ...[
+                        const SizedBox(height: 5),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            _PriceVerificationChip(status: verification),
+                            if (dealerList != null)
+                              Text(
+                                verification == 'updated' &&
+                                        importedPrice != null
+                                    ? 'Identifix ${_money(importedPrice)} → Dealer list ${_money(dealerList)}'
+                                    : 'Dealer list ${_money(dealerList)}',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  color: Color(0xFF405064),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                SizedBox(
+                  width: 58,
+                  child: Text(
+                    _quantity(line['quantity']),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 15.5,
+                      color: Color(0xFF182239),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 92,
+                  child: Text(
+                    _money(amount),
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      fontSize: 15.5,
+                      color: Color(0xFF182239),
+                    ),
+                  ),
+                ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+    }
+
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
@@ -5974,172 +6218,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ],
             ),
           ),
-          if (lines.isEmpty)
+          if (_estimate)
+            RepairGroupPanel(
+              key: ValueKey(_detail?['_server_document_id'] ?? widget.documentId),
+              store: _repairGroups,
+              business: widget.businessId,
+              estimate: _detail?['_server_document_id']?.toString() ?? widget.documentId,
+              lines: lines,
+              editable: widget.isOwner && !_readOnly && !_busy,
+              buildLine: buildLine,
+            )
+          else if (lines.isEmpty)
             const Padding(
               padding: EdgeInsets.all(22),
               child: Center(child: Text('No items added yet.')),
             )
           else
-            ...lines.map((line) {
-              final description =
-                  line['description']?.toString().trim() ?? '';
-              final amount = _lineNetAmount(line);
-              final importMeta =
-                  importByLine[line['id']?.toString()] ?? const {};
-              final partNumber =
-                  importMeta['part_number']?.toString().trim() ?? '';
-              final verification =
-                  importMeta['verification_status']?.toString() ?? '';
-              final dealerList = importMeta['dealer_list_price'];
-              final importedPrice = importMeta['imported_unit_price'];
-              return InkWell(
-                onTap: _readOnly || _busy ? null : () => _editLine(line),
-                onLongPress: _readOnly || _busy
-                    ? null
-                    : () => _showLineActions(
-                          line,
-                          canMoveUp:
-                              line['position'] != lines.first['position'],
-                          canMoveDown:
-                              line['position'] != lines.last['position'],
-                        ),
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(16, 11, 16, 11),
-                  decoration: const BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(color: Color(0xFFE1E6E9)),
-                    ),
-                  ),
-                  // TEST parity: title and mechanic badges share a full
-                  // invoice-width header. Qty and Amount occupy their own
-                  // columns below, so phone widths do not push mechanics
-                  // beneath the labor name.
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (OwnerPayrollScreen.enabled && widget.isOwner &&
-                          !_estimate && isInvoiceLaborLine(line) &&
-                          line['id'] is String && _detail?['job_id'] is String)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Text(line['name']?.toString() ?? '',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFF0D1528),
-                              )),
-                            const SizedBox(width: 10),
-                            Expanded(child: Align(
-                              alignment: Alignment.centerRight,
-                              child: JobTasksAccess(
-                                business: widget.businessId,
-                                job: _detail!['job_id'] as String,
-                                invoice: widget.documentId,
-                                line: line['id'] as String,
-                                revision: _loadGeneration,
-                                onChanged: () => unawaited(_load()),
-                              ),
-                            )),
-                          ],
-                        ),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (!(OwnerPayrollScreen.enabled &&
-                                    widget.isOwner && !_estimate &&
-                                    isInvoiceLaborLine(line) &&
-                                    line['id'] is String &&
-                                    _detail?['job_id'] is String))
-                                  Text(
-                                    line['name']?.toString() ?? '',
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w800,
-                                      color: Color(0xFF0D1528),
-                                    ),
-                                  ),
-                            if (description.isNotEmpty) ...[
-                              const SizedBox(height: 3),
-                              Text(
-                                description,
-                                style: const TextStyle(
-                                  fontSize: 13.5,
-                                  height: 1.25,
-                                  color: Color(0xFF405064),
-                                ),
-                              ),
-                            ],
-                            if (partNumber.isNotEmpty) ...[
-                              const SizedBox(height: 3),
-                              Text(
-                                'Part # $partNumber',
-                                style: const TextStyle(
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF405064),
-                                ),
-                              ),
-                            ],
-                            if (verification.isNotEmpty &&
-                                verification != 'not_applicable') ...[
-                              const SizedBox(height: 5),
-                              Wrap(
-                                spacing: 6,
-                                runSpacing: 4,
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                children: [
-                                  _PriceVerificationChip(status: verification),
-                                  if (dealerList != null)
-                                    Text(
-                                      verification == 'updated' &&
-                                              importedPrice != null
-                                          ? 'Identifix ${_money(importedPrice)} → Dealer list ${_money(dealerList)}'
-                                          : 'Dealer list ${_money(dealerList)}',
-                                      style: const TextStyle(
-                                        fontSize: 11.5,
-                                        color: Color(0xFF405064),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      SizedBox(
-                        width: 58,
-                        child: Text(
-                          _quantity(line['quantity']),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 15.5,
-                            color: Color(0xFF182239),
-                          ),
-                        ),
-                      ),
-                      SizedBox(
-                        width: 92,
-                        child: Text(
-                          _money(amount),
-                          textAlign: TextAlign.right,
-                          style: const TextStyle(
-                            fontSize: 15.5,
-                            color: Color(0xFF182239),
-                          ),
-                        ),
-                      ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }),
+            ...lines.map(buildLine),
+
           Padding(
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
             child: Column(

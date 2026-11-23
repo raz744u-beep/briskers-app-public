@@ -1,4 +1,5 @@
 import 'invoice_labor_work_summary.dart';
+import 'local_repair_groups.dart';
 import 'local_warranty_companies.dart';
 import 'dart:convert';
 import 'invoice_tax_proposal.dart';
@@ -1063,6 +1064,11 @@ class OfflineDocumentEditService {
       }
     }
     if (changed) {
+      if (cached['kind'] == 'estimate') {
+        await LocalRepairGroups(database: _database).remapLine(
+          businessId, documentId, localId, serverId,
+        );
+      }
       await _cache.save(
         businessId,
         documentId,

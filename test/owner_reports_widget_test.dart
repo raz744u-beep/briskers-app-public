@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'support/handoff_qa_fonts.dart';
+import 'package:briskers_app/core/briskers_colors.dart';
 import 'package:briskers_app/core/owner_report_models.dart';
 import 'package:briskers_app/local/briskers_local_database.dart' show BriskersLocalDatabase;
 import 'package:briskers_app/screens/reports/owner_reports_screen.dart';
@@ -57,6 +58,39 @@ void main() {
     await tester.ensureVisible(finder); await tester.tap(finder); await tester.pumpAndSettle();
     expect(tester.getTopLeft(find.byKey(const ValueKey('report-date-range'))).dy,greaterThanOrEqualTo(120));
   }
+  testWidgets('report tabs use the employee palette and matching stripe', (tester) async {
+    tester.view.physicalSize = const Size(375, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await open(tester);
+
+    const colors = {
+      'Overview': BriskersColors.tabBlue,
+      'Financial': BriskersColors.tabGreen,
+      'Taxes': BriskersColors.tabGray,
+      'Customers': BriskersColors.tabPurple,
+      'Items': BriskersColors.tabBlue,
+    };
+    for (final entry in colors.entries) {
+      await tab(tester, entry.key);
+      final stripe = tester.widget<ColoredBox>(
+        find.byKey(const ValueKey('profile-tabs-stripe')),
+      );
+      expect(stripe.color, entry.value);
+      for (final label in colors.keys) {
+        final background = tester.widget<Container>(
+          find.byKey(ValueKey('profile-tab-$label')),
+        ).decoration as BoxDecoration;
+        if (label == entry.key) {
+          expect(background.color, entry.value);
+        } else {
+          expect(background.gradient, isA<LinearGradient>());
+        }
+      }
+    }
+    await tester.pumpWidget(const SizedBox());
+  });
   testWidgets('overview has four configurable slots and preserves the installed dock', (tester) async {
     await open(tester);
     expect(find.byKey(const ValueKey('installed-dock')),findsOneWidget);
@@ -207,8 +241,16 @@ void main() {
         image.dispose();
       });
     }
-    final chart=tester.getTopLeft(find.byKey(const ValueKey('owner-report-chart')));
-    await tester.tapAt(chart+const Offset(11*90+12+2*(64/3)+8,20));
+    final chart = tester.getRect(find.byKey(const ValueKey('owner-report-chart')));
+    final viewport = tester.getRect(find.byWidgetPredicate(
+      (widget) => widget is SingleChildScrollView &&
+          widget.scrollDirection == Axis.horizontal && widget.reverse,
+    ));
+    // The plot contains a year of history, with the latest six months visible.
+    expect(chart.width, closeTo(viewport.width * 2, 0.01));
+    expect(chart.right, closeTo(viewport.right, 0.01));
+    final lastMonthWidth = viewport.width / 6;
+    await tester.tapAt(Offset(chart.right - lastMonthWidth / 4, chart.top + 20));
     await tester.pumpAndSettle();
     expect(find.text(r'Nov 26 · Net Profit: $30.00'),findsOneWidget);
     await capture('overview');await tab(tester,'Customers');await capture('customers');

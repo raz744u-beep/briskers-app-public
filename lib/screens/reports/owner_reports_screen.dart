@@ -249,9 +249,23 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
       const SizedBox(height: 9),
       const Text('Tap a tile for details · pencil to choose its report', textAlign: TextAlign.center,
         style: TextStyle(fontSize: 11, color: BriskersColors.secondaryText)),
-      TextButton.icon(key:const ValueKey('view-period-transactions'),onPressed:()=>_periodTransactions(ReportTransactionBasis.invoices),
-        icon:const Icon(Icons.receipt_long_outlined),label:const Text('View sales register')),
-      const SizedBox(height: 14),
+      const SizedBox(height: 12),
+      Center(
+        child: FilledButton.icon(
+          key: const ValueKey('view-period-transactions'),
+          style: FilledButton.styleFrom(
+            backgroundColor: BriskersColors.tabBlue,
+            foregroundColor: Colors.white,
+            minimumSize: const Size(0, 52),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          onPressed: () => _periodTransactions(ReportTransactionBasis.invoices),
+          icon: const Icon(Icons.receipt_long_outlined),
+          label: const Text('View sales register'),
+        ),
+      ),
+      const SizedBox(height: 18),
       _card(OwnerReportTrend(data: data, period: _period)),
       for (final issue in summary.issues) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(issue,
         style: const TextStyle(fontSize: 12, color: BriskersColors.secondaryText))),
@@ -499,12 +513,13 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
         onPressed: () => _load(), icon: const Icon(Icons.refresh, color: Colors.white))]),
       bottomNavigationBar: widget.sharedBottomNavigationBar,
       body: Column(children: [
+        const SizedBox(height: 12),
         SingleChildScrollView(scrollDirection: Axis.horizontal, child: SizedBox(width: MediaQuery.sizeOf(context).width < 560 ? 560 : MediaQuery.sizeOf(context).width,
           child: BriskersCurvedTabs(controller: _tabs, entries: const [
             (label:'Overview', color:BriskersColors.tabBlue, icon:Icons.bar_chart),
-            (label:'Financial', color:BriskersColors.tabBlue, icon:Icons.payments_outlined),
-            (label:'Taxes', color:BriskersColors.tabBlue, icon:Icons.calculate_outlined),
-            (label:'Customers', color:BriskersColors.tabBlue, icon:Icons.people_outline),
+            (label:'Financial', color:BriskersColors.tabGreen, icon:Icons.payments_outlined),
+            (label:'Taxes', color:BriskersColors.tabGray, icon:Icons.description_outlined),
+            (label:'Customers', color:BriskersColors.tabPurple, icon:Icons.people_outline),
             (label:'Items', color:BriskersColors.tabBlue, icon:Icons.inventory_2_outlined),
           ]))),
         Expanded(child: RefreshIndicator(onRefresh: _load, child: ListView(key: ValueKey('owner-report-body-${_tabs.index}'), padding: const EdgeInsets.all(12), children: [
