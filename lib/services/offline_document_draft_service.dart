@@ -133,18 +133,19 @@ class OfflineDocumentDraftService {
     }
 
     final savedLines = _lines(local);
-    final remoteLines = _lines(remote);
-    final unchangedQuote = _headerText(local['memo']) ==
-            _headerText(remote['memo']) &&
-        savedLines.length == remoteLines.length &&
-        List.generate(
-          savedLines.length,
-          (i) => sameLine(savedLines[i], remoteLines[i]),
-        ).every((matches) => matches) &&
-        sameNumber(local['net_amount'], remote['net_amount'], tolerance: 0.005) &&
-        sameNumber(local['tax_amount'], remote['tax_amount'], tolerance: 0.005) &&
-        sameNumber(local['total_amount'], remote['total_amount'], tolerance: 0.005);
-    if (!unchangedQuote) {
+    bool quoteMatches(Map<String, dynamic> actual) {
+      final actualLines = _lines(actual);
+      return _headerText(local['memo']) == _headerText(actual['memo']) &&
+          savedLines.length == actualLines.length &&
+          List.generate(
+            savedLines.length,
+            (i) => sameLine(savedLines[i], actualLines[i]),
+          ).every((matches) => matches) &&
+          sameNumber(local['net_amount'], actual['net_amount'], tolerance: 0.005) &&
+          sameNumber(local['tax_amount'], actual['tax_amount'], tolerance: 0.005) &&
+          sameNumber(local['total_amount'], actual['total_amount'], tolerance: 0.005);
+    }
+    if (!quoteMatches(remote)) {
       throw const _EstimateHeaderSyncConflict(
         'server estimate items or notes differ from the offline version',
       );
@@ -202,6 +203,16 @@ class OfflineDocumentDraftService {
           'server did not confirm the edited warranty identifiers',
         );
       }
+    }
+
+    // Another device may edit the quote between the first comparison and
+    // the guarded Claim/Authorization RPC's final authoritative read.
+    // Never retire the local draft without rechecking that last snapshot.
+    if (dateOnly(remote['document_date']) != expectedDate ||
+        !quoteMatches(remote)) {
+      throw const _EstimateHeaderSyncConflict(
+        'server estimate date, items or notes changed during warranty confirmation',
+      );
     }
 
     return remote;
