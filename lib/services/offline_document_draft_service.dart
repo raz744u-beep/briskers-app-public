@@ -2099,6 +2099,7 @@ class OfflineDocumentDraftService {
         });
       } catch (error) {
         final conflict = error is _EstimateHeaderSyncConflict ||
+            error is RepairGroupIdentityConflict ||
             (preflight['kind'] == 'estimate' &&
              error is PostgrestException &&
              const {'PT409','23505','42501','22023'}.contains(error.code));
