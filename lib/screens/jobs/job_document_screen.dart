@@ -300,7 +300,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   String? _error;
 
   bool get _estimate => _detail?['kind']?.toString() == 'estimate';
-  bool get _converted => _detail?['converted'] == true;
+  bool get _converted => _detail?['converted'] == true ||
+      (_detail?['converted_invoice_id']?.toString().trim().isNotEmpty ?? false);
+  bool get _canReviseIssuedEstimate => widget.isOwner &&
+      _estimate && !_converted &&
+      _detail?['legacy_read_only'] == true &&
+      _detail?['status'] == 'issued' &&
+      _detail?['closed_at'] == null;
   bool get _editLockUnverified => _detail != null &&
       !_offlineDocumentDraft.isLocalDraftId(widget.documentId) &&
       !_detail!.containsKey('legacy_read_only');
@@ -1064,6 +1070,46 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       expectedVersion: _version,
       reason: confirmed,
     ); await LocalInvoiceClosureStore(localDatabase).serverReopened(widget.businessId,widget.documentId); });
+  }
+
+  Future<void> _reviseIssuedEstimate() async {
+    if (!_canReviseIssuedEstimate || _busy) return;
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Connect to verify this older estimate before revising it.'),
+      ));
+      return;
+    }
+    final version = _version;
+    final documentId =
+        _detail?['_server_document_id']?.toString() ?? widget.documentId;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Revise issued estimate?'),
+        content: const Text(
+          'Keep the same estimate number and save the original in its revision history.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Enable editing'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true || !_canReviseIssuedEstimate || _busy) {
+      return;
+    }
+    await _run(() => _api.enableIssuedEstimateRevision(
+      widget.businessId,
+      documentId,
+      expectedVersion: version,
+    ));
   }
 
   Future<void> _enableImportedInvoiceEditing() async {
@@ -7922,7 +7968,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   onTap: () => Navigator.pop(sheetContext, 'job_number'),
                 ),
               const _DocumentActionSectionLabel('Edit and copy'),
-              if (_estimate && _readOnly)
+              if (_canReviseIssuedEstimate)
+                ListTile(
+                  leading: const Icon(Icons.edit_outlined),
+                  title: const Text('Revise issued estimate'),
+                  subtitle: const Text('Keep the existing estimate number'),
+                  onTap: () => Navigator.pop(sheetContext, 'revise_estimate'),
+                )
+              else if (_estimate && _readOnly)
                 ListTile(
                   leading: const Icon(Icons.lock_outline),
                   title: const Text('Estimate editing is locked'),
@@ -8049,6 +8102,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         await _addEstimateToExistingInvoice();
       case 'edit':
         await _editDocumentHeader();
+      case 'revise_estimate':
+        await _reviseIssuedEstimate();
       case 'copy':
         await _copyDocument();
       case 'labor_tasks':
@@ -8317,7 +8372,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                         ),
                       ),
                     ),
-                  if (_detail?['legacy_editable'] == true)
+                  if (!_estimate && _detail?['legacy_editable'] == true)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                       child: Column(
@@ -8337,7 +8392,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                       child: Text(
-                        tr('importedInvoiceLockedHelp'),
+                        _estimate
+                            ? _canReviseIssuedEstimate
+                                ? 'Use Revise issued estimate to edit this estimate under its existing number.'
+                                : 'This estimate is saved as read-only.'
+                            : tr('importedInvoiceLockedHelp'),
                         style: const TextStyle(
                           color: Color(0xFF8A5200),
                           fontWeight: FontWeight.w600,

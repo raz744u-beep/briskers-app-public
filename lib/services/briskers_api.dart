@@ -3483,6 +3483,21 @@ class BriskersApi {
     );
   }
 
+  Future<void> enableIssuedEstimateRevision(
+    String businessId,
+    String documentId, {
+    required int expectedVersion,
+  }) async {
+    await networkSupabase.rpc(
+      'briskers_owner_enable_issued_estimate_revision',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_expected_version': expectedVersion,
+      },
+    );
+  }
+
   /// Owner-only, audited override for a closed or imported invoice.
   Future<void> ownerForceReopenInvoice(
     String businessId,
