@@ -2,7 +2,7 @@ name: Offline recurring component
 
 on:
   push:
-    branches: [fix/bugs38-round1-historical-edit-guard, fix/bugs38-consolidated, candidate/backup-512-note9, fix/payroll-unified-repayment-4775]
+    branches: [fix/bugs38-round1-historical-edit-guard, fix/bugs38-consolidated, candidate/backup-512-note9, fix/payroll-unified-repayment-4775, candidate/estimate-groups-phone]
   pull_request:
     paths:
       - 'lib/services/offline_recurring_repository.dart'

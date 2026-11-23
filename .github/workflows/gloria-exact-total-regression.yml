@@ -7,6 +7,7 @@ on:
       - fix/bugs38-consolidated
       - candidate/backup-512-note9
       - fix/payroll-unified-repayment-4775
+      - candidate/estimate-groups-phone
   pull_request:
     paths:
       - "tools/recovery/offline_invoice_exact_total_v2_DRAFT.sql"
