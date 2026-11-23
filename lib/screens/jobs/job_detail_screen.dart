@@ -1,3 +1,4 @@
+import '../../core/formatters.dart';
 import '../../widgets/customer_identity_marker.dart';
 import '../../services/local_customer_navigation_identity.dart';
 import '../../services/job_status_local_events.dart';
@@ -1347,6 +1348,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       builder: (dialogContext) => AlertDialog(
         title: const Text('Edit job name'),
         content: TextField(
+          inputFormatters: const [FirstLetterCapitalizationFormatter()],
           controller: controller,
           autofocus: true,
           textCapitalization: TextCapitalization.sentences,
@@ -1803,6 +1805,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
               ),
               const SizedBox(height: 5),
               TextField(
+                textCapitalization: TextCapitalization.sentences,
+                inputFormatters: const [FirstLetterCapitalizationFormatter()],
                 controller: controller,
                 autofocus: true,
                 cursorColor: BriskersColors.jobs,
@@ -1852,6 +1856,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         builder: (dialogContext) => AlertDialog(
           title: const Text('Reopen job'),
           content: TextFormField(
+            textCapitalization: TextCapitalization.sentences,
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             autofocus: true,
             minLines: 2,
             maxLines: 4,
@@ -2454,6 +2460,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
               ),
               const SizedBox(height: 6),
               TextField(
+                textCapitalization: TextCapitalization.sentences,
+                inputFormatters: const [FirstLetterCapitalizationFormatter()],
                 controller: notes,
                 minLines: 3,
                 maxLines: 6,
@@ -2622,6 +2630,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       builder: (dialogContext) => AlertDialog(
         title: const Text('Photo note'),
         content: TextField(
+          textCapitalization: TextCapitalization.sentences,
+          inputFormatters: const [FirstLetterCapitalizationFormatter()],
           controller: controller,
           autofocus: true,
           minLines: 2,
@@ -2727,6 +2737,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   ),
                   const SizedBox(height: 6),
                   TextField(
+                    textCapitalization: TextCapitalization.sentences,
+                    inputFormatters: const [FirstLetterCapitalizationFormatter()],
                     controller: controller,
                     autofocus: false,
                     minLines: 3,
@@ -2917,6 +2929,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
               ),
               const SizedBox(height: 10),
               TextField(
+                textCapitalization: TextCapitalization.sentences,
+                inputFormatters: const [FirstLetterCapitalizationFormatter()],
                 controller: controller,
                 autofocus: true,
                 minLines: 3,

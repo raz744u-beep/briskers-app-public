@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
 
@@ -60,6 +61,7 @@ class _PaymentMethodsSettingsScreenState
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
+                inputFormatters: const [FirstLetterCapitalizationFormatter()],
                 controller: controller,
                 autofocus: true,
                 textCapitalization: TextCapitalization.words,

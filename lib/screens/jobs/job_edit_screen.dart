@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/local_job_work_date.dart';
 import '../../local/local_database_provider.dart';
@@ -337,6 +338,7 @@ class _JobEditScreenState extends State<JobEditScreen> {
                 JobDateField(value: _jobDate, onChanged: _saving ? null : (date) => setState(() => _jobDate = date)),
                 const SizedBox(height: 12),
                 TextField(
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   controller: _title,
                   enabled: !_saving,
                   textCapitalization: TextCapitalization.sentences,
@@ -350,6 +352,7 @@ class _JobEditScreenState extends State<JobEditScreen> {
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   controller: _requestedWork,
                   enabled: !_saving,
                   minLines: 3,

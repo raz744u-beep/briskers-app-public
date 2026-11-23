@@ -1024,6 +1024,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                 if (flagged) ...[
                   const SizedBox(height: 8),
                   TextField(
+                    textCapitalization: TextCapitalization.sentences,
+                    inputFormatters: const [FirstLetterCapitalizationFormatter()],
                     controller: controller,
                     minLines: 3,
                     maxLines: 6,

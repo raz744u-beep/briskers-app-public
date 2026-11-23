@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
 
+import '../core/formatters.dart';
 import '../core/briskers_colors.dart';
 import '../core/module_modal_theme.dart';
 import '../core/briskers_i18n.dart';
@@ -159,6 +160,8 @@ class _WorkPerformedEditorSheetState extends State<WorkPerformedEditorSheet>
               ),
             ),
           TextField(
+            textCapitalization: TextCapitalization.sentences,
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _controller,
             autofocus: true,
             minLines: 4,

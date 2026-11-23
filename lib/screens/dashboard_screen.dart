@@ -1,3 +1,4 @@
+import '../core/formatters.dart';
 import 'reports/owner_reports_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -755,6 +756,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Job title'),
         content: TextField(
+          textCapitalization: TextCapitalization.sentences,
+          inputFormatters: const [FirstLetterCapitalizationFormatter()],
           controller: controller,
           autofocus: true,
           decoration: const InputDecoration(
@@ -1086,6 +1089,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(height: 10),
               TextField(
+                textCapitalization: TextCapitalization.sentences,
+                inputFormatters: const [FirstLetterCapitalizationFormatter()],
                 controller: controller,
                 autofocus: true,
                 textInputAction: TextInputAction.send,

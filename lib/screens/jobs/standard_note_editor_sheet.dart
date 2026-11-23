@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/formatters.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/standard_note_rules.dart';
 import 'invoice_note_draft_rules.dart';
@@ -121,6 +122,7 @@ class _StandardNoteEditorSheetState extends State<StandardNoteEditorSheet> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       TextField(
+                        inputFormatters: const [FirstLetterCapitalizationFormatter()],
                         key: const ValueKey('standard-note-name'),
                         controller: _name,
                         autofocus: !widget.editing,
@@ -225,6 +227,7 @@ class _StandardNoteEditorSheetState extends State<StandardNoteEditorSheet> {
                       ),
                       const SizedBox(height: 14),
                       TextField(
+                        inputFormatters: const [FirstLetterCapitalizationFormatter()],
                         key: const ValueKey('standard-note-body'),
                         controller: _body,
                         minLines: 4,

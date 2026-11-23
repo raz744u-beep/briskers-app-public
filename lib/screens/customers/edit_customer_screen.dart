@@ -154,6 +154,7 @@ class _EditCustomerScreenState extends State<EditCustomerScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _name,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(labelText: 'Name *'),
@@ -185,18 +186,21 @@ class _EditCustomerScreenState extends State<EditCustomerScreen> {
           ),
           const SizedBox(height: 8),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _address1,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(labelText: 'Street address'),
           ),
           const SizedBox(height: 10),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _address2,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(labelText: 'Address line 2'),
           ),
           const SizedBox(height: 10),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _city,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(labelText: 'City'),

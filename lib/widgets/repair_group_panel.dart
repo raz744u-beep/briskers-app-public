@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/formatters.dart';
 import '../core/briskers_colors.dart';
 import '../core/repair_group.dart';
 import '../services/local_repair_groups.dart';
@@ -85,12 +86,16 @@ class _RepairGroupPanelState extends State<RepairGroupPanel> {
           title: group == null ? 'Add repair group' : 'Edit repair group',
           content: Column(mainAxisSize: MainAxisSize.min, children: [
             TextFormField(
+              textCapitalization: TextCapitalization.sentences,
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               initialValue: name,
               decoration: const InputDecoration(labelText: 'Repair group name'),
               onChanged: (value) => update(() => name = value),
             ),
             const SizedBox(height: 16),
             TextFormField(
+              textCapitalization: TextCapitalization.sentences,
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               initialValue: description,
               decoration: const InputDecoration(labelText: 'Description'),
               maxLines: 3,

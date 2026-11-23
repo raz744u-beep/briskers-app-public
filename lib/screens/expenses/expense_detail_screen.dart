@@ -1,3 +1,4 @@
+import '../../core/formatters.dart';
 import '../../widgets/amount_calculator_dialog.dart';
 import '../../services/offline_financial_write_service.dart';
 import '../../core/supabase_config.dart';
@@ -1419,6 +1420,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                           ),
                           const SizedBox(height: 8),
                           TextField(
+                            textCapitalization: TextCapitalization.sentences,
+                            inputFormatters: const [FirstLetterCapitalizationFormatter()],
                             controller: remarks,
                             minLines: 2,
                             maxLines: 5,

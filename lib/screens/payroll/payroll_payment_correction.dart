@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/formatters.dart';
 import '../../services/local_payroll_repository.dart';
 import '../../services/payroll_lan_enrollment.dart';
 import '../../services/payroll_lan_identity.dart';
@@ -100,6 +101,8 @@ class PayrollPaymentCorrection {
               ),
               if (originalAdjustment != null)
                 TextFormField(
+                  textCapitalization: TextCapitalization.sentences,
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   initialValue: originalReason,
                   decoration: const InputDecoration(labelText: 'Adjustment reason'),
                   onChanged: (value) => update(() => reason = value),

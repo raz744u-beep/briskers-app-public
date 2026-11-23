@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
 
@@ -78,6 +79,7 @@ class _WorkSummaryEditScreenState extends State<WorkSummaryEditScreen> {
           ),
           const SizedBox(height: 12),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _controller,
             autofocus: true,
             minLines: 8,

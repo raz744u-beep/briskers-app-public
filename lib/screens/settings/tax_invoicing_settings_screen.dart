@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
 
 class TaxInvoicingSettingsScreen extends StatefulWidget {
@@ -150,6 +151,7 @@ class _TaxInvoicingSettingsScreenState
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   controller: _warrantyMessage,
                   minLines: 4,
                   maxLines: 8,

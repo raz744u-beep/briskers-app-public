@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
@@ -322,6 +323,8 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TextField(
+                    textCapitalization: TextCapitalization.sentences,
+                    inputFormatters: const [FirstLetterCapitalizationFormatter()],
                     controller: controller,
                     autofocus: true,
                     minLines: 3,
@@ -546,6 +549,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
       child: Column(
         children: [
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _note,
             minLines: 3,
             maxLines: 5,
@@ -845,6 +849,7 @@ class _EditCustomerNoteDialogState
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               TextField(
+                inputFormatters: const [FirstLetterCapitalizationFormatter()],
                 controller: _controller,
                 minLines: 3,
                 maxLines: 6,

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:briskers_app/core/repair_group.dart';
 import 'package:briskers_app/services/document_pdf_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -57,4 +58,58 @@ void main() {
           .writeAsBytes(bytes);
     }
   });
+
+  test('render grouped estimate with mixed labor and parts', () async {
+    final part = <String, dynamic>{
+      'name': 'Valve cover gasket',
+      'line_kind': 'item',
+      'quantity': 1,
+      'unit_price': 70,
+      'net_amount': 70,
+    };
+    final labor = <String, dynamic>{
+      'name': 'Gasket replacement',
+      'line_kind': 'labor',
+      'quantity': 2,
+      'unit_price': 100,
+      'net_amount': 200,
+    };
+    final ungrouped = <String, dynamic>{
+      'name': 'Engine oil',
+      'line_kind': 'item',
+      'quantity': 1,
+      'unit_price': 50,
+      'net_amount': 50,
+    };
+    final supplies = <String, dynamic>{
+      'name': 'Shop supplies',
+      'line_kind': 'item',
+      'quantity': 1,
+      'unit_price': 10,
+      'net_amount': 10,
+    };
+    final bytes = await DocumentPdfService.build({
+      'kind': 'estimate',
+      'document_number': 'QA-GROUP-001',
+      'net_amount': 330,
+      'total_amount': 330,
+      'lines': [part, labor, ungrouped, supplies],
+    }, repairGroups: [
+      RepairGroup(
+        id: 'gasket',
+        name: 'Oil leaks',
+        description: 'Replace the leaking gasket',
+        lines: [part, labor],
+      ),
+      RepairGroup(
+        id: RepairGroup.otherId,
+        name: 'Other Items',
+        lines: [ungrouped],
+      ),
+    ]);
+    expect(utf8.decode(bytes.sublist(0, 5)), '%PDF-');
+    final directory = Directory('build/pdf-qa')..createSync(recursive: true);
+    await File('${directory.path}/grouped-estimate.pdf').writeAsBytes(bytes);
+  });
+
 }

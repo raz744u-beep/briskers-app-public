@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+import '../../core/formatters.dart';
 import '../../core/module_modal_theme.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -696,6 +697,8 @@ class _ImportLineDialogState extends State<_ImportLineDialog> {
             ),
             const SizedBox(height: 10),
             TextField(
+              textCapitalization: TextCapitalization.sentences,
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               controller: _description,
               decoration: const InputDecoration(labelText: 'Description'),
             ),

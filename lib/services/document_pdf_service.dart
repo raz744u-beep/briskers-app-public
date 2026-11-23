@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../core/formatters.dart';
 import '../core/mileage_workflow.dart';
+import '../core/repair_group.dart';
 import '../core/warranty_payment_amounts.dart';
 import '../core/invoice_warranty_pdf_projection.dart';
 
@@ -267,7 +268,10 @@ class DocumentPdfService {
     return number.isEmpty ? 'Briskers-$kind.pdf' : 'Briskers-$kind-$number.pdf';
   }
 
-  static Future<Uint8List> build(Map<String, dynamic> detail) async {
+  static Future<Uint8List> build(
+    Map<String, dynamic> detail, {
+    List<RepairGroup> repairGroups = const [],
+  }) async {
     detail = InvoiceWarrantyPdfProjection.apply(detail);
     final doc = pw.Document();
     final logo = await _monochromeLogo();
@@ -284,6 +288,11 @@ class DocumentPdfService {
 
     final kind =
         detail['kind']?.toString() == 'estimate' ? 'ESTIMATE' : 'INVOICE';
+    final groupedEstimate =
+        kind == 'ESTIMATE' && repairGroups.any((group) => !group.isOther);
+    final generalCharges = groupedEstimate
+        ? allLines.where(RepairGroup.isGeneralCharge).toList()
+        : const <Map<String, dynamic>>[];
     final kindTitle = kind == 'INVOICE' ? 'Invoice' : 'Estimate';
     final invoicePayments =
         kind == 'INVOICE' ? invoicePaymentAmounts(detail) : null;
@@ -529,14 +538,22 @@ class DocumentPdfService {
             ],
           ),
           pw.SizedBox(height: 12),
-          if (itemLines.isNotEmpty)
-            _lineTable(
-              itemLines,
-              quantityHeading: 'Qty',
-            ),
-          if (laborLines.isNotEmpty) ...[
-            if (itemLines.isNotEmpty) pw.SizedBox(height: 10),
-            _laborTable(laborLines),
+          if (groupedEstimate) ...[
+            for (final group in repairGroups)
+              if (group.lines.isNotEmpty) ...[
+                _repairGroupHeading(group),
+                _lineTable(group.lines, quantityHeading: 'Qty'),
+                pw.SizedBox(height: 10),
+              ],
+            if (generalCharges.isNotEmpty)
+              _lineTable(generalCharges, quantityHeading: 'Qty'),
+          ] else ...[
+            if (itemLines.isNotEmpty)
+              _lineTable(itemLines, quantityHeading: 'Qty'),
+            if (laborLines.isNotEmpty) ...[
+              if (itemLines.isNotEmpty) pw.SizedBox(height: 10),
+              _laborTable(laborLines),
+            ],
           ],
           pw.SizedBox(height: 12),
           pw.Row(
@@ -693,6 +710,21 @@ class DocumentPdfService {
       ),
     );
   }
+
+  static pw.Widget _repairGroupHeading(RepairGroup group) => pw.Padding(
+    padding: const pw.EdgeInsets.only(bottom: 5),
+    child: pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text(group.name, style: const pw.TextStyle(
+          fontSize: 11,
+          fontWeight: pw.FontWeight.bold,
+        )),
+        if (group.description.trim().isNotEmpty)
+          pw.Text(group.description, style: const pw.TextStyle(fontSize: 9)),
+      ],
+    ),
+  );
 
   static pw.Widget _lineTable(
     List<Map<String, dynamic>> lines, {

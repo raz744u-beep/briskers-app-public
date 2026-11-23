@@ -95,3 +95,42 @@ class VinTextInputFormatter extends TextInputFormatter {
 
 String normalizeVin(String value) =>
     value.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+
+class FirstLetterCapitalizationFormatter extends TextInputFormatter {
+  const FirstLetterCapitalizationFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.composing.isValid && !newValue.composing.isCollapsed) {
+      return newValue;
+    }
+
+    var start = 0;
+    for (final rune in newValue.text.runes) {
+      final letter = String.fromCharCode(rune);
+      final uppercase = letter.toUpperCase();
+      final end = start + letter.length;
+      if (letter.toLowerCase() != uppercase) {
+        if (uppercase == letter) return newValue;
+        final change = uppercase.length - letter.length;
+        int shift(int offset) => offset >= end ? offset + change : offset;
+        final selection = newValue.selection;
+        return newValue.copyWith(
+          text: newValue.text.replaceRange(start, end, uppercase),
+          selection: TextSelection(
+            baseOffset: shift(selection.baseOffset),
+            extentOffset: shift(selection.extentOffset),
+            affinity: selection.affinity,
+            isDirectional: selection.isDirectional,
+          ),
+          composing: TextRange.empty,
+        );
+      }
+      start = end;
+    }
+    return newValue;
+  }
+}

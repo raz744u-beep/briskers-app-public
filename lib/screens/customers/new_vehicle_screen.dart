@@ -226,6 +226,7 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
           ),
           const SizedBox(height: 12),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _model,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(labelText: 'Model *'),
@@ -290,6 +291,7 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
           ),
           const SizedBox(height: 12),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _color,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(labelText: 'Color'),

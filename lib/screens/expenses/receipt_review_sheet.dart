@@ -1,6 +1,8 @@
 // ignore_for_file: prefer_interpolation_to_compose_strings, use_null_aware_elements, curly_braces_in_flow_control_structures
 import 'package:flutter/material.dart';
 
+import '../../core/formatters.dart';
+
 /// Explicit operator confirmation before receipt fields alter expense entry.
 /// Keeps the existing expense editor; it does not create any transaction.
 class ReceiptReviewSheet extends StatefulWidget {
@@ -89,9 +91,16 @@ class _ReceiptReviewSheetState extends State<ReceiptReviewSheet> {
     TextEditingController controller,
     String label, {
     TextInputType keyboard = TextInputType.text,
+    bool capitalize = false,
   }) => TextField(
     controller: controller,
     keyboardType: keyboard,
+    textCapitalization: capitalize
+        ? TextCapitalization.sentences
+        : TextCapitalization.none,
+    inputFormatters: capitalize
+        ? const [FirstLetterCapitalizationFormatter()]
+        : null,
     decoration: InputDecoration(
       labelText: label,
       isDense: true,
@@ -224,7 +233,7 @@ class _ReceiptReviewSheetState extends State<ReceiptReviewSheet> {
                       ),
                     ],
                     const SizedBox(height: 16),
-                    _field(_vendor, 'Vendor'),
+                    _field(_vendor, 'Vendor', capitalize: true),
                     const SizedBox(height: 10),
                     _field(_invoice, 'Vendor invoice number (preserves zeros)'),
                     const SizedBox(height: 10),
@@ -287,7 +296,11 @@ class _ReceiptReviewSheetState extends State<ReceiptReviewSheet> {
                                   ),
                                 ],
                               ),
-                              _field(_items[i].description, 'Part description'),
+                              _field(
+                                _items[i].description,
+                                'Part description',
+                                capitalize: true,
+                              ),
                               const SizedBox(height: 8),
                               _field(_items[i].sku, 'Part number / SKU'),
                               const SizedBox(height: 8),

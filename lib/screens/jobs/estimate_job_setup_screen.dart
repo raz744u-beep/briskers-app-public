@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
 
@@ -286,6 +287,7 @@ class _EstimateJobSetupScreenState extends State<EstimateJobSetupScreen> {
           ],
           const SizedBox(height: 12),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _title,
             enabled: !_saving,
             textCapitalization: TextCapitalization.sentences,

@@ -730,6 +730,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
             subtitle: const Text('Optional display name on this device'),
             children: [
               TextFormField(
+                inputFormatters: const [FirstLetterCapitalizationFormatter()],
                 controller: _nickname,
                 maxLength: 32,
                 textCapitalization: TextCapitalization.words,
@@ -792,6 +793,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
+                    inputFormatters: const [FirstLetterCapitalizationFormatter()],
                     controller: _name,
                     textCapitalization: TextCapitalization.words,
                     validator: _required,
@@ -802,6 +804,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
                   if (_editing && widget.isOwner) ...[
                     const SizedBox(height: 12),
                     TextFormField(
+                      inputFormatters: const [FirstLetterCapitalizationFormatter()],
                       controller: _nickname,
                       maxLength: 32,
                       textCapitalization: TextCapitalization.words,
@@ -841,6 +844,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
+                    inputFormatters: const [FirstLetterCapitalizationFormatter()],
                     controller: _address,
                     textCapitalization: TextCapitalization.words,
                     minLines: 2,

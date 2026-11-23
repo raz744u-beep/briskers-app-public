@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../core/formatters.dart';
 import 'task_selection_dialog.dart';
 import 'approved_tasks_ui.dart';
 import '../../widgets/briskers_module_dock.dart';
@@ -184,6 +185,7 @@ class _GeneralTaskEditorState extends State<GeneralTaskEditor> {
                         ),
                       ),
                     TextField(
+                      inputFormatters: const [FirstLetterCapitalizationFormatter()],
                       controller: _description,
                       onChanged: (_) => setState(() {}),
                       enabled: !_saving,

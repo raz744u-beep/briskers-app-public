@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/module_modal_theme.dart';
 import '../../core/connection_mode.dart';
@@ -442,6 +443,7 @@ class _AccountDialogState extends State<_AccountDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               controller: name,
               enabled: !saving,
               textCapitalization: TextCapitalization.words,
@@ -793,6 +795,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               controller: name,
               enabled: !saving,
               textCapitalization: TextCapitalization.words,
@@ -1142,6 +1145,7 @@ class _CounterpartyDialogState extends State<_CounterpartyDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               controller: name,
               enabled: !saving,
               textCapitalization: TextCapitalization.words,
@@ -1535,6 +1539,8 @@ class _QuickDialogState extends State<_QuickDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
+              textCapitalization: TextCapitalization.sentences,
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               controller: name,
               enabled: !saving,
               decoration: const InputDecoration(labelText: 'Shortcut name'),
@@ -1608,6 +1614,8 @@ class _QuickDialogState extends State<_QuickDialog> {
             ),
             const SizedBox(height: 10),
             TextField(
+              textCapitalization: TextCapitalization.sentences,
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               controller: remarks,
               enabled: !saving,
               decoration: const InputDecoration(labelText: 'Default notes'),
@@ -2312,6 +2320,8 @@ class _RecurringDialogState extends State<_RecurringDialog> {
             ),
             const SizedBox(height: 10),
             TextField(
+              textCapitalization: TextCapitalization.sentences,
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               controller: remarks,
               enabled: !saving,
               decoration: const InputDecoration(labelText: 'Description / notes'),

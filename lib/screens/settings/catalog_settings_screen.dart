@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
@@ -542,6 +543,7 @@ class CatalogItemDialogState extends State<CatalogItemDialog> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       TextField(
+                        inputFormatters: const [FirstLetterCapitalizationFormatter()],
                         controller: _name,
                         textCapitalization: TextCapitalization.words,
                         decoration: const InputDecoration(
@@ -551,6 +553,7 @@ class CatalogItemDialogState extends State<CatalogItemDialog> {
                       ),
                       const SizedBox(height: 12),
                       TextField(
+                        inputFormatters: const [FirstLetterCapitalizationFormatter()],
                         controller: _description,
                         minLines: 2,
                         maxLines: 4,

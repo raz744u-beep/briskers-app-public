@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
 
 class CustomerInvoiceSignatureScreen extends StatefulWidget {
@@ -242,6 +243,8 @@ class _CustomerInvoiceSignatureScreenState
             ],
             const SizedBox(height: 16),
             TextField(
+              textCapitalization: TextCapitalization.sentences,
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               controller: _nameController,
               onChanged: (_) => setState(() {}),
               decoration: const InputDecoration(

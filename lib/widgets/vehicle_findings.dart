@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/formatters.dart';
 
 typedef FindingAction = Future<void> Function(Map<String, dynamic> finding);
 
@@ -72,6 +73,8 @@ class VehicleFindings extends StatelessWidget {
             ),
             if (selected == 'Not Applicable' && current != selected)
               TextField(
+                textCapitalization: TextCapitalization.sentences,
+                inputFormatters: const [FirstLetterCapitalizationFormatter()],
                 onChanged: (value) => note = value,
                 maxLines: 3,
                 decoration: const InputDecoration(

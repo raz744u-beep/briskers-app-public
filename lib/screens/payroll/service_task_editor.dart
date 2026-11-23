@@ -1,3 +1,4 @@
+import '../../core/formatters.dart';
 import '../../widgets/owner_confirmation_dialog.dart';
 import '../../core/job_display_description.dart';
 import 'package:intl/intl.dart';
@@ -584,6 +585,7 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
                       const SizedBox(height: 16),
                       _heading('Task Name'),
                       TextFormField(
+                        inputFormatters: const [FirstLetterCapitalizationFormatter()],
                         key: const ValueKey('task-name'),
                         controller: _name,
                         readOnly: _saving,
@@ -593,6 +595,7 @@ class _ServiceTaskEditorState extends State<ServiceTaskEditor> {
                       const SizedBox(height: 12),
                       _heading('Task Description'),
                       TextFormField(
+                        inputFormatters: const [FirstLetterCapitalizationFormatter()],
                         key: const ValueKey('task-description'),
                         autofocus: widget.focusDescription,
                         controller: _description,

@@ -1,3 +1,4 @@
+import '../../core/formatters.dart';
 import '../../widgets/owner_confirmation_dialog.dart';
 import '../../widgets/customer_identity_marker.dart';
 import '../../services/local_document_party_identity.dart';
@@ -120,6 +121,8 @@ Widget _historicalInvoiceReopenDialog(
         Text(tr('forceReopenInvoiceHelp')),
         const SizedBox(height: 14),
         TextField(
+          textCapitalization: TextCapitalization.sentences,
+          inputFormatters: const [FirstLetterCapitalizationFormatter()],
           controller: reason,
           minLines: 4,
           maxLines: 6,
@@ -2797,13 +2800,23 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
+  Future<Uint8List> _buildDocumentPdf(Map<String, dynamic> detail) async {
+    if (detail['kind'] != 'estimate') return DocumentPdfService.build(detail);
+
+    final estimateId = detail['_server_document_id']?.toString() ??
+        _detail?['_server_document_id']?.toString() ??
+        widget.documentId;
+    final groups = await _repairGroups.groups(widget.businessId, estimateId, detail);
+    return DocumentPdfService.build(detail, repairGroups: groups);
+  }
+
   Future<void> _previewPdf() async {
     final detail = await _preparePdf();
     if (detail == null || !mounted) return;
 
     try {
       final pdfRenderWatch = Stopwatch()..start();
-      final bytes = await DocumentPdfService.build(detail);
+      final bytes = await _buildDocumentPdf(detail);
       unawaited(const InvoicePerformanceMetrics().record(
         widget.businessId,
         documentId: widget.documentId,
@@ -2847,7 +2860,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   Future<void> _printPdf() async {
     final detail = await _preparePdf();
     if (detail == null) return;
-    final bytes = await DocumentPdfService.build(detail);
+    final bytes = await _buildDocumentPdf(detail);
     await Printing.layoutPdf(
       name: DocumentPdfService.fileName(detail),
       format: PdfPageFormat.letter,
@@ -2859,7 +2872,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   Future<void> _sharePdf() async {
     final detail = await _preparePdf();
     if (detail == null) return;
-    final bytes = await DocumentPdfService.build(detail);
+    final bytes = await _buildDocumentPdf(detail);
     await Printing.sharePdf(
       bytes: bytes,
       filename: DocumentPdfService.fileName(detail),
@@ -2872,7 +2885,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   Future<void> _openPdfInApp() async {
     final detail = await _preparePdf();
     if (detail == null) return;
-    final bytes = await DocumentPdfService.build(detail);
+    final bytes = await _buildDocumentPdf(detail);
     final filename = DocumentPdfService.fileName(detail);
 
     if (Platform.isAndroid) {
@@ -4752,7 +4765,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   Future<void> _emailPdf() async {
     final detail = await _preparePdf();
     if (detail == null) return;
-    final bytes = await DocumentPdfService.build(detail);
+    final bytes = await _buildDocumentPdf(detail);
     final customerId = detail['customer_id']?.toString() ??
         _detail?['customer_id']?.toString() ?? '';
     var email = detail['customer_email']?.toString().trim() ?? '';
@@ -6868,7 +6881,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       return;
     }
     final email=readiness['submission_email'] as String;
-    final bytes = await DocumentPdfService.build(detail);
+    final bytes = await _buildDocumentPdf(detail);
 
     if (!mounted) return;
     final confirmed = await showDialog<bool>(
@@ -7140,6 +7153,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  textCapitalization: TextCapitalization.sentences,
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   controller: title,
                   decoration: InputDecoration(
                     labelText: tr('title'),
@@ -7148,6 +7163,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 ),
                 const SizedBox(height: 10),
                 TextField(
+                  textCapitalization: TextCapitalization.sentences,
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   controller: body,
                   minLines: 5,
                   maxLines: 10,
@@ -7585,6 +7602,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           ],
           const SizedBox(height: 8),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _notesController,
             focusNode: _notesFocusNode,
             readOnly: _readOnly,
@@ -8782,6 +8800,8 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
+              textCapitalization: TextCapitalization.sentences,
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               controller: _name,
               autofocus: true,
               decoration: InputDecoration(
@@ -8793,6 +8813,8 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
             ),
             const SizedBox(height: 10),
             TextField(
+              textCapitalization: TextCapitalization.sentences,
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               controller: _description,
               decoration: InputDecoration(
                 labelText: tr('description'),
@@ -9084,6 +9106,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       TextField(
+                        inputFormatters: const [FirstLetterCapitalizationFormatter()],
                         scrollPadding: const EdgeInsets.only(bottom: 180),
                         controller: _name,
                         readOnly: _catalogLocked,
@@ -9108,6 +9131,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                       ),
                       const SizedBox(height: 12),
                       TextField(
+                        inputFormatters: const [FirstLetterCapitalizationFormatter()],
                         scrollPadding: const EdgeInsets.only(bottom: 180),
                         controller: _description,
                         minLines: 2,
@@ -9400,6 +9424,8 @@ class _DiscountDialogState extends State<_DiscountDialog> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       TextField(
+                        textCapitalization: TextCapitalization.sentences,
+                        inputFormatters: const [FirstLetterCapitalizationFormatter()],
                         controller: _name,
                         decoration: const InputDecoration(
                           labelText: 'Name',
@@ -9472,6 +9498,8 @@ class _DiscountDialogState extends State<_DiscountDialog> {
                       ),
                       const SizedBox(height: 12),
                       TextField(
+                        textCapitalization: TextCapitalization.sentences,
+                        inputFormatters: const [FirstLetterCapitalizationFormatter()],
                         controller: _description,
                         minLines: 2,
                         maxLines: 4,

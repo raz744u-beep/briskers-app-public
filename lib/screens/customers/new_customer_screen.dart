@@ -279,6 +279,7 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
         ),
         children: [
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _name,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(labelText: 'Name *', border: roundedInput, enabledBorder: roundedInput, focusedBorder: roundedInput),
@@ -313,6 +314,7 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
           ),
           const SizedBox(height: 8),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _address1,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(
@@ -324,6 +326,7 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
           ),
           const SizedBox(height: 10),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _address2,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(
@@ -335,6 +338,7 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
           ),
           const SizedBox(height: 10),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _city,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(

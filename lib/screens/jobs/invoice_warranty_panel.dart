@@ -26,6 +26,7 @@ Widget _createWarrantyCompanyDialog(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         TextField(
+          inputFormatters: const [FirstLetterCapitalizationFormatter()],
           controller: name,
           autofocus: autofocusName,
           textCapitalization: TextCapitalization.words,

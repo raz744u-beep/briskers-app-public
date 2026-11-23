@@ -1,3 +1,4 @@
+import '../../core/formatters.dart';
 import '../../widgets/amount_calculator_dialog.dart';
 import '../../services/local_recurring_expense_edit.dart';
 import '../../services/receipt_scanning_notice.dart';
@@ -2093,6 +2094,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                 ),
                 const SizedBox(height: 8),
                 TextField(
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   controller: _remarksController,
                   minLines: 2,
                   maxLines: 5,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/formatters.dart';
 import '../../core/employee_role_style.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
@@ -291,6 +292,7 @@ class _PositionEditDialogState extends State<_PositionEditDialog> {
         mainAxisSize: MainAxisSize.min,
         children: [
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _name,
             autofocus: true,
             textCapitalization: TextCapitalization.words,

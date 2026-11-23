@@ -534,8 +534,16 @@ class _LocalEmployeeDetailsScreenState
                               : entry.key == 'email'
                               ? TextInputType.emailAddress
                               : TextInputType.text,
-                          inputFormatters: entry.key == 'phone'
-                              ? const [WarrantyPhoneTextInputFormatter()] : null,
+                          textCapitalization: switch (entry.key) {
+                            'name' || 'address' => TextCapitalization.words,
+                            _ => TextCapitalization.none,
+                          },
+                          inputFormatters: switch (entry.key) {
+                            'phone' => const [WarrantyPhoneTextInputFormatter()],
+                            'name' || 'address' =>
+                              const [FirstLetterCapitalizationFormatter()],
+                            _ => null,
+                          },
                           maxLines: entry.key == 'address' ? 2 : 1,
                           decoration: editorField(switch (entry.key) {
                               'name' => 'Full name',
@@ -655,6 +663,8 @@ class _LocalEmployeeDetailsScreenState
                     ),
                   if (!nicknameOnly) groupTitle('Display Name', Icons.sell_outlined),
                   TextFormField(
+                    textCapitalization: TextCapitalization.sentences,
+                    inputFormatters: const [FirstLetterCapitalizationFormatter()],
                     controller: alias,
                     maxLength: 32,
                     decoration: editorField('Nickname (optional)'),

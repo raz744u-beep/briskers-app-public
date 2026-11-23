@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
 import '../../services/local_item_categories_cache.dart';
@@ -71,6 +72,7 @@ class _ItemCategoriesSettingsScreenState
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
+                inputFormatters: const [FirstLetterCapitalizationFormatter()],
                 controller: controller,
                 autofocus: true,
                 textCapitalization: TextCapitalization.words,

@@ -6,6 +6,7 @@ import 'package:drift/drift.dart' show Variable;
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/formatters.dart';
 import '../../core/connection_mode.dart';
 import '../../core/briskers_colors.dart';
 import '../../local/local_database_provider.dart';
@@ -500,6 +501,8 @@ class _CustomerVehicleFindingsSectionState
                   ),
                   const SizedBox(height: 10),
                   TextField(
+                    textCapitalization: TextCapitalization.sentences,
+                    inputFormatters: const [FirstLetterCapitalizationFormatter()],
                     controller: controller,
                     autofocus: false,
                     minLines: 3,
@@ -1046,6 +1049,8 @@ class _CustomerVehicleFindingsSectionState
                   AlertDialog(
                     title: const Text('Edit finding'),
                     content: TextField(
+                      textCapitalization: TextCapitalization.sentences,
+                      inputFormatters: const [FirstLetterCapitalizationFormatter()],
                       controller: controller,
                       autofocus: true,
                       minLines: 3,

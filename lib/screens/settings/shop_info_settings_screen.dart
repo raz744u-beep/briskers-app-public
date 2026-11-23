@@ -172,6 +172,7 @@ class _ShopInfoSettingsScreenState extends State<ShopInfoSettingsScreen> {
               padding: const EdgeInsets.all(16),
               children: [
                 TextField(
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   controller: _name,
                   textCapitalization: TextCapitalization.words,
                   decoration: const InputDecoration(
@@ -181,6 +182,7 @@ class _ShopInfoSettingsScreenState extends State<ShopInfoSettingsScreen> {
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   controller: _address,
                   textCapitalization: TextCapitalization.words,
                   minLines: 2,
@@ -234,6 +236,8 @@ class _ShopInfoSettingsScreenState extends State<ShopInfoSettingsScreen> {
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  textCapitalization: TextCapitalization.sentences,
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   controller: _hours,
                   decoration: const InputDecoration(
                     labelText: 'Operating hours',
@@ -284,6 +288,7 @@ class _ShopInfoSettingsScreenState extends State<ShopInfoSettingsScreen> {
                 ),
                 _sectionTitle(context, 'Customer page content'),
                 TextField(
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   controller: _about,
                   textCapitalization: TextCapitalization.sentences,
                   minLines: 4,

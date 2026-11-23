@@ -811,6 +811,7 @@ class _KioskCheckInScreenState
               )
             else ...[
               TextField(
+                inputFormatters: const [FirstLetterCapitalizationFormatter()],
                 controller: _newName,
                 textCapitalization: TextCapitalization.words,
                 decoration: const InputDecoration(
@@ -981,6 +982,7 @@ class _KioskCheckInScreenState
               ),
               const SizedBox(height: 12),
               TextField(
+                inputFormatters: const [FirstLetterCapitalizationFormatter()],
                 controller: _vehicleModel,
                 textCapitalization: TextCapitalization.words,
                 decoration: const InputDecoration(
@@ -991,6 +993,7 @@ class _KioskCheckInScreenState
             ],
             const SizedBox(height: 22),
             TextField(
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               controller: _reason,
               textCapitalization: TextCapitalization.sentences,
               minLines: 4,

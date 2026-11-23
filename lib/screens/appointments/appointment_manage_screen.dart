@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/appointment_action_policy.dart';
 import '../../core/connection_mode.dart';
@@ -483,6 +484,7 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
           ),
           const SizedBox(height: 12),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _title,
             textCapitalization: TextCapitalization.sentences,
             decoration: const InputDecoration(
@@ -495,6 +497,7 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
           ),
           const SizedBox(height: 12),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _description,
             minLines: 3,
             maxLines: 5,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/invoice_status_style.dart';
 import '../../services/briskers_api.dart';
@@ -212,6 +213,7 @@ class _InvoiceStatusDialogState extends State<_InvoiceStatusDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               controller: _name,
               enabled: !_saving,
               textCapitalization: TextCapitalization.words,

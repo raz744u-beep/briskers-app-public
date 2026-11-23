@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
 import '../../services/offline_job_admin_service.dart';
@@ -224,6 +225,7 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
           ),
           const SizedBox(height: 12),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _title,
             textCapitalization: TextCapitalization.sentences,
             decoration: const InputDecoration(
@@ -236,6 +238,7 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
           ),
           const SizedBox(height: 12),
           TextField(
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _description,
             minLines: 3,
             maxLines: 5,

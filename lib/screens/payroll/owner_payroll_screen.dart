@@ -1,3 +1,4 @@
+import '../../core/formatters.dart';
 import '../../widgets/amount_calculator_dialog.dart';
 import '../../core/amount_calculator.dart';
 import '../../core/briskers_colors.dart';
@@ -1782,6 +1783,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
         if (!_isOpeningBalance) ...[
           const SizedBox(height: 12),
           TextField(
+            textCapitalization: TextCapitalization.sentences,
+            inputFormatters: const [FirstLetterCapitalizationFormatter()],
             controller: _balanceReason,
             enabled: !_busy,
             onChanged: (_) => setState(() => _advanceError = null),
@@ -1872,6 +1875,8 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       ),
       const SizedBox(height: 12),
       TextField(
+        textCapitalization: TextCapitalization.sentences,
+        inputFormatters: const [FirstLetterCapitalizationFormatter()],
         controller: _repaymentNote,
         enabled: !_busy,
         decoration: _advanceField('Notes (optional)'),

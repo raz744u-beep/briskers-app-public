@@ -78,6 +78,7 @@ class _EmailTemplatesSettingsScreenState extends State<EmailTemplatesSettingsScr
                   'You can still edit each email in Gmail before sending.'),
               const SizedBox(height: 16),
               TextField(
+                textCapitalization: TextCapitalization.sentences,
                 controller: _subject,
                 decoration: const InputDecoration(
                   labelText: 'Email subject',
@@ -86,6 +87,7 @@ class _EmailTemplatesSettingsScreenState extends State<EmailTemplatesSettingsScr
               ),
               const SizedBox(height: 16),
               TextField(
+                textCapitalization: TextCapitalization.sentences,
                 controller: _body,
                 minLines: 4,
                 maxLines: 9,

@@ -248,8 +248,13 @@ void main() {
     await tester.pumpAndSettle();
     final nameField = find.widgetWithText(TextFormField, 'Repair group name');
     final descriptionField = find.widgetWithText(TextFormField, 'Description');
-    await tester.enterText(nameField, 'Oil leaks');
-    await tester.tap(descriptionField);
+    for (final field in [nameField, descriptionField]) {
+      final input = find.descendant(of: field, matching: find.byType(EditableText));
+      expect(tester.widget<EditableText>(input).textCapitalization,
+          TextCapitalization.sentences);
+    }
+    await tester.enterText(nameField, 'oil leaks');
+    await tester.enterText(descriptionField, 'check the valve cover');
     tester.view.viewInsets = const FakeViewPadding(bottom: 300);
     addTearDown(tester.view.resetViewInsets);
     await tester.pumpAndSettle();
@@ -269,6 +274,7 @@ void main() {
     expect(renamed, findsOneWidget);
     final persisted = await tester.runAsync(() => groups.groups('shop', estimate, saved));
     expect(persisted?.first.name, 'Oil leaks');
+    expect(persisted?.first.description, 'Check the valve cover');
     expect(persisted?.first.lines, hasLength(2));
     expect(find.text('Record authorization'), findsNothing);
     expect(tester.takeException(), isNull);

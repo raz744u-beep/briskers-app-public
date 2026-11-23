@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
 
 class KioskCheckInSettingsScreen extends StatefulWidget {
@@ -164,6 +165,7 @@ class _KioskCheckInSettingsScreenState
                         ),
                         const SizedBox(height: 16),
                         TextField(
+                          inputFormatters: const [FirstLetterCapitalizationFormatter()],
                           controller: _disclaimer,
                           minLines: 9,
                           maxLines: 18,

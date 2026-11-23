@@ -1,3 +1,4 @@
+import '../../core/formatters.dart';
 import '../../services/recorded_payroll_week.dart';
 import 'recorded_weekly_payment_card.dart';
 import '../../core/briskers_colors.dart';
@@ -573,7 +574,10 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   ],);
               },),
               const SizedBox(height:9),
-              TextField(controller:note,minLines:1,maxLines:2,
+              TextField(
+                textCapitalization: TextCapitalization.sentences,
+                inputFormatters: const [FirstLetterCapitalizationFormatter()],
+                controller:note,minLines:1,maxLines:2,
                 decoration:const InputDecoration(
                   labelText:'Payment note or adjustment reason',
                   border:OutlineInputBorder(),),),
@@ -1086,7 +1090,10 @@ class _WeeklyLaborReviewState extends State<WeeklyLaborReview> {
                   const SizedBox(height: 12),
                   const Text('Adjustment reason'),
                   const SizedBox(height: 6),
-                  TextField(controller:reason,
+                  TextField(
+                    textCapitalization: TextCapitalization.sentences,
+                    inputFormatters: const [FirstLetterCapitalizationFormatter()],
+                    controller:reason,
                     minLines: 2,
                     maxLines: 3,
                     decoration: field('Adjustment reason',),onChanged:(_)=>update((){}),),

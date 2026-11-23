@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
@@ -305,6 +306,7 @@ class _JobStatusDialogState extends State<_JobStatusDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
+              inputFormatters: const [FirstLetterCapitalizationFormatter()],
               controller: _name,
               enabled: !_saving,
               textCapitalization: TextCapitalization.words,

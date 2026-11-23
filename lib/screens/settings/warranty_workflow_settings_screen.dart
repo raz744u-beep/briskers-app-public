@@ -112,7 +112,9 @@ class _WarrantyWorkflowSettingsScreenState
           icon: Icons.shield_outlined,
           content: Column(mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              TextField(controller: name, autofocus: company == null,
+              TextField(
+                inputFormatters: const [FirstLetterCapitalizationFormatter()],
+                controller: name, autofocus: company == null,
                 textCapitalization: TextCapitalization.words,
                 decoration: const InputDecoration(labelText: 'Company name', border: OutlineInputBorder())),
               const SizedBox(height: 12),
@@ -126,7 +128,9 @@ class _WarrantyWorkflowSettingsScreenState
               TextField(controller: portal, keyboardType: TextInputType.url,
                 decoration: const InputDecoration(labelText: 'Portal / website (optional)', border: OutlineInputBorder())),
               const SizedBox(height: 12),
-              TextField(controller: notes, minLines: 2, maxLines: 5,
+              TextField(
+                inputFormatters: const [FirstLetterCapitalizationFormatter()],
+                controller: notes, minLines: 2, maxLines: 5,
                 textCapitalization: TextCapitalization.sentences,
                 decoration: const InputDecoration(labelText: 'Notes (optional)', border: OutlineInputBorder())),
               SwitchListTile(contentPadding: EdgeInsets.zero, value: active,
@@ -218,6 +222,8 @@ class _WarrantyWorkflowSettingsScreenState
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  textCapitalization: TextCapitalization.sentences,
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   controller: name,
                   autofocus: note == null,
                   decoration: const InputDecoration(
@@ -227,6 +233,8 @@ class _WarrantyWorkflowSettingsScreenState
                 ),
                 const SizedBox(height: 10),
                 TextField(
+                  textCapitalization: TextCapitalization.sentences,
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   controller: body,
                   minLines: 5,
                   maxLines: 10,
@@ -352,6 +360,8 @@ class _WarrantyWorkflowSettingsScreenState
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  textCapitalization: TextCapitalization.sentences,
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   controller: name,
                   autofocus: disclaimer == null,
                   decoration: const InputDecoration(
@@ -361,6 +371,8 @@ class _WarrantyWorkflowSettingsScreenState
                 ),
                 const SizedBox(height: 10),
                 TextField(
+                  textCapitalization: TextCapitalization.sentences,
+                  inputFormatters: const [FirstLetterCapitalizationFormatter()],
                   controller: body,
                   minLines: 5,
                   maxLines: 10,

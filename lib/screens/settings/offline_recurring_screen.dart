@@ -1,3 +1,4 @@
+import '../../core/formatters.dart';
 import '../../widgets/briskers_dialog.dart';
 import 'dart:async';
 import 'dart:math';
@@ -350,7 +351,10 @@ class _RuleEditorState extends State<_RuleEditor> {
       TextField(controller:interval,decoration:const InputDecoration(labelText:'Every (number of periods)'),keyboardType:TextInputType.number),
       TextField(controller:date,decoration:const InputDecoration(labelText:'Next date (YYYY-MM-DD)')),
       TextField(controller:end,decoration:const InputDecoration(labelText:'End date (optional, YYYY-MM-DD)')),
-      TextField(controller:remarks,decoration:const InputDecoration(labelText:'Remarks')),
+      TextField(
+        textCapitalization: TextCapitalization.sentences,
+        inputFormatters: const [FirstLetterCapitalizationFormatter()],
+        controller:remarks,decoration:const InputDecoration(labelText:'Remarks')),
       SwitchListTile(title:const Text('Repeating'),value:active,onChanged:(v)=>setState(()=>active=v)),
       if(error!=null) Text(error!),
     ])),
