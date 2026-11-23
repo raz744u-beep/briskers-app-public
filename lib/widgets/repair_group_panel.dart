@@ -15,6 +15,7 @@ class RepairGroupPanel extends StatefulWidget {
     required this.editable,
     required this.buildLine,
     required this.store,
+    this.lineRevision,
   });
 
   final String business, estimate;
@@ -22,6 +23,7 @@ class RepairGroupPanel extends StatefulWidget {
   final bool editable;
   final Widget Function(Map<String, dynamic>) buildLine;
   final LocalRepairGroups store;
+  final Object? lineRevision;
 
   @override
   State<RepairGroupPanel> createState() => _RepairGroupPanelState();
@@ -38,7 +40,18 @@ class _RepairGroupPanelState extends State<RepairGroupPanel> {
   @override
   void didUpdateWidget(covariant RepairGroupPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.lines, widget.lines)) _groups = _load();
+    if (oldWidget.business != widget.business ||
+        oldWidget.estimate != widget.estimate ||
+        !identical(oldWidget.lineRevision ?? oldWidget.lines,
+            widget.lineRevision ?? widget.lines)) {
+      _groups = _load();
+    }
+  }
+
+  void _showMessage(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    }
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -76,6 +89,7 @@ class _RepairGroupPanelState extends State<RepairGroupPanel> {
               decoration: const InputDecoration(labelText: 'Repair group name'),
               onChanged: (value) => update(() => name = value),
             ),
+            const SizedBox(height: 16),
             TextFormField(
               initialValue: description,
               decoration: const InputDecoration(labelText: 'Description'),
@@ -102,6 +116,7 @@ class _RepairGroupPanelState extends State<RepairGroupPanel> {
         widget.business, widget.estimate, group.id, name: name, description: description,
       );
     }
+    _showMessage(group == null ? 'Repair group added.' : 'Repair group updated.');
   }
 
   Future<void> _moveItems(RepairGroup target, List<RepairGroup> groups) async {
@@ -113,9 +128,7 @@ class _RepairGroupPanelState extends State<RepairGroupPanel> {
               (id: id, name: line['name']?.toString() ?? 'Item', from: group.name),
     ];
     if (items.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add items to the estimate first.')),
-      );
+      _showMessage('There are no items outside ${target.name} to move here.');
       return;
     }
 
@@ -156,6 +169,7 @@ class _RepairGroupPanelState extends State<RepairGroupPanel> {
     );
     if (confirmed == true && mounted && widget.editable) {
       await widget.store.move(widget.business, widget.estimate, selected, target.id);
+      _showMessage('Moved ${selected.length} ${selected.length == 1 ? 'item' : 'items'} to ${target.name}.');
     }
   }
 
@@ -280,6 +294,24 @@ class _RepairGroupPanelState extends State<RepairGroupPanel> {
               if (group.description.isNotEmpty)
                 Padding(padding: const EdgeInsets.all(12), child: Text(group.description)),
               ...group.lines.map(widget.buildLine),
+              if (widget.editable)
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  children: [
+                    TextButton.icon(
+                      onPressed: _busy ? null : () => _run(() => _moveItems(group, groups)),
+                      icon: const Icon(Icons.drive_file_move_outline),
+                      label: const Text('Move items here'),
+                    ),
+                    if (!group.isOther)
+                      TextButton.icon(
+                        onPressed: _busy ? null : () => _run(() => _edit(group)),
+                        icon: const Icon(Icons.edit_outlined),
+                        label: const Text('Edit group'),
+                      ),
+                  ],
+                ),
             ],
           ),
         ),

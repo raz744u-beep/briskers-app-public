@@ -894,7 +894,7 @@ jobs:
             BUILD_NUMBER=$((3000 + GITHUB_RUN_NUMBER))
             test "$BUILD_NUMBER" -gt 4698
             if [ "$GITHUB_REF_NAME" = candidate/estimate-groups-phone ]; then
-              test "$BUILD_NUMBER" -gt 4788
+              test "$BUILD_NUMBER" -gt 4790
             elif [ "$GITHUB_REF_NAME" = fix/payroll-unified-repayment-4775 ]; then
               test "$BUILD_NUMBER" -gt 4784
             elif [ "$GITHUB_REF_NAME" = candidate/backup-512-note9 ]; then
@@ -1002,7 +1002,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: briskers-android-debug
-          run-id: ${{ github.ref_name == 'candidate/estimate-groups-phone' && '45071703459' || github.ref_name == 'fix/payroll-unified-repayment-4775' && '45058121671' || github.ref_name == 'candidate/backup-512-note9' && '44866202765' || github.ref_name == 'fix/bugs38-consolidated' && '44850390913' || github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108' && '43910365398' || github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && '42414887944' || '42165351470' }}
+          run-id: ${{ github.ref_name == 'candidate/estimate-groups-phone' && '45146263903' || github.ref_name == 'fix/payroll-unified-repayment-4775' && '45058121671' || github.ref_name == 'candidate/backup-512-note9' && '44866202765' || github.ref_name == 'fix/bugs38-consolidated' && '44850390913' || github.ref_name == 'fix/bugs33-preserve-offline-financial-history-20261108' && '43910365398' || github.ref_name == 'fix/bugs31-payroll-navigation-noop-auth-20261106' && '42414887944' || '42165351470' }}
           github-token: ${{ github.token }}
           path: upgrade-receipt-baseline
 

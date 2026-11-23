@@ -6225,6 +6225,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               business: widget.businessId,
               estimate: _detail?['_server_document_id']?.toString() ?? widget.documentId,
               lines: lines,
+              lineRevision: _detail?['lines'],
               editable: widget.isOwner && !_readOnly && !_busy,
               buildLine: buildLine,
             )
@@ -7903,6 +7904,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   onTap: () => Navigator.pop(sheetContext, 'job_number'),
                 ),
               const _DocumentActionSectionLabel('Edit and copy'),
+              if (_estimate && _readOnly)
+                ListTile(
+                  leading: const Icon(Icons.lock_outline),
+                  title: const Text('Estimate editing is locked'),
+                  subtitle: Text(_converted
+                      ? 'This estimate was converted to an invoice.'
+                      : _editLockUnverified
+                          ? tr('documentLockNeedsRefresh')
+                          : 'This estimate is saved as read-only.'),
+                ),
               if (!_readOnly)
                 ListTile(
                   leading: Icon(
@@ -8204,11 +8215,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 onPressed: _busy ? null : _ownerForceReopen,
                 icon: const Icon(Icons.lock_open_outlined),
               ),
-            if (!_readOnly)
+            if (!_readOnly || (_estimate && widget.isOwner))
               IconButton(
                 tooltip: _estimate ? 'Estimate actions' : tr('editInvoice'),
                 onPressed: _busy ? null : _showDocumentHeaderActions,
-                icon: const Icon(Icons.edit_outlined),
+                icon: Icon(_readOnly ? Icons.more_vert : Icons.edit_outlined),
               ),
           ],
         ),

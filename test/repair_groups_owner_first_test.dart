@@ -1,6 +1,9 @@
 import 'package:briskers_app/core/briskers_colors.dart';
+import 'package:briskers_app/core/connection_mode.dart';
 import 'package:briskers_app/core/repair_group.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/local/local_database_provider.dart';
+import 'package:briskers_app/screens/jobs/job_document_screen.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_repair_groups.dart';
 import 'package:briskers_app/services/offline_document_draft_service.dart';
@@ -130,7 +133,55 @@ void main() {
     expect((await groups.groups('shop', estimate, original)).single.isOther, isTrue);
   });
 
-  testWidgets('an owner can expand a group and use the existing item action', (tester) async {
+  testWidgets('issued estimates show edit or explain the saved lock', (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final mode = BriskersConnectionModeController.instance;
+    await tester.runAsync(() async {
+      debugUseLocalDatabase(db);
+      await mode.setMode(BriskersConnectionMode.offline);
+      final quote = await detail();
+      await cache.save('shop', 'issued-editable', {
+        ...quote,
+        'id': 'issued-editable',
+        'document_number': 'E-2010',
+        'status': 'issued',
+        'legacy_read_only': false,
+      });
+      await cache.save('shop', 'issued-unverified', {
+        ...quote,
+        'id': 'issued-unverified',
+        'document_number': 'E-2011',
+        'status': 'issued',
+      }..remove('legacy_read_only'));
+    });
+    addTearDown(() async {
+      debugUseLocalDatabase(null);
+      await mode.setMode(BriskersConnectionMode.auto);
+    });
+    for (final (id, editable) in [('issued-editable', true), ('issued-unverified', false)]) {
+      await tester.pumpWidget(MaterialApp(home: JobDocumentScreen(
+        key: ValueKey(id), businessId: 'shop', documentId: id, isOwner: true,
+        roleCode: 'owner',
+      )));
+      final actions = find.byTooltip('Estimate actions');
+      for (var i = 0; i < 50 && actions.evaluate().isEmpty; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump();
+      }
+      await tester.tap(actions);
+      await tester.pumpAndSettle();
+      expect(find.text('Edit estimate'), editable ? findsOneWidget : findsNothing);
+      expect(find.text('Estimate editing is locked'), editable ? findsNothing : findsOneWidget);
+      expect(find.text('Copy Estimate'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    }
+  });
+
+  testWidgets('an owner can move items and save an edited group at phone width', (tester) async {
     final (saved, groupId) = await tester.runAsync(() async {
       final saved = await detail();
       final groupId = await namedGroup('Front brakes');
@@ -172,7 +223,7 @@ void main() {
     );
     await tester.tap(menu);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Move items here'));
+    await tester.tap(find.widgetWithText(PopupMenuItem<String>, 'Move items here'));
     await tester.pumpAndSettle();
     expect(find.text('Move items to Front brakes'), findsOneWidget);
     expect(find.byWidgetPredicate((widget) {
@@ -181,8 +232,43 @@ void main() {
       }
       return false;
     }), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
+    await tester.tap(find.widgetWithText(CheckboxListTile, 'Installation'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Move items'));
     await tester.pumpAndSettle();
+    for (var i = 0; i < 30 && find.text('2 items').evaluate().isEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+    }
+    expect(find.descendant(of: card, matching: find.text('2 items')), findsOneWidget);
+
+    await tester.tap(menu);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(PopupMenuItem<String>, 'Edit group'));
+    await tester.pumpAndSettle();
+    final nameField = find.widgetWithText(TextFormField, 'Repair group name');
+    final descriptionField = find.widgetWithText(TextFormField, 'Description');
+    await tester.enterText(nameField, 'Oil leaks');
+    await tester.tap(descriptionField);
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    addTearDown(tester.view.resetViewInsets);
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(descriptionField).dy - tester.getBottomLeft(nameField).dy,
+      greaterThanOrEqualTo(16),
+    );
+    expect(find.text('Save group').hitTestable(), findsOneWidget);
+    await tester.tap(find.text('Save group'));
+    tester.view.resetViewInsets();
+    await tester.pumpAndSettle();
+    final renamed = find.descendant(of: card, matching: find.text('Oil leaks'));
+    for (var i = 0; i < 30 && renamed.evaluate().isEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+    }
+    expect(renamed, findsOneWidget);
+    final persisted = await tester.runAsync(() => groups.groups('shop', estimate, saved));
+    expect(persisted?.first.name, 'Oil leaks');
+    expect(persisted?.first.lines, hasLength(2));
     expect(find.text('Record authorization'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
