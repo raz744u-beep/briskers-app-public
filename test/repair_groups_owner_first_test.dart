@@ -233,6 +233,7 @@ void main() {
       return false;
     }), findsOneWidget);
     await tester.tap(find.widgetWithText(CheckboxListTile, 'Installation'));
+    await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, 'Move items'));
     await tester.pumpAndSettle();
     for (var i = 0; i < 30 && find.text('2 items').evaluate().isEmpty; i++) {
