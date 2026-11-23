@@ -1359,7 +1359,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        'Fully covered invoices are shown here. Closing saves Closed on this device immediately. Payment records stay unchanged; synchronization runs in the background.',
+                        'Fully covered invoices are shown here. Closing records Closed and finalizes any pending received payments into Income on this device. Sync of these changes to other devices is not yet confirmed. Verify each device before relying on its totals.',
                       ),
                     ),
                   ),
