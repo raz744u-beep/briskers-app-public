@@ -207,7 +207,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
           ]))));
 
   Widget _tableRow({String? index, required String title, required String quantity, required String value,
-    VoidCallback? onTap, bool header = false}) {
+    VoidCallback? onTap, bool header = false, bool itemRow = false}) {
     final style = TextStyle(fontSize: header ? 11 : 13, fontWeight: header ? FontWeight.w800 : FontWeight.w600);
     return Material(color: header ? const Color(0xFFE8EDF6) : Colors.transparent,
       child: InkWell(onTap: onTap, child: Container(padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
@@ -216,8 +216,23 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
           SizedBox(width: 24, child: header ? Text('#', style: style) : CircleAvatar(radius: 12,
             backgroundColor: const Color(0xFFDCEBFE), child: Text(index ?? '', style: style))),
           const SizedBox(width: 6),
-          Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: style)),
-          SizedBox(width: 46, child: Text(quantity, textAlign: TextAlign.center, style: style)),
+          Expanded(child: Text(
+            title,
+            maxLines: itemRow ? null : 2,
+            overflow: itemRow ? TextOverflow.visible : TextOverflow.ellipsis,
+            style: style,
+          )),
+          if (itemRow) const SizedBox(width: 8),
+          SizedBox(
+            width: itemRow ? 52 : 46,
+            child: itemRow
+                ? FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(quantity, textAlign: TextAlign.center, style: style),
+                  )
+                : Text(quantity, textAlign: TextAlign.center, style: style),
+          ),
+          if (itemRow) const SizedBox(width: 8),
           SizedBox(width: 82, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight,
             child: Text(value, style: style))),
         ]))));
@@ -442,9 +457,9 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
           _selector(_itemRank, const ['Revenue','Quantity','Cost','Profit'], (v) => setState(() => _itemRank = v)),
         ]),
         const Divider(),
-        _tableRow(title: 'Item / Part', quantity: 'Qty Sold', value: _itemRank, header: true),
-        for (final (index, r) in shown.indexed) _tableRow(index: '${index + 1}', title: r.name,
-          quantity: '${NumberFormat('#,##0.##').format(r.quantity)}${r.labor ? ' hrs' : ''}',
+        _tableRow(title: 'Item / Part', quantity: 'Qty Sold', value: _itemRank, header: true, itemRow: true),
+        for (final (index, r) in shown.indexed) _tableRow(index: '${index + 1}', title: r.name, itemRow: true,
+          quantity: '${NumberFormat('#,##0.##').format(r.quantity)}${r.labor ? '\nhrs' : ''}',
           value: _itemRank == 'Quantity' ? NumberFormat('#,##0.##').format(r.quantity) :
             _money(_itemRank == 'Cost' ? r.cost : _itemRank == 'Profit' ? r.profit : r.revenue),
           onTap: () => _itemDetails(r)),
