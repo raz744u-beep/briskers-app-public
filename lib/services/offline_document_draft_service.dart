@@ -104,6 +104,52 @@ class OfflineDocumentDraftService {
       );
     }
 
+    // The server's idempotent create can return an older document. In
+    // particular, the standalone estimate RPC returns an existing operation
+    // without comparing its saved lines or memo. Date/claim verification alone
+    // cannot prove that the quote the Owner edited has been preserved.
+    //
+    // Compare the authoritative rows before any warranty mutation and before
+    // the local outbox is retired. Never rewrite another device's quote based
+    // on a stale offline snapshot; retain it for explicit Owner review.
+    bool sameNumber(Object? left, Object? right,
+        {double tolerance = 0.000001}) {
+      final a = num.tryParse(left?.toString() ?? '');
+      final b = num.tryParse(right?.toString() ?? '');
+      return a != null && b != null && a.isFinite && b.isFinite &&
+          (a - b).abs() <= tolerance;
+    }
+
+    bool sameLine(Map<String, dynamic> saved, Map<String, dynamic> actual) {
+      for (final key in <String>[
+        'name', 'description', 'line_kind', 'item_id', 'pricing_unit',
+      ]) {
+        if (_headerText(saved[key]) != _headerText(actual[key])) return false;
+      }
+      for (final key in <String>['quantity', 'unit_price', 'tax_rate']) {
+        if (!sameNumber(saved[key], actual[key])) return false;
+      }
+      return true;
+    }
+
+    final savedLines = _lines(local);
+    final remoteLines = _lines(remote);
+    final unchangedQuote = _headerText(local['memo']) ==
+            _headerText(remote['memo']) &&
+        savedLines.length == remoteLines.length &&
+        List.generate(
+          savedLines.length,
+          (i) => sameLine(savedLines[i], remoteLines[i]),
+        ).every((matches) => matches) &&
+        sameNumber(local['net_amount'], remote['net_amount'], tolerance: 0.005) &&
+        sameNumber(local['tax_amount'], remote['tax_amount'], tolerance: 0.005) &&
+        sameNumber(local['total_amount'], remote['total_amount'], tolerance: 0.005);
+    if (!unchangedQuote) {
+      throw const _EstimateHeaderSyncConflict(
+        'server estimate items or notes differ from the offline version',
+      );
+    }
+
     final desiredClaim = _headerText(local['claim_number']);
     final desiredAuthorization = _headerText(local['authorization_number']);
     String? actualClaim() => _headerText(remote['claim_number']);
