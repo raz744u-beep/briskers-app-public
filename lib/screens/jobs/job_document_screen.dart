@@ -57,6 +57,7 @@ import '../../services/invoice_expense_reader.dart';
 import '../../services/document_pdf_service.dart';
 import '../../core/invoice_warranty_pdf_projection.dart';
 import '../../services/local_invoice_signature_store.dart';
+import '../../core/repair_group.dart';
 import '../../services/local_repair_groups.dart';
 import '../../widgets/repair_group_panel.dart';
 import '../../services/invoice_performance_metrics.dart';
@@ -2429,6 +2430,73 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     await _run(() => _moveLineLocalAware(line, direction));
   }
 
+  /// Only local estimate organization is changed: no item amount, tax, or
+  /// invoice line is rewritten by this shortcut.
+  Future<void> _moveEstimateLineToRepairGroup(Map<String, dynamic> line) async {
+    if (!widget.isOwner || !_estimate || _readOnly || _busy) return;
+    final lineId = line['id']?.toString().trim() ?? '';
+    if (lineId.isEmpty || RepairGroup.isGeneralCharge(line)) return;
+    final detail = _detail;
+    if (detail == null) return;
+    final serverId = detail['_server_document_id']?.toString().trim() ?? '';
+    final estimateId = serverId.isNotEmpty ? serverId : widget.documentId;
+
+    List<RepairGroup> groups;
+    try {
+      groups = await _repairGroups.groups(widget.businessId, estimateId, detail);
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Could not load repair groups: $error');
+      return;
+    }
+    if (!mounted || !_estimate || _readOnly || _busy) return;
+    if (groups.every((group) => group.isOther)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Add a repair group first.'),
+      ));
+      return;
+    }
+    final current = groups.firstWhere(
+      (group) => group.lines.any((item) => item['id']?.toString() == lineId),
+      orElse: () => groups.last,
+    );
+    final target = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Text('Move to repair group',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+            ),
+            for (final group in groups)
+              ListTile(
+                leading: Icon(group.isOther
+                    ? Icons.inventory_2_outlined : Icons.folder_outlined),
+                title: Text(group.name),
+                trailing: group.id == current.id ? const Icon(Icons.check) : null,
+                enabled: group.id != current.id,
+                onTap: group.id == current.id
+                    ? null : () => Navigator.pop(sheetContext, group.id),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || target == null || !_estimate || _readOnly || _busy) return;
+    final saved = await _run(
+      () => _repairGroups.move(widget.businessId, estimateId, {lineId}, target),
+      localOnly: true,
+    );
+    if (saved && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Repair group updated.'),
+      ));
+    }
+  }
+
   Future<void> _showLineActions(
     Map<String, dynamic> line, {
     required bool canMoveUp,
@@ -2452,6 +2520,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               title: const Text('Copy item'),
               onTap: () => Navigator.pop(sheetContext, 'copy'),
             ),
+            if (_estimate && widget.isOwner &&
+                !RepairGroup.isGeneralCharge(line) &&
+                (line['id']?.toString().trim().isNotEmpty ?? false))
+              ListTile(
+                leading: const Icon(Icons.folder_move_outlined),
+                title: const Text('Move to repair group'),
+                onTap: () => Navigator.pop(sheetContext, 'repair_group'),
+              ),
             ListTile(
               enabled: canMoveUp,
               leading: const Icon(Icons.arrow_upward),
@@ -2482,6 +2558,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     if (!mounted || action == null) return;
     if (action == 'edit') await _editLine(line);
     if (action == 'copy') await _copyLine(line);
+    if (action == 'repair_group') await _moveEstimateLineToRepairGroup(line);
     if (action == 'up') await _moveLine(line, 'up');
     if (action == 'down') await _moveLine(line, 'down');
     if (action == 'delete') await _deleteLine(line);
