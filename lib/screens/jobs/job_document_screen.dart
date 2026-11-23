@@ -2459,18 +2459,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       (group) => group.lines.any((item) => item['id']?.toString() == lineId),
       orElse: () => groups.last,
     );
-    final target = await showModalBottomSheet<String>(
+    final target = await showDialog<String>(
       context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
+      builder: (dialogContext) => BriskersDialog(
+        title: 'Move to repair group',
+        icon: Icons.drive_file_move_outline,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Text('Move to repair group',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-            ),
             for (final group in groups)
               ListTile(
                 leading: Icon(group.isOther
@@ -2479,10 +2475,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 trailing: group.id == current.id ? const Icon(Icons.check) : null,
                 enabled: group.id != current.id,
                 onTap: group.id == current.id
-                    ? null : () => Navigator.pop(sheetContext, group.id),
+                    ? null : () => Navigator.pop(dialogContext, group.id),
               ),
           ],
         ),
+        actions: [
+          OutlinedButton(
+            style: BriskersDialog.cancelStyle,
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+        ],
       ),
     );
     if (!mounted || target == null || !_estimate || _readOnly || _busy) return;

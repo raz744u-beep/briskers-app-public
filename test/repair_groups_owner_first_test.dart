@@ -1,3 +1,4 @@
+import 'package:briskers_app/core/briskers_colors.dart';
 import 'package:briskers_app/core/repair_group.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
@@ -165,6 +166,23 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Brake pads'));
     expect(edited, lines(saved).first['id']);
+    final menu = find.descendant(
+      of: card,
+      matching: find.byTooltip('Repair group actions'),
+    );
+    await tester.tap(menu);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Move items here'));
+    await tester.pumpAndSettle();
+    expect(find.text('Move items to Front brakes'), findsOneWidget);
+    expect(find.byWidgetPredicate((widget) {
+      if (widget case Container(decoration: BoxDecoration(:final gradient))) {
+        return gradient == BriskersColors.blueHeader;
+      }
+      return false;
+    }), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
     expect(find.text('Record authorization'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
