@@ -115,7 +115,7 @@ void main() {
     await expectLater(groups.remapDraft('shop', estimate, 'server-estimate', before, [
       {...after.first, 'unit_price': 101},
       after.last,
-    ]), throwsStateError);
+    ]), throwsA(isA<RepairGroupIdentityConflict>()));
     expect((await groups.groups('shop', estimate, original)).first.lines.single['id'],
         before.first['id']);
 
