@@ -12,6 +12,7 @@ import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/offline_document_draft_service.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_document_repository.dart';
+import 'package:briskers_app/services/local_repair_groups.dart';
 
 class _StandaloneApi extends BriskersApi {
   final List<String> operationIds = [];
@@ -60,15 +61,18 @@ class _StandaloneApi extends BriskersApi {
       'net_amount': 220,
       'tax_amount': 0,
       'total_amount': 220,
+      'memo': 'Price subject to inspection',
       'origin': 'native',
       'legacy_read_only': false,
       'lines': [
         {
           'id': 'server-line',
+          'position': 1,
           'name': 'Labor',
           'quantity': 4.4,
           'unit_price': 50,
           'line_kind': 'labor',
+          'tax_rate': 0,
         },
       ],
     };
@@ -131,6 +135,13 @@ void main() {
       taxRate: 0,
     );
     await drafts.saveMemo('shop', localId, 'Price subject to inspection');
+    final repairGroups = LocalRepairGroups(database: db, cache: cache);
+    final quote = (await cache.load('shop', localId))!;
+    await repairGroups.add('shop', localId, name: 'Inspection', description: '');
+    final group = (await repairGroups.groups('shop', localId, quote)).first;
+    await repairGroups.move(
+      'shop', localId, {(quote['lines'] as List).single['id'] as String}, group.id,
+    );
     await drafts.flush('shop');
     expect(api.operationIds, isEmpty);
     // Reproduce the legacy index and cached detail, then restart in Force Offline.
@@ -169,6 +180,11 @@ void main() {
       api.operationIds.singleOrNull ?? api.operationIds.first,
     );
     expect(details?['document_number'], number);
+    final serverId = api.operationIds.last;
+    final syncedGroups = await LocalRepairGroups(database: db, cache: cache)
+        .groups('shop', serverId, details!);
+    expect(syncedGroups.first.name, 'Inspection');
+    expect(syncedGroups.first.lines.single['id'], 'server-line');
     final documents = await LocalDocumentRepository(
       database: db,
     ).listByKind('shop', kind: 'estimate');

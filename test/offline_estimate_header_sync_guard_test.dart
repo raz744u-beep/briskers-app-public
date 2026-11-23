@@ -4,6 +4,7 @@ import 'package:briskers_app/core/connection_mode.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
+import 'package:briskers_app/services/local_repair_groups.dart';
 import 'package:briskers_app/services/offline_document_draft_service.dart';
 import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
@@ -16,11 +17,14 @@ class _EstimateHeaderApi extends BriskersApi {
   String? authorizationNumber;
   num? vehicleMileage;
   bool dropClaimAcknowledgment = false;
+  bool changeQuoteDuringClaimConfirmation = false;
   int revision = 2;
   int creates = 0;
   int claimUpdates = 0;
   int mileageUpdates = 0;
   String? submittedDate;
+  String remoteLineName = 'Inspection';
+  String? remoteMemo;
 
   @override
   Future<String> syncOfflineStandaloneEstimate(
@@ -61,10 +65,11 @@ class _EstimateHeaderApi extends BriskersApi {
     'net_amount': 100,
     'tax_amount': 0,
     'total_amount': 100,
+    'memo': remoteMemo,
     'lines': [
       {
         'id': 'remote-line-1',
-        'name': 'Inspection',
+        'name': remoteLineName,
         'line_kind': 'part',
         'quantity': 1,
         'unit_price': 100,
@@ -86,6 +91,11 @@ class _EstimateHeaderApi extends BriskersApi {
     this.claimNumber = claimNumber;
     this.authorizationNumber = authorizationNumber;
     revision++;
+    if (changeQuoteDuringClaimConfirmation) {
+      // Simulate a separate device updating the quote during RPC confirmation.
+      remoteLineName = 'Other device updated this repair';
+      revision++;
+    }
     if (dropClaimAcknowledgment) throw StateError('Simulated lost RPC acknowledgment');
   }
 
@@ -197,6 +207,85 @@ void main() {
     expect(saved['_server_document_id'], isNull);
     await drafts.flush('shop');
     expect(api.creates, 1);
+  });
+
+  test('idempotent create cannot replace locally saved estimate lines with stale server items', () async {
+    final id = await create();
+    final store = LocalRepairGroups(database: db, cache: cache);
+    final saved = (await cache.load('shop', id))!;
+    final lineId = (saved['lines'] as List).single['id'] as String;
+    await store.add('shop', id, name: 'Inspection work', description: '');
+    final group = (await store.groups('shop', id, saved)).first;
+    await store.move('shop', id, {lineId}, group.id);
+    api.remoteLineName = 'Different server repair';
+    await drafts.updatePendingEstimateDetails(
+      'shop', id, documentDate: DateTime(2026, 11, 20),
+      customerId: 'customer-id', customerName: 'Fixture',
+      claimNumber: 'KEEP-LOCAL',
+    );
+    await mode.setMode(BriskersConnectionMode.auto);
+    await drafts.flush('shop');
+    final pending = await queue(id);
+    expect(pending['state'], 'conflict');
+    expect(pending['last_error']?.toString(), contains('items or notes'));
+    final local = (await cache.load('shop', id))!;
+    expect((local['lines'] as List).single['name'], 'Inspection');
+    expect(local['claim_number'], 'KEEP-LOCAL');
+    expect(local['_server_document_id'], isNull);
+    expect(local['sync_state'], 'conflict');
+    expect((await store.groups('shop', id, local)).first.lines.single['id'], lineId);
+    expect(api.claimUpdates, 0);
+    await drafts.flush('shop');
+    expect(api.creates, 1);
+  });
+
+  test('idempotent create cannot silently replace an offline estimate memo', () async {
+    final id = await drafts.createStandaloneEstimate(
+      'shop',
+      customerId: 'customer-id',
+      customerName: 'Fixture',
+      initialLines: [
+        {'name': 'Inspection', 'line_kind': 'part', 'quantity': 1,
+          'unit_price': 100, 'tax_rate': 0},
+      ],
+      initialMemo: 'Owner saved note',
+    );
+    await mode.setMode(BriskersConnectionMode.auto);
+    await drafts.flush('shop');
+    expect((await queue(id))['state'], 'conflict');
+    final local = (await cache.load('shop', id))!;
+    expect(local['memo'], 'Owner saved note');
+    expect(local['_server_document_id'], isNull);
+    expect(api.creates, 1);
+  });
+
+  test('concurrent remote quote edit during claim confirmation preserves local estimate', () async {
+    final id = await create();
+    api.changeQuoteDuringClaimConfirmation = true;
+    await drafts.updatePendingEstimateDetails(
+      'shop', id, documentDate: DateTime(2026, 11, 20),
+      customerId: 'customer-id', customerName: 'Fixture',
+      claimNumber: 'CLAIM-CONCURRENT',
+    );
+    await mode.setMode(BriskersConnectionMode.auto);
+    await drafts.flush('shop');
+
+    // The claim RPC committed, but the final server quote changed before the
+    // confirming read. Its independent edit must not replace our local lines.
+    expect(api.claimUpdates, 1);
+    expect(api.claimNumber, 'CLAIM-CONCURRENT');
+    expect(api.remoteLineName, 'Other device updated this repair');
+    final pending = await queue(id);
+    expect(pending['state'], 'conflict');
+    expect(pending['last_error']?.toString(), contains('changed during warranty confirmation'));
+    final local = (await cache.load('shop', id))!;
+    expect((local['lines'] as List).single['name'], 'Inspection');
+    expect(local['claim_number'], 'CLAIM-CONCURRENT');
+    expect(local['sync_state'], 'conflict');
+    expect(local['_server_document_id'], isNull);
+    await drafts.flush('shop');
+    expect(api.creates, 1);
+    expect(api.claimUpdates, 1);
   });
 
   test('same revision-guarded receipt survives a lost claim RPC acknowledgment', () async {
