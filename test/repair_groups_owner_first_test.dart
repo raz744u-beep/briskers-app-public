@@ -73,6 +73,35 @@ void main() {
     expect(saved['total_amount'], 190);
   });
 
+  test('single item can move between groups and back to Other Items offline', () async {
+    final before = await detail();
+    final originalLines = [
+      for (final line in lines(before)) Map<String, dynamic>.from(line),
+    ];
+    final front = await namedGroup('Front brakes');
+    final later = await namedGroup('Later');
+    final laborId = originalLines.last['id'] as String;
+
+    await groups.move('shop', estimate, {laborId}, front);
+    await groups.move('shop', estimate, {laborId}, later);
+    await groups.move('shop', estimate, {laborId}, later);
+    var sections = await groups.groups('shop', estimate, await detail());
+    expect(sections.singleWhere((group) => group.id == front).lines, isEmpty);
+    expect(sections.singleWhere((group) => group.id == later).lines.single['id'], laborId);
+
+    await groups.move('shop', estimate, {laborId}, RepairGroup.otherId);
+    sections = await groups.groups('shop', estimate, await detail());
+    expect(sections.singleWhere((group) => group.id == later).lines, isEmpty);
+    expect(sections.last.isOther, isTrue);
+    expect(sections.last.lines.map((line) => line['id']), [
+      for (final line in originalLines) line['id'],
+    ]);
+    final after = await detail();
+    expect(lines(after), originalLines);
+    expect(after['total_amount'], before['total_amount']);
+    expect(after['tax_amount'], before['tax_amount']);
+  });
+
   test('sync ID replacement preserves group membership and rejects changed content', () async {
     final original = await detail();
     final before = lines(original);
