@@ -21,6 +21,8 @@ class _EstimateHeaderApi extends BriskersApi {
   int claimUpdates = 0;
   int mileageUpdates = 0;
   String? submittedDate;
+  String remoteLineName = 'Inspection';
+  String? remoteMemo;
 
   @override
   Future<String> syncOfflineStandaloneEstimate(
@@ -61,10 +63,11 @@ class _EstimateHeaderApi extends BriskersApi {
     'net_amount': 100,
     'tax_amount': 0,
     'total_amount': 100,
+    'memo': remoteMemo,
     'lines': [
       {
         'id': 'remote-line-1',
-        'name': 'Inspection',
+        'name': remoteLineName,
         'line_kind': 'part',
         'quantity': 1,
         'unit_price': 100,
@@ -196,6 +199,49 @@ void main() {
     expect(saved['sync_state'], 'conflict');
     expect(saved['_server_document_id'], isNull);
     await drafts.flush('shop');
+    expect(api.creates, 1);
+  });
+
+  test('idempotent create cannot replace locally saved estimate lines with stale server items', () async {
+    final id = await create();
+    api.remoteLineName = 'Different server repair';
+    await drafts.updatePendingEstimateDetails(
+      'shop', id, documentDate: DateTime(2026, 11, 20),
+      customerId: 'customer-id', customerName: 'Fixture',
+      claimNumber: 'KEEP-LOCAL',
+    );
+    await mode.setMode(BriskersConnectionMode.auto);
+    await drafts.flush('shop');
+    final pending = await queue(id);
+    expect(pending['state'], 'conflict');
+    expect(pending['last_error']?.toString(), contains('items or notes'));
+    final local = (await cache.load('shop', id))!;
+    expect((local['lines'] as List).single['name'], 'Inspection');
+    expect(local['claim_number'], 'KEEP-LOCAL');
+    expect(local['_server_document_id'], isNull);
+    expect(local['sync_state'], 'conflict');
+    expect(api.claimUpdates, 0);
+    await drafts.flush('shop');
+    expect(api.creates, 1);
+  });
+
+  test('idempotent create cannot silently replace an offline estimate memo', () async {
+    final id = await drafts.createStandaloneEstimate(
+      'shop',
+      customerId: 'customer-id',
+      customerName: 'Fixture',
+      initialLines: [
+        {'name': 'Inspection', 'line_kind': 'part', 'quantity': 1,
+          'unit_price': 100, 'tax_rate': 0},
+      ],
+      initialMemo: 'Owner saved note',
+    );
+    await mode.setMode(BriskersConnectionMode.auto);
+    await drafts.flush('shop');
+    expect((await queue(id))['state'], 'conflict');
+    final local = (await cache.load('shop', id))!;
+    expect(local['memo'], 'Owner saved note');
+    expect(local['_server_document_id'], isNull);
     expect(api.creates, 1);
   });
 
