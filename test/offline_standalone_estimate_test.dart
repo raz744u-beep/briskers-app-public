@@ -18,6 +18,8 @@ class _StandaloneApi extends BriskersApi {
   var detailAttempts = 0;
   late String syncedNumber;
   late String syncedDate;
+  late List<Map<String, dynamic>> syncedLines;
+  String? syncedMemo;
   @override
   Future<String> syncOfflineStandaloneEstimate(
     String businessId, {
@@ -32,6 +34,14 @@ class _StandaloneApi extends BriskersApi {
     operationIds.add(operationId);
     syncedNumber = publicNumber;
     syncedDate = documentDate;
+    // Simulate the quote stored by the idempotent server create; only
+    // server-assigned row IDs change. The response must not be a stale,
+    // incomplete hard-coded line now that replay verifies every field.
+    syncedLines = [
+      for (final line in lines)
+        <String, dynamic>{...line, 'id': 'server-line'},
+    ];
+    syncedMemo = memo;
     expect(customerId, 'customer-id');
     expect(lines, hasLength(1));
     expect(lines.single['name'], 'Labor');
@@ -62,15 +72,8 @@ class _StandaloneApi extends BriskersApi {
       'total_amount': 220,
       'origin': 'native',
       'legacy_read_only': false,
-      'lines': [
-        {
-          'id': 'server-line',
-          'name': 'Labor',
-          'quantity': 4.4,
-          'unit_price': 50,
-          'line_kind': 'labor',
-        },
-      ],
+      'memo': syncedMemo,
+      'lines': syncedLines,
     };
   }
 }
