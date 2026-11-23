@@ -2524,7 +2524,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 !RepairGroup.isGeneralCharge(line) &&
                 (line['id']?.toString().trim().isNotEmpty ?? false))
               ListTile(
-                leading: const Icon(Icons.folder_move_outlined),
+                leading: const Icon(Icons.drive_file_move_outline),
                 title: const Text('Move to repair group'),
                 onTap: () => Navigator.pop(sheetContext, 'repair_group'),
               ),
