@@ -77,6 +77,7 @@ import '../../services/local_job_repository.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
 import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_document_draft_service.dart';
+import '../../services/verified_local_conversion_repair.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../services/local_standard_notes_service.dart';
 import '../../services/offline_document_edit_service.dart';
@@ -4597,6 +4598,53 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     );
   }
 
+  bool get _canUndoAuditedConversion => widget.isOwner &&
+      !_estimate &&
+      BriskersConnectionModeController.instance.forceOffline &&
+      VerifiedLocalConversionRepair.appliesTo(widget.businessId, widget.documentId);
+
+  Future<void> _undoAuditedConversion() async {
+    if (!_canUndoAuditedConversion || _busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Undo offline conversion?'),
+        content: const Text(
+          'Restore Estimate #1997 to Issued and remove Invoice #6387 and Job J-67 '
+          'from the active lists. A local audit copy will be kept.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Undo conversion'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true || !_canUndoAuditedConversion || _busy) return;
+    setState(() => _busy = true);
+    try {
+      final grant = await DeviceOwnerAuthorization.instance.authority
+          .authorizeSession(widget.businessId);
+      if (!mounted) return;
+      await VerifiedLocalConversionRepair(localDatabase)
+          .undo(widget.businessId, widget.documentId, grant);
+      if (mounted) Navigator.pop(context, true);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.toString())),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _deleteOrVoidInvoice() async {
     if (!widget.isOwner || _estimate || _detail == null) return;
     if (_busy) {
@@ -8061,7 +8109,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   onTap: () => Navigator.pop(sheetContext, 'add_to_invoice'),
                 ),
               ],
-              if (widget.isOwner && (!_estimate || !_converted)) ...[
+              if (_canUndoAuditedConversion)
+                ListTile(
+                  leading: const Icon(Icons.undo),
+                  title: const Text('Undo offline conversion'),
+                  onTap: () => Navigator.pop(sheetContext, 'undo_audited_conversion'),
+                )
+              else if (widget.isOwner && (!_estimate || !_converted)) ...[
                 const Divider(height: 1),
                 const _DocumentActionSectionLabel('Delete'),
                 ListTile(
@@ -8131,6 +8185,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         await _addInvoiceExpense();
       case 'force_reopen':
         await _ownerForceReopen();
+        break;
+      case 'undo_audited_conversion':
+        await _undoAuditedConversion();
         break;
       case 'delete':
         if (_estimate) {
