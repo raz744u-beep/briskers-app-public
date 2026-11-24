@@ -14,6 +14,8 @@ class _FakeApi extends BriskersApi {
   _FakeApi();
 
   var addCalls = 0;
+  bool loseAddResponse = false;
+  bool failNextDetailAfterAdd = false;
   Completer<void>? firstAddEntered;
   Completer<void>? releaseFirstAdd;
   final Map<String, dynamic> _detail = {
@@ -30,6 +32,10 @@ class _FakeApi extends BriskersApi {
     String businessId,
     String documentId,
   ) async {
+    if (addCalls > 0 && failNextDetailAfterAdd) {
+      failNextDetailAfterAdd = false;
+      throw TimeoutException('Synthetic detail read after committed add');
+    }
     return {
       ..._detail,
       'lines': List<dynamic>.from(_detail['lines'] as List),
@@ -76,6 +82,10 @@ class _FakeApi extends BriskersApi {
       final net = (line['quantity'] as num) * (line['unit_price'] as num);
       return total + net + net * (line['tax_rate'] as num);
     });
+    if (loseAddResponse) {
+      loseAddResponse = false;
+      throw TimeoutException('Synthetic lost response after committed add');
+    }
   }
 }
 
@@ -279,6 +289,78 @@ void main() {
       "AND entity_id = 'estimate-1'",
     ).get(), isEmpty);
   });
+
+  for (final lostResponse in [false, true]) {
+    test('committed estimate add is held after ${lostResponse ? 'lost response' : 'failed detail read'}',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final database = BriskersLocalDatabase(NativeDatabase.memory());
+      addTearDown(database.close);
+      final cache = LocalDocumentDetailCache(database: database);
+      final api = _FakeApi()
+        ..loseAddResponse = lostResponse
+        ..failNextDetailAfterAdd = !lostResponse;
+      OfflineDocumentEditService service() => OfflineDocumentEditService(
+        api: api, cache: cache, database: database,
+      );
+      await cache.save('business-1', 'estimate-1', {
+        'id': 'estimate-1',
+        'kind': 'estimate',
+        'status': 'draft',
+        'row_version': 1,
+        'total_amount': 0,
+        'net_amount': 0,
+        'tax_amount': 0,
+        'lines': <Map<String, dynamic>>[],
+      });
+      await database.customStatement(
+        '''
+        INSERT INTO local_documents (
+          id, business_id, job_id, customer_id, kind, status,
+          display_status_code, converted, total, row_version, sync_state
+        ) VALUES (?, ?, ?, ?, 'estimate', 'draft', 'draft', 0, 0, 1, 'synced')
+        ''',
+        ['estimate-1', 'business-1', 'job-1', 'customer-1'],
+      );
+      final editor = service();
+      await editor.addLine(
+        'business-1', 'estimate-1',
+        name: 'One part', quantity: 1, unitPrice: 30,
+        taxRate: 0, lineKind: 'item',
+      );
+      await editor.flush('business-1');
+      expect(api.addCalls, 1);
+      final queue = await database.customSelect(
+        "SELECT id FROM sync_outbox WHERE entity_type = 'document_edit'",
+      ).getSingle();
+      final outboxId = queue.read<int>('id');
+      final fence = await database.customSelect(
+        'SELECT status FROM sync_replay_fences_v1 WHERE replay_key = ?',
+        variables: [Variable<String>('outbox:$outboxId')],
+      ).getSingle();
+      expect(fence.read<String>('status'), lostResponse ? 'review' : 'inflight');
+      // Make any ordinary transient cooldown expire without waiting. The
+      // durable hold must still prevent transport from a new service instance.
+      await database.customStatement(
+        'UPDATE sync_replay_fences_v1 SET not_before_ms = 0',
+      );
+      await service().flush('business-1');
+      expect(api.addCalls, 1);
+      final remote = await api.documentDetail('business-1', 'estimate-1');
+      expect(remote['lines'], hasLength(1));
+      expect(remote['total_amount'], 30);
+      final local = await cache.load('business-1', 'estimate-1');
+      expect(local!['lines'], hasLength(1));
+      expect(local['total_amount'], 30);
+      final state = await database.customSelect(
+        "SELECT sync_state FROM local_documents WHERE id = 'estimate-1'",
+      ).getSingle();
+      expect(state.read<String>('sync_state'), 'pending');
+      expect(await database.customSelect(
+        "SELECT id FROM sync_outbox WHERE entity_type = 'document_edit'",
+      ).get(), hasLength(1));
+    });
+  }
 
   test('pending taxable catalog line is repaired before reconnect sync',
       () async {

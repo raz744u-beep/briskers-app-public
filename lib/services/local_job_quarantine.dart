@@ -756,6 +756,7 @@ class LocalJobQuarantine {
     String businessId,
     Future<T> Function() request, {
     int? outboxId,
+    bool holdUntilLocalCommit = false,
   }) async {
     await assertReplayAllowed(db, businessId, outboxId: outboxId);
     if (outboxId == null) {
@@ -763,8 +764,13 @@ class LocalJobQuarantine {
     }
     return SyncReplayFence(db).run(
       businessId, 'outbox:$outboxId',
-      () => _guardReplay(db, businessId, request, outboxId: outboxId),
+      () => _guardReplay(
+        db, businessId, request,
+        outboxId: outboxId,
+        rejectExistingReceipt: holdUntilLocalCommit,
+      ),
       outboxId: outboxId,
+      holdUntilLocalCommit: holdUntilLocalCommit,
     );
   }
 
@@ -773,12 +779,31 @@ class LocalJobQuarantine {
     String businessId,
     Future<T> Function() request, {
     int? outboxId,
+    bool rejectExistingReceipt = false,
   }) async {
     if (!await _installed(db)) {
       await db.transaction(() => _ensureSchema(db));
     }
     final requestGeneration = await captureGeneration(db, businessId);
     await assertReplayAllowed(db, businessId, outboxId: outboxId);
+    if (rejectExistingReceipt && outboxId != null) {
+      // A pre-upgrade acknowledgement can exist even when the old transport
+      // fence was released before the local outbox commit. Never resend it.
+      final receipt = await db.customSelect(
+        'SELECT 1 FROM local_job_recovery_receipts '
+        'WHERE business_id=? AND outbox_id=? LIMIT 1',
+        variables: [
+          Variable<String>(businessId),
+          Variable<int>(outboxId),
+        ],
+      ).get();
+      if (receipt.isNotEmpty) {
+        throw const LocalJobQuarantineException(
+          'Estimate line already has a server acknowledgement. '
+          'Review the saved operation before retrying.',
+        );
+      }
+    }
     final response = await request();
     // Persist every returned acknowledgement before a later await can let
     // quarantine retire the queue. The next caller-side guard may then throw

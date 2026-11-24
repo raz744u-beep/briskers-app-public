@@ -11,6 +11,7 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
+import 'sync_replay_fence.dart';
 import 'local_document_detail_cache.dart';
 import 'local_catalog_repository.dart';
 
@@ -703,6 +704,8 @@ class OfflineDocumentEditService {
     for (final row in rows) {
       final outboxId = row.read<int>('id');
       final operation = row.read<String>('operation');
+      final holdLineCreate = serverDetail['kind'] == 'estimate' &&
+          (operation == 'add_line' || operation == 'copy_line');
       var payload = Map<String, dynamic>.from(
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
@@ -735,6 +738,7 @@ class OfflineDocumentEditService {
               lineKind: payload['line_kind']?.toString() ?? 'item',
             ),
             outboxId: outboxId,
+            holdUntilLocalCommit: holdLineCreate,
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
           final serverLineId = _findAddedLine(
@@ -743,6 +747,14 @@ class OfflineDocumentEditService {
             payload,
           );
           final localLineId = payload['local_line_id']?.toString() ?? '';
+          if (holdLineCreate &&
+              (localLineId.isEmpty || serverLineId.isEmpty ||
+                  beforeIds.contains(serverLineId) ||
+                  !_serverLineIds(serverDetail).contains(serverLineId))) {
+            throw StateError(
+              'Estimate line identity needs review. Saved work is retained.',
+            );
+          }
           if (localLineId.isNotEmpty && serverLineId.isNotEmpty) {
             await _database.transaction(() async {
               await LocalJobQuarantine.assertReplayAllowed(
@@ -756,6 +768,15 @@ class OfflineDocumentEditService {
                 localLineId,
                 serverLineId,
               );
+              if (holdLineCreate) {
+                await _database.customStatement(
+                  'DELETE FROM sync_outbox WHERE id = ?',
+                  [outboxId],
+                );
+                await SyncReplayFence(_database).completeLocalCommit(
+                  businessId, 'outbox:$outboxId',
+                );
+              }
             });
           }
         } else if (operation == 'update_line') {
@@ -800,6 +821,7 @@ class OfflineDocumentEditService {
               expectedVersion: version,
             ),
             outboxId: outboxId,
+            holdUntilLocalCommit: holdLineCreate,
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
           if (serverLineId.isEmpty) {
@@ -810,6 +832,14 @@ class OfflineDocumentEditService {
             );
           }
           final localLineId = payload['local_line_id']?.toString() ?? '';
+          if (holdLineCreate &&
+              (localLineId.isEmpty || serverLineId.isEmpty ||
+                  beforeIds.contains(serverLineId) ||
+                  !_serverLineIds(serverDetail).contains(serverLineId))) {
+            throw StateError(
+              'Estimate line identity needs review. Saved work is retained.',
+            );
+          }
           if (localLineId.isNotEmpty && serverLineId.isNotEmpty) {
             await _database.transaction(() async {
               await LocalJobQuarantine.assertReplayAllowed(
@@ -823,6 +853,15 @@ class OfflineDocumentEditService {
                 localLineId,
                 serverLineId,
               );
+              if (holdLineCreate) {
+                await _database.customStatement(
+                  'DELETE FROM sync_outbox WHERE id = ?',
+                  [outboxId],
+                );
+                await SyncReplayFence(_database).completeLocalCommit(
+                  businessId, 'outbox:$outboxId',
+                );
+              }
             });
           }
         } else if (operation == 'move_line') {
@@ -880,17 +919,19 @@ class OfflineDocumentEditService {
           serverDetail = await _api.documentDetail(businessId, documentId);
         }
 
-        await _database.transaction(() async {
-          await LocalJobQuarantine.assertReplayAllowed(
-            _database,
-            businessId,
-            outboxId: outboxId,
-          );
-          await _database.customStatement(
-            'DELETE FROM sync_outbox WHERE id = ?',
-            [outboxId],
-          );
-        });
+        if (!holdLineCreate) {
+          await _database.transaction(() async {
+            await LocalJobQuarantine.assertReplayAllowed(
+              _database,
+              businessId,
+              outboxId: outboxId,
+            );
+            await _database.customStatement(
+              'DELETE FROM sync_outbox WHERE id = ?',
+              [outboxId],
+            );
+          });
+        }
       } catch (error) {
         await _database.customStatement(
           '''
