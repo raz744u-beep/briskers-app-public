@@ -101,7 +101,7 @@ class _PayrollReportNamesScreenState extends State<PayrollReportNamesScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             const Text(
-              'Link a name from Expenses → Payroll to an employee’s reports.',
+              'Link a saved payroll name to an employee. Linked entries show the employee’s full name in Expenses and Reports.',
             ),
             const SizedBox(height: 12),
             Form(

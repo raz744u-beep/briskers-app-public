@@ -18,6 +18,7 @@ import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
 import '../services/warranty_receipt_reporting.dart';
 import '../services/local_financial_cache.dart';
+import '../services/local_employee_reports.dart';
 import '../services/offline_financial_write_service.dart';
 import '../services/financial_history_recovery.dart';
 import '../services/invoice_payment_feed.dart';
@@ -193,6 +194,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       _lastPeriodAt = null;
       _periodCalculating = false;
       _periodError = null;
+      _payrollDisplayNames = const PayrollDisplayNames();
       _serverConfirmedTransactionIds.clear();
       _previousServerTransactionProofs = {};
       _transactionRefreshFailed = false;
@@ -473,6 +475,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
 
+  PayrollDisplayNames _payrollDisplayNames = const PayrollDisplayNames();
+
   Future<void> _load({
     bool showLoading = true,
     bool refreshReceipts = false,
@@ -511,6 +515,17 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
 
     if (_owner) {
+      try {
+        final names = await LocalEmployeeReports().displayNames(businessId);
+        if (!_isCurrentLoad(epoch, businessId)) return;
+        setState(() => _payrollDisplayNames = names);
+      } catch (error) {
+        if (_isCurrentLoad(epoch, businessId)) {
+          setState(() => _payrollDisplayNames = const PayrollDisplayNames());
+        }
+        debugPrint('Payroll names could not be read: ${error.runtimeType}');
+      }
+      if (!_isCurrentLoad(epoch, businessId)) return;
       try {
         await OfflineFinancialWriteService().materializePendingPayrollExpenses(businessId);
       } catch (error) {
@@ -1244,7 +1259,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final query = _appliedSearch.toLowerCase();
     final words = query.split(RegExp(r'\s+'));
     return rows.where((row) {
-      final fields = _searchIndex[row] ??= LocalTransactionSearch.fields(row);
+      final saved = _searchIndex[row] ??= LocalTransactionSearch.fields(row);
+      final fullName = _owner ? _payrollDisplayNames.forExpense(row) : null;
+      final fields = fullName == null ? saved : '$saved ${fullName.toLowerCase()}';
       return fields.contains(query) || words.every(fields.contains);
     }).toList();
   }
@@ -1699,6 +1716,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           // The tapped list row is safe to show as a non-editable preview.
           // Waiting for the server here caused an empty full-screen spinner.
           cachedDetail: Map<String, dynamic>.from(transaction),
+          payrollDisplayName: _owner ? _payrollDisplayNames.forExpense(transaction) : null,
         ),
       ),
     );
@@ -2601,6 +2619,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       final incomeRow =
                           transaction['direction']?.toString() == 'income';
                       final payee =
+                          (_owner ? _payrollDisplayNames.forExpense(transaction) : null) ??
                           transaction['counterparty']?.toString() ??
                           (incomeRow ? 'Income' : 'Expense');
                       final copyNumber = transaction['copy_number'];

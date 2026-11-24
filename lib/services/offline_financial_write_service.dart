@@ -11,6 +11,7 @@ import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
 import 'local_financial_cache.dart';
+import 'local_employee_reports.dart';
 import 'local_owner_authorization.dart';
 import 'local_financial_totals_journal.dart';
 import 'payroll_expense_link_store.dart';
@@ -846,10 +847,7 @@ class OfflineFinancialWriteService {
   }) async {
     assertAuthorized();
     await _database.transaction(() async {
-      await _database.customStatement('''CREATE TABLE IF NOT EXISTS local_financial_voids(
-        business_id TEXT NOT NULL, transaction_id TEXT NOT NULL, owner_id TEXT NOT NULL,
-        voided_at TEXT NOT NULL, original TEXT NOT NULL,
-        PRIMARY KEY(business_id,transaction_id))''');
+      await _ensureLocalVoids();
       if ((await _cache.locallyVoidedExpenseIds(business)).contains(transaction)) return;
       final original = await _cache.loadTransactionDetail(business, transaction);
       if (ownerId.isEmpty || transaction.startsWith('local-') ||
@@ -870,6 +868,95 @@ class OfflineFinancialWriteService {
       );
       await LocalFinancialTotalsJournal(database: _database).record(
         business, 'transaction:$transaction', before: original,
+      );
+      assertAuthorized();
+    });
+  }
+
+  Future<void> _ensureLocalVoids() async {
+    await _database.customStatement('''CREATE TABLE IF NOT EXISTS local_financial_voids(
+        business_id TEXT NOT NULL, transaction_id TEXT NOT NULL, owner_id TEXT NOT NULL,
+        voided_at TEXT NOT NULL, original TEXT NOT NULL,
+        PRIMARY KEY(business_id,transaction_id))''');
+  }
+
+  Future<void> voidDuplicatePayrollExpense(
+    String business, {
+    required String duplicateId,
+    required String keepId,
+    required String ownerId,
+    required void Function() assertAuthorized,
+  }) async {
+    assertAuthorized();
+    if (ownerId.isEmpty || duplicateId.isEmpty || keepId.isEmpty ||
+        duplicateId == keepId) {
+      throw StateError('Choose two separate saved payroll expenses.');
+    }
+    await _database.transaction(() async {
+      await _ensureLocalVoids();
+      if ((await _cache.locallyVoidedExpenseIds(business)).contains(duplicateId)) {
+        return;
+      }
+      final groups = await LocalEmployeeReports(database: _database)
+          .duplicateGroups(business, isOwner: true);
+      final matching = groups.where((group) {
+        final ids = group.entries.map((entry) => entry.expense?['id']);
+        return ids.contains(duplicateId) && ids.contains(keepId);
+      }).singleOrNull;
+      if (matching == null) {
+        throw StateError('The selected expenses no longer match. Reopen the review.');
+      }
+      final candidate = matching.entries.singleWhere(
+        (entry) => entry.expense?['id'] == duplicateId,
+      );
+      final original = candidate.expense!;
+      if (candidate.operationId != null ||
+          original['invoice_payment_id'] != null ||
+          original['document_id'] != null || original['job_id'] != null ||
+          original['recurring_rule_id'] != null ||
+          original['is_recurring'] == true ||
+          original['transfer_id'] != null) {
+        throw StateError('This expense is linked to another record. Review it separately.');
+      }
+
+      final queued = await _database.customSelect(
+        "SELECT * FROM sync_outbox WHERE business_id=? AND state!='reversed' "
+        "AND (entity_id=? OR (json_valid(payload_json) AND "
+        "(json_extract(payload_json,'\$.transaction_id')=? OR "
+        "json_extract(payload_json,'\$.local_transaction_id')=?)))",
+        variables: [
+          Variable(business), Variable(duplicateId),
+          Variable(duplicateId), Variable(duplicateId),
+        ],
+      ).get();
+      final pendingCreate = queued.singleOrNull;
+      final safePendingCreate = pendingCreate != null &&
+          pendingCreate.read<String>('entity_type') == 'financial_create' &&
+          pendingCreate.read<String>('state') == 'pending' &&
+          pendingCreate.data['last_attempt_at'] == null &&
+          pendingCreate.read<int>('attempt_count') == 0;
+      if ((queued.isNotEmpty && !safePendingCreate) ||
+          (duplicateId.startsWith('local-') && !safePendingCreate)) {
+        throw StateError('This expense has unresolved sync activity. Review its sync status first.');
+      }
+      if (safePendingCreate) {
+        await _database.customStatement(
+          "UPDATE sync_outbox SET state='reversed' WHERE id=?",
+          [pendingCreate.read<int>('id')],
+        );
+      }
+      await _database.customStatement(
+        'INSERT INTO local_financial_voids VALUES(?,?,?,?,?)',
+        [business, duplicateId, ownerId, DateTime.now().toUtc().toIso8601String(),
+         jsonEncode({...original, 'duplicate_kept_id': keepId})],
+      );
+      await LocalFinancialTotalsJournal(database: _database).record(
+        business, 'transaction:$duplicateId', before: {
+          ...original,
+          'direction': 'expense',
+          'amount': matching.cents / 100,
+          'transaction_date': matching.date.toIso8601String().split('T').first,
+        },
       );
       assertAuthorized();
     });
@@ -978,15 +1065,12 @@ class OfflineFinancialWriteService {
   ) async {
     final localId = payload['local_transaction_id'].toString();
     final isPayroll = payload['operation_id'].toString().startsWith('payroll-financial-');
-    if (isPayroll) {
-      // The successful acknowledgment removes the replay fence just before
-      // remapping the expense. Keep a durable dispatch marker across that gap.
-      final marked = await _database.customUpdate(
-        "UPDATE sync_outbox SET last_attempt_at=? WHERE business_id=? AND id=? AND state='pending' AND payload_json=?",
-        variables: [Variable(_unixNow()), Variable(businessId), Variable(outboxId), Variable(jsonEncode(payload))],
-      );
-      if (marked == 0) return;
-    }
+    // Mark dispatch before a duplicate review can cancel the queued creation.
+    final marked = await _database.customUpdate(
+      "UPDATE sync_outbox SET last_attempt_at=? WHERE business_id=? AND id=? AND state='pending' AND payload_json=?",
+      variables: [Variable(_unixNow()), Variable(businessId), Variable(outboxId), Variable(jsonEncode(payload))],
+    );
+    if (marked == 0) return;
 
     final response = await LocalJobQuarantine.guardReplay(
       _database,

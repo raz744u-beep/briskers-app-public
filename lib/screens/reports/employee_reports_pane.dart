@@ -11,6 +11,7 @@ import '../jobs/job_detail_screen.dart';
 import '../jobs/job_document_screen.dart';
 import '../payroll/approved_tasks_ui.dart';
 import 'payroll_report_names_screen.dart';
+import 'payroll_duplicate_review_screen.dart';
 
 class EmployeeReportsPane extends StatefulWidget {
   const EmployeeReportsPane({
@@ -637,6 +638,26 @@ class EmployeeReportsPaneState extends State<EmployeeReportsPane> {
                             ),
                             isOwner: widget.isOwner,
                             data: data,
+                            sharedBottomNavigationBar:
+                                widget.sharedBottomNavigationBar,
+                          ),
+                        ),
+                      );
+                      await refresh();
+                    },
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.rule),
+                    label: const Text('Review payroll duplicates'),
+                    onPressed: () async {
+                      await Navigator.of(context).push<void>(
+                        MaterialPageRoute(
+                          builder: (_) => PayrollDuplicateReviewScreen(
+                            businessId: widget.businessId,
+                            database: widget.database,
                             sharedBottomNavigationBar:
                                 widget.sharedBottomNavigationBar,
                           ),

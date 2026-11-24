@@ -6,12 +6,103 @@ import 'package:briskers_app/local/briskers_local_database.dart'
 import 'package:briskers_app/services/local_employee_reports.dart';
 import 'package:briskers_app/services/local_financial_cache.dart';
 import 'package:briskers_app/services/local_payroll_repository.dart';
+import 'package:briskers_app/services/offline_financial_write_service.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('confirmed aliases display the profile name and one duplicate can be voided', () async {
+    SharedPreferences.setMockInitialValues({
+      'briskers_job_employees_shop': jsonEncode([
+        {'id': 'mechanic', 'name': 'Jamie Example', 'nickname': 'Jay'},
+        {'id': 'other', 'name': 'Jamie Other'},
+      ]),
+    });
+    final database = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(database.close);
+    final reports = LocalEmployeeReports(database: database);
+    final cache = LocalFinancialCache(database: database);
+    Map<String, Object> expense(
+      String id,
+      String name, {
+      String category = 'Payroll',
+      String date = '2026-10-09',
+      int amount = 250,
+    }) => {
+      'id': id,
+      'direction': 'expense',
+      'category': category,
+      'counterparty': name,
+      'transaction_date': date,
+      'amount': amount,
+    };
+    final duplicate = expense('local-transaction-copy', 'Jamie');
+    final kept = expense('kept', 'Jamie Example');
+    final customer = expense('service', 'Jamie', category: 'Parts');
+    await cache.saveTransactions('shop', [
+      duplicate,
+      kept,
+      customer,
+      expense('other', 'Jamie Other'),
+      expense('different-date', 'Jamie', date: '2026-10-16'),
+      expense('different-amount', 'Jamie', amount: 100),
+    ]);
+    expect(await reports.duplicateGroups('shop', isOwner: true), isEmpty);
+    await reports.savePayrollName(
+      'shop',
+      isOwner: true,
+      name: 'Jamie',
+      employeeId: 'mechanic',
+    );
+    final names = await reports.displayNames('shop');
+    expect(names.forExpense(duplicate), 'Jamie Example');
+    expect(names.forExpense(customer), isNull);
+    expect(
+      names.forExpense({...duplicate, 'employee_id': 'other'}),
+      'Jamie Other',
+    );
+    final group = (await reports.duplicateGroups('shop', isOwner: true)).single;
+    expect(
+      group.entries.map((entry) => entry.expense!['id']),
+      unorderedEquals(['kept', 'local-transaction-copy']),
+    );
+    await database.customStatement(
+      'INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,payload_json) VALUES (?,?,?,?,?)',
+      ['shop', 'financial_create', 'local-transaction-copy', 'create', '{}'],
+    );
+    final writes = OfflineFinancialWriteService(database: database);
+    await writes.voidDuplicatePayrollExpense(
+      'shop',
+      duplicateId: 'local-transaction-copy',
+      keepId: 'kept',
+      ownerId: 'owner',
+      assertAuthorized: () {},
+    );
+    expect(await reports.duplicateGroups('shop', isOwner: true), isEmpty);
+    expect(
+      (await cache.loadTransactions('shop')).map((row) => row['id']),
+      unorderedEquals([
+        'kept',
+        'service',
+        'other',
+        'different-date',
+        'different-amount',
+      ]),
+    );
+    final audit = await database
+        .customSelect('SELECT original FROM local_financial_voids')
+        .getSingle();
+    final original = jsonDecode(audit.read<String>('original')) as Map;
+    expect(original['counterparty'], 'Jamie');
+    expect(original['duplicate_kept_id'], 'kept');
+    final outbox = await database
+        .customSelect('SELECT state FROM sync_outbox')
+        .getSingle();
+    expect(outbox.read<String>('state'), 'reversed');
+  });
 
   test(
     'reports settlements once and retains dated historical payroll expenses',

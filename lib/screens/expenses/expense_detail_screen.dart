@@ -69,6 +69,7 @@ class ExpenseDetailScreen extends StatefulWidget {
     this.allowRecurring = true,
     this.canDeleteTransaction = false,
     this.cachedDetail,
+    this.payrollDisplayName,
     this.api = const BriskersApi(),
     this.financialCache,
     this.localPhotoSync,
@@ -83,6 +84,7 @@ class ExpenseDetailScreen extends StatefulWidget {
   final bool allowRecurring;
   final bool canDeleteTransaction;
   final Map<String, dynamic>? cachedDetail;
+  final String? payrollDisplayName;
   final BriskersApi api;
   final LocalFinancialCache? financialCache;
   final ExpenseIqLocalPhotoSync? localPhotoSync;
@@ -1838,7 +1840,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       (detail['receipt_count'] ??
           widget.cachedDetail?['receipt_count'])?.toString() ?? '',
     ) ?? 0;
-    final payee = detail['counterparty']?.toString() ?? (income ? 'Income' : 'Expense');
+    final payee = widget.payrollDisplayName ?? detail['counterparty']?.toString() ?? (income ? 'Income' : 'Expense');
     final copyNumber = detail['copy_number'];
     final counterparty = copyNumber == null ? payee : '$payee (Copy $copyNumber)';
     final category = detail['category']?.toString() ?? '';

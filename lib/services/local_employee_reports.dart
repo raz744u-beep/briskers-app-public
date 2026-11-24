@@ -66,6 +66,38 @@ typedef EmployeeReportData = ({
   List<({String name, String employeeId})> payrollNames,
 });
 
+typedef PayrollDuplicateGroup = ({
+  String employee,
+  DateTime date,
+  int cents,
+  List<EmployeeReportPayment> entries,
+});
+
+class PayrollDisplayNames {
+  const PayrollDisplayNames({
+    this.byId = const {},
+    this.byExpenseName = const {},
+  });
+
+  final Map<String, String> byId;
+  final Map<String, String> byExpenseName;
+
+  String? forExpense(ReportRow row) {
+    if (row['direction'] == 'income' ||
+        (!LocalFinancialCache.requiresOwnerAccountEdit(row) &&
+            LocalEmployeeReports._normalized(row['category_name']) !=
+                'payroll')) {
+      return null;
+    }
+    final original = (row['counterparty'] ?? row['counterparty_name'])
+        ?.toString()
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .toLowerCase();
+    return byId[row['employee_id']] ?? byExpenseName[original];
+  }
+}
+
 /// Reads local snapshots without preparing, posting or editing payroll.
 class LocalEmployeeReports {
   LocalEmployeeReports({BriskersLocalDatabase? database})
@@ -145,6 +177,94 @@ class LocalEmployeeReports {
           .map((row) => row.data)
           .toList();
 
+  Future<Set<String>> _savedTables() async =>
+      (await _db
+              .customSelect(
+                "SELECT name FROM sqlite_master WHERE type IN ('table','view')",
+              )
+              .get())
+          .map((row) => row.read<String>('name'))
+          .toSet();
+
+  Future<Map<String, ReportRow>> _staff(
+    String business,
+    Set<String> tables,
+    List<ReportRow> roster,
+  ) async => {
+    if (tables.contains('regular_payroll_employees'))
+      for (final employee in await _read(
+        'SELECT id,name FROM regular_payroll_employees WHERE business_id=?',
+        business,
+      ))
+        employee['id'] as String: {...employee},
+    for (final employee in roster) ?_text(employee['id']): {...employee},
+  };
+
+  Future<List<ReportRow>> _savedPayrollNames(
+    String business,
+    Set<String> tables,
+  ) => tables.contains(_payrollNamesTable)
+      ? _read(
+          'SELECT name_key,saved_name,employee_id FROM $_payrollNamesTable '
+          'WHERE business_id=? ORDER BY name_key',
+          business,
+        )
+      : Future.value([]);
+
+  Future<PayrollDisplayNames> displayNames(String business) async {
+    final roster = await OfflineJobAdminService(database: _db)
+        .cachedEmployees(business);
+    return _db.transaction(() async {
+      final tables = await _savedTables();
+      final staff = await _staff(business, tables, roster);
+      final fullNames = <String, String>{
+        for (final entry in staff.entries)
+          entry.key: ?_text(entry.value['name']),
+      };
+      return PayrollDisplayNames(
+        byId: fullNames,
+        byExpenseName: {
+          for (final alias in await _savedPayrollNames(business, tables))
+            alias['name_key'] as String: ?fullNames[alias['employee_id']],
+        },
+      );
+    });
+  }
+
+  Future<List<PayrollDuplicateGroup>> duplicateGroups(
+    String business, {
+    required bool isOwner,
+  }) async {
+    final data = await load(
+      business,
+      ReportPeriod(DateTime(1900), DateTime(9999, 12, 31)),
+      isOwner: isOwner,
+    );
+    final candidates = <PayrollDuplicateGroup>[];
+    for (final employee in data.employees) {
+      final byDateAndAmount =
+          <(DateTime, int), Map<String, EmployeeReportPayment>>{};
+      for (final entry in employee.payments) {
+        final id = _text(entry.expense?['id']);
+        final date = entry.date;
+        final cents = entry.cents;
+        if (id == null || date == null || cents == null || cents <= 0) continue;
+        (byDateAndAmount[(date, cents)] ??= {})[id] = entry;
+      }
+      for (final group in byDateAndAmount.entries) {
+        if (group.value.length > 1) {
+          candidates.add((
+            employee: employee.name,
+            date: group.key.$1,
+            cents: group.key.$2,
+            entries: group.value.values.toList(),
+          ));
+        }
+      }
+    }
+    return candidates..sort((a, b) => b.date.compareTo(a.date));
+  }
+
   Future<EmployeeReportData> load(
     String business,
     ReportPeriod period, {
@@ -154,23 +274,8 @@ class LocalEmployeeReports {
     final roster = await OfflineJobAdminService(database: _db)
         .cachedEmployees(business);
     return _db.transaction(() async {
-      final tables =
-          (await _db
-                  .customSelect(
-                    "SELECT name FROM sqlite_master WHERE type IN ('table','view')",
-                  )
-                  .get())
-              .map((row) => row.read<String>('name'))
-              .toSet();
-      final staff = <String, ReportRow>{
-        if (tables.contains('regular_payroll_employees'))
-          for (final employee in await _read(
-            'SELECT id,name FROM regular_payroll_employees WHERE business_id=?',
-            business,
-          ))
-            employee['id'] as String: {...employee},
-        for (final employee in roster) ?_text(employee['id']): {...employee},
-      };
+      final tables = await _savedTables();
+      final staff = await _staff(business, tables, roster);
       final aliases = tables.contains('local_employee_nicknames')
           ? await _read(
               'SELECT employee_id,nickname FROM local_employee_nicknames WHERE business_id=?',
@@ -184,10 +289,9 @@ class LocalEmployeeReports {
       final names = <String, Set<String>>{};
       final reports = <String, EmployeeReportRow>{};
       for (final entry in staff.entries) {
-        final label = EmployeeNicknameStore.displayLabel(
-          entry.value,
-          staff.values,
-        );
+        final label =
+            _text(entry.value['name']) ??
+            EmployeeNicknameStore.displayLabel(entry.value, staff.values);
         reports[entry.key] = EmployeeReportRow(
           entry.key,
           label.isEmpty ? 'Saved employee' : label,
@@ -203,13 +307,7 @@ class LocalEmployeeReports {
         for (final entry in reports.entries)
           entry.key: _text(staff[entry.key]?['name']) ?? entry.value.name,
       };
-      final payrollNames = tables.contains(_payrollNamesTable)
-          ? await _read(
-              'SELECT name_key,saved_name,employee_id FROM $_payrollNamesTable '
-              'WHERE business_id=? ORDER BY name_key',
-              business,
-            )
-          : <ReportRow>[];
+      final payrollNames = await _savedPayrollNames(business, tables);
       final savedLinks = <String, String>{
         for (final row in payrollNames)
           if (staff.containsKey(row['employee_id']))
