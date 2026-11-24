@@ -74,13 +74,20 @@ void main() {
       ['shop', 'financial_create', 'local-transaction-copy', 'create', '{}'],
     );
     final writes = OfflineFinancialWriteService(database: database);
-    await writes.voidDuplicatePayrollExpense(
+    Future<void> removeDuplicate() => writes.voidDuplicatePayrollExpense(
       'shop',
       duplicateId: 'local-transaction-copy',
       keepId: 'kept',
       ownerId: 'owner',
       assertAuthorized: () {},
     );
+    await database.customStatement('UPDATE sync_outbox SET last_attempt_at=1');
+    await expectLater(removeDuplicate(), throwsStateError);
+    expect(await cache.locallyVoidedExpenseIds('shop'), isEmpty);
+    await database.customStatement(
+      'UPDATE sync_outbox SET last_attempt_at=NULL',
+    );
+    await removeDuplicate();
     expect(await reports.duplicateGroups('shop', isOwner: true), isEmpty);
     expect(
       (await cache.loadTransactions('shop')).map((row) => row['id']),

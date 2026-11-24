@@ -40,6 +40,7 @@ class _PayrollDuplicateReviewScreenState
     final id = row['id'].toString();
     return [
       entry.savedName,
+      if (row['copy_number'] case final int copyNumber) 'Copy $copyNumber',
       if (row['account'] case final String account) account,
       if (row['remarks'] case final String notes when notes.trim().isNotEmpty)
         notes,

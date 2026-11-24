@@ -914,8 +914,9 @@ class OfflineFinancialWriteService {
           original['invoice_payment_id'] != null ||
           original['document_id'] != null || original['job_id'] != null ||
           original['recurring_rule_id'] != null ||
-          original['is_recurring'] == true ||
-          original['transfer_id'] != null) {
+          original['recurring_engine_owned'] == true ||
+          original['recurring'] == true ||
+          original['transfer_group_id'] != null) {
         throw StateError('This expense is linked to another record. Review it separately.');
       }
 
@@ -935,8 +936,9 @@ class OfflineFinancialWriteService {
           pendingCreate.read<String>('state') == 'pending' &&
           pendingCreate.data['last_attempt_at'] == null &&
           pendingCreate.read<int>('attempt_count') == 0;
-      if ((queued.isNotEmpty && !safePendingCreate) ||
-          (duplicateId.startsWith('local-') && !safePendingCreate)) {
+      final needsQueueProof = queued.isNotEmpty ||
+          duplicateId.startsWith('local-') || original['sync_state'] == 'pending';
+      if (needsQueueProof && !safePendingCreate) {
         throw StateError('This expense has unresolved sync activity. Review its sync status first.');
       }
       if (safePendingCreate) {
