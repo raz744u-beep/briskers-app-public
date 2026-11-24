@@ -135,12 +135,13 @@ class EmployeeReportsPaneState extends State<EmployeeReportsPane> {
           ],
         ),
       );
-      if (year != null)
+      if (year != null) {
         next = ReportPeriod(
           DateTime(year),
           DateTime(year, 12, 31),
           preset: selection,
         );
+      }
     } else if (selection == 'shopWeek') {
       next = EmployeeReportsPane.shopWeek(today);
     } else if (selection == 'lastYear') {
@@ -574,8 +575,9 @@ class EmployeeReportsPaneState extends State<EmployeeReportsPane> {
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.isOwner)
+    if (!widget.isOwner) {
       return const Center(child: Text('Owner access is required.'));
+    }
     return FutureBuilder<EmployeeReportData>(
       future: _data,
       builder: (context, snapshot) {
@@ -597,7 +599,10 @@ class EmployeeReportsPaneState extends State<EmployeeReportsPane> {
                     : 'Labor & Payroll',
               ),
               if (snapshot.connectionState != ConnectionState.done)
-                const LinearProgressIndicator()
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Center(child: Text('Reading saved employee reports…')),
+                )
               else if (snapshot.hasError)
                 ListTile(
                   title: const Text(

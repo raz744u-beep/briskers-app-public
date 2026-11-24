@@ -279,7 +279,7 @@ void main(){
     await click(find.text('Review payment'));
     await click(find.byKey(const Key('record-confirmed-payroll')));
     await until(find.text('Payment Recorded'));await click(find.widgetWithText(FilledButton,'Done'));
-    await click(find.text('Reports'));await until(find.text('Payroll History'));
+    await click(find.text('Reports'));await until(find.text('Payment history'));
     await tester.runAsync(()async{
       final rows=await LocalPayrollRepository(db,business:'shop',owner:true).history('b');expect(rows,hasLength(1));expect(rows.single['net'],20000);
       final alpha=(await LocalPayrollRepository(db,business:'shop',owner:true).work(employee:'a')).where((r)=>r['state']=='Done').single;
@@ -312,7 +312,7 @@ void main(){
     expect(find.byKey(const Key('verify-weekly-payment')),findsNothing);
     expect(find.text('Weekly Payment Summary'),findsOneWidget);
     await capture('bugs30-employee-paid-tasks');
-    await click(find.text('Reports'));await until(find.text('Payroll History'));
+    await click(find.text('Reports'));await until(find.text('Payment history'));
     navigator.currentState!.pop();await tester.pumpAndSettle();
     navigator.currentState!.pop();await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('Tasks'),-100,scrollable:find.descendant(of:find.byType(HomeScreen),matching:find.byType(Scrollable)).first);

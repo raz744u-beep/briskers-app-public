@@ -53,7 +53,7 @@ class EmployeeReportRow {
   int get paid => labor.fold(0, (total, row) => total + row.paidMinutes);
   int? get unpaid => labor.any((row) => row.unpaidMinutes == null)
       ? null
-      : labor.fold(0, (total, row) => total + row.unpaidMinutes!);
+      : labor.fold<int>(0, (total, row) => total + row.unpaidMinutes!);
   int get paidCents =>
       payments.fold(0, (total, row) => total + (row.cents ?? 0));
 }
@@ -102,8 +102,7 @@ class LocalEmployeeReports {
             business,
           ))
             employee['id'] as String: {...employee},
-        for (final employee in roster)
-          if (_text(employee['id']) case final id?) id: {...employee},
+        for (final employee in roster) ?_text(employee['id']): {...employee},
       };
       final aliases = tables.contains('local_employee_nicknames')
           ? await _read(
@@ -228,7 +227,7 @@ class LocalEmployeeReports {
       for (final option
           in (options['categories'] as List? ?? []).whereType<Map>())
         if (_normalized(option['name'] ?? option['label']) == 'payroll')
-          if (_text(option['id']) case final id?) id,
+          ?_text(option['id']),
     };
     final transactions = await LocalFinancialTotalsJournal(database: _db)
         .overlayCachedRows(
