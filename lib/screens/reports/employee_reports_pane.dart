@@ -21,6 +21,7 @@ class EmployeeReportsPane extends StatefulWidget {
     this.initialPeriod,
     this.sharedBottomNavigationBar,
     this.onPaymentTools,
+    this.paymentNotice,
   });
 
   final String businessId;
@@ -30,6 +31,7 @@ class EmployeeReportsPane extends StatefulWidget {
   final ReportPeriod? initialPeriod;
   final Widget? sharedBottomNavigationBar;
   final VoidCallback? onPaymentTools;
+  final Widget? paymentNotice;
 
   static ReportPeriod shopWeek(DateTime date) {
     final monday = DateTime(date.year, date.month, date.day - date.weekday + 1);
@@ -593,6 +595,7 @@ class EmployeeReportsPaneState extends State<EmployeeReportsPane> {
             physics: const AlwaysScrollableScrollPhysics(),
             children: [
               _periodPicker(data?.years ?? const []),
+              ?widget.paymentNotice,
               _heading(
                 _period.preset == 'shopWeek'
                     ? 'Weekly Labor & Payroll'

@@ -351,7 +351,7 @@ void main() {
         network = PayrollOwnerLan(lease: authority, database: db, actor: 'owner', approve: (_) async => null);
       });
       await tester.pumpWidget(screen(tab: 2));
-      await until(find.text(currentHolder ? 'Payroll History' : 'Connect'));
+      await until(find.text(currentHolder ? 'Payment history' : 'Connect'));
       if (currentHolder) {
         await tester.runAsync(() async {
           final saved = await LocalPayrollRepository(db, business: 'shop', owner: true).history('a');

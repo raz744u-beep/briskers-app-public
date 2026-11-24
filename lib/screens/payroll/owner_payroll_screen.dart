@@ -2473,6 +2473,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       businessId: widget.businessId, isOwner: _canView, database: _db,
       employeeId: widget.employeeId, initialPeriod: EmployeeReportsPane.shopWeek(_week),
       sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
+      paymentNotice: _pendingPayments.isEmpty ? null : _pendingPaymentsBanner(),
       onPaymentTools: () async {
         await Navigator.of(context).push<void>(MaterialPageRoute(
           builder: (_) => Scaffold(
@@ -2507,6 +2508,12 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
     }
   }
 
+  Widget _pendingPaymentsBanner() => MaterialBanner(content: Text(
+    "${_pendingPayments.length} payment request(s) pending — not recorded as paid. "
+    "Reconnect over shop Wi-Fi, refresh and review unpaid work before retrying.",),
+    actions: [TextButton(onPressed: () => showOwnerPayrollConnection(context, widget.businessId),
+      child: const Text("Connect"),),],);
+
   Widget _reportsPanel() => _PayrollViewport(minHeight:360,child:Column(children: [
     if (_canView && (widget.employeeId ?? _employee) != null)
       TextButton.icon(icon: const Icon(Icons.manage_search),
@@ -2526,12 +2533,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
           employeeId: widget.employeeId ?? _employee),
       ),
 
-    if (_pendingPayments.isNotEmpty)
-      MaterialBanner(content: Text(
-        "${_pendingPayments.length} payment request(s) pending — not recorded as paid. "
-        "Reconnect over shop Wi-Fi, refresh and review unpaid work before retrying.",),
-        actions: [TextButton(onPressed: () => showOwnerPayrollConnection(context, widget.businessId),
-          child: const Text("Connect"),),],),
+    if (_pendingPayments.isNotEmpty) _pendingPaymentsBanner(),
     Expanded(child: PayrollHistoryPanel(
               payments: _history,
               onPaymentAction: _correctRecordedPayment,

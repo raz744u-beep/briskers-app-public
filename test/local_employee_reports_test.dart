@@ -134,55 +134,61 @@ void main() {
     },
   );
 
-  test('reports completed work and partial pay coverage from saved labor', () async {
-    SharedPreferences.setMockInitialValues({});
-    final database = BriskersLocalDatabase(NativeDatabase.memory());
-    addTearDown(database.close);
-    await LocalPayrollRepository(
-      database,
-      business: 'shop',
-      owner: true,
-    ).prepare();
-    await database.customStatement(
-      'INSERT INTO regular_payroll_employees VALUES(?,?,?,?,?)',
-      ['shop', 'employee', 'Mechanic', 4000, 0],
-    );
-    await database.customStatement(
-      'INSERT INTO regular_payroll_tasks VALUES(?,?,?,?,?,?)',
-      ['shop', 'task', 'job', 'line', 'Oil leak repair', 720],
-    );
-    await database.customStatement(
-      'INSERT INTO regular_payroll_portions VALUES(?,?,?,?,?,?,?)',
-      ['shop', 'portion', 'task', 'employee', 'Done', 1, '2026-11-24'],
-    );
-    await database.customStatement(
-      'INSERT INTO local_mechanic_work_credits_v1 VALUES(?,?,?,?,?,?,?,?,?,?)',
-      [
+  test(
+    'reports completed work and partial pay coverage from saved labor',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final database = BriskersLocalDatabase(NativeDatabase.memory());
+      addTearDown(database.close);
+      await LocalPayrollRepository(
+        database,
+        business: 'shop',
+        owner: true,
+      ).prepare();
+      await database.customStatement(
+        'INSERT INTO regular_payroll_employees VALUES(?,?,?,?,?)',
+        ['shop', 'employee', 'Mechanic', 4000, 0],
+      );
+      await database.customStatement(
+        'INSERT INTO regular_payroll_tasks VALUES(?,?,?,?,?,?)',
+        ['shop', 'task', 'job', 'line', 'Oil leak repair', 720],
+      );
+      await database.customStatement(
+        'INSERT INTO regular_payroll_portions VALUES(?,?,?,?,?,?,?)',
+        ['shop', 'portion', 'task', 'employee', 'Done', 1, '2026-11-24'],
+      );
+      await database.customStatement(
+        'INSERT INTO local_mechanic_work_credits_v1 '
+        '(business_id,allocation_id,job_id,labor_line_id,task_id,employee_id,'
+        'actual_minutes,rate_cents,completed,paid_operation_id,revision) '
+        'VALUES(?,?,?,?,?,?,?,?,?,?)',
+        [
+          'shop',
+          'portion',
+          'job',
+          'line',
+          'task',
+          'employee',
+          720,
+          4000,
+          1,
+          null,
+          1,
+        ],
+      );
+      await database.customStatement(
+        'INSERT INTO regular_payroll_work_coverage VALUES(?,?,?,?,?,?)',
+        ['shop', 'portion', 'payment', 480, 32000, '{}'],
+      );
+      final data = await LocalEmployeeReports(database: database).load(
         'shop',
-        'portion',
-        'job',
-        'line',
-        'task',
-        'employee',
-        720,
-        4000,
-        1,
-        null,
-        1,
-      ],
-    );
-    await database.customStatement(
-      'INSERT INTO regular_payroll_work_coverage VALUES(?,?,?,?,?,?)',
-      ['shop', 'portion', 'payment', 480, 32000, '{}'],
-    );
-    final data = await LocalEmployeeReports(database: database).load(
-      'shop',
-      ReportPeriod(DateTime(2026, 11, 23), DateTime(2026, 11, 27)),
-      isOwner: true,
-    );
-    final person = data.employees.single;
-    expect((person.completed, person.paid, person.unpaid), (720, 480, 240));
-    expect(person.labor.single.description, 'Oil leak repair');
-    expect(person.paidCents, 0);
-  });
+        ReportPeriod(DateTime(2026, 11, 23), DateTime(2026, 11, 27)),
+        isOwner: true,
+      );
+      final person = data.employees.single;
+      expect((person.completed, person.paid, person.unpaid), (720, 480, 240));
+      expect(person.labor.single.description, 'Oil leak repair');
+      expect(person.paidCents, 0);
+    },
+  );
 }
