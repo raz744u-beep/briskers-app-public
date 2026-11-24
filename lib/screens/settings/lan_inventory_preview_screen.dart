@@ -99,14 +99,66 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
     if (mounted) setState(() => _difference = LanRecordInventory.compare(source, here));
   });
 
-  Widget _result(String title, List<LanInventoryEntry> entries) {
+  Widget _result(
+    String title, List<LanInventoryEntry> entries, {
+    bool showRecords = false,
+    Map<String, LanInventoryEntry> destination = const {},
+  }) {
     final totals = <String, int>{};
     for (final entry in entries) {
       totals.update(entry.kind, (n) => n + 1, ifAbsent: () => 1);
     }
+    final heading = Text('$title · ${entries.length}');
+    final summary = Text(totals.entries.map((entry) => '${entry.key} ${entry.value}').join(' · '));
+    if (!showRecords || entries.isEmpty) {
+      return Card(child: ListTile(title: heading, subtitle: summary));
+    }
     return Card(child: ListTile(
-      title: Text('$title · ${entries.length}'),
-      subtitle: Text(totals.entries.map((entry) => '${entry.key} ${entry.value}').join(' · ')),
+      title: heading,
+      subtitle: summary,
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => Navigator.push<void>(context, MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: Text(title)),
+          body: ListView.builder(
+            itemCount: entries.length,
+            itemBuilder: (context, index) {
+              final entry = entries[index];
+              final local = destination[entry.identity];
+              final sourceFields = entry.review;
+              final label = sourceFields['Number'] ?? sourceFields['Name'] ??
+                  [sourceFields['Year'], sourceFields['Make'], sourceFields['Model']]
+                      .whereType<String>().where((value) => value.isNotEmpty).join(' ');
+              final changed = {
+                ...sourceFields.keys,
+                ...?local?.review.keys,
+              }.where((key) => sourceFields[key] != local?.review[key]).toList();
+              return ExpansionTile(
+                title: Text(label.isEmpty ? entry.kind : '${entry.kind} · $label'),
+                subtitle: local == null ? null : const Text('Source phone and this phone'),
+                children: [
+                  if (sourceFields.isEmpty)
+                    const ListTile(title: Text('Record details unavailable. Update the source phone.'))
+                  else if (local == null)
+                    for (final field in sourceFields.entries)
+                      ListTile(title: Text(field.key), subtitle: Text(field.value))
+                  else if (changed.isEmpty)
+                    const ListTile(title: Text('A saved field differs outside the displayed fields.'))
+                  else
+                    for (final field in changed)
+                      ListTile(
+                        title: Text(field),
+                        subtitle: Text(
+                          'Source phone  ${sourceFields[field] ?? 'Unavailable'}\n'
+                          'This phone  ${local.review[field] ?? 'Unavailable'}',
+                        ),
+                      ),
+                ],
+              );
+            },
+          ),
+        ),
+      )),
     ));
   }
 
@@ -148,9 +200,10 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
         if (_busy) const LinearProgressIndicator(),
         if (_error case final error?) Text(error),
         if (difference != null) ...[
-          _result('Only on source phone', difference.onlyOnSource),
+          _result('Only on source phone', difference.onlyOnSource, showRecords: true),
           _result('Only on this phone', difference.onlyOnDestination),
-          _result('Different on both phones', difference.different),
+          _result('Different on both phones', difference.different,
+            showRecords: true, destination: difference.destinationVersions),
           _result('Needs verification', difference.unverified),
           const Text('Results compare saved IDs and selected fields. Pending changes, local-only IDs, and documents without a saved detail go under Needs verification.'),
         ],

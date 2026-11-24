@@ -13,6 +13,7 @@ LanInventoryEntry entry(
   fingerprint: fingerprint,
   pending: pending,
   hasDocumentDetail: hasDocumentDetail,
+  review: const {},
 );
 
 void main() {
@@ -33,6 +34,7 @@ void main() {
     expect(result.onlyOnSource.map((item) => item.identity), ['source-only']);
     expect(result.onlyOnDestination.map((item) => item.identity), ['destination-only']);
     expect(result.different.map((item) => item.identity), ['edited']);
+    expect(result.destinationVersions['edited']?.fingerprint, 'destination');
     expect(result.unverified.map((item) => item.identity),
         ['pending', 'invoice-index', 'pending-on-destination']);
   });

@@ -43,7 +43,7 @@ class LanInventorySession {
     final payload = utf8.encode(jsonEncode([
       shop,
       for (final item in inventory)
-        [item.kind, item.identity, item.fingerprint, item.pending, item.hasDocumentDetail],
+        [item.kind, item.identity, item.fingerprint, item.pending, item.hasDocumentDetail, item.review],
     ]));
     if (payload.length > _limit) throw StateError('This inventory is too large for a preview.');
     final key = await _cipher.newSecretKey();
@@ -110,15 +110,31 @@ class LanInventorySession {
       }
       final entries = <LanInventoryEntry>[];
       for (final item in data.skip(1)) {
-        if (item is! List || item.length != 5 ||
+        if (item is! List || (item.length != 5 && item.length != 6) ||
             !const {'customer', 'vehicle', 'job', 'estimate', 'invoice'}.contains(item[0]) ||
             item[1] is! String || item[2] is! String ||
             item[3] is! bool || item[4] is! bool) {
           throw const FormatException('This inventory format is invalid.');
         }
+        final review = <String, String>{};
+        if (item.length == 6) {
+          final values = item[5];
+          if (values is! Map || values.length > 8) {
+            throw const FormatException('Invalid record review fields.');
+          }
+          for (final field in values.entries) {
+            final label = field.key;
+            final value = field.value;
+            if (label is! String || label.length > 32 ||
+                value is! String || value.length > 97) {
+              throw const FormatException('Invalid record review field.');
+            }
+            review[label] = value;
+          }
+        }
         entries.add((kind: item[0] as String, identity: item[1] as String,
           fingerprint: item[2] as String, pending: item[3] as bool,
-          hasDocumentDetail: item[4] as bool));
+          hasDocumentDetail: item[4] as bool, review: Map.unmodifiable(review)));
       }
       return entries;
     } finally {

@@ -14,12 +14,14 @@ typedef LanInventoryEntry = ({
   String fingerprint,
   bool pending,
   bool hasDocumentDetail,
+  Map<String, String> review,
 });
 
 typedef LanInventoryDifference = ({
   List<LanInventoryEntry> onlyOnSource,
   List<LanInventoryEntry> onlyOnDestination,
   List<LanInventoryEntry> different,
+  Map<String, LanInventoryEntry> destinationVersions,
   List<LanInventoryEntry> unverified,
 });
 
@@ -99,11 +101,31 @@ class LanRecordInventory {
           fingerprint: _hash([payload, detail]),
           pending: pending,
           hasDocumentDetail: detail != null,
+          review: _reviewFields(recordKind, payload, detail),
         ));
       }
     }
     return List.unmodifiable(entries);
   });
+
+  static Map<String, String> _reviewFields(
+    String kind, Map<String, Object?> row, List<Object?>? detail,
+  ) {
+    final fields = switch (kind) {
+      'customer' => {'Name': 'display_name', 'Company': 'is_company', 'Taxable': 'taxable'},
+      'vehicle' => {'Year': 'year', 'Make': 'make', 'Model': 'model', 'Mileage': 'mileage', 'Color': 'color'},
+      'job' => {'Number': 'job_number', 'Title': 'title', 'Status': 'status', 'Mileage in': 'odometer_in'},
+      _ => {'Number': 'document_number', 'Status': 'status', 'Total': 'total', 'Date': 'document_date'},
+    };
+    String limited(Object? value) {
+      final text = value?.toString() ?? '';
+      return text.length <= 96 ? text : '${text.substring(0, 96)}…';
+    }
+    return {
+      for (final field in fields.entries) field.key: limited(row[field.value]),
+      if (detail != null) 'Line items': '${detail.length - 1}',
+    };
+  }
 
   static List<Object?>? _documentFields(
     Object? raw, String business, String id, String kind,
@@ -173,6 +195,9 @@ class LanRecordInventory {
       onlyOnSource: List.unmodifiable(onlyOnSource),
       onlyOnDestination: List.unmodifiable(onlyOnDestination),
       different: List.unmodifiable(different),
+      destinationVersions: Map.unmodifiable({
+        for (final entry in different) entry.identity: to[entry.identity]!,
+      }),
       unverified: List.unmodifiable(unverified),
     );
   }
