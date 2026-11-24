@@ -8362,6 +8362,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 child: Column(
                   children: [
                   _customerHeader(),
+                  if (_canUndoAuditedConversion)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: FilledButton.icon(
+                        onPressed: _busy ? null : _undoAuditedConversion,
+                        icon: const Icon(Icons.undo),
+                        label: const Text('Undo offline conversion'),
+                      ),
+                    ),
                   if (_estimate && _detail?['sync_state'] == 'conflict')
                     Padding(
                       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
