@@ -161,7 +161,7 @@ void main() {
         'INSERT INTO local_mechanic_work_credits_v1 '
         '(business_id,allocation_id,job_id,labor_line_id,task_id,employee_id,'
         'actual_minutes,rate_cents,completed,paid_operation_id,revision) '
-        'VALUES(?,?,?,?,?,?,?,?,?,?)',
+      'VALUES(?,?,?,?,?,?,?,?,?,?,?)',
         [
           'shop',
           'portion',
