@@ -81,8 +81,9 @@ class LocalEmployeeReports {
     ReportPeriod period, {
     required bool isOwner,
   }) async {
-    if (!isOwner || business.trim().isEmpty)
+    if (!isOwner || business.trim().isEmpty) {
       throw StateError('Owner access is required.');
+    }
     final roster = await OfflineJobAdminService(database: _db)
         .cachedEmployees(business);
     return _db.transaction(() async {
@@ -289,8 +290,9 @@ class LocalEmployeeReports {
       if ((row['direction'] != null && row['direction'] != 'expense') ||
           (row['business_id'] != null && row['business_id'] != business) ||
           const {'void', 'voided', 'deleted'}.contains(row['status']) ||
-          row['sync_state'] == 'reversed')
+          row['sync_state'] == 'reversed') {
         continue;
+      }
       final linkedOperation = links[row['id']];
       final storedOperation = _text(row['payroll_operation_id']);
       if (linkedOperation != null &&
@@ -352,8 +354,9 @@ class LocalEmployeeReports {
       'regular_payroll_portions',
       'regular_payroll_tasks',
       'regular_payroll_task_sources',
-    }))
+    })) {
       return [];
+    }
 
     final coverage = tables.contains('regular_payroll_active_coverage_v1')
         ? 'regular_payroll_active_coverage_v1'
