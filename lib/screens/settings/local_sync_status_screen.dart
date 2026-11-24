@@ -1,3 +1,4 @@
+import 'lan_inventory_preview_screen.dart';
 import 'device_inventory_comparison.dart';
 import 'local_recovery_review_screen.dart';
 import 'owner_offline_numbering_screen.dart';
@@ -1124,6 +1125,17 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                       _syncing ? tr('syncing') : 'Review online sync',
                     ),
                   ),
+                  if (widget.isOwner)
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.devices_outlined),
+                      label: const Text('LAN record preview'),
+                      onPressed: _syncing ? null : () => Navigator.push<void>(
+                        context,
+                        MaterialPageRoute(builder: (_) => LanInventoryPreviewScreen(
+                          businessId: widget.businessId,
+                        )),
+                      ),
+                    ),
                   _syncSection(
                     title: 'Saved on this device',
                     subtitle: 'Compare local record counts across phones.',
