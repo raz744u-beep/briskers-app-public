@@ -87,6 +87,15 @@ void main() {
     await database.customStatement(
       'UPDATE sync_outbox SET last_attempt_at=NULL',
     );
+    await database.customStatement(
+      'CREATE TABLE local_job_recovery_receipts (business_id TEXT, outbox_id INTEGER)',
+    );
+    await database.customStatement(
+      'INSERT INTO local_job_recovery_receipts SELECT business_id,id FROM sync_outbox',
+    );
+    await expectLater(removeDuplicate(), throwsStateError);
+    expect(await cache.locallyVoidedExpenseIds('shop'), isEmpty);
+    await database.customStatement('DELETE FROM local_job_recovery_receipts');
     await removeDuplicate();
     expect(await reports.duplicateGroups('shop', isOwner: true), isEmpty);
     expect(

@@ -942,9 +942,32 @@ class OfflineFinancialWriteService {
         throw StateError('This expense has unresolved sync activity. Review its sync status first.');
       }
       if (safePendingCreate) {
+        final queueId = pendingCreate.read<int>('id');
+        // Older builds recorded dispatch in the replay fence or recovery
+        // receipt before updating the queue's last-attempt timestamp.
+        final evidenceTables = await _database.customSelect(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+          "('sync_replay_fences_v1','local_job_recovery_receipts')",
+        ).get();
+        final tables = evidenceTables.map((row) => row.read<String>('name')).toSet();
+        final fences = tables.contains('sync_replay_fences_v1')
+            ? await _database.customSelect(
+                'SELECT 1 FROM sync_replay_fences_v1 WHERE business_id=? AND replay_key=? LIMIT 1',
+                variables: [Variable(business), Variable('outbox:$queueId')],
+              ).get()
+            : const [];
+        final receipts = tables.contains('local_job_recovery_receipts')
+            ? await _database.customSelect(
+                'SELECT 1 FROM local_job_recovery_receipts WHERE business_id=? AND outbox_id=? LIMIT 1',
+                variables: [Variable(business), Variable(queueId)],
+              ).get()
+            : const [];
+        if (fences.isNotEmpty || receipts.isNotEmpty) {
+          throw StateError('A prior sync attempt needs review before removing this expense.');
+        }
         await _database.customStatement(
           "UPDATE sync_outbox SET state='reversed' WHERE id=?",
-          [pendingCreate.read<int>('id')],
+          [queueId],
         );
       }
       await _database.customStatement(
