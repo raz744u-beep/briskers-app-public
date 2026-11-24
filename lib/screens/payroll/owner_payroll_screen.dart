@@ -61,6 +61,7 @@ import 'tasks_workspace.dart';
 import 'job_scoped_tasks.dart';
 import 'task_selection_dialog.dart';
 import 'payroll_overview.dart';
+import '../reports/employee_reports_pane.dart';
 
 enum _AdvanceSection { balance, paycheck, repayment, history }
 
@@ -2445,7 +2446,7 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
                   key: ValueKey(controller.index),
                   child: switch (controller.index) {
                     1 => _safeTab(_payrollTab, 'Payroll'),
-                    2 => _safeTab(_reportsPanel, 'Reports'),
+                    2 => _canView ? _employeeReports() : _safeTab(_reportsPanel, 'Reports'),
                     3 => _taxesTab(),
                     _ => const SizedBox.shrink(),
                   },
@@ -2465,6 +2466,26 @@ class _OwnerPayrollScreenState extends State<OwnerPayrollScreen> with WidgetsBin
       !_canView ? '$name requires the saved Owner account.'
         : _loadingLocal ? 'Loading saved $name…' : 'Saved $name has not loaded. Use Retry above.',),),);
   }
+
+  Widget _employeeReports() => SafeArea(
+    top: false,
+    child: EmployeeReportsPane(
+      businessId: widget.businessId, isOwner: _canView, database: _db,
+      employeeId: widget.employeeId, initialPeriod: EmployeeReportsPane.shopWeek(_week),
+      sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
+      onPaymentTools: () async {
+        await Navigator.of(context).push<void>(MaterialPageRoute(
+          builder: (_) => Scaffold(
+            appBar: const ApprovedTasksHeader(title: 'Payroll payment tools'),
+            bottomNavigationBar: widget.sharedBottomNavigationBar,
+            backgroundColor: taskCanvas,
+            body: _safeTab(_reportsPanel, 'Reports'),
+          ),
+        ));
+        if (mounted) await _load();
+      },
+    ),
+  );
 
   Future<bool> _correctRecordedPayment(
     Map<String, dynamic> payment, PayrollPaymentAction action,

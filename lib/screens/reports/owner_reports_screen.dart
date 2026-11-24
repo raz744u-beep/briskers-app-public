@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/owner_report_models.dart';
+import 'employee_reports_pane.dart';
 import 'owner_report_transactions_screen.dart';
 import '../../services/local_owner_reports.dart';
 import '../../services/owner_report_preferences.dart';
@@ -43,6 +44,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
   bool _allCustomers = false, _allItems = false;
   final _customerSearch = TextEditingController();
   final _itemSearch = TextEditingController();
+  final _employeeReports = GlobalKey<EmployeeReportsPaneState>();
   static final _currency = NumberFormat.simpleCurrency(locale: 'en_US');
   String _money(int? cents) => cents == null ? 'Not recorded' : _currency.format(cents / 100);
 
@@ -50,7 +52,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _tabs = TabController(length: 5, vsync: this)..addListener(_tabChanged);
+    _tabs = TabController(length: 6, vsync: this)..addListener(_tabChanged);
     _period = ReportPeriod.preset('thisMonth', DateTime.now());
     _scope();
   }
@@ -525,19 +527,26 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
       '60days' => 'Last 60 Days', '90days' => 'Last 90 Days', 'thisYear' => 'This Year', _ => 'Custom'};
     return Scaffold(backgroundColor: taskCanvas,
       appBar: ApprovedTasksHeader(title: 'Owner Reports', actions: [IconButton(tooltip: 'Refresh local reports',
-        onPressed: () => _load(), icon: const Icon(Icons.refresh, color: Colors.white))]),
+        onPressed: () => _tabs.index == 3 ? _employeeReports.currentState?.refresh() : _load(),
+        icon: const Icon(Icons.refresh, color: Colors.white))]),
       bottomNavigationBar: widget.sharedBottomNavigationBar,
       body: Column(children: [
         const SizedBox(height: 12),
-        SingleChildScrollView(scrollDirection: Axis.horizontal, child: SizedBox(width: MediaQuery.sizeOf(context).width < 560 ? 560 : MediaQuery.sizeOf(context).width,
+        SingleChildScrollView(scrollDirection: Axis.horizontal, child: SizedBox(width: MediaQuery.sizeOf(context).width < 665 ? 665 : MediaQuery.sizeOf(context).width,
           child: BriskersCurvedTabs(controller: _tabs, entries: const [
             (label:'Overview', color:BriskersColors.tabBlue, icon:Icons.bar_chart),
             (label:'Financial', color:BriskersColors.tabGreen, icon:Icons.payments_outlined),
             (label:'Taxes', color:BriskersColors.tabGray, icon:Icons.description_outlined),
+            (label:'Employees', color:BriskersColors.tabBlue, icon:Icons.badge_outlined),
             (label:'Customers', color:BriskersColors.tabPurple, icon:Icons.people_outline),
             (label:'Items', color:BriskersColors.tabBlue, icon:Icons.inventory_2_outlined),
           ]))),
-        Expanded(child: RefreshIndicator(onRefresh: _load, child: ListView(key: ValueKey('owner-report-body-${_tabs.index}'), padding: const EdgeInsets.all(12), children: [
+        if (_tabs.index == 3)
+          Expanded(child: EmployeeReportsPane(
+            key: _employeeReports, businessId: widget.businessId, isOwner: widget.isOwner,
+            database: _repository.db, sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
+          ))
+        else Expanded(child: RefreshIndicator(onRefresh: _load, child: ListView(key: ValueKey('owner-report-body-${_tabs.index}'), padding: const EdgeInsets.all(12), children: [
           Container(key: const ValueKey('report-date-range'), margin: const EdgeInsets.only(bottom: 14), decoration: BoxDecoration(
             color: const Color(0xFFDCEBFE), borderRadius: BorderRadius.circular(16)),
             child: Row(children: [
@@ -554,8 +563,8 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
           if (_data == null && _error == null) const Padding(padding: EdgeInsets.all(24), child: Center(child: Text('Reading local reports…')))
           else if (_data != null) ...[
             if (_tabs.index == 0) _overview(_data!)
-            else if (_tabs.index == 3) _customers(_data!)
-            else if (_tabs.index == 4) _items(_data!)
+            else if (_tabs.index == 4) _customers(_data!)
+            else if (_tabs.index == 5) _items(_data!)
             else _otherTab(),
             const Text('Calculated from records saved on this device.', textAlign: TextAlign.center,
               style: TextStyle(fontSize: 11, color: BriskersColors.secondaryText)),
