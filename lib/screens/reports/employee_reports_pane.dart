@@ -10,6 +10,7 @@ import '../expenses/expense_detail_screen.dart';
 import '../jobs/job_detail_screen.dart';
 import '../jobs/job_document_screen.dart';
 import '../payroll/approved_tasks_ui.dart';
+import 'payroll_report_names_screen.dart';
 
 class EmployeeReportsPane extends StatefulWidget {
   const EmployeeReportsPane({
@@ -621,6 +622,30 @@ class EmployeeReportsPaneState extends State<EmployeeReportsPane> {
                   person ?? EmployeeReportRow(widget.employeeId!, 'Employee'),
                 )
               else if (data != null) ...[
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.link),
+                    label: const Text('Manage payroll names'),
+                    onPressed: () async {
+                      await Navigator.of(context).push<void>(
+                        MaterialPageRoute(
+                          builder: (_) => PayrollReportNamesScreen(
+                            businessId: widget.businessId,
+                            repository: LocalEmployeeReports(
+                              database: widget.database,
+                            ),
+                            isOwner: widget.isOwner,
+                            data: data,
+                            sharedBottomNavigationBar:
+                                widget.sharedBottomNavigationBar,
+                          ),
+                        ),
+                      );
+                      await refresh();
+                    },
+                  ),
+                ),
                 if (rows.isEmpty)
                   const Text(
                     'No saved employees or payroll payments for this period.',

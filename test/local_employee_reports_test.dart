@@ -119,6 +119,58 @@ void main() {
       expect(historical.name, 'Former Mechanic');
       expect(historical.paidCents, 40000);
       expect(historical.labor, isEmpty);
+      await reports.savePayrollName(
+        'shop',
+        isOwner: true,
+        name: '  CHRIS ',
+        employeeId: 'chris',
+      );
+      await reports.savePayrollName(
+        'shop',
+        isOwner: true,
+        name: 'Former  Mechanic',
+        employeeId: 'chris',
+      );
+      final linkedWeek = await reports.load(
+        'shop',
+        ReportPeriod(DateTime(2026, 11, 23), DateTime(2026, 11, 27)),
+        isOwner: true,
+      );
+      expect(linkedWeek.payrollNames, hasLength(2));
+      expect(linkedWeek.review, isEmpty);
+      expect(
+        linkedWeek.employees.singleWhere((row) => row.id == 'chris').paidCents,
+        40000,
+      );
+      final linkedPrior = await reports.load(
+        'shop',
+        ReportPeriod(DateTime(2025), DateTime(2025, 12, 31)),
+        isOwner: true,
+      );
+      expect(linkedPrior.employees.where((row) => row.historical), isEmpty);
+      final merged = linkedPrior.employees.singleWhere(
+        (row) => row.id == 'chris',
+      );
+      expect(merged.paidCents, 40000);
+      expect(
+        merged.payments.single.expense?['counterparty'],
+        'Former Mechanic',
+      );
+      expect(merged.labor, isEmpty);
+      await reports.removePayrollName(
+        'shop',
+        isOwner: true,
+        name: 'former mechanic',
+      );
+      final restored = await reports.load(
+        'shop',
+        ReportPeriod(DateTime(2025), DateTime(2025, 12, 31)),
+        isOwner: true,
+      );
+      expect(
+        restored.employees.singleWhere((row) => row.historical).paidCents,
+        40000,
+      );
       expect(
         await database.customSelect('SELECT * FROM sync_outbox').get(),
         isEmpty,
@@ -161,7 +213,7 @@ void main() {
         'INSERT INTO local_mechanic_work_credits_v1 '
         '(business_id,allocation_id,job_id,labor_line_id,task_id,employee_id,'
         'actual_minutes,rate_cents,completed,paid_operation_id,revision) '
-      'VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+        'VALUES(?,?,?,?,?,?,?,?,?,?,?)',
         [
           'shop',
           'portion',

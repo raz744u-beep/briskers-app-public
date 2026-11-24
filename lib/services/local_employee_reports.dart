@@ -62,6 +62,8 @@ typedef EmployeeReportData = ({
   List<EmployeeReportRow> employees,
   List<EmployeeReportPayment> review,
   List<int> years,
+  Map<String, String> employeeNames,
+  List<({String name, String employeeId})> payrollNames,
 });
 
 /// Reads local snapshots without preparing, posting or editing payroll.
@@ -70,6 +72,73 @@ class LocalEmployeeReports {
     : _db = database ?? localDatabase;
 
   final BriskersLocalDatabase _db;
+  static const _payrollNamesTable = 'local_employee_report_payroll_names';
+
+  static void _requireOwner(String business, bool isOwner) {
+    if (!isOwner || business.trim().isEmpty) {
+      throw StateError('Owner access is required.');
+    }
+  }
+
+  Future<void> savePayrollName(
+    String business, {
+    required bool isOwner,
+    required String name,
+    required String employeeId,
+  }) async {
+    _requireOwner(business, isOwner);
+    final key = _normalized(name);
+    if (key == null || name.trim().length > 100) {
+      throw ArgumentError('Enter a payroll name up to 100 characters.');
+    }
+    final roster = await OfflineJobAdminService(database: _db)
+        .cachedEmployees(business);
+    await _db.transaction(() async {
+      final known =
+          roster.any((row) => row['id'] == employeeId) ||
+          ((await _db
+                      .customSelect(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='regular_payroll_employees'",
+                      )
+                      .get())
+                  .isNotEmpty &&
+              (await _db
+                      .customSelect(
+                        'SELECT 1 FROM regular_payroll_employees WHERE business_id=? AND id=?',
+                        variables: [Variable(business), Variable(employeeId)],
+                      )
+                      .get())
+                  .isNotEmpty);
+      if (!known) throw StateError('Choose a saved employee.');
+      await _db.customStatement('''
+        CREATE TABLE IF NOT EXISTS $_payrollNamesTable (
+          business_id TEXT NOT NULL, name_key TEXT NOT NULL,
+          saved_name TEXT NOT NULL, employee_id TEXT NOT NULL,
+          PRIMARY KEY (business_id, name_key)
+        )
+      ''');
+      await _db.customStatement(
+        '''
+        INSERT INTO $_payrollNamesTable VALUES (?,?,?,?)
+        ON CONFLICT(business_id, name_key) DO UPDATE
+        SET saved_name=excluded.saved_name, employee_id=excluded.employee_id
+      ''',
+        [business, key, name.trim(), employeeId],
+      );
+    });
+  }
+
+  Future<void> removePayrollName(
+    String business, {
+    required bool isOwner,
+    required String name,
+  }) async {
+    _requireOwner(business, isOwner);
+    await _db.customStatement(
+      'DELETE FROM $_payrollNamesTable WHERE business_id=? AND name_key=?',
+      [business, _normalized(name)],
+    );
+  }
 
   Future<List<ReportRow>> _read(String sql, String business) async =>
       (await _db.customSelect(sql, variables: [Variable(business)]).get())
@@ -81,9 +150,7 @@ class LocalEmployeeReports {
     ReportPeriod period, {
     required bool isOwner,
   }) async {
-    if (!isOwner || business.trim().isEmpty) {
-      throw StateError('Owner access is required.');
-    }
+    _requireOwner(business, isOwner);
     final roster = await OfflineJobAdminService(database: _db)
         .cachedEmployees(business);
     return _db.transaction(() async {
@@ -132,6 +199,22 @@ class LocalEmployeeReports {
           }
         }
       }
+      final employeeNames = {
+        for (final entry in reports.entries)
+          entry.key: _text(staff[entry.key]?['name']) ?? entry.value.name,
+      };
+      final payrollNames = tables.contains(_payrollNamesTable)
+          ? await _read(
+              'SELECT name_key,saved_name,employee_id FROM $_payrollNamesTable '
+              'WHERE business_id=? ORDER BY name_key',
+              business,
+            )
+          : <ReportRow>[];
+      final savedLinks = <String, String>{
+        for (final row in payrollNames)
+          if (staff.containsKey(row['employee_id']))
+            row['name_key'] as String: row['employee_id'] as String,
+      };
 
       final years = <int>{};
       final review = <EmployeeReportPayment>[];
@@ -145,15 +228,28 @@ class LocalEmployeeReports {
         if (date != null && !period.containsDate(date)) return;
         final name = _normalized(payment.savedName);
         final matches = names[name] ?? const <String>{};
+        // A verified employee ID takes precedence over name-based links.
+        // An explicitly linked historical name can resolve older expenses
+        // whose employee ID is absent from the saved roster.
+        final linkedEmployee =
+            payment.expense != null &&
+                (employee == null ||
+                    (payment.operationId == null &&
+                        !staff.containsKey(employee)))
+            ? savedLinks[name]
+            : null;
+        final resolvedEmployee = linkedEmployee ?? employee;
         if (ambiguous ||
             date == null ||
             payment.cents == null ||
             payment.cents! < 0 ||
-            (employee == null && (matches.length > 1 || name == null))) {
+            (resolvedEmployee == null &&
+                (matches.length > 1 || name == null))) {
           review.add(payment);
           return;
         }
-        final id = employee ?? matches.singleOrNull ?? 'historical:$name';
+        final id =
+            resolvedEmployee ?? matches.singleOrNull ?? 'historical:$name';
         final report = reports.putIfAbsent(
           id,
           () => EmployeeReportRow(
@@ -210,6 +306,14 @@ class LocalEmployeeReports {
           ),
         review: review..sort((a, b) => recentFirst(a.date, b.date)),
         years: years.toList()..sort((a, b) => b.compareTo(a)),
+        employeeNames: employeeNames,
+        payrollNames: [
+          for (final row in payrollNames)
+            (
+              name: row['saved_name'] as String,
+              employeeId: row['employee_id'] as String,
+            ),
+        ],
       );
     });
   }
