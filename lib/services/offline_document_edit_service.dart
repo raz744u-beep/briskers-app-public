@@ -923,6 +923,16 @@ class OfflineDocumentEditService {
           replayGeneration) {
         throw StateError('Document replay was invalidated by Job revocation.');
       }
+      // A local edit may have been saved while the earlier RPC was in
+      // flight. Preserve its optimistic detail and pending state until
+      // the remaining queue is acknowledged.
+      final remaining = await _database.customSelect(
+        "SELECT id FROM sync_outbox WHERE business_id = ? "
+        "AND entity_type = 'document_edit' AND entity_id = ? "
+        "AND state <> 'done' LIMIT 1",
+        variables: [Variable<String>(businessId), Variable<String>(documentId)],
+      ).getSingleOrNull();
+      if (remaining != null) return;
       final previous = await _cache.load(businessId, documentId);
       await _cache.save(businessId, documentId, <String, dynamic>{
         ...serverDetail,

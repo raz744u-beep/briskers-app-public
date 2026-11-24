@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +14,8 @@ class _FakeApi extends BriskersApi {
   _FakeApi();
 
   var addCalls = 0;
+  Completer<void>? firstAddEntered;
+  Completer<void>? releaseFirstAdd;
   final Map<String, dynamic> _detail = {
     'id': 'estimate-1',
     'kind': 'estimate',
@@ -46,6 +50,10 @@ class _FakeApi extends BriskersApi {
     String lineKind = 'item',
   }) async {
     addCalls++;
+    if (addCalls == 1 && firstAddEntered != null) {
+      firstAddEntered!.complete();
+      await releaseFirstAdd!.future;
+    }
     final lines = List<Map<String, dynamic>>.from(
       (_detail['lines'] as List).map(
         (raw) => Map<String, dynamic>.from(raw as Map),
@@ -64,9 +72,10 @@ class _FakeApi extends BriskersApi {
     });
     _detail['lines'] = lines;
     _detail['row_version'] = expectedVersion + 1;
-    final net = quantity * unitPrice;
-    final tax = net * taxRate;
-    _detail['total_amount'] = net + tax;
+    _detail['total_amount'] = lines.fold<num>(0, (total, line) {
+      final net = (line['quantity'] as num) * (line['unit_price'] as num);
+      return total + net + net * (line['tax_rate'] as num);
+    });
   }
 }
 
@@ -175,6 +184,100 @@ void main() {
     expect((syncedLines.single as Map)['id'], 'server-line-1');
 
     await database.close();
+  });
+
+  test('replay preserves a new local estimate line queued during add RPC',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final database = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(database.close);
+    final cache = LocalDocumentDetailCache(database: database);
+    final api = _FakeApi()
+      ..firstAddEntered = Completer<void>()
+      ..releaseFirstAdd = Completer<void>();
+    final service = OfflineDocumentEditService(
+      api: api, cache: cache, database: database,
+    );
+    final editor = OfflineDocumentEditService(
+      api: api, cache: cache, database: database,
+    );
+
+    await cache.save('business-1', 'estimate-1', {
+      'id': 'estimate-1',
+      'kind': 'estimate',
+      'status': 'draft',
+      'row_version': 1,
+      'total_amount': 0,
+      'net_amount': 0,
+      'tax_amount': 0,
+      'lines': <Map<String, dynamic>>[],
+    });
+
+    await database.customStatement(
+      '''
+      INSERT INTO local_documents (
+        id, business_id, job_id, customer_id, kind, document_number,
+        status, display_status_code, closed_at, converted, total,
+        created_at, server_updated_at, row_version, sync_state
+      ) VALUES (?, ?, ?, ?, 'estimate', NULL, 'draft', 'draft',
+                NULL, 0, 0, ?, ?, 1, 'synced')
+      ''',
+      [
+        'estimate-1',
+        'business-1',
+        'job-1',
+        'customer-1',
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+      ],
+    );
+
+    await service.addLine(
+      'business-1', 'estimate-1',
+      name: 'First part', quantity: 1, unitPrice: 10,
+      taxRate: 0, lineKind: 'item',
+    );
+    final flush = service.flush('business-1');
+    try {
+      await api.firstAddEntered!.future.timeout(const Duration(seconds: 5));
+      await editor.addLine(
+        'business-1', 'estimate-1',
+        name: 'Second part', quantity: 1, unitPrice: 20,
+        taxRate: 0, lineKind: 'item',
+      );
+    } finally {
+      api.releaseFirstAdd!.complete();
+      await flush;
+    }
+
+    final pending = await cache.load('business-1', 'estimate-1');
+    expect(pending!['lines'], hasLength(2));
+    expect(pending['total_amount'], 30);
+    expect(api.addCalls, 1);
+    final state = await database.customSelect(
+      "SELECT sync_state, total FROM local_documents WHERE id = 'estimate-1'",
+    ).getSingle();
+    expect(state.read<String>('sync_state'), 'pending');
+    expect(state.data['total'], 30);
+    final queue = await database.customSelect(
+      "SELECT id FROM sync_outbox WHERE entity_type = 'document_edit' "
+      "AND entity_id = 'estimate-1'",
+    ).get();
+    expect(queue, hasLength(1));
+
+    await service.flush('business-1');
+    final synced = await cache.load('business-1', 'estimate-1');
+    expect(synced!['lines'], hasLength(2));
+    expect(synced['total_amount'], 30);
+    expect(api.addCalls, 2);
+    final finalState = await database.customSelect(
+      "SELECT sync_state FROM local_documents WHERE id = 'estimate-1'",
+    ).getSingle();
+    expect(finalState.read<String>('sync_state'), 'synced');
+    expect(await database.customSelect(
+      "SELECT id FROM sync_outbox WHERE entity_type = 'document_edit' "
+      "AND entity_id = 'estimate-1'",
+    ).get(), isEmpty);
   });
 
   test('pending taxable catalog line is repaired before reconnect sync',
