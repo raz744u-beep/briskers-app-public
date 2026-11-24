@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +14,14 @@ class _FakeApi extends BriskersApi {
   _FakeApi();
 
   var addCalls = 0;
+  var copyCalls = 0;
+  bool loseCopyResponse = false;
+  bool failNextDetailAfterCopy = false;
+  bool omitCopyIdentity = false;
+  bool loseAddResponse = false;
+  bool failNextDetailAfterAdd = false;
+  Completer<void>? firstAddEntered;
+  Completer<void>? releaseFirstAdd;
   final Map<String, dynamic> _detail = {
     'id': 'estimate-1',
     'kind': 'estimate',
@@ -26,6 +36,14 @@ class _FakeApi extends BriskersApi {
     String businessId,
     String documentId,
   ) async {
+    if (copyCalls > 0 && failNextDetailAfterCopy) {
+      failNextDetailAfterCopy = false;
+      throw TimeoutException('Synthetic detail read after committed copy');
+    }
+    if (addCalls > 0 && failNextDetailAfterAdd) {
+      failNextDetailAfterAdd = false;
+      throw TimeoutException('Synthetic detail read after committed add');
+    }
     return {
       ..._detail,
       'lines': List<dynamic>.from(_detail['lines'] as List),
@@ -46,6 +64,10 @@ class _FakeApi extends BriskersApi {
     String lineKind = 'item',
   }) async {
     addCalls++;
+    if (addCalls == 1 && firstAddEntered != null) {
+      firstAddEntered!.complete();
+      await releaseFirstAdd!.future;
+    }
     final lines = List<Map<String, dynamic>>.from(
       (_detail['lines'] as List).map(
         (raw) => Map<String, dynamic>.from(raw as Map),
@@ -64,9 +86,41 @@ class _FakeApi extends BriskersApi {
     });
     _detail['lines'] = lines;
     _detail['row_version'] = expectedVersion + 1;
-    final net = quantity * unitPrice;
-    final tax = net * taxRate;
-    _detail['total_amount'] = net + tax;
+    _detail['total_amount'] = lines.fold<num>(0, (total, line) {
+      final net = (line['quantity'] as num) * (line['unit_price'] as num);
+      return total + net + net * (line['tax_rate'] as num);
+    });
+    if (loseAddResponse) {
+      loseAddResponse = false;
+      throw TimeoutException('Synthetic lost response after committed add');
+    }
+  }
+  @override
+  Future<String> copyDocumentLine(
+    String businessId,
+    String lineId, {
+    required int expectedVersion,
+  }) async {
+    copyCalls++;
+    final lines = List<Map<String, dynamic>>.from(
+      (_detail['lines'] as List).map(
+        (raw) => Map<String, dynamic>.from(raw as Map),
+      ),
+    );
+    final source = lines.singleWhere((line) => line['id'] == lineId);
+    final id = 'server-copy-$copyCalls';
+    lines.add({...source, 'id': id, 'position': lines.length + 1});
+    _detail['lines'] = lines;
+    _detail['row_version'] = expectedVersion + 1;
+    _detail['total_amount'] = lines.fold<num>(0, (total, line) {
+      final net = (line['quantity'] as num) * (line['unit_price'] as num);
+      return total + net + net * (line['tax_rate'] as num);
+    });
+    if (loseCopyResponse) {
+      loseCopyResponse = false;
+      throw TimeoutException('Synthetic lost response after committed copy');
+    }
+    return omitCopyIdentity ? '' : id;
   }
 }
 
@@ -176,6 +230,277 @@ void main() {
 
     await database.close();
   });
+
+  test('replay preserves a new local estimate line queued during add RPC',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final database = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(database.close);
+    final cache = LocalDocumentDetailCache(database: database);
+    final api = _FakeApi()
+      ..firstAddEntered = Completer<void>()
+      ..releaseFirstAdd = Completer<void>();
+    final service = OfflineDocumentEditService(
+      api: api, cache: cache, database: database,
+    );
+    final editor = OfflineDocumentEditService(
+      api: api, cache: cache, database: database,
+    );
+
+    await cache.save('business-1', 'estimate-1', {
+      'id': 'estimate-1',
+      'kind': 'estimate',
+      'status': 'draft',
+      'row_version': 1,
+      'total_amount': 0,
+      'net_amount': 0,
+      'tax_amount': 0,
+      'lines': <Map<String, dynamic>>[],
+    });
+
+    await database.customStatement(
+      '''
+      INSERT INTO local_documents (
+        id, business_id, job_id, customer_id, kind, document_number,
+        status, display_status_code, closed_at, converted, total,
+        created_at, server_updated_at, row_version, sync_state
+      ) VALUES (?, ?, ?, ?, 'estimate', NULL, 'draft', 'draft',
+                NULL, 0, 0, ?, ?, 1, 'synced')
+      ''',
+      [
+        'estimate-1',
+        'business-1',
+        'job-1',
+        'customer-1',
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+      ],
+    );
+
+    await service.addLine(
+      'business-1', 'estimate-1',
+      name: 'First part', quantity: 1, unitPrice: 10,
+      taxRate: 0, lineKind: 'item',
+    );
+    final flush = service.flush('business-1');
+    try {
+      await api.firstAddEntered!.future.timeout(const Duration(seconds: 5));
+      await editor.addLine(
+        'business-1', 'estimate-1',
+        name: 'Second part', quantity: 1, unitPrice: 20,
+        taxRate: 0, lineKind: 'item',
+      );
+    } finally {
+      api.releaseFirstAdd!.complete();
+      await flush;
+    }
+
+    final pending = await cache.load('business-1', 'estimate-1');
+    expect(pending!['lines'], hasLength(2));
+    expect(pending['total_amount'], 30);
+    expect(api.addCalls, 1);
+    final state = await database.customSelect(
+      "SELECT sync_state, total FROM local_documents WHERE id = 'estimate-1'",
+    ).getSingle();
+    expect(state.read<String>('sync_state'), 'pending');
+    expect(state.data['total'], 30);
+    final queue = await database.customSelect(
+      "SELECT id FROM sync_outbox WHERE entity_type = 'document_edit' "
+      "AND entity_id = 'estimate-1'",
+    ).get();
+    expect(queue, hasLength(1));
+
+    await service.flush('business-1');
+    final synced = await cache.load('business-1', 'estimate-1');
+    expect(synced!['lines'], hasLength(2));
+    expect(synced['total_amount'], 30);
+    expect(api.addCalls, 2);
+    final finalState = await database.customSelect(
+      "SELECT sync_state FROM local_documents WHERE id = 'estimate-1'",
+    ).getSingle();
+    expect(finalState.read<String>('sync_state'), 'synced');
+    expect(await database.customSelect(
+      "SELECT id FROM sync_outbox WHERE entity_type = 'document_edit' "
+      "AND entity_id = 'estimate-1'",
+    ).get(), isEmpty);
+  });
+
+  for (final lostResponse in [false, true]) {
+    test('committed estimate add is held after ${lostResponse ? 'lost response' : 'failed detail read'}',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final database = BriskersLocalDatabase(NativeDatabase.memory());
+      addTearDown(database.close);
+      final cache = LocalDocumentDetailCache(database: database);
+      final api = _FakeApi()
+        ..loseAddResponse = lostResponse
+        ..failNextDetailAfterAdd = !lostResponse;
+      OfflineDocumentEditService service() => OfflineDocumentEditService(
+        api: api, cache: cache, database: database,
+      );
+      await cache.save('business-1', 'estimate-1', {
+        'id': 'estimate-1',
+        'kind': 'estimate',
+        'status': 'draft',
+        'row_version': 1,
+        'total_amount': 0,
+        'net_amount': 0,
+        'tax_amount': 0,
+        'lines': <Map<String, dynamic>>[],
+      });
+      await database.customStatement(
+        '''
+        INSERT INTO local_documents (
+          id, business_id, job_id, customer_id, kind, status,
+          display_status_code, converted, total, row_version, sync_state
+        ) VALUES (?, ?, ?, ?, 'estimate', 'draft', 'draft', 0, 0, 1, 'synced')
+        ''',
+        ['estimate-1', 'business-1', 'job-1', 'customer-1'],
+      );
+      final editor = service();
+      await editor.addLine(
+        'business-1', 'estimate-1',
+        name: 'One part', quantity: 1, unitPrice: 30,
+        taxRate: 0, lineKind: 'item',
+      );
+      await editor.flush('business-1');
+      expect(api.addCalls, 1);
+      final queue = await database.customSelect(
+        "SELECT id FROM sync_outbox WHERE entity_type = 'document_edit'",
+      ).getSingle();
+      final outboxId = queue.read<int>('id');
+      final fence = await database.customSelect(
+        'SELECT status FROM sync_replay_fences_v1 WHERE replay_key = ?',
+        variables: [Variable<String>('outbox:$outboxId')],
+      ).getSingle();
+      expect(fence.read<String>('status'), lostResponse ? 'review' : 'inflight');
+      // Make any ordinary transient cooldown expire without waiting. The
+      // durable hold must still prevent transport from a new service instance.
+      await database.customStatement(
+        'UPDATE sync_replay_fences_v1 SET not_before_ms = 0',
+      );
+      await service().flush('business-1');
+      expect(api.addCalls, 1);
+      final remote = await api.documentDetail('business-1', 'estimate-1');
+      expect(remote['lines'], hasLength(1));
+      expect(remote['total_amount'], 30);
+      final local = await cache.load('business-1', 'estimate-1');
+      expect(local!['lines'], hasLength(1));
+      expect(local['total_amount'], 30);
+      final state = await database.customSelect(
+        "SELECT sync_state FROM local_documents WHERE id = 'estimate-1'",
+      ).getSingle();
+      expect(state.read<String>('sync_state'), 'pending');
+      expect(await database.customSelect(
+        "SELECT id FROM sync_outbox WHERE entity_type = 'document_edit'",
+      ).get(), hasLength(1));
+    });
+  }
+
+  for (final outcome in ['success', 'lost response', 'failed detail read',
+    'missing copy identity', 'ambiguous copy receipt']) {
+    test('estimate copy replay: $outcome', () async {
+      SharedPreferences.setMockInitialValues({});
+      final database = BriskersLocalDatabase(NativeDatabase.memory());
+      addTearDown(database.close);
+      final cache = LocalDocumentDetailCache(database: database);
+      final api = _FakeApi();
+      OfflineDocumentEditService service() => OfflineDocumentEditService(
+        api: api, cache: cache, database: database,
+      );
+      await cache.save('business-1', 'estimate-1', {
+        'id': 'estimate-1',
+        'kind': 'estimate',
+        'status': 'draft',
+        'row_version': 1,
+        'total_amount': 0,
+        'net_amount': 0,
+        'tax_amount': 0,
+        'lines': <Map<String, dynamic>>[],
+      });
+      await database.customStatement(
+        '''
+        INSERT INTO local_documents (
+          id, business_id, job_id, customer_id, kind, status,
+          display_status_code, converted, total, row_version, sync_state
+        ) VALUES (?, ?, ?, ?, 'estimate', 'draft', 'draft', 0, 0, 1, 'synced')
+        ''',
+        ['estimate-1', 'business-1', 'job-1', 'customer-1'],
+      );
+      final editor = service();
+      await editor.addLine(
+        'business-1', 'estimate-1',
+        name: 'Original part', quantity: 1, unitPrice: 30,
+        taxRate: 0, lineKind: 'item',
+      );
+      await editor.flush('business-1');
+      expect(api.addCalls, 1);
+      final before = await cache.load('business-1', 'estimate-1');
+      expect(before!['total_amount'], 30);
+      api.loseCopyResponse = outcome == 'lost response';
+      api.failNextDetailAfterCopy = outcome == 'failed detail read' ||
+          outcome == 'ambiguous copy receipt';
+      api.omitCopyIdentity = outcome == 'missing copy identity';
+
+      await editor.copyLine('business-1', 'estimate-1', 'server-line-1');
+      final desired = await cache.load('business-1', 'estimate-1');
+      final localCopyId = ((desired!['lines'] as List)[1] as Map)['id'];
+      expect(localCopyId, isNot('server-line-1'));
+      expect(desired['total_amount'], 60);
+      expect(api.copyCalls, 0);
+      await editor.flush('business-1');
+      expect(api.copyCalls, 1);
+
+      final queue = await database.customSelect(
+        "SELECT id FROM sync_outbox WHERE entity_type = 'document_edit'",
+      ).get();
+      if (outcome == 'success') {
+        expect(queue, isEmpty);
+      } else {
+        expect(queue, hasLength(1));
+        final outboxId = queue.single.read<int>('id');
+        final fence = await database.customSelect(
+          'SELECT status FROM sync_replay_fences_v1 WHERE replay_key = ?',
+          variables: [Variable<String>('outbox:$outboxId')],
+        ).getSingle();
+        expect(fence.read<String>('status'),
+          outcome == 'lost response' ? 'review' : 'inflight');
+        await database.customStatement(
+          'UPDATE sync_replay_fences_v1 SET not_before_ms = 0',
+        );
+        if (outcome == 'ambiguous copy receipt') {
+          await database.customStatement(
+            'INSERT INTO local_job_recovery_receipts '
+            '(business_id,outbox_id,response_json,request_generation,captured_at) '
+            'SELECT business_id,outbox_id,response_json,request_generation,captured_at '
+            'FROM local_job_recovery_receipts WHERE business_id=? AND outbox_id=?',
+            ['business-1', outboxId],
+          );
+        }
+      }
+
+      await service().flush('business-1');
+      expect(api.copyCalls, 1);
+      final recovered = outcome == 'success' || outcome == 'failed detail read';
+      final remote = await api.documentDetail('business-1', 'estimate-1');
+      expect(remote['lines'], hasLength(2));
+      expect(remote['total_amount'], 60);
+      final local = await cache.load('business-1', 'estimate-1');
+      expect(local!['lines'], hasLength(2));
+      expect(local['total_amount'], 60);
+      final ids = (local['lines'] as List)
+          .map((line) => (line as Map)['id']);
+      expect(ids, contains(recovered ? 'server-copy-1' : localCopyId));
+      final state = await database.customSelect(
+        "SELECT sync_state FROM local_documents WHERE id = 'estimate-1'",
+      ).getSingle();
+      expect(state.read<String>('sync_state'),
+        recovered ? 'synced' : 'pending');
+      expect(await database.customSelect(
+        "SELECT id FROM sync_outbox WHERE entity_type = 'document_edit'",
+      ).get(), hasLength(recovered ? 0 : 1));
+    });
+  }
 
   test('pending taxable catalog line is repaired before reconnect sync',
       () async {

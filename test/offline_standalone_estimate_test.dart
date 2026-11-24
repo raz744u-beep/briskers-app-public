@@ -17,6 +17,9 @@ import 'package:briskers_app/services/local_repair_groups.dart';
 class _StandaloneApi extends BriskersApi {
   final List<String> operationIds = [];
   var detailAttempts = 0;
+  bool invalidServerPositions = false;
+  late List<Map<String, dynamic>> syncedLines;
+  String? syncedMemo;
   late String syncedNumber;
   late String syncedDate;
   @override
@@ -33,6 +36,14 @@ class _StandaloneApi extends BriskersApi {
     operationIds.add(operationId);
     syncedNumber = publicNumber;
     syncedDate = documentDate;
+    // Mirror the idempotently committed server quote. Only server row IDs
+    // and an intentionally invalid test position may differ.
+    syncedLines = [
+      for (final line in lines)
+        <String, dynamic>{...line, 'id': 'server-line',
+          'position': invalidServerPositions ? 0 : line['position']},
+    ];
+    syncedMemo = memo;
     expect(customerId, 'customer-id');
     expect(lines, hasLength(1));
     expect(lines.single['name'], 'Labor');
@@ -61,20 +72,10 @@ class _StandaloneApi extends BriskersApi {
       'net_amount': 220,
       'tax_amount': 0,
       'total_amount': 220,
-      'memo': 'Price subject to inspection',
+      'memo': syncedMemo,
       'origin': 'native',
       'legacy_read_only': false,
-      'lines': [
-        {
-          'id': 'server-line',
-          'position': 1,
-          'name': 'Labor',
-          'quantity': 4.4,
-          'unit_price': 50,
-          'line_kind': 'labor',
-          'tax_rate': 0,
-        },
-      ],
+      'lines': syncedLines,
     };
   }
 }
@@ -198,6 +199,77 @@ void main() {
       isEmpty,
     );
   });
+  for (final invalidServerPositions in [false, true]) {
+    test(
+      invalidServerPositions
+          ? 'invalid server line positions leave offline grouped estimate in review without retry'
+          : 'offline grouped estimate retains membership after real outbox line-ID remap',
+      () async {
+        SharedPreferences.setMockInitialValues({});
+        final mode = BriskersConnectionModeController.instance;
+        await mode.setMode(BriskersConnectionMode.offline);
+        final db = BriskersLocalDatabase(NativeDatabase.memory());
+        addTearDown(() async {
+          await db.close();
+          LocalDocumentDetailCache.sqliteWritesEnabled = false;
+          await mode.setMode(BriskersConnectionMode.auto);
+        });
+        await LocalDocumentDetailCache.initialize(db);
+        final cache = LocalDocumentDetailCache(database: db);
+        final api = _StandaloneApi()
+          ..invalidServerPositions = invalidServerPositions;
+        final drafts = OfflineDocumentDraftService(
+          database: db, cache: cache, api: api,
+        );
+        final localId = await drafts.createStandaloneEstimate(
+          'shop', customerId: 'customer-id', customerName: 'Test Customer',
+        );
+        await drafts.addLine('shop', localId,
+          name: 'Labor', lineKind: 'labor', quantity: 4.4,
+          unitPrice: 50, taxRate: 0,
+        );
+        await drafts.saveMemo('shop', localId, 'Price subject to inspection');
+        final before = (await cache.load('shop', localId))!;
+        final localLineId = (before['lines'] as List).single['id'] as String;
+        final groups = LocalRepairGroups(database: db, cache: cache);
+        await groups.add('shop', localId, name: 'Brake repair', description: '');
+        final groupId = (await groups.groups('shop', localId, before)).first.id;
+        await groups.move('shop', localId, {localLineId}, groupId);
+
+        await mode.setMode(BriskersConnectionMode.auto);
+        await drafts.flush('shop'); // Simulate a lost first server detail response.
+        await drafts.flush('shop'); // Reconcile the same idempotent operation.
+        expect(api.operationIds, hasLength(2));
+        expect(api.operationIds.first, api.operationIds.last);
+        final outbox = await db.customSelect(
+          "SELECT state FROM sync_outbox WHERE business_id='shop'",
+        ).get();
+        if (invalidServerPositions) {
+          expect(outbox, hasLength(1));
+          expect(outbox.single.read<String>('state'), 'conflict');
+          final retained = (await cache.load('shop', localId))!;
+          expect(retained['sync_state'], 'conflict');
+          expect(retained['_server_document_id'], isNull);
+          expect((await groups.groups('shop', localId, retained))
+              .first.lines.single['id'], localLineId);
+          expect(retained['total_amount'], before['total_amount']);
+          await drafts.flush('shop');
+          expect(api.operationIds, hasLength(2)); // No automatic retry storm.
+        } else {
+          expect(outbox, isEmpty);
+          final serverId = api.operationIds.first;
+          final serverDetail = (await cache.load('shop', serverId))!;
+          final sections = await groups.groups('shop', serverId, serverDetail);
+          expect(sections.first.id, groupId);
+          expect(sections.first.lines.single['id'], 'server-line');
+          expect(sections.last.lines, isEmpty);
+          expect(serverDetail['total_amount'], before['total_amount']);
+          expect((await cache.load('shop', localId))?['_server_document_id'], serverId);
+        }
+      },
+    );
+  }
+
   test(
     'legacy or sent numbers survive blank refreshes and generated numbers stay unique',
     () async {

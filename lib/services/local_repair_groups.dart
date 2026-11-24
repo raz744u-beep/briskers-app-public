@@ -5,6 +5,17 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_document_detail_cache.dart';
 
+/// Server item identities could not safely be assigned to saved repair groups.
+/// Keep the original local estimate and ask the Owner to review the conflict.
+class RepairGroupIdentityConflict implements Exception {
+  const RepairGroupIdentityConflict();
+
+  @override
+  String toString() => 'Repair group synchronization needs Owner review: '
+      'server estimate item identities do not match saved local groups. '
+      'The offline estimate has been retained.';
+}
+
 class LocalRepairGroups {
   LocalRepairGroups({BriskersLocalDatabase? database, LocalDocumentDetailCache? cache})
     : db = database ?? localDatabase,
@@ -117,11 +128,11 @@ class LocalRepairGroups {
           ordered.map(_position).toSet().length != ordered.length ||
           ordered.map((line) => line['id']).toSet().length != ordered.length ||
           ordered.any((line) => line['id'] is! String || line['id'] == '')) {
-        throw StateError('Review estimate item identities before completing sync.');
+        throw const RepairGroupIdentityConflict();
       }
       for (var i = 0; i < before.length; i++) {
         if (!_matchingLine(before[i], ordered[i])) {
-          throw StateError('Review estimate item identities before completing sync.');
+          throw const RepairGroupIdentityConflict();
         }
         replacements[before[i]['id'] as String] = ordered[i]['id'] as String;
       }
