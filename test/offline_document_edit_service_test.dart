@@ -398,7 +398,7 @@ void main() {
   }
 
   for (final outcome in ['success', 'lost response', 'failed detail read',
-    'missing copy identity']) {
+    'missing copy identity', 'ambiguous copy receipt']) {
     test('estimate copy replay: $outcome', () async {
       SharedPreferences.setMockInitialValues({});
       final database = BriskersLocalDatabase(NativeDatabase.memory());
@@ -438,7 +438,8 @@ void main() {
       final before = await cache.load('business-1', 'estimate-1');
       expect(before!['total_amount'], 30);
       api.loseCopyResponse = outcome == 'lost response';
-      api.failNextDetailAfterCopy = outcome == 'failed detail read';
+      api.failNextDetailAfterCopy = outcome == 'failed detail read' ||
+          outcome == 'ambiguous copy receipt';
       api.omitCopyIdentity = outcome == 'missing copy identity';
 
       await editor.copyLine('business-1', 'estimate-1', 'server-line-1');
@@ -467,10 +468,20 @@ void main() {
         await database.customStatement(
           'UPDATE sync_replay_fences_v1 SET not_before_ms = 0',
         );
+        if (outcome == 'ambiguous copy receipt') {
+          await database.customStatement(
+            'INSERT INTO local_job_recovery_receipts '
+            '(business_id,outbox_id,response_json,request_generation,captured_at) '
+            'SELECT business_id,outbox_id,response_json,request_generation,captured_at '
+            'FROM local_job_recovery_receipts WHERE business_id=? AND outbox_id=?',
+            ['business-1', outboxId],
+          );
+        }
       }
 
       await service().flush('business-1');
       expect(api.copyCalls, 1);
+      final recovered = outcome == 'success' || outcome == 'failed detail read';
       final remote = await api.documentDetail('business-1', 'estimate-1');
       expect(remote['lines'], hasLength(2));
       expect(remote['total_amount'], 60);
@@ -479,16 +490,15 @@ void main() {
       expect(local['total_amount'], 60);
       final ids = (local['lines'] as List)
           .map((line) => (line as Map)['id']);
-      expect(ids, contains(outcome == 'success'
-          ? 'server-copy-1' : localCopyId));
+      expect(ids, contains(recovered ? 'server-copy-1' : localCopyId));
       final state = await database.customSelect(
         "SELECT sync_state FROM local_documents WHERE id = 'estimate-1'",
       ).getSingle();
       expect(state.read<String>('sync_state'),
-        outcome == 'success' ? 'synced' : 'pending');
+        recovered ? 'synced' : 'pending');
       expect(await database.customSelect(
         "SELECT id FROM sync_outbox WHERE entity_type = 'document_edit'",
-      ).get(), hasLength(outcome == 'success' ? 0 : 1));
+      ).get(), hasLength(recovered ? 0 : 1));
     });
   }
 

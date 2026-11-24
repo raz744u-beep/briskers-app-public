@@ -811,6 +811,11 @@ class OfflineDocumentEditService {
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
         } else if (operation == 'copy_line') {
+          if (holdLineCreate && await _recoverAcknowledgedCopy(
+            businessId, documentId, outboxId, payload, serverDetail,
+          )) {
+            continue;
+          }
           final beforeIds = _serverLineIds(serverDetail);
           var serverLineId = await LocalJobQuarantine.guardReplay(
             _database,
@@ -1002,6 +1007,47 @@ class OfflineDocumentEditService {
       );
     });
   }
+
+  /// Resolve a known, durable copy acknowledgement without another mutation.
+  /// Unknown/ambiguous receipts must remain held for review.
+  Future<bool> _recoverAcknowledgedCopy(
+    String businessId,
+    String documentId,
+    int outboxId,
+    Map<String, dynamic> payload,
+    Map<String, dynamic> serverDetail,
+  ) => _database.transaction(() async {
+    final serverId = await LocalJobQuarantine.acknowledgedCopyId(
+      _database, businessId, outboxId,
+    );
+    if (serverId == null) return false;
+    final localId = payload['local_line_id']?.toString() ?? '';
+    final sourceId = payload['source_line_id']?.toString() ?? '';
+    final cached = await _cache.load(businessId, documentId);
+    if (serverDetail['id']?.toString() != documentId ||
+        serverDetail['kind'] != 'estimate' ||
+        localId.isEmpty || sourceId.isEmpty ||
+        serverId == localId || serverId == sourceId ||
+        cached == null || cached['kind'] != 'estimate' ||
+        _lines(serverDetail).where((line) => line['id'] == serverId).length != 1 ||
+        _lines(cached).where((line) => line['id'] == localId).length != 1 ||
+        _serverLineIds(cached).contains(serverId)) {
+      throw StateError(
+        'Estimate copy identity needs review. Saved work is retained.',
+      );
+    }
+    await LocalJobQuarantine.assertReplayAllowed(
+      _database, businessId, outboxId: outboxId,
+    );
+    await _remapLineId(businessId, documentId, localId, serverId);
+    await _database.customStatement(
+      'DELETE FROM sync_outbox WHERE id = ?', [outboxId],
+    );
+    await SyncReplayFence(_database).completeLocalCommit(
+      businessId, 'outbox:$outboxId',
+    );
+    return true;
+  });
 
   Future<Map<String, dynamic>> _refreshPayload(
     int outboxId,

@@ -751,6 +751,54 @@ class LocalJobQuarantine {
     }
   }
 
+  /// Read-only recovery of a returned copy ID, never a retry of the RPC.
+  /// The caller must use this inside the same transaction as its local remap.
+  static Future<String?> acknowledgedCopyId(
+    BriskersLocalDatabase db,
+    String businessId,
+    int outboxId,
+  ) async {
+    await assertReplayAllowed(db, businessId, outboxId: outboxId);
+    if (!await _installed(db)) return null;
+    final receipts = await db.customSelect(
+      'SELECT response_json,request_generation FROM local_job_recovery_receipts '
+      'WHERE business_id=? AND outbox_id=?',
+      variables: [Variable<String>(businessId), Variable<int>(outboxId)],
+    ).get();
+    if (receipts.isEmpty) return null;
+    final generation = await captureGeneration(db, businessId);
+    final fence = SyncReplayFence(db);
+    await fence.ensureSchema();
+    final claim = await db.customSelect(
+      'SELECT status,attempts FROM sync_replay_fences_v1 '
+      'WHERE business_id=? AND replay_key=?',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>('outbox:$outboxId'),
+      ],
+    ).getSingleOrNull();
+    if (receipts.length == 1 &&
+        receipts.single.read<int>('request_generation') == generation &&
+        claim?.read<String>('status') == 'inflight' &&
+        claim?.read<int>('attempts') == 1) {
+      final Object? value;
+      try {
+        value = jsonDecode(receipts.single.read<String>('response_json'));
+      } on FormatException {
+        throw const LocalJobQuarantineException(
+          'Estimate copy acknowledgement needs review.',
+        );
+      }
+      if (value is String && value.trim().isNotEmpty &&
+          value != 'null' && value == value.trim()) {
+        return value;
+      }
+    }
+    throw const LocalJobQuarantineException(
+      'Estimate copy acknowledgement needs review.',
+    );
+  }
+
   static Future<T> guardReplay<T>(
     BriskersLocalDatabase db,
     String businessId,
