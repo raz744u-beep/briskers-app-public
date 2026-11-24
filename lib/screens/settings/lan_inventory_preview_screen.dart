@@ -3,10 +3,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr/qr.dart';
 
 import '../../local/local_database_provider.dart';
 import '../../services/lan_inventory_session.dart';
 import '../../services/lan_record_inventory.dart';
+import 'lan_pairing_scanner_screen.dart';
 
 class LanInventoryPreviewScreen extends StatefulWidget {
   const LanInventoryPreviewScreen({super.key, required this.businessId});
@@ -90,6 +92,20 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
     await offer?.close();
   }
 
+  Future<void> _scanCode() async {
+    FocusScope.of(context).unfocus();
+    final code = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const LanPairingScannerScreen()),
+    );
+    if (!mounted || code == null) return;
+    _code.text = code;
+    setState(() {
+      _difference = null;
+      _error = null;
+    });
+  }
+
   Future<void> _compare() => _run(() async {
     final code = _code.text;
     setState(() => _difference = null);
@@ -169,12 +185,27 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('LAN record preview')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
-        const Text('Use the same private Wi-Fi on both phones. Share from the source phone, then enter its code on the other phone. This preview leaves the saved records on both phones intact.'),
+        const Text('Use the same private Wi-Fi on both phones. Share from the source phone, then scan or enter its pairing code on the other phone. This preview leaves the saved records on both phones intact.'),
         const SizedBox(height: 12),
         if (offer == null)
           OutlinedButton(onPressed: _busy ? null : _start, child: const Text('Share my inventory'))
         else ...[
           const Text('Comparison code · expires after five minutes'),
+          const SizedBox(height: 8),
+          Center(
+            child: Semantics(
+              image: true,
+              label: 'Briskers pairing QR code',
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 224),
+                child: AspectRatio(
+                  aspectRatio: 1,
+                  child: CustomPaint(painter: _PairingQrPainter(offer.code)),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
           SelectableText(offer.code),
           OutlinedButton(
             onPressed: () async {
@@ -190,6 +221,12 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
           TextButton(onPressed: _stop, child: const Text('Stop sharing')),
         ],
         const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: _busy ? null : _scanCode,
+          icon: const Icon(Icons.qr_code_scanner),
+          label: const Text('Scan pairing code'),
+        ),
+        const SizedBox(height: 8),
         TextField(
           controller: _code, autocorrect: false, enableSuggestions: false,
           decoration: const InputDecoration(
@@ -210,4 +247,44 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
       ]),
     );
   }
+}
+
+class _PairingQrPainter extends CustomPainter {
+  _PairingQrPainter(this.code)
+      : _image = QrImage(QrCode.fromData(
+          data: code,
+          errorCorrectLevel: QrErrorCorrectLevel.M,
+        ));
+
+  final String code;
+  final QrImage _image;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const quietZone = 4;
+    final side = size.shortestSide;
+    final moduleSize = side / (_image.moduleCount + 2 * quietZone);
+    final padding = quietZone * moduleSize;
+    final paint = Paint()..isAntiAlias = false;
+    canvas.drawRect(Offset.zero & size, paint..color = Colors.white);
+    paint.color = Colors.black;
+    for (var row = 0; row < _image.moduleCount; row++) {
+      for (var column = 0; column < _image.moduleCount; column++) {
+        if (_image.isDark(row, column)) {
+          canvas.drawRect(
+            Rect.fromLTRB(
+              padding + column * moduleSize,
+              padding + row * moduleSize,
+              padding + (column + 1) * moduleSize,
+              padding + (row + 1) * moduleSize,
+            ),
+            paint,
+          );
+        }
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PairingQrPainter oldDelegate) => code != oldDelegate.code;
 }

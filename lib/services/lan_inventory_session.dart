@@ -71,7 +71,16 @@ class LanInventorySession {
     await _server.close(force: true);
   }
 
-  static Future<List<LanInventoryEntry>> fetch(String code, String business) async {
+  static bool isComparisonCode(String code) {
+    try {
+      _parseComparisonCode(code);
+      return true;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  static ({InternetAddress address, int port, String key}) _parseComparisonCode(String code) {
     final match = RegExp(r'^([0-9.]+):([0-9]{1,5})/([A-Za-z0-9_-]{43}=)$')
         .firstMatch(code.trim());
     if (match == null) throw const FormatException('Enter the full comparison code.');
@@ -80,6 +89,11 @@ class LanInventorySession {
     if (address == null || !_private(address) || port < 1 || port > 65535) {
       throw const FormatException('The comparison code must contain a private Wi-Fi address.');
     }
+    return (address: address, port: port, key: match[3]!);
+  }
+
+  static Future<List<LanInventoryEntry>> fetch(String code, String business) async {
+    final (:address, :port, :key) = _parseComparisonCode(code);
     final shop = LanRecordInventory.shopFingerprint(business);
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 8)
@@ -101,7 +115,7 @@ class LanInventorySession {
       if (bytes.length < 28) throw const FormatException('The inventory was incomplete.');
       final plain = await _cipher.decrypt(
         SecretBox.fromConcatenation(bytes, nonceLength: 12, macLength: 16),
-        secretKey: SecretKey(base64Url.decode(match[3]!)),
+        secretKey: SecretKey(base64Url.decode(key)),
         aad: utf8.encode(shop),
       );
       final data = jsonDecode(utf8.decode(plain));

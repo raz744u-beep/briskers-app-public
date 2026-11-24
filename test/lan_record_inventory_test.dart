@@ -1,3 +1,4 @@
+import 'package:briskers_app/services/lan_inventory_session.dart';
 import 'package:briskers_app/services/lan_record_inventory.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -17,6 +18,16 @@ LanInventoryEntry entry(
 );
 
 void main() {
+  test('accepts LAN comparison codes and rejects unrelated QR payloads', () {
+    final key = '${'A' * 43}=';
+
+    expect(LanInventorySession.isComparisonCode(' 192.168.0.25:43210/$key '), isTrue);
+    expect(LanInventorySession.isComparisonCode('https://192.168.0.25:43210/$key'), isFalse);
+    expect(LanInventorySession.isComparisonCode('8.8.8.8:43210/$key'), isFalse);
+    expect(LanInventorySession.isComparisonCode('192.168.0.25:65536/$key'), isFalse);
+    expect(LanInventorySession.isComparisonCode('192.168.0.25:43210/short'), isFalse);
+  });
+
   test('compares stable IDs and separates unverified records from differences', () {
     final result = LanRecordInventory.compare([
       entry('source-only'),
