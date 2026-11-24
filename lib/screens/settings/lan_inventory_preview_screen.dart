@@ -127,9 +127,11 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
           OutlinedButton(
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: offer.code));
-              if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Comparison code copied.')),
-              );
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Comparison code copied.')),
+                );
+              }
             },
             child: const Text('Copy code'),
           ),

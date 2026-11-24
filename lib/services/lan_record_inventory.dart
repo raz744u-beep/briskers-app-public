@@ -85,7 +85,9 @@ class LanRecordInventory {
         final id = row.read<String>('id');
         if ((kind == 'job' && blockedJobs.contains(id)) ||
             (document && (blockedDocuments.contains(id) ||
-              blockedJobs.contains(row.readNullable<String>('job_id'))))) continue;
+              blockedJobs.contains(row.readNullable<String>('job_id'))))) {
+          continue;
+        }
         final recordKind = document ? row.read<String>('kind') : kind;
         final payload = Map<String, Object?>.from(row.data);
         final cached = payload.remove('cached_detail');
@@ -111,7 +113,9 @@ class LanRecordInventory {
       final detail = jsonDecode(raw);
       if (detail is! Map || detail['id'] != id || detail['kind'] != kind ||
           (detail['business_id'] != null && detail['business_id'] != business) ||
-          detail['lines'] is! List) return null;
+          detail['lines'] is! List) {
+        return null;
+      }
       final lines = detail['lines'] as List;
       if (lines.any((line) => line is! Map)) return null;
       return [
