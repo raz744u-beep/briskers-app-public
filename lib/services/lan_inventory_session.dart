@@ -82,8 +82,8 @@ class LanInventorySession {
     }
     final shop = LanRecordInventory.shopFingerprint(business);
     final client = HttpClient()
-      ..findProxy = (_) => 'DIRECT'
-      ..connectionTimeout = const Duration(seconds: 8);
+      ..connectionTimeout = const Duration(seconds: 8)
+      ..findProxy = ((_) => 'DIRECT');
     try {
       final request = await client.getUrl(Uri(
         scheme: 'http', host: address.address, port: port, path: '/inventory',
