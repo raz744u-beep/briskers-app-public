@@ -237,8 +237,15 @@ class OfflineFinancialWriteService {
     Map<String, dynamic>? receiptExtraction,
     String? verifiedPayrollOperationId,
     String? copySourceId,
+    String? payrollEmployeeId,
   }) async {
     final payrollOperation = verifiedPayrollOperationId?.trim();
+    if (payrollEmployeeId != null &&
+        (direction != 'expense' || categoryName.trim().toLowerCase() != 'payroll' ||
+          payrollEmployeeId.trim().isEmpty || counterpartyId != null ||
+          (counterpartyName?.trim().isEmpty ?? true))) {
+      throw ArgumentError('Select a saved employee for the Payroll expense.');
+    }
     if (copySourceId != null && verifiedPayrollOperationId != null) {
       throw ArgumentError('A payroll expense cannot be copied.');
     }
@@ -334,6 +341,7 @@ class OfflineFinancialWriteService {
         'signed_amount': direction == 'expense' ? -amount : amount,
         'transaction_date': dateText,
         'counterparty': cleanCounterparty,
+        'employee_id': ?payrollEmployeeId,
         'copy_number': ?copyNumber,
         'counterparty_id': counterpartyId,
         'category': categoryName,

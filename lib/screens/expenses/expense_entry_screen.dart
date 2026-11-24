@@ -24,6 +24,7 @@ import '../../services/local_attachment_cache.dart';
 import '../../services/expenseiq_local_photo_sync.dart';
 import '../../services/device_owner_authorization.dart';
 import '../../services/offline_financial_write_service.dart';
+import '../../services/offline_job_admin_service.dart';
 import 'expense_receipt_attachments.dart';
 
 // Never display raw HTTP exception bodies, access tokens or receipt data.
@@ -132,6 +133,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
   String? _accountId;
   String? _categoryId;
   String? _counterpartyId;
+  ({String id, String name})? _payrollEmployee;
   String? _jobId;
   String? _documentId;
   String? _contextLabel;
@@ -163,6 +165,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       _editing && LocalFinancialCache.requiresOwnerAccountEdit(_original);
 
   bool get _editing => widget.editTransactionId != null;
+  bool get _selectPayrollEmployee => !_editing && _direction == 'expense' &&
+      _selectedCategoryName().trim().toLowerCase() == 'payroll';
   bool get _copying => widget.copyTransactionId != null;
   bool get _missingOriginal => (_editing || _copying) && !_editTargetLoaded;
   bool get _linked => _jobId != null || _documentId != null;
@@ -869,6 +873,43 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     });
   }
 
+  Future<void> _pickPayrollEmployee() async {
+    final roster = await OfflineJobAdminService().cachedEmployees(widget.businessId);
+    if (!mounted || !_selectPayrollEmployee) return;
+    final employees = <({String id, String name, String nickname})>[
+      for (final row in roster)
+        if (row['id'] is String && row['name'] is String &&
+            (row['name'] as String).trim().isNotEmpty)
+          (id: row['id'] as String, name: (row['name'] as String).trim(),
+            nickname: row['nickname']?.toString().trim() ?? ''),
+    ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    if (employees.isEmpty) {
+      setState(() => _error = 'No employee names are saved on this device.');
+      return;
+    }
+    final selected = await showDialog<({String id, String name})>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: const Text('Select employee'),
+        children: [
+          for (final employee in employees)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialog, (id: employee.id, name: employee.name)),
+              child: Text(employee.nickname.isEmpty || employee.nickname == employee.name
+                  ? employee.name : '${employee.name} (${employee.nickname})'),
+            ),
+        ],
+      ),
+    );
+    if (!mounted || selected == null || !_selectPayrollEmployee) return;
+    setState(() {
+      _payrollEmployee = selected;
+      _counterpartyId = null;
+      _counterpartyController.text = selected.name;
+      _error = null;
+    });
+  }
+
   Future<void> _pickCounterparty() async {
     FocusScope.of(context).unfocus();
     final searchController = TextEditingController(
@@ -1355,6 +1396,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       setState(() => _error = 'Select an account and category.');
       return;
     }
+    final payrollEmployee = _selectPayrollEmployee ? _payrollEmployee : null;
+    if (_selectPayrollEmployee && (payrollEmployee == null ||
+        _counterpartyId != null || _counterpartyController.text.trim() != payrollEmployee.name)) {
+      setState(() => _error = 'Select an employee for this Payroll expense.');
+      return;
+    }
 
     if (_copying) {
       final original = _original!;
@@ -1497,6 +1544,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
         } else {
           await _offlineFinancial.createLocalTransaction(
             widget.businessId,
+            payrollEmployeeId: payrollEmployee?.id,
             direction: _direction,
             accountId: _accountId!,
             accountName: _selectedAccountName(),
@@ -1987,13 +2035,13 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                 const SizedBox(height: 12),
                 InkWell(
                   borderRadius: BorderRadius.circular(4),
-                  onTap: _saving ? null : _pickCounterparty,
+                  onTap: _saving ? null : _selectPayrollEmployee ? _pickPayrollEmployee : _pickCounterparty,
                   child: InputDecorator(
                     decoration: InputDecoration(
-                      labelText: _direction == 'income'
+                      labelText: _selectPayrollEmployee ? 'Employee' : _direction == 'income'
                           ? tr('payer')
                           : tr('payee'),
-                      hintText: _direction == 'income'
+                      hintText: _selectPayrollEmployee ? 'Select employee' : _direction == 'income'
                           ? tr('selectPayer')
                           : tr('selectPayee'),
                       border: const OutlineInputBorder(),
@@ -2001,7 +2049,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                     ),
                     child: Text(
                       _counterpartyController.text.trim().isEmpty
-                          ? (_direction == 'income'
+                          ? (_selectPayrollEmployee ? 'Select employee' : _direction == 'income'
                                 ? 'Select a payer'
                                 : 'Select a payee')
                           : _counterpartyController.text.trim(),
