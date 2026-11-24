@@ -824,7 +824,9 @@ class OfflineDocumentEditService {
             holdUntilLocalCommit: holdLineCreate,
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
-          if (serverLineId.isEmpty) {
+          // Estimates must use the server's canonical copy identity. A
+          // missing acknowledgement is not permission to guess a new line.
+          if (serverLineId.isEmpty && !holdLineCreate) {
             serverLineId = _findAddedLine(
               beforeIds,
               serverDetail,

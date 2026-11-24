@@ -14,6 +14,10 @@ class _FakeApi extends BriskersApi {
   _FakeApi();
 
   var addCalls = 0;
+  var copyCalls = 0;
+  bool loseCopyResponse = false;
+  bool failNextDetailAfterCopy = false;
+  bool omitCopyIdentity = false;
   bool loseAddResponse = false;
   bool failNextDetailAfterAdd = false;
   Completer<void>? firstAddEntered;
@@ -32,6 +36,10 @@ class _FakeApi extends BriskersApi {
     String businessId,
     String documentId,
   ) async {
+    if (copyCalls > 0 && failNextDetailAfterCopy) {
+      failNextDetailAfterCopy = false;
+      throw TimeoutException('Synthetic detail read after committed copy');
+    }
     if (addCalls > 0 && failNextDetailAfterAdd) {
       failNextDetailAfterAdd = false;
       throw TimeoutException('Synthetic detail read after committed add');
@@ -86,6 +94,33 @@ class _FakeApi extends BriskersApi {
       loseAddResponse = false;
       throw TimeoutException('Synthetic lost response after committed add');
     }
+  }
+  @override
+  Future<String> copyDocumentLine(
+    String businessId,
+    String lineId, {
+    required int expectedVersion,
+  }) async {
+    copyCalls++;
+    final lines = List<Map<String, dynamic>>.from(
+      (_detail['lines'] as List).map(
+        (raw) => Map<String, dynamic>.from(raw as Map),
+      ),
+    );
+    final source = lines.singleWhere((line) => line['id'] == lineId);
+    final id = 'server-copy-$copyCalls';
+    lines.add({...source, 'id': id, 'position': lines.length + 1});
+    _detail['lines'] = lines;
+    _detail['row_version'] = expectedVersion + 1;
+    _detail['total_amount'] = lines.fold<num>(0, (total, line) {
+      final net = (line['quantity'] as num) * (line['unit_price'] as num);
+      return total + net + net * (line['tax_rate'] as num);
+    });
+    if (loseCopyResponse) {
+      loseCopyResponse = false;
+      throw TimeoutException('Synthetic lost response after committed copy');
+    }
+    return omitCopyIdentity ? '' : id;
   }
 }
 
@@ -359,6 +394,101 @@ void main() {
       expect(await database.customSelect(
         "SELECT id FROM sync_outbox WHERE entity_type = 'document_edit'",
       ).get(), hasLength(1));
+    });
+  }
+
+  for (final outcome in ['success', 'lost response', 'failed detail read',
+    'missing copy identity']) {
+    test('estimate copy replay: $outcome', () async {
+      SharedPreferences.setMockInitialValues({});
+      final database = BriskersLocalDatabase(NativeDatabase.memory());
+      addTearDown(database.close);
+      final cache = LocalDocumentDetailCache(database: database);
+      final api = _FakeApi();
+      OfflineDocumentEditService service() => OfflineDocumentEditService(
+        api: api, cache: cache, database: database,
+      );
+      await cache.save('business-1', 'estimate-1', {
+        'id': 'estimate-1',
+        'kind': 'estimate',
+        'status': 'draft',
+        'row_version': 1,
+        'total_amount': 0,
+        'net_amount': 0,
+        'tax_amount': 0,
+        'lines': <Map<String, dynamic>>[],
+      });
+      await database.customStatement(
+        '''
+        INSERT INTO local_documents (
+          id, business_id, job_id, customer_id, kind, status,
+          display_status_code, converted, total, row_version, sync_state
+        ) VALUES (?, ?, ?, ?, 'estimate', 'draft', 'draft', 0, 0, 1, 'synced')
+        ''',
+        ['estimate-1', 'business-1', 'job-1', 'customer-1'],
+      );
+      final editor = service();
+      await editor.addLine(
+        'business-1', 'estimate-1',
+        name: 'Original part', quantity: 1, unitPrice: 30,
+        taxRate: 0, lineKind: 'item',
+      );
+      await editor.flush('business-1');
+      expect(api.addCalls, 1);
+      final before = await cache.load('business-1', 'estimate-1');
+      expect(before!['total_amount'], 30);
+      api.loseCopyResponse = outcome == 'lost response';
+      api.failNextDetailAfterCopy = outcome == 'failed detail read';
+      api.omitCopyIdentity = outcome == 'missing copy identity';
+
+      await editor.copyLine('business-1', 'estimate-1', 'server-line-1');
+      final desired = await cache.load('business-1', 'estimate-1');
+      final localCopyId = ((desired!['lines'] as List)[1] as Map)['id'];
+      expect(localCopyId, isNot('server-line-1'));
+      expect(desired['total_amount'], 60);
+      expect(api.copyCalls, 0);
+      await editor.flush('business-1');
+      expect(api.copyCalls, 1);
+
+      final queue = await database.customSelect(
+        "SELECT id FROM sync_outbox WHERE entity_type = 'document_edit'",
+      ).get();
+      if (outcome == 'success') {
+        expect(queue, isEmpty);
+      } else {
+        expect(queue, hasLength(1));
+        final outboxId = queue.single.read<int>('id');
+        final fence = await database.customSelect(
+          'SELECT status FROM sync_replay_fences_v1 WHERE replay_key = ?',
+          variables: [Variable<String>('outbox:$outboxId')],
+        ).getSingle();
+        expect(fence.read<String>('status'),
+          outcome == 'lost response' ? 'review' : 'inflight');
+        await database.customStatement(
+          'UPDATE sync_replay_fences_v1 SET not_before_ms = 0',
+        );
+      }
+
+      await service().flush('business-1');
+      expect(api.copyCalls, 1);
+      final remote = await api.documentDetail('business-1', 'estimate-1');
+      expect(remote['lines'], hasLength(2));
+      expect(remote['total_amount'], 60);
+      final local = await cache.load('business-1', 'estimate-1');
+      expect(local!['lines'], hasLength(2));
+      expect(local['total_amount'], 60);
+      final ids = (local['lines'] as List)
+          .map((line) => (line as Map)['id']);
+      expect(ids, contains(outcome == 'success'
+          ? 'server-copy-1' : localCopyId));
+      final state = await database.customSelect(
+        "SELECT sync_state FROM local_documents WHERE id = 'estimate-1'",
+      ).getSingle();
+      expect(state.read<String>('sync_state'),
+        outcome == 'success' ? 'synced' : 'pending');
+      expect(await database.customSelect(
+        "SELECT id FROM sync_outbox WHERE entity_type = 'document_edit'",
+      ).get(), hasLength(outcome == 'success' ? 0 : 1));
     });
   }
 
