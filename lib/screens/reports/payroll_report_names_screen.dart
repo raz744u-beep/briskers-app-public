@@ -81,8 +81,9 @@ class _PayrollReportNamesScreenState extends State<PayrollReportNamesScreen> {
         _form.currentState?.reset();
       });
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() => _error = 'Could not save the payroll name. Try again.');
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
