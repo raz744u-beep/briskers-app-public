@@ -9,6 +9,7 @@ import 'employee_nickname_store.dart';
 import 'local_financial_cache.dart';
 import 'local_financial_totals_journal.dart';
 import 'local_invoice_task_store.dart';
+import 'local_job_retirement.dart';
 import 'offline_job_admin_service.dart';
 import 'payroll_expense_identity.dart';
 
@@ -158,7 +159,7 @@ class LocalEmployeeReports {
           () => EmployeeReportRow(
             id,
             payment.savedName.isEmpty ? 'Saved employee' : payment.savedName,
-            historical: employee == null,
+            historical: !staff.containsKey(id) && payment.expense != null,
           ),
         );
         report.payments.add(payment);
@@ -290,7 +291,15 @@ class LocalEmployeeReports {
           const {'void', 'voided', 'deleted'}.contains(row['status']) ||
           row['sync_state'] == 'reversed')
         continue;
-      final operation = links[row['id']] ?? _text(row['payroll_operation_id']);
+      final linkedOperation = links[row['id']];
+      final storedOperation = _text(row['payroll_operation_id']);
+      if (linkedOperation != null &&
+          storedOperation != null &&
+          linkedOperation != storedOperation) {
+        record(expensePayment(row), ambiguous: true);
+        continue;
+      }
+      final operation = linkedOperation ?? storedOperation;
       if (operation != null) {
         (linkedExpenses[operation] ??= []).add(row);
       } else if (_normalized(row['category'] ?? row['category_name']) ==
@@ -298,10 +307,7 @@ class LocalEmployeeReports {
           _normalized(row['kind']) == 'payroll' ||
           payrollCategories.contains(_text(row['category_id']))) {
         final savedId = _text(row['employee_id']);
-        record(
-          expensePayment(row),
-          employee: staff.containsKey(savedId) ? savedId : null,
-        );
+        record(expensePayment(row), employee: savedId);
       }
     }
     for (final operation in {...settlements.keys, ...linkedExpenses.keys}) {
@@ -340,14 +346,14 @@ class LocalEmployeeReports {
     }
   }
 
-  Future<List<ReportRow>> _labor(String business, Set<String> tables) {
+  Future<List<ReportRow>> _labor(String business, Set<String> tables) async {
     if (!tables.containsAll({
       'local_mechanic_work_credits_v1',
       'regular_payroll_portions',
       'regular_payroll_tasks',
       'regular_payroll_task_sources',
     }))
-      return Future.value([]);
+      return [];
 
     final coverage = tables.contains('regular_payroll_active_coverage_v1')
         ? 'regular_payroll_active_coverage_v1'
@@ -364,6 +370,17 @@ class LocalEmployeeReports {
               "AND a.operation_id=p.id AND a.event='owner_reviewed_unpaid_carry')"
         : '0';
     final metadata = tables.contains('regular_task_metadata');
+    final namedMetadata =
+        metadata &&
+        (await _db
+                .customSelect('PRAGMA table_info(regular_task_metadata)')
+                .get())
+            .any((column) => column.data['name'] == 'task_name');
+    final description = !metadata
+        ? 't.description'
+        : namedMetadata
+        ? 'COALESCE(tm.task_name,tm.description,t.description)'
+        : 'COALESCE(tm.description,t.description)';
     final schedule = tables.contains('regular_task_schedule_v1');
     final assignment = tables.contains('regular_payroll_assignment_meta');
     final legacyPaid = reversed
@@ -384,7 +401,7 @@ class LocalEmployeeReports {
       SELECT c.employee_id,c.job_id,c.actual_minutes,p.completed_date,
         j.job_number,d.document_number AS invoice_number,d.document_date AS invoice_date,
         s.invoice_id,s.source_kind,
-        ${metadata ? 'COALESCE(tm.task_name,tm.description,t.description)' : 't.description'} AS description,
+        $description AS description,
         ${schedule ? 'sch.payroll_treatment' : 'NULL'} AS treatment,
         $reviewed AS reviewed_carry,
         CASE WHEN $priorPaid THEN c.actual_minutes ELSE $paid END AS paid_minutes
@@ -401,6 +418,8 @@ class LocalEmployeeReports {
       WHERE c.business_id=? AND p.state='Done' AND c.actual_minutes>0
         AND COALESCE(s.active,1)=1 ${assignment ? 'AND COALESCE(m.active,1)=1' : ''}
         AND COALESCE(d.status,'') NOT IN ('void','voided','cancelled','canceled','deleted')
+        ${tables.contains('local_job_retirement_entities') ? "AND NOT EXISTS (SELECT 1 FROM local_job_retirement_entities r WHERE r.business_id=c.business_id AND r.state IN ${LocalJobRetirement.blockedStates} AND ((r.entity_kind='job' AND r.entity_id=c.job_id) OR (r.entity_kind='invoice' AND r.entity_id=s.invoice_id)))" : ''}
+        ${tables.contains('local_offline_job_purge_entities') ? "AND NOT EXISTS (SELECT 1 FROM local_offline_job_purge_entities x WHERE x.business_id=c.business_id AND x.entity_kind='job' AND x.entity_id=c.job_id)" : ''}
         ${tables.contains('local_document_identity_aliases') ? 'AND NOT EXISTS (SELECT 1 FROM local_document_identity_aliases a WHERE a.business_id=c.business_id AND a.alias_id=s.invoice_id)' : ''}
       ''', business);
   }
