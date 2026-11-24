@@ -542,17 +542,17 @@ class DocumentPdfService {
             for (final group in repairGroups)
               if (group.lines.isNotEmpty) ...[
                 _repairGroupHeading(group),
-                _lineTable(group.lines, quantityHeading: 'Qty'),
+                _lineTable(group.lines, quantityHeading: 'Qty', numbered: false),
                 pw.SizedBox(height: 10),
               ],
             if (generalCharges.isNotEmpty)
-              _lineTable(generalCharges, quantityHeading: 'Qty'),
+              _lineTable(generalCharges, quantityHeading: 'Qty', numbered: false),
           ] else ...[
             if (itemLines.isNotEmpty)
-              _lineTable(itemLines, quantityHeading: 'Qty'),
+              _lineTable(itemLines, quantityHeading: 'Qty', numbered: kind == 'INVOICE'),
             if (laborLines.isNotEmpty) ...[
               if (itemLines.isNotEmpty) pw.SizedBox(height: 10),
-              _laborTable(laborLines),
+              _laborTable(laborLines, numbered: kind == 'INVOICE'),
             ],
           ],
           pw.SizedBox(height: 12),
@@ -729,24 +729,19 @@ class DocumentPdfService {
   static pw.Widget _lineTable(
     List<Map<String, dynamic>> lines, {
     required String quantityHeading,
+    required bool numbered,
   }) {
     return pw.Table(
       border: pw.TableBorder.all(
         color: PdfColors.grey700,
         width: 0.75,
       ),
-      columnWidths: const {
-        0: pw.FlexColumnWidth(0.55),
-        1: pw.FlexColumnWidth(4.2),
-        2: pw.FlexColumnWidth(1.0),
-        3: pw.FlexColumnWidth(1.45),
-        4: pw.FlexColumnWidth(1.55),
-      },
+      columnWidths: _lineColumnWidths(numbered),
       children: [
         pw.TableRow(
           decoration: const pw.BoxDecoration(color: PdfColors.grey200),
           children: [
-            _headerCell('#', align: pw.TextAlign.center),
+            if (numbered) _headerCell('#', align: pw.TextAlign.center),
             _headerCell('Description'),
             _quantityHeadingCell(quantityHeading),
             _headerCell('Unit Price', align: pw.TextAlign.right),
@@ -754,28 +749,25 @@ class DocumentPdfService {
           ],
         ),
         for (var index = 0; index < lines.length; index++)
-          _lineRow(lines[index], index + 1),
+          _lineRow(lines[index], numbered ? index + 1 : null),
       ],
     );
   }
 
-  static pw.Widget _laborTable(List<Map<String, dynamic>> lines) {
+  static pw.Widget _laborTable(
+    List<Map<String, dynamic>> lines, {
+    required bool numbered,
+  }) {
     // One bordered table keeps vertical separators continuous through the
     // labor heading and every row instead of a separate full-width banner.
     return pw.Table(
       border: pw.TableBorder.all(color: PdfColors.grey700, width: 0.75),
-      columnWidths: const {
-        0: pw.FlexColumnWidth(0.55),
-        1: pw.FlexColumnWidth(4.2),
-        2: pw.FlexColumnWidth(1.0),
-        3: pw.FlexColumnWidth(1.45),
-        4: pw.FlexColumnWidth(1.55),
-      },
+      columnWidths: _lineColumnWidths(numbered),
       children: [
         pw.TableRow(
           decoration: const pw.BoxDecoration(color: PdfColors.grey200),
           children: [
-            _headerCell('#', align: pw.TextAlign.center),
+            if (numbered) _headerCell('#', align: pw.TextAlign.center),
             _headerCell('Labor'),
             _quantityHeadingCell('Qty'),
             _headerCell('Unit Price', align: pw.TextAlign.right),
@@ -783,10 +775,18 @@ class DocumentPdfService {
           ],
         ),
         for (var index = 0; index < lines.length; index++)
-          _lineRow(lines[index], index + 1),
+          _lineRow(lines[index], numbered ? index + 1 : null),
       ],
     );
   }
+
+  static Map<int, pw.TableColumnWidth> _lineColumnWidths(bool numbered) => {
+    if (numbered) 0: const pw.FlexColumnWidth(0.55),
+    (numbered ? 1 : 0): pw.FlexColumnWidth(numbered ? 4.2 : 4.75),
+    (numbered ? 2 : 1): const pw.FlexColumnWidth(1.0),
+    (numbered ? 3 : 2): const pw.FlexColumnWidth(1.45),
+    (numbered ? 4 : 3): const pw.FlexColumnWidth(1.55),
+  };
 
   static pw.Widget _quantityHeadingCell(String text) => pw.Padding(
     padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 5),
@@ -833,7 +833,7 @@ class DocumentPdfService {
 
   static pw.TableRow _lineRow(
     Map<String, dynamic> line,
-    int index,
+    int? index,
   ) {
     final name = line['name']?.toString().trim() ?? '';
     final description = line['description']?.toString().trim() ?? '';
@@ -844,7 +844,7 @@ class DocumentPdfService {
 
     return pw.TableRow(
       children: [
-        _bodyCell(index.toString(), align: pw.TextAlign.center),
+        if (index != null) _bodyCell(index.toString(), align: pw.TextAlign.center),
         _bodyCell(display),
         _quantityCell(line),
         _bodyCell(_money(line['unit_price']), align: pw.TextAlign.right),

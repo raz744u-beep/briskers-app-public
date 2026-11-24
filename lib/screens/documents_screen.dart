@@ -1,4 +1,5 @@
 import '../services/local_document_identity.dart';
+import '../services/verified_local_conversion_repair.dart';
 import '../services/local_estimate_number.dart';
 import '../widgets/list_interaction_hint.dart';
 import '../services/offline_invoice_payment_ledger.dart';
@@ -1071,13 +1072,18 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     final canExpenses =
         !_estimate && (widget.isOwner || widget.canManageExpenses);
     final estimateConverted = _estimate && row['converted'] == true;
-    final canDelete = widget.isOwner;
+    final canUndoConversion = !_estimate && widget.isOwner &&
+        BriskersConnectionModeController.instance.forceOffline &&
+        VerifiedLocalConversionRepair.appliesTo(
+          widget.businessId, row['id']?.toString() ?? '',
+        );
+    final canDelete = widget.isOwner && !canUndoConversion;
     final status = _invoiceStage(row);
     final total = num.tryParse(row['total_amount']?.toString() ?? '') ?? 0;
     final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
     final pending = num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
     final canPayment =
-        !_estimate &&
+        !_estimate && !canUndoConversion &&
         status == 'Open' &&
         !DocumentPresentation(row).requiresReconciliation &&
         total - paid - pending > 0.005;
@@ -1203,6 +1209,12 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                 title: Text(tr('send')),
                 onTap: () => Navigator.pop(sheetContext, 'send'),
               ),
+              if (canUndoConversion)
+                ListTile(
+                  leading: const Icon(Icons.undo),
+                  title: const Text('Undo offline conversion'),
+                  onTap: () => Navigator.pop(sheetContext, 'undo_audited_conversion'),
+                ),
               if (canDelete) ...[
                 const Divider(height: 1),
                 const _ActionSectionLabel('Delete'),

@@ -1206,6 +1206,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       case 'preview':
         await _previewPdf();
         break;
+      case 'undo_audited_conversion':
+        await _undoAuditedConversion();
+        break;
       case 'convert_new':
         await _convertEstimateToNewInvoice();
         break;
@@ -7996,6 +7999,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _showDocumentHeaderActions() async {
+    final presentation = DocumentPresentation(_detail ?? const {});
+    final canAddPayment = !_estimate && !_canUndoAuditedConversion &&
+        presentation.statusCode == 'open' &&
+        (presentation.balanceDueCents ?? 0) > 0;
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -8059,6 +8066,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 title: Text(_estimate ? 'Copy Estimate' : tr('copyInvoice')),
                 onTap: () => Navigator.pop(sheetContext, 'copy'),
               ),
+              if (canAddPayment) ...[
+                const Divider(height: 1),
+                const _DocumentActionSectionLabel('Payment'),
+                ListTile(
+                  leading: const Icon(Icons.credit_card_outlined),
+                  title: Text(tr('addPayment')),
+                  onTap: () => Navigator.pop(sheetContext, 'payment'),
+                ),
+              ],
               if (!_estimate) ...[
                 const Divider(height: 1),
                 const _DocumentActionSectionLabel('Repair'),
@@ -8107,6 +8123,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   ),
                   title: const Text('Add to Existing Invoice'),
                   onTap: () => Navigator.pop(sheetContext, 'add_to_invoice'),
+                ),
+              ],
+              if (!_estimate) ...[
+                const Divider(height: 1),
+                const _DocumentActionSectionLabel('Output'),
+                ListTile(
+                  leading: const Icon(Icons.visibility_outlined),
+                  title: Text(tr('preview')),
+                  onTap: () => Navigator.pop(sheetContext, 'preview'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.outbox_outlined),
+                  title: Text(tr('send')),
+                  onTap: () => Navigator.pop(sheetContext, 'send'),
                 ),
               ],
               if (_canUndoAuditedConversion)
@@ -8185,6 +8215,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         await _addInvoiceExpense();
       case 'force_reopen':
         await _ownerForceReopen();
+        break;
+      case 'payment':
+        await _enterPayment();
+        break;
+      case 'preview':
+        await _previewPdf();
+        break;
+      case 'send':
+        await _showSendMenu();
         break;
       case 'undo_audited_conversion':
         await _undoAuditedConversion();
@@ -8345,11 +8384,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 onPressed: _busy ? null : _ownerForceReopen,
                 icon: const Icon(Icons.lock_open_outlined),
               ),
-            if (!_readOnly || (_estimate && widget.isOwner))
+            if (!_readOnly || widget.isOwner)
               IconButton(
-                tooltip: _estimate ? 'Estimate actions' : tr('editInvoice'),
+                tooltip: _estimate ? 'Estimate actions' : tr('invoiceActions'),
                 onPressed: _busy ? null : _showDocumentHeaderActions,
-                icon: Icon(_readOnly ? Icons.more_vert : Icons.edit_outlined),
+                icon: Icon(
+                  !_estimate || _readOnly ? Icons.more_vert : Icons.edit_outlined,
+                ),
               ),
           ],
         ),
