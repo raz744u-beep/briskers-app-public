@@ -128,8 +128,8 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       // trips through SQLite before the diagnostics screen can paint.
       final names = <String>[
         'customers', 'vehicles', 'appointments', 'jobs', 'catalog',
-        'documents', 'findings', 'inspections', 'photoPending',
-        'photoUploaded', 'photoFailed', 'pending', 'conflicts',
+        'estimates', 'invoices', 'findings', 'inspections', 'photoPending',
+        'photoUploaded', 'photoFailed',
       ];
       final values = await Future.wait<int>([
         _count('local_customers'),
@@ -137,7 +137,8 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         _count('local_appointments'),
         _count('local_jobs'),
         _count('local_catalog_items'),
-        _count('local_documents'),
+        _count('local_documents', where: "kind = 'estimate'"),
+        _count('local_documents', where: "kind = 'invoice'"),
         _count('local_findings'),
         _count('local_pre_inspections'),
         _count('local_expense_iq_photos',
@@ -145,8 +146,6 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         _count('local_expense_iq_photos', where: "state = 'uploaded'"),
         _count('local_expense_iq_photos',
             where: "state IN ('failed','missing')"),
-        _count('sync_outbox', where: "state = 'pending'"),
-        _count('sync_outbox', where: "state = 'conflict'"),
       ]);
       final counts = <String, int>{
         for (var i = 0; i < names.length; i++) names[i]: values[i],
@@ -166,11 +165,16 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       final outboxRows = await localDatabase.customSelect(
         '''
         SELECT entity_type, state, COUNT(*) AS count,
-               MAX(last_error) AS last_error
+               CASE
+                 WHEN state = 'conflict' THEN 'review'
+                 WHEN state = 'inflight' OR attempt_count > 0 OR last_attempt_at IS NOT NULL
+                   THEN 'verify'
+                 ELSE 'queued'
+               END AS queue_status
         FROM sync_outbox
-        WHERE business_id = ?
-        GROUP BY entity_type, state
-        ORDER BY state, entity_type
+        WHERE business_id = ? AND state IN ('pending','inflight','conflict')
+        GROUP BY entity_type, state, queue_status
+        ORDER BY entity_type
         ''',
         variables: [Variable<String>(widget.businessId)],
       ).get();
@@ -194,7 +198,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
           'entity_type': row.read<String>('entity_type'),
           'state': row.read<String>('state'),
           'count': row.read<int>('count'),
-          'last_error': row.readNullable<String>('last_error'),
+          'queue_status': row.read<String>('queue_status'),
         }).toList();
         _loading = false;
       });
@@ -280,7 +284,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                 'entity_type': row.read<String>('entity_type'),
                 'state': row.read<String>('state'),
                 'count': row.read<int>('count'),
-                'last_error': row.readNullable<String>('last_error'),
+                'queue_status': row.read<String>('queue_status'),
               },
             )
             .toList();
@@ -333,6 +337,20 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
 
   String _operationLabel(String type) {
     switch (type) {
+      case 'document_draft_create':
+        return 'New estimates and invoices';
+      case 'document_edit':
+        return 'Estimate and invoice edits';
+      case 'invoice_payment_received':
+        return 'Received invoice payments';
+      case 'invoice_mileage_out':
+        return 'Invoice mileage';
+      case 'customer_create':
+        return 'New customers';
+      case 'vehicle_create':
+        return 'New vehicles';
+      case 'job_admin':
+        return 'Job updates';
       case 'work_summary':
         return tr('workPerformed');
       case 'finding_create':
@@ -957,6 +975,64 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     );
   }
 
+  Widget _syncSection({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required List<Widget> children,
+    bool expanded = false,
+  }) => Card(
+    child: ExpansionTile(
+      leading: Icon(icon),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+      subtitle: Text(subtitle),
+      initiallyExpanded: expanded,
+      childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+      children: children,
+    ),
+  );
+
+  Future<void> _reviewOnlineSync() async {
+    if (_syncing) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Sync with the online server?'),
+        content: const Text(
+          'This runs online sync for the shop. It can send eligible changes '
+          'from this phone and download newer records from the server.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dialog, true), child: const Text('Start online sync')),
+        ],
+      ),
+    );
+    if (mounted && confirmed == true) await _syncNow();
+  }
+
+  Widget _queueSection(String status, String title, String explanation, IconData icon) {
+    final groups = <String, int>{};
+    for (final entry in _outbox.where((row) => row['queue_status'] == status)) {
+      final label = _operationLabel(entry['entity_type'] as String);
+      groups.update(label, (count) => count + (entry['count'] as int),
+        ifAbsent: () => entry['count'] as int);
+    }
+    final count = groups.values.fold(0, (sum, count) => sum + count);
+    return _syncSection(
+      title: '$title · $count',
+      subtitle: explanation,
+      icon: icon,
+      expanded: status == 'review' && count > 0,
+      children: [
+        if (groups.isEmpty) const ListTile(title: Text('No changes in this section.')),
+        for (final entry in groups.entries)
+          ListTile(dense: true, title: Text(entry.key), trailing: Text('${entry.value}')),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final offlineReady = (_counts['customers'] ?? 0) > 0 &&
@@ -1012,283 +1088,295 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                         ),
                       ),
                     ),
-                  Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.storage_outlined),
-                      title: Text(
-                        tr('localDatabaseActive'),
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      subtitle: Text(
-                        'SQLite / Drift • ${tr('schemaVersion')} '
-                        '${localDatabase.schemaVersion}',
-                      ),
-                      trailing: Icon(
-                        offlineReady
-                            ? Icons.check_circle
-                            : Icons.info_outline,
-                        color: offlineReady ? Colors.green : Colors.orange,
+                  if ((_syncMessage ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      _syncMessage!,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                  if ((_error ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
                       ),
                     ),
-                  ),
+                  ],
+                  _queueSection('review', 'Needs attention',
+                    'Conflicts that need review before sending.', Icons.warning_amber_rounded),
+                  _queueSection('verify', 'Sending or needs verification',
+                    'An upload started. Delivery may still be unconfirmed.', Icons.sync_problem),
+                  _queueSection('queued', 'Waiting to send',
+                    'Changes saved on this phone that have not started uploading.', Icons.cloud_upload_outlined),
                   const SizedBox(height: 8),
-                  Text(
-                    tr('cachedOnDevice'),
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+                  FilledButton.icon(
+                    onPressed: _syncing ? null : _reviewOnlineSync,
+                    icon: _syncing
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.sync),
+                    label: Text(
+                      _syncing ? tr('syncing') : 'Review online sync',
+                    ),
                   ),
-                  const SizedBox(height: 6),
-                  _countTile(
-                    Icons.people_outline,
-                    tr('customers'),
-                    _counts['customers'] ?? 0,
-                  ),
-                  _countTile(
-                    Icons.directions_car_outlined,
-                    tr('vehicles'),
-                    _counts['vehicles'] ?? 0,
-                  ),
-                  _countTile(
-                    Icons.calendar_month_outlined,
-                    tr('appointments'),
-                    _counts['appointments'] ?? 0,
-                  ),
-                  _countTile(
-                    Icons.build_outlined,
-                    tr('jobs'),
-                    _counts['jobs'] ?? 0,
-                  ),
-                  _countTile(
-                    Icons.inventory_2_outlined,
-                    'Items / Catalog',
-                    _counts['catalog'] ?? 0,
-                  ),
-                  _countTile(
-                    Icons.description_outlined,
-                    'Estimates / Invoices',
-                    _counts['documents'] ?? 0,
-                  ),
-                  _countTile(
-                    Icons.car_repair_outlined,
-                    tr('vehicleFindings'),
-                    _counts['findings'] ?? 0,
-                  ),
-                  _countTile(
-                    Icons.search,
-                    tr('preInspections'),
-                    _counts['inspections'] ?? 0,
-                  ),
-                  FutureBuilder<OfflineAttachmentInventory>(
-                    future: _mediaInventory,
-                    builder: (context, snapshot) {
-                      final available = snapshot.data?.available;
-                      final known = snapshot.data?.known;
-                      final missing = snapshot.data?.missing;
-                      return Card(
+                  _syncSection(
+                    title: 'Saved on this device',
+                    subtitle: 'Compare local record counts across phones.',
+                    icon: Icons.storage_outlined,
+                    children: [
+                      Card(
                         child: ListTile(
-                          leading: const Icon(Icons.photo_library_outlined),
-                          title: const Text('Offline photo copies'),
-                          subtitle: Text(
-                            snapshot.hasError
-                                ? 'Photo inventory unavailable — refresh to retry'
-                                : known == null
-                                    ? 'Checking files already saved on this device…'
-                                    : '$available of $known known photos stored locally '
-                                        '• $missing missing. '
-                                        'Only synced photo references are counted; '
-                                        'the full historical total may be higher.',
-                          ),
-                          trailing: snapshot.connectionState ==
-                                  ConnectionState.done
-                              ? Icon(snapshot.hasError
-                                  ? Icons.warning_amber_outlined
-                                  : missing == 0
-                                      ? Icons.check_circle_outline
-                                      : Icons.cloud_download_outlined)
-                              : const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2),
-                                ),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    tr('offlineQueue'),
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
-                  ),
-                  const SizedBox(height: 6),
-                  _countTile(
-                    Icons.cloud_upload_outlined,
-                    tr('pendingUpload'),
-                    _counts['pending'] ?? 0,
-                    color: Colors.orange,
-                  ),
-                  _countTile(
-                    Icons.warning_amber_rounded,
-                    tr('syncConflicts'),
-                    _counts['conflicts'] ?? 0,
-                    color: Colors.red,
-                  ),
-                  _countTile(
-                    Icons.photo_library_outlined,
-                    'ExpenseIQ photos awaiting cloud sync',
-                    _counts['photoPending'] ?? 0,
-                    color: Colors.orange,
-                  ),
-                  _countTile(
-                    Icons.cloud_done_outlined,
-                    'ExpenseIQ photos uploaded from this phone',
-                    _counts['photoUploaded'] ?? 0,
-                    color: Colors.green,
-                  ),
-                  _countTile(
-                    Icons.report_problem_outlined,
-                    'ExpenseIQ photos needing attention',
-                    _counts['photoFailed'] ?? 0,
-                    color: Colors.red,
-                  ),
-                  if (_outbox.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    ..._outbox.map(
-                      (row) => Card(
-                        child: ListTile(
-                          dense: true,
+                          leading: const Icon(Icons.storage_outlined),
                           title: Text(
-                            _operationLabel(
-                              row['entity_type']?.toString() ?? '',
-                            ),
+                            tr('localDatabaseActive'),
+                            style: const TextStyle(fontWeight: FontWeight.w800),
                           ),
-                          subtitle: (row['last_error']?.toString() ?? '').isEmpty
-                              ? Text(row['state']?.toString() ?? '')
-                              : Text(
-                                  row['last_error'].toString(),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                          trailing: Text(
-                            '${row['count'] ?? 0}',
-                            style: const TextStyle(
+                          subtitle: Text(
+                            'SQLite / Drift • ${tr('schemaVersion')} '
+                            '${localDatabase.schemaVersion}',
+                          ),
+                          trailing: Icon(
+                            offlineReady
+                                ? Icons.check_circle
+                                : Icons.info_outline,
+                            color: offlineReady ? Colors.green : Colors.orange,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        tr('cachedOnDevice'),
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.w800,
                             ),
-                          ),
-                        ),
                       ),
-                    ),
-                  ],
-                  if (_pendingDetails.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    const Text('Pending operation details (read-only)',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 6),
-                    ..._pendingDetails.map((operation) => Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: SelectableText([
-                          '${operation['type']} #${operation['id']} · ${operation['state']}',
-                          'Record: ${operation['entity']}',
-                          if ((operation['kind'] as String).isNotEmpty)
-                            'Kind: ${operation['kind']}',
-                          if (operation['type'] == 'finding_action')
-                            'Finding action: ${operation['finding_action']} · previously attempted: ${operation['finding_mutation_attempted']}',
-                          if ((operation['customer_id'] as String).isNotEmpty)
-                            'Customer ID: ${operation['customer_id']}',
-                          if ((operation['vehicle_id'] as String).isNotEmpty)
-                            'Vehicle ID: ${operation['vehicle_id']}',
-                          if ((operation['job_id'] as String).isNotEmpty)
-                            'Job ID: ${operation['job_id']}',
-                          'Attempts: ${operation['attempts']}',
-                          'Linked local documents: ${operation['linked_documents']}',
-                          'Linked local jobs: ${operation['linked_jobs']}',
-                          if ((operation['error'] as String).isNotEmpty)
-                            'Error: ${operation['error']}',
-                        ].join('\n')),
+                      const SizedBox(height: 6),
+                      _countTile(
+                        Icons.people_outline,
+                        tr('customers'),
+                        _counts['customers'] ?? 0,
                       ),
-                    )),
-                    const Text(
-                      'Inspection only. No pending data is removed here.',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ],
-                  // Show the action on Owner's screen even when the cached
-                  // eligibility summary is stale. The transactional handler
-                  // still rechecks all identifiers and linked records.
-                  if (widget.isOwner) ...[
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      onPressed: _syncing || !_pendingDetails.any((entry) =>
-                        entry['id'] == 81 && entry['type'] == 'job_admin')
-                          ? null : _cancelOrphanedTestJobUpdate,
-                      icon: const Icon(Icons.remove_circle_outline),
-                      label: const Text('Cancel orphaned test update #81'),
-                    ),
-                  ],
-                  if (widget.isOwner &&
-                      _pendingDetails.any((e) => e['id'] == 78 &&
-                        e['type'] == 'document_draft_create' &&
-                        e['entity'] ==
-                          'local-estimate-ff67c47c-b116-437a-a8a4-2e3511695ef2')) ...[
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      onPressed: _syncing ? null : _removeTestEstimate78,
-                      icon: const Icon(Icons.delete_outline),
-                      label: const Text('Remove disposable test estimate #78'),
-                    ),
-                  ],
-                  const SizedBox(height: 10),
-                  Text(
-                    tr('syncHistory'),
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+                      _countTile(
+                        Icons.directions_car_outlined,
+                        tr('vehicles'),
+                        _counts['vehicles'] ?? 0,
+                      ),
+                      _countTile(
+                        Icons.calendar_month_outlined,
+                        tr('appointments'),
+                        _counts['appointments'] ?? 0,
+                      ),
+                      _countTile(
+                        Icons.build_outlined,
+                        tr('jobs'),
+                        _counts['jobs'] ?? 0,
+                      ),
+                      _countTile(
+                        Icons.inventory_2_outlined,
+                        'Items / Catalog',
+                        _counts['catalog'] ?? 0,
+                      ),
+                      _countTile(
+                        Icons.description_outlined,
+                        'Estimates',
+                        _counts['estimates'] ?? 0,
+                      ),
+                      _countTile(
+                        Icons.receipt_long_outlined,
+                        'Invoices',
+                        _counts['invoices'] ?? 0,
+                      ),
+                      _countTile(
+                        Icons.car_repair_outlined,
+                        tr('vehicleFindings'),
+                        _counts['findings'] ?? 0,
+                      ),
+                      _countTile(
+                        Icons.search,
+                        tr('preInspections'),
+                        _counts['inspections'] ?? 0,
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 6),
-                  if (_syncStates.isEmpty)
-                    Card(
-                      child: ListTile(
-                        title: Text(tr('notSyncedYet')),
+                  _syncSection(
+                    title: 'Photos',
+                    subtitle: 'Receipt uploads and offline photo copies.',
+                    icon: Icons.photo_library_outlined,
+                    children: [
+                      _countTile(
+                        Icons.photo_library_outlined,
+                        'ExpenseIQ photos awaiting cloud sync',
+                        _counts['photoPending'] ?? 0,
+                        color: Colors.orange,
                       ),
-                    )
-                  else
-                    ..._syncStates.map(
-                      (row) => Card(
-                        child: ListTile(
-                          title: Text(
-                            _scopeLabel(row['scope']?.toString() ?? ''),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
+                      _countTile(
+                        Icons.cloud_done_outlined,
+                        'ExpenseIQ photos uploaded from this phone',
+                        _counts['photoUploaded'] ?? 0,
+                        color: Colors.green,
+                      ),
+                      _countTile(
+                        Icons.report_problem_outlined,
+                        'ExpenseIQ photos needing attention',
+                        _counts['photoFailed'] ?? 0,
+                        color: Colors.red,
+                      ),
+                      FutureBuilder<OfflineAttachmentInventory>(
+                        future: _mediaInventory,
+                        builder: (context, snapshot) {
+                          final available = snapshot.data?.available;
+                          final known = snapshot.data?.known;
+                          final missing = snapshot.data?.missing;
+                          return Card(
+                            child: ListTile(
+                              leading: const Icon(Icons.photo_library_outlined),
+                              title: const Text('Offline photo copies'),
+                              subtitle: Text(
+                                snapshot.hasError
+                                    ? 'Photo inventory unavailable — refresh to retry'
+                                    : known == null
+                                        ? 'Checking files already saved on this device…'
+                                        : '$available of $known known photos stored locally '
+                                            '• $missing missing. '
+                                            'Only synced photo references are counted; '
+                                            'the full historical total may be higher.',
+                              ),
+                              trailing: snapshot.connectionState ==
+                                      ConnectionState.done
+                                  ? Icon(snapshot.hasError
+                                      ? Icons.warning_amber_outlined
+                                      : missing == 0
+                                          ? Icons.check_circle_outline
+                                          : Icons.cloud_download_outlined)
+                                  : const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                  _syncSection(
+                    title: 'Online sync history',
+                    subtitle: 'Last recorded downloads and uploads by record type.',
+                    icon: Icons.history,
+                    children: [
+                      if (_syncStates.isEmpty)
+                        Card(
+                          child: ListTile(
+                            title: Text(tr('notSyncedYet')),
+                          ),
+                        )
+                      else
+                        ..._syncStates.map(
+                          (row) => Card(
+                            child: ListTile(
+                              title: Text(
+                                _scopeLabel(row['scope']?.toString() ?? ''),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              subtitle: Text([
+                                "${tr('lastPull')}: ${_dateLabel(row['last_pull_at'])}",
+                                "${tr('lastPush')}: ${_dateLabel(row['last_push_at'])}",
+                                if ((row['last_error']?.toString() ?? '').isNotEmpty)
+                                  "Download failed: ${row['last_error']}",
+                                if (row['bootstrapped'] != true)
+                                  'Download incomplete; offline list may be partial',
+                              ].join('\n')),
+                              trailing: Icon(
+                                (row['last_error']?.toString() ?? '').isNotEmpty
+                                    ? Icons.error_outline
+                                    : row['bootstrapped'] == true
+                                        ? Icons.check_circle_outline
+                                        : Icons.hourglass_empty,
+                                color: (row['last_error']?.toString() ?? '').isNotEmpty
+                                    ? Colors.red
+                                    : row['bootstrapped'] == true
+                                        ? Colors.green
+                                        : Colors.orange,
+                              ),
+                              isThreeLine: true,
                             ),
                           ),
-                          subtitle: Text([
-                            "${tr('lastPull')}: ${_dateLabel(row['last_pull_at'])}",
-                            "${tr('lastPush')}: ${_dateLabel(row['last_push_at'])}",
-                            if ((row['last_error']?.toString() ?? '').isNotEmpty)
-                              "Download failed: ${row['last_error']}",
-                            if (row['bootstrapped'] != true)
-                              'Download incomplete; offline list may be partial',
-                          ].join('\n')),
-                          trailing: Icon(
-                            (row['last_error']?.toString() ?? '').isNotEmpty
-                                ? Icons.error_outline
-                                : row['bootstrapped'] == true
-                                    ? Icons.check_circle_outline
-                                    : Icons.hourglass_empty,
-                            color: (row['last_error']?.toString() ?? '').isNotEmpty
-                                ? Colors.red
-                                : row['bootstrapped'] == true
-                                    ? Colors.green
-                                    : Colors.orange,
-                          ),
-                          isThreeLine: true,
                         ),
-                      ),
-                    ),
+                    ],
+                  ),
+                  _syncSection(
+                    title: 'Diagnostics',
+                    subtitle: 'Read-only operation details and Owner troubleshooting.',
+                    icon: Icons.manage_search,
+                    children: [
+                      if (_pendingDetails.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        const Text('Pending operation details (read-only)',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                        const SizedBox(height: 6),
+                        ..._pendingDetails.map((operation) => Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: SelectableText([
+                              '${operation['type']} #${operation['id']} · ${operation['state']}',
+                              'Record: ${operation['entity']}',
+                              if ((operation['kind'] as String).isNotEmpty)
+                                'Kind: ${operation['kind']}',
+                              if (operation['type'] == 'finding_action')
+                                'Finding action: ${operation['finding_action']} · previously attempted: ${operation['finding_mutation_attempted']}',
+                              if ((operation['customer_id'] as String).isNotEmpty)
+                                'Customer ID: ${operation['customer_id']}',
+                              if ((operation['vehicle_id'] as String).isNotEmpty)
+                                'Vehicle ID: ${operation['vehicle_id']}',
+                              if ((operation['job_id'] as String).isNotEmpty)
+                                'Job ID: ${operation['job_id']}',
+                              'Attempts: ${operation['attempts']}',
+                              'Linked local documents: ${operation['linked_documents']}',
+                              'Linked local jobs: ${operation['linked_jobs']}',
+                              if ((operation['error'] as String).isNotEmpty)
+                                'Error: ${operation['error']}',
+                            ].join('\n')),
+                          ),
+                        )),
+                        const Text(
+                          'Inspection only. No pending data is removed here.',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ],
+                      // Show the action on Owner's screen even when the cached
+                      // eligibility summary is stale. The transactional handler
+                      // still rechecks all identifiers and linked records.
+                      if (widget.isOwner) ...[
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: _syncing || !_pendingDetails.any((entry) =>
+                            entry['id'] == 81 && entry['type'] == 'job_admin')
+                              ? null : _cancelOrphanedTestJobUpdate,
+                          icon: const Icon(Icons.remove_circle_outline),
+                          label: const Text('Cancel orphaned test update #81'),
+                        ),
+                      ],
+                      if (widget.isOwner &&
+                          _pendingDetails.any((e) => e['id'] == 78 &&
+                            e['type'] == 'document_draft_create' &&
+                            e['entity'] ==
+                              'local-estimate-ff67c47c-b116-437a-a8a4-2e3511695ef2')) ...[
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: _syncing ? null : _removeTestEstimate78,
+                          icon: const Icon(Icons.delete_outline),
+                          label: const Text('Remove disposable test estimate #78'),
+                        ),
+                      ],
+                    ],
+                  ),
                   const SizedBox(height: 10),
                   Card(
                     child: Padding(
@@ -1318,94 +1406,72 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                       ),
                     ),
                   ),
-                  if ((_syncMessage ?? '').isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      _syncMessage!,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ],
-                  if ((_error ?? '').isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      _error!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 14),
-                  if (widget.isOwner) ...[
-                    OutlinedButton.icon(
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => LocalRecoveryReviewScreen(
-                            businessId: widget.businessId,
-                            isOwner: widget.isOwner,
+                  _syncSection(
+                    title: 'Recovery tools',
+                    subtitle: 'Advanced tools for specific record issues.',
+                    icon: Icons.build_outlined,
+                    children: [
+                      const SizedBox(height: 14),
+                      if (widget.isOwner) ...[
+                        OutlinedButton.icon(
+                          onPressed: () => Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => LocalRecoveryReviewScreen(
+                                businessId: widget.businessId,
+                                isOwner: widget.isOwner,
+                              ),
+                            ),
                           ),
+                          icon: const Icon(Icons.fact_check_outlined),
+                          label: const Text('Review and reconcile recovered records'),
                         ),
-                      ),
-                      icon: const Icon(Icons.fact_check_outlined),
-                      label: const Text('Review and reconcile recovered records'),
-                    ),
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => OwnerOfflineNumberingScreen(
-                            businessId: widget.businessId,
-                            isOwner: widget.isOwner,
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: () => Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => OwnerOfflineNumberingScreen(
+                                businessId: widget.businessId,
+                                isOwner: widget.isOwner,
+                              ),
+                            ),
                           ),
+                          icon: const Icon(Icons.numbers),
+                          label: const Text('Assign local invoice and Job numbers'),
                         ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: _copyGloriaRecoverySnapshot,
+                          icon: const Icon(Icons.copy_all_outlined),
+                          label: const Text('Copy Gloria recovery snapshot (read-only)'),
+                        ),
+                        const Text(
+                          'Copies private customer, invoice and payment recovery data. Share only in a private conversation. No upload or local changes.',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      FilledButton.icon(
+                        onPressed: (_syncing || !widget.isOwner)
+                            ? null : _recoverPendingInvoices,
+                        icon: const Icon(Icons.receipt_long_outlined),
+                        label: const Text('Recover pending invoices'),
                       ),
-                      icon: const Icon(Icons.numbers),
-                      label: const Text('Assign local invoice and Job numbers'),
-                    ),
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: _copyGloriaRecoverySnapshot,
-                      icon: const Icon(Icons.copy_all_outlined),
-                      label: const Text('Copy Gloria recovery snapshot (read-only)'),
-                    ),
-                    const Text(
-                      'Copies private customer, invoice and payment recovery data. Share only in a private conversation. No upload or local changes.',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  FilledButton.icon(
-                    onPressed: (_syncing || !widget.isOwner)
-                        ? null : _recoverPendingInvoices,
-                    icon: const Icon(Icons.receipt_long_outlined),
-                    label: const Text('Recover pending invoices'),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Uploads queued customers, vehicles, invoices and recorded '
-                    'payments only. Does not run the 22-step full sync, '
-                    'delete records or finalize payments.',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: _syncing ? null : _syncNow,
-                    icon: _syncing
-                        ? const SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.sync),
-                    label: Text(
-                      _syncing ? tr('syncing') : tr('syncNow'),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: _syncing ? null : _repairImportedData,
-                    icon: const Icon(Icons.cleaning_services_outlined),
-                    label: Text(tr('repairImportedData')),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Uploads queued customers, vehicles, invoices and recorded '
+                        'payments only. Does not run the 22-step full sync, '
+                        'delete records or finalize payments.',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: _syncing ? null : _repairImportedData,
+                        icon: const Icon(Icons.cleaning_services_outlined),
+                        label: Text(tr('repairImportedData')),
+                      ),
+                    ],
                   ),
                 ],
               ),
