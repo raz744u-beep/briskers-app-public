@@ -1,3 +1,4 @@
+import 'device_inventory_comparison.dart';
 import 'local_recovery_review_screen.dart';
 import 'owner_offline_numbering_screen.dart';
 import 'dart:convert';
@@ -1128,6 +1129,11 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                     subtitle: 'Compare local record counts across phones.',
                     icon: Icons.storage_outlined,
                     children: [
+                      if (widget.isOwner)
+                        DeviceInventoryComparison(
+                          businessId: widget.businessId,
+                          counts: _counts,
+                        ),
                       Card(
                         child: ListTile(
                           leading: const Icon(Icons.storage_outlined),
