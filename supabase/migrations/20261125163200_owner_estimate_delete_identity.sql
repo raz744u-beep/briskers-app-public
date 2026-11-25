@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS briskers.owner_estimate_deletions_v1 (
   estimate_id uuid NOT NULL,
   UNIQUE (business_id,estimate_id)
 );
+ALTER TABLE briskers.owner_estimate_deletions_v1 ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON briskers.owner_estimate_deletions_v1 FROM PUBLIC,anon,authenticated;
 
 CREATE OR REPLACE FUNCTION briskers.reject_deleted_estimate_create_v1()

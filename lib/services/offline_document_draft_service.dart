@@ -657,9 +657,9 @@ class OfflineDocumentDraftService {
         }
         final payload = create == null ? null
             : jsonDecode(create.read<String>('payload_json')) as Map;
-        // The standalone sync RPC uses the operation UUID as the document ID.
-        // Job estimate imports may use a different server identity.
-        if (payload?['kind'] != 'estimate' || payload?['job_id'] != null ||
+        // Both numbered estimate create RPCs use the operation UUID as
+        // the document ID. An older upload without that UUID is ambiguous.
+        if (payload?['kind'] != 'estimate' ||
             !_remoteEstimateId.hasMatch(payload?['operation_id']?.toString() ?? '')) {
           throw StateError('This estimate upload has no confirmed server identity.');
         }

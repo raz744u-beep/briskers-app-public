@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS briskers.standalone_expense_deletions_v1 (
   UNIQUE (business_id, transaction_id),
   UNIQUE (business_id, create_operation)
 );
+ALTER TABLE briskers.standalone_expense_deletions_v1 ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON briskers.standalone_expense_deletions_v1 FROM PUBLIC, anon, authenticated;
 
 CREATE OR REPLACE FUNCTION briskers.reject_deleted_standalone_expense_create_v1()
@@ -78,8 +79,21 @@ BEGIN
                           'payment_id','document_id','invoice_id','job_id')
             AND f.value IS NOT NULL
         ) OR EXISTS (
+          SELECT 1 FROM briskers.expense_allocations a
+          WHERE a.business_id=p_business_id AND a.transaction_id=target
+            AND (a.job_id IS NOT NULL OR a.document_id IS NOT NULL)
+        ) OR EXISTS (
           SELECT 1 FROM briskers.payment_allocations a
           WHERE a.business_id=p_business_id AND a.transaction_id=target
+        ) OR EXISTS (
+          SELECT 1 FROM briskers.payroll_allocations a
+          WHERE a.business_id=p_business_id AND a.transaction_id=target
+        ) OR EXISTS (
+          SELECT 1 FROM briskers.recurring_transactions r
+          WHERE r.business_id=p_business_id AND r.source_transaction_id=target
+        ) OR EXISTS (
+          SELECT 1 FROM briskers.recurring_occurrences r
+          WHERE r.business_id=p_business_id AND r.transaction_id=target
         ) OR EXISTS (
           SELECT 1 FROM briskers.sync_applied_operations o
           WHERE o.business_id=p_business_id AND o.entity_type='financial_transaction_create'
@@ -88,8 +102,20 @@ BEGIN
         ) THEN
         RAISE EXCEPTION 'This expense belongs to a linked transaction' USING ERRCODE='PT409';
       END IF;
-      DELETE FROM briskers.financial_transactions t
-      WHERE t.business_id=p_business_id AND t.id=target;
+      IF EXISTS (
+        SELECT 1 FROM briskers.expense_attachments a
+        WHERE a.business_id=p_business_id AND a.transaction_id=target
+      ) THEN
+        -- The receipt must keep its storage reference. Voiding removes the
+        -- transaction from the active register without deleting its image.
+        UPDATE briskers.financial_transactions t SET status='void'
+        WHERE t.business_id=p_business_id AND t.id=target AND t.status<>'void';
+      ELSE
+        DELETE FROM briskers.expense_allocations a
+        WHERE a.business_id=p_business_id AND a.transaction_id=target;
+        DELETE FROM briskers.financial_transactions t
+        WHERE t.business_id=p_business_id AND t.id=target;
+      END IF;
     END IF;
   END IF;
   IF target IS NOT NULL OR p_create_operation IS NOT NULL THEN

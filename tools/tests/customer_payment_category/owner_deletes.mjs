@@ -14,10 +14,15 @@ try {
     "SELECT nullif(current_setting('test.actor',true),'')::uuid $$;" +
     "CREATE FUNCTION briskers.is_owner(b uuid) RETURNS bool LANGUAGE sql STABLE AS $$ " +
     "SELECT b::text=current_setting('test.shop',true) AND current_setting('test.owner',true)='true' $$;" +
-    "CREATE TABLE briskers.financial_transactions(id uuid PRIMARY KEY,business_id uuid,kind text,job_id uuid);" +
+    "CREATE TABLE briskers.financial_transactions(id uuid PRIMARY KEY,business_id uuid,kind text,job_id uuid,status text DEFAULT 'posted');" +
     "CREATE TABLE briskers.sync_applied_operations(business_id uuid,operation_id text,entity_type text,result jsonb," +
     "PRIMARY KEY(business_id,operation_id));" +
+    "CREATE TABLE briskers.expense_allocations(business_id uuid,transaction_id uuid REFERENCES briskers.financial_transactions(id),job_id uuid,document_id uuid);" +
     "CREATE TABLE briskers.payment_allocations(business_id uuid,transaction_id uuid);" +
+    "CREATE TABLE briskers.payroll_allocations(business_id uuid,transaction_id uuid);" +
+    "CREATE TABLE briskers.recurring_transactions(business_id uuid,source_transaction_id uuid);" +
+    "CREATE TABLE briskers.recurring_occurrences(business_id uuid,transaction_id uuid);" +
+    "CREATE TABLE briskers.expense_attachments(business_id uuid,transaction_id uuid REFERENCES briskers.financial_transactions(id));" +
     "CREATE TABLE briskers.appointments(id uuid PRIMARY KEY,business_id uuid,job_id uuid,request_id uuid);" +
     "CREATE TABLE briskers.appointment_create_operations(business_id uuid,operation_id uuid,appointment_id uuid," +
     "PRIMARY KEY(business_id,operation_id));" +
@@ -48,8 +53,13 @@ try {
     "INSERT INTO briskers.sync_applied_operations VALUES($1,$2,'financial_transaction_create',jsonb_build_object('transaction_id',$3::text))",
     [shop, op, uuid],
   );
-  await db.query("INSERT INTO briskers.financial_transactions VALUES($1,$2,'other_expense',NULL),($3,$2,'other_expense',$4),($5,$6,'other_expense',NULL)",
-    [id(10), shop, id(11), id(30), id(12), other]);
+  await db.query("INSERT INTO briskers.financial_transactions(id,business_id,kind,job_id) VALUES"
+    + "($1,$2,'other_expense',NULL),($3,$2,'other_expense',NULL),"
+    + "($4,$5,'other_expense',NULL),($6,$2,'other_expense',NULL)",
+    [id(10), shop, id(11), id(12), other, id(13)]);
+  await db.query('INSERT INTO briskers.expense_allocations VALUES($1,$2,NULL,NULL),($1,$3,$4,NULL)',
+    [shop, id(10), id(11), id(30)]);
+  await db.query('INSERT INTO briskers.expense_attachments VALUES($1,$2)', [shop, id(13)]);
   await financialCreate('financial-create-accepted', id(10));
   assert.equal(await expense(null, 'financial-create-accepted', [id(10)]), null);
   assert.equal(await expense(null, 'financial-create-accepted'), id(10));
@@ -59,8 +69,11 @@ try {
   await assert.rejects(() => expense(id(11), null), {code: 'PT409'});
   const feed = (await db.query('SELECT transaction_id FROM public.briskers_expense_deletion_feed_v1($1,0)', [shop])).rows;
   assert.deepEqual(feed, [{transaction_id: id(10)}]);
-  assert.deepEqual((await db.query('SELECT id FROM briskers.financial_transactions ORDER BY id')).rows,
-    [{id: id(11)}, {id: id(12)}]);
+  assert.equal(await expense(id(13), null), id(13));
+  assert.deepEqual((await db.query('SELECT id,status FROM briskers.financial_transactions ORDER BY id')).rows,
+    [{id: id(11), status: 'posted'}, {id: id(12), status: 'posted'}, {id: id(13), status: 'void'}]);
+  assert.deepEqual((await db.query('SELECT transaction_id FROM briskers.expense_attachments')).rows,
+    [{transaction_id: id(13)}]);
 
   const appointment = (uuid, op) => db.query(
     'SELECT public.briskers_delete_appointment_identity_v1($1,$2,$3) AS id',

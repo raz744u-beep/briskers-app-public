@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS briskers.appointment_create_cancellations_v1 (
   operation_id uuid NOT NULL,
   PRIMARY KEY (business_id,operation_id)
 );
+ALTER TABLE briskers.appointment_create_cancellations_v1 ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON briskers.appointment_create_cancellations_v1 FROM PUBLIC,anon,authenticated;
 
 CREATE OR REPLACE FUNCTION briskers.lock_appointment_creation_v1()
