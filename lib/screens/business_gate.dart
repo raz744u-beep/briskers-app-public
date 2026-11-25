@@ -474,6 +474,13 @@ class _BusinessGateState extends State<BusinessGate> with WidgetsBindingObserver
       // Never touch an invoice's historical odometer_in on replay.
     }
 
+    if (roleCode == 'owner') {
+      try {
+        await _offlinePayments.flushPendingDeletions(businessId);
+      } catch (_) {
+        // The removed receipt remains hidden while its server status is unknown.
+      }
+    }
     try {
       await _offlinePayments.flush(businessId);
     } catch (_) {

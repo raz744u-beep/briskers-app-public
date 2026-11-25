@@ -8,6 +8,7 @@ import '../local/local_database_provider.dart';
 import 'local_financial_cache.dart';
 import 'local_document_detail_cache.dart';
 import 'local_invoice_closure.dart';
+import 'offline_invoice_payment_ledger.dart';
 import 'local_document_sql_store.dart';
 import 'local_transaction_search.dart';
 
@@ -54,7 +55,14 @@ class InvoicePaymentFeed {
   ) => _cache.saveInvoiceReceipts(businessId, receipts);
 
   Future<List<Map<String, dynamic>>> load(String businessId) async {
-    final server = await _cache.loadInvoiceReceipts(businessId);
+    final deletionIds = await OfflineInvoicePaymentLedger(database: _db)
+        .pendingDeletionIds(businessId);
+    final server = (await _cache.loadInvoiceReceipts(businessId)).where((receipt) {
+      if (receipt['receipt_state'] != 'pending') return true;
+      return !OfflineInvoicePaymentLedger.hasDeletedPaymentIdentity(
+        receipt, deletionIds[receipt['invoice_id']] ?? const {},
+      );
+    }).toList();
     final raw = await _db.customSelect(
       '''
       SELECT o.entity_id, o.payload_json, d.document_number,

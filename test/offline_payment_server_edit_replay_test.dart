@@ -2,6 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/core/connection_mode.dart';
 import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/offline_invoice_payment_ledger.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
@@ -15,6 +16,18 @@ class _PaymentServerFixture extends BriskersApi {
   int editCalls=0;
   bool loseResponse=false;
   bool rejectConflict=false;
+
+  final removed = <String?>[];
+
+  @override
+  Future<String?> syncDeletePendingInvoicePayment(
+    String businessId, String invoiceId, {
+    String? paymentId,
+    String? createOperation,
+  }) async {
+    removed.add(paymentId ?? createOperation);
+    return 'server-pending-payment';
+  }
 
   @override
   Future<void> updatePendingInvoicePaymentV2(
@@ -60,6 +73,75 @@ class _PaymentServerFixture extends BriskersApi {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('Owner removes a server-pending receipt offline without hiding posted income', () async {
+    SharedPreferences.setMockInitialValues({});
+    final mode = BriskersConnectionModeController.instance;
+    await mode.setMode(BriskersConnectionMode.offline);
+    addTearDown(() => mode.setMode(BriskersConnectionMode.auto));
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final server = _PaymentServerFixture();
+    final ledger = OfflineInvoicePaymentLedger(database: db, api: server);
+    const shop = 'owner-delete-payment';
+    const invoice = 'invoice-1';
+    final cache = LocalDocumentDetailCache(database: db);
+    final detail = await server.documentDetailV4(shop, invoice);
+    (detail['payments'] as List).add({
+      'id': 'posted-receipt',
+      'state': 'posted',
+      'amount': 70,
+    });
+    detail['paid_amount'] = 70;
+    await cache.save(shop, invoice, detail);
+
+    await ledger.queuePendingDeletion(
+      shop, invoice, 'server-pending-payment',
+      localReceipt: false, assertAuthorized: () {},
+    );
+    await ledger.flushPendingDeletions(shop);
+    expect(server.removed, isEmpty);
+    final ids = await ledger.pendingDeletionIds(shop);
+    final projected = OfflineInvoicePaymentLedger.projectPendingDeletions(
+      detail, ids[invoice]!,
+    );
+    expect(projected['pending_payment'], 0);
+    expect(projected['paid_amount'], 70);
+    expect((projected['payments'] as List).single['id'], 'posted-receipt');
+    await mode.setMode(BriskersConnectionMode.auto);
+    await ledger.flushPendingDeletions(shop);
+    await ledger.flushPendingDeletions(shop);
+    expect(server.removed, ['server-pending-payment']);
+    expect(await db.customSelect('SELECT id FROM sync_outbox').get(), isEmpty);
+    expect((await ledger.pendingDeletionIds(shop))[invoice], ids[invoice]);
+  });
+
+  test('removing an attempted local receipt keeps the create identity for replay', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final server = _PaymentServerFixture();
+    final ledger = OfflineInvoicePaymentLedger(database: db, api: server);
+    const shop = 'owner-delete-attempted';
+    const invoice = 'invoice-1';
+    final operation = await ledger.recordReceivedPayment(
+      shop, invoice, amount: 50, remainingBeforePaymentCents: 10000,
+      methodId: 'cash', methodName: 'Cash',
+    );
+    await db.customStatement(
+      "UPDATE sync_outbox SET attempt_count=1,last_attempt_at=1 "
+      "WHERE entity_type='invoice_payment_received'",
+    );
+    await ledger.queuePendingDeletion(
+      shop, invoice, operation, localReceipt: true, assertAuthorized: () {},
+    );
+    expect(await ledger.pendingForInvoice(shop, invoice), isEmpty);
+    expect((await ledger.pendingDeletionIds(shop))[invoice], {operation});
+    await ledger.flushPendingDeletions(shop);
+    expect(server.removed, [operation]);
+    expect((await ledger.pendingDeletionIds(shop))[invoice],
+        {operation, 'server-pending-payment'});
+  });
 
   test('queued correction syncs by same payment ID and caches result', () async {
     SharedPreferences.setMockInitialValues({});

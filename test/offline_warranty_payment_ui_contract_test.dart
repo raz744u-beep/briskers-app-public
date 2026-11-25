@@ -46,7 +46,15 @@ void main() {
     expect(screen, contains("_detail?['_payment_reconciliation_required']"));
     expect(finalize, contains('OfflineInvoiceFinalization().finalizeLocally('));
     expect(finalize, isNot(contains('.flush(')));
-    expect(screen, contains("payment['pending_sync'] == true ||"));
+    final editStart = screen.indexOf('Future<void> _editPayment(');
+    final removeStart = screen.indexOf('Future<void> _deletePayment(', editStart);
+    final edit = screen.substring(editStart, removeStart);
+    final reconciliationGuard =
+        edit.indexOf("payment['reconciliation_required'] == true");
+    final serverEdit = edit.indexOf('updatePendingInvoicePaymentV2(');
+    expect(reconciliationGuard, greaterThanOrEqualTo(0));
+    expect(serverEdit, greaterThan(reconciliationGuard));
+    expect(edit, contains('queueServerPendingEdit('));
     expect(screen, contains("label: 'Waiting to sync'"));
     expect(screen, contains('paymentPendingLabel: _warrantyPaymentProcessed(pendingOnly: true)'));
     final panel = File('lib/screens/jobs/invoice_warranty_panel.dart').readAsStringSync();

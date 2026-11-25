@@ -26,6 +26,9 @@ try {
     "CREATE TABLE briskers.appointments(id uuid PRIMARY KEY,business_id uuid,job_id uuid,request_id uuid);" +
     "CREATE TABLE briskers.appointment_create_operations(business_id uuid,operation_id uuid,appointment_id uuid," +
     "PRIMARY KEY(business_id,operation_id));" +
+    "CREATE TABLE briskers.invoice_pending_payments(id uuid PRIMARY KEY,business_id uuid,invoice_id uuid);" +
+    "CREATE TABLE briskers.invoice_payment_operation_keys(business_id uuid,operation_id uuid,invoice_id uuid,pending_payment_id uuid," +
+    "PRIMARY KEY(business_id,operation_id));" +
     "CREATE TABLE briskers.sales_documents(id uuid PRIMARY KEY,business_id uuid,kind text,source_estimate_id uuid);" +
     "CREATE TABLE briskers.sales_document_estimate_links(business_id uuid,estimate_id uuid);" +
     "CREATE FUNCTION public.briskers_delete_appointment(b uuid,a uuid) RETURNS void LANGUAGE plpgsql AS $$ BEGIN " +
@@ -41,6 +44,7 @@ try {
     '20261125163000_owner_standalone_expense_delete.sql',
     '20261125163100_owner_appointment_delete_identity.sql',
     '20261125163200_owner_estimate_delete_identity.sql',
+    '20261125164000_owner_pending_invoice_payment_delete.sql',
   ]) {
     await db.exec(readFileSync(new URL('../../../supabase/migrations/' + file, import.meta.url), 'utf8'));
   }
@@ -101,8 +105,28 @@ try {
   assert.deepEqual((await db.query('SELECT estimate_id FROM public.briskers_estimate_deletion_feed_v1($1,0)', [shop])).rows,
     [{estimate_id: id(40)}, {estimate_id: id(43)}]);
 
+  const removePendingPayment = (payment, operation, invoice = id(42)) => db.query(
+    'SELECT public.briskers_owner_delete_pending_invoice_payment_v1($1,$2,$3,$4) AS id',
+    [shop, invoice, payment, operation],
+  ).then(result => result.rows[0].id);
+  await db.query('INSERT INTO briskers.invoice_pending_payments VALUES($1,$2,$3),($4,$2,$3)',
+    [id(50), shop, id(42), id(51)]);
+  await db.query('INSERT INTO briskers.invoice_payment_operation_keys VALUES($1,$2,$3,$4),($1,$5,$3,$6)',
+    [shop, id(52), id(42), id(50), id(53), id(54)]);
+  await assert.rejects(() => removePendingPayment(null, id(53)), {code: 'PT409'});
+  await assert.rejects(() => removePendingPayment(null, id(52), id(41)), {code: 'PT409'});
+  assert.equal(await removePendingPayment(null, id(52)), id(50));
+  assert.equal(await removePendingPayment(null, id(52)), id(50));
+  assert.equal(await removePendingPayment(id(50), null), id(50));
+  assert.equal(await removePendingPayment(null, id(55)), null);
+  await assert.rejects(() => db.query(
+    'INSERT INTO briskers.invoice_payment_operation_keys VALUES($1,$2,$3,NULL)',
+    [shop, id(55), id(42)]), {code: 'PT409'});
+  assert.deepEqual((await db.query('SELECT id FROM briskers.invoice_pending_payments')).rows,
+    [{id: id(51)}]);
+
   await db.exec("SELECT set_config('test.owner','false',false)");
-  for (const run of [() => expense(id(12), null), () => appointment(id(21), null), () => estimate(id(41))]) {
+  for (const run of [() => expense(id(12), null), () => appointment(id(21), null), () => estimate(id(41)), () => removePendingPayment(id(51), null)]) {
     await assert.rejects(run, {code: '42501'});
   }
   console.log('PASS: Owner delete authorization, identity cancellation, retry and linked-record protection.');
