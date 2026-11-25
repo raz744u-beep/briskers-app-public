@@ -86,7 +86,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
   bool _loading = true;
   bool _syncing = false;
   bool _targetedRecovery = false;
-  static const int _syncStepCount = 22;
+  int get _syncStepCount => widget.isOwner ? 26 : 22;
   int _syncStep = 0;
   String? _syncStage;
   String? _error;
@@ -345,6 +345,14 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         return 'Estimate and invoice edits';
       case 'invoice_payment_received':
         return 'Received invoice payments';
+      case 'invoice_pending_payment_delete':
+        return 'Removed pending payments';
+      case 'financial_delete':
+        return 'Deleted expenses';
+      case 'estimate_delete':
+        return 'Deleted estimates';
+      case 'appointment_delete':
+        return 'Deleted appointments';
       case 'invoice_mileage_out':
         return 'Invoice mileage';
       case 'customer_create':
@@ -845,6 +853,12 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       'Customer notes / findings',
       () => _customerDetail.flush(widget.businessId),
     );
+    if (widget.isOwner) {
+      await attempt('Deleted expenses', () => _financial.syncExpenseDeletions(widget.businessId));
+      await attempt('Deleted estimates', () => _documentDrafts.syncEstimateDeletions(widget.businessId));
+      await attempt('Deleted appointments', () => _appointments.flushDeletes(widget.businessId));
+      await attempt('Removed invoice payments', () => _payments.flushPendingDeletions(widget.businessId));
+    }
     await attempt(
       'Expenses / receipts',
       () => _financial.flush(widget.businessId),
