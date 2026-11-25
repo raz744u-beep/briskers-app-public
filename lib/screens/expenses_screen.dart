@@ -1773,35 +1773,6 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
   }
 
-  Future<void> _deleteStandaloneExpenseFromList(
-    String id, Map<String, dynamic> detail,
-  ) async {
-    final businessId = widget.businessId;
-    try {
-      final grant = await DeviceOwnerAuthorization.instance.authority
-          .authorizeLocal(businessId);
-      if (!mounted || widget.businessId != businessId) return;
-      await _localFinancial.saveTransactionDetail(businessId, id, detail);
-      final writes = OfflineFinancialWriteService();
-      await writes.deleteStandaloneExpense(
-        businessId, id,
-        assertAuthorized: () => grant.assertValid(
-          businessId, supabase.auth.currentUser?.id ?? '',
-        ),
-      );
-      if (!mounted || widget.businessId != businessId) return;
-      setState(() {
-        _transactions = _transactions.where((row) => row['id'] != id).toList();
-      });
-      unawaited(_load(showLoading: false, forceTotals: true));
-      unawaited(writes.syncExpenseDeletions(businessId).catchError((Object _) {}));
-    } catch (error) {
-      if (mounted && widget.businessId == businessId) {
-        setState(() => _error = error.toString());
-      }
-    }
-  }
-
   Future<void> _deleteTransactionFromList(String transactionId) async {
     final confirmed =
         await showDialog<bool>(
@@ -1835,6 +1806,35 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       if (mounted) await _load(forceTotals: true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _deleteStandaloneExpenseFromList(
+    String id, Map<String, dynamic> detail,
+  ) async {
+    final businessId = widget.businessId;
+    try {
+      final grant = await DeviceOwnerAuthorization.instance.authority
+          .authorizeLocal(businessId);
+      if (!mounted || widget.businessId != businessId) return;
+      await _localFinancial.saveTransactionDetail(businessId, id, detail);
+      final writes = OfflineFinancialWriteService();
+      await writes.deleteStandaloneExpense(
+        businessId, id,
+        assertAuthorized: () => grant.assertValid(
+          businessId, supabase.auth.currentUser?.id ?? '',
+        ),
+      );
+      if (!mounted || widget.businessId != businessId) return;
+      setState(() {
+        _transactions = _transactions.where((row) => row['id'] != id).toList();
+      });
+      unawaited(_load(showLoading: false, forceTotals: true));
+      unawaited(writes.syncExpenseDeletions(businessId).catchError((Object _) {}));
+    } catch (error) {
+      if (mounted && widget.businessId == businessId) {
+        setState(() => _error = error.toString());
+      }
     }
   }
 
