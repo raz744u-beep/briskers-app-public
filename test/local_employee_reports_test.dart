@@ -14,7 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('confirmed aliases display the profile name and one duplicate can be voided', () async {
+  test('a payroll duplicate deletes immediately despite prior sync attempts', () async {
     SharedPreferences.setMockInitialValues({
       'briskers_job_employees_shop': jsonEncode([
         {'id': 'mechanic', 'name': 'Jamie Example', 'nickname': 'Jay'},
@@ -69,34 +69,29 @@ void main() {
       group.entries.map((entry) => entry.expense!['id']),
       unorderedEquals(['kept', 'local-transaction-copy']),
     );
-    await database.customStatement(
-      'INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,payload_json) VALUES (?,?,?,?,?)',
-      ['shop', 'financial_create', 'local-transaction-copy', 'create', '{}'],
-    );
+    const duplicateId = 'local-transaction-copy';
+    await cache.saveTransactionDetail('shop', duplicateId, duplicate);
+    for (final (type, id, payload) in [
+      ('financial_create', duplicateId, '{}'),
+      ('financial_photo', 'photo', jsonEncode({'transaction_id': duplicateId})),
+      ('financial_update', 'kept', '{}'),
+    ]) {
+      await database.customStatement(
+        'INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,'
+        'payload_json,last_attempt_at,attempt_count) VALUES (?,?,?,?,?,1,2)',
+        ['shop', type, id, 'create', payload],
+      );
+    }
     final writes = OfflineFinancialWriteService(database: database);
-    Future<void> removeDuplicate() => writes.voidDuplicatePayrollExpense(
+    Future<void> removeDuplicate() => writes.deleteDuplicatePayrollExpense(
       'shop',
-      duplicateId: 'local-transaction-copy',
-      keepId: 'kept',
-      ownerId: 'owner',
+      duplicateId,
       assertAuthorized: () {},
     );
-    await database.customStatement('UPDATE sync_outbox SET last_attempt_at=1');
-    await expectLater(removeDuplicate(), throwsStateError);
-    expect(await cache.locallyVoidedExpenseIds('shop'), isEmpty);
-    await database.customStatement(
-      'UPDATE sync_outbox SET last_attempt_at=NULL',
-    );
-    await database.customStatement(
-      'CREATE TABLE local_job_recovery_receipts (business_id TEXT, outbox_id INTEGER)',
-    );
-    await database.customStatement(
-      'INSERT INTO local_job_recovery_receipts SELECT business_id,id FROM sync_outbox',
-    );
-    await expectLater(removeDuplicate(), throwsStateError);
-    expect(await cache.locallyVoidedExpenseIds('shop'), isEmpty);
-    await database.customStatement('DELETE FROM local_job_recovery_receipts');
     await removeDuplicate();
+    await removeDuplicate();
+    expect(await cache.loadTransactionDetail('shop', duplicateId), isNull);
+    await cache.mergeServerTransactions('shop', [duplicate, kept]);
     expect(await reports.duplicateGroups('shop', isOwner: true), isEmpty);
     expect(
       (await cache.loadTransactions('shop')).map((row) => row['id']),
@@ -108,16 +103,14 @@ void main() {
         'different-amount',
       ]),
     );
-    final audit = await database
-        .customSelect('SELECT original FROM local_financial_voids')
-        .getSingle();
-    final original = jsonDecode(audit.read<String>('original')) as Map;
-    expect(original['counterparty'], 'Jamie');
-    expect(original['duplicate_kept_id'], 'kept');
-    final outbox = await database
-        .customSelect('SELECT state FROM sync_outbox')
-        .getSingle();
-    expect(outbox.read<String>('state'), 'reversed');
+    final audit = await database.customSelect(
+      "SELECT name FROM sqlite_master WHERE name='local_financial_voids'",
+    ).get();
+    expect(audit, isEmpty);
+    final outbox = await database.customSelect(
+      'SELECT entity_id FROM sync_outbox',
+    ).getSingle();
+    expect(outbox.read<String>('entity_id'), 'kept');
   });
 
   test(

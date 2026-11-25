@@ -50,52 +50,8 @@ class _PayrollDuplicateReviewScreenState
     ].join(' · ');
   }
 
-  Future<void> _review(
-    PayrollDuplicateGroup group,
-    EmployeeReportPayment duplicate,
-  ) async {
-    final keep = await showDialog<EmployeeReportPayment>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('Choose the entry to keep'),
-        children: [
-          for (final entry in group.entries)
-            if (entry != duplicate)
-              SimpleDialogOption(
-                onPressed: () => Navigator.pop(context, entry),
-                child: Text(_describe(entry)),
-              ),
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-    if (keep == null || !mounted) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Remove duplicate on this device?'),
-        content: Text(
-          '${group.employee} · ${DateFormat.yMMMd().format(group.date)} · '
-          '${NumberFormat.simpleCurrency(locale: 'en_US').format(group.cents / 100)}\n\n'
-          'Keep ${_describe(keep)}\n\nRemove ${_describe(duplicate)}\n\n'
-          'Confirm after checking the bank paid this amount once.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove duplicate'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
+  Future<void> _delete(EmployeeReportPayment entry) async {
+    if (_busy) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -104,11 +60,9 @@ class _PayrollDuplicateReviewScreenState
       final grant = await DeviceOwnerAuthorization.instance.authority
           .authorizeLocal(widget.businessId);
       await OfflineFinancialWriteService(database: widget.database)
-          .voidDuplicatePayrollExpense(
+          .deleteDuplicatePayrollExpense(
             widget.businessId,
-            duplicateId: duplicate.expense!['id'].toString(),
-            keepId: keep.expense!['id'].toString(),
-            ownerId: grant.actorId,
+            entry.expense!['id'].toString(),
             assertAuthorized: () => grant.assertValid(
               widget.businessId,
               supabase.auth.currentUser?.id ?? '',
@@ -148,8 +102,7 @@ class _PayrollDuplicateReviewScreenState
             padding: const EdgeInsets.all(16),
             children: [
               const Text(
-                'Review saved Payroll expenses for the same employee, date, and amount. '
-                'Confirmed removals update this device and keep an audit record.',
+                'Saved payroll expenses with the same employee, date, and amount.',
               ),
               if (_busy) const LinearProgressIndicator(),
               if (_error case final error?)
@@ -187,8 +140,8 @@ class _PayrollDuplicateReviewScreenState
                               ? TextButton(
                                   onPressed: _busy
                                       ? null
-                                      : () => _review(group, entry),
-                                  child: const Text('Review removal'),
+                                      : () => _delete(entry),
+                                  child: const Text('Delete'),
                                 )
                               : null,
                         ),

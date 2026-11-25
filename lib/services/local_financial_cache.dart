@@ -180,15 +180,52 @@ class LocalFinancialCache {
       row['invoice_payment_id'] == null && !requiresOwnerAccountEdit(row);
 
   Future<Set<String>> locallyVoidedExpenseIds(String business) async {
-    final table = await _database.customSelect(
-      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_financial_voids'",
-    ).getSingleOrNull();
-    if (table == null) return {};
-    final rows = await _database.customSelect(
-      'SELECT transaction_id FROM local_financial_voids WHERE business_id=?',
-      variables: [Variable(business)],
+    final tables = await _database.customSelect(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+      "('local_financial_voids', 'local_financial_deletions')",
     ).get();
-    return rows.map((row) => row.read<String>('transaction_id')).toSet();
+    final ids = <String>{};
+    for (final table in tables) {
+      final name = table.read<String>('name');
+      final rows = await _database.customSelect(
+        'SELECT transaction_id FROM $name WHERE business_id=?',
+        variables: [Variable(business)],
+      ).get();
+      ids.addAll(rows.map((row) => row.read<String>('transaction_id')));
+    }
+    return ids;
+  }
+
+  /// Keep only the ID needed to reject stale downloads of this transaction.
+  Future<void> deleteSavedTransaction(String business, String id) async {
+    await _database.transaction(() async {
+      await _database.customStatement('''
+        CREATE TABLE IF NOT EXISTS local_financial_deletions (
+          business_id TEXT NOT NULL,
+          transaction_id TEXT NOT NULL,
+          PRIMARY KEY (business_id, transaction_id)
+        )
+      ''');
+      final raw = await _load(business, _transactionsKey);
+      if (jsonDecode(raw ?? 'null') case final List<dynamic> rows) {
+        await _save(
+          business,
+          _transactionsKey,
+          jsonEncode([
+            for (final row in rows)
+              if (row is! Map || row['id'] != id) row,
+          ]),
+        );
+      }
+      await _database.customStatement(
+        'DELETE FROM local_financial_cache WHERE business_id=? AND cache_key=?',
+        [business, 'transaction_detail_$id'],
+      );
+      await _database.customStatement(
+        'INSERT OR IGNORE INTO local_financial_deletions VALUES (?, ?)',
+        [business, id],
+      );
+    });
   }
 
   Future<int> recordTransactionCopy(String business, String original, String copy) async {
