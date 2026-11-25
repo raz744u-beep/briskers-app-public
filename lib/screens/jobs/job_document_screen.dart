@@ -3680,7 +3680,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     Map<String, dynamic> payment,
   ) async {
     if (_busy || !_canManageInvoiceExpenses ||
-        payment['state']?.toString() != 'pending') return;
+        payment['state']?.toString() != 'pending') {
+      return;
+    }
     final canEdit = payment['reconciliation_required'] != true &&
         _detail?['_payment_reconciliation_required'] != true;
     final canRemove = widget.isOwner;

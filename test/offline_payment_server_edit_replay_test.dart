@@ -116,6 +116,33 @@ void main() {
     expect((await ledger.pendingDeletionIds(shop))[invoice], ids[invoice]);
   });
 
+  test('removing an attempted local receipt keeps the create identity for replay', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final server = _PaymentServerFixture();
+    final ledger = OfflineInvoicePaymentLedger(database: db, api: server);
+    const shop = 'owner-delete-attempted';
+    const invoice = 'invoice-1';
+    final operation = await ledger.recordReceivedPayment(
+      shop, invoice, amount: 50, remainingBeforePaymentCents: 10000,
+      methodId: 'cash', methodName: 'Cash',
+    );
+    await db.customStatement(
+      "UPDATE sync_outbox SET attempt_count=1,last_attempt_at=1 "
+      "WHERE entity_type='invoice_payment_received'",
+    );
+    await ledger.queuePendingDeletion(
+      shop, invoice, operation, localReceipt: true, assertAuthorized: () {},
+    );
+    expect(await ledger.pendingForInvoice(shop, invoice), isEmpty);
+    expect((await ledger.pendingDeletionIds(shop))[invoice], {operation});
+    await ledger.flushPendingDeletions(shop);
+    expect(server.removed, [operation]);
+    expect((await ledger.pendingDeletionIds(shop))[invoice],
+        {operation, 'server-pending-payment'});
+  });
+
   test('queued correction syncs by same payment ID and caches result', () async {
     SharedPreferences.setMockInitialValues({});
     final db=BriskersLocalDatabase(NativeDatabase.memory());
