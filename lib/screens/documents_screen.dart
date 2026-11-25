@@ -15,6 +15,8 @@ import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/connection_mode.dart';
+import '../core/supabase_config.dart';
+import '../services/device_owner_authorization.dart';
 import '../core/invoice_status_style.dart';
 import '../core/briskers_i18n.dart';
 import '../core/document_search.dart';
@@ -1036,21 +1038,17 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       return;
     }
 
-    final number = row['document_number']?.toString().trim() ?? '';
-    final confirmed = await showDialog<bool>(context: context,
-      builder: (dialog) => BriskersDialog(
-        title: 'Delete estimate?', icon: Icons.delete_outline,
-        content: Text(number.isEmpty ? 'Delete this estimate?' : 'Delete estimate #$number?'),
-        actions: [
-          OutlinedButton(style: BriskersDialog.cancelStyle,
-            onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancel')),
-          FilledButton(style: BriskersDialog.confirmStyle(destructive: true),
-            onPressed: () => Navigator.pop(dialog, true), child: const Text('Delete')),
-        ],
-      ));
-    if (confirmed != true) return;
     try {
-      await _offlineDrafts.deleteEstimate(widget.businessId, row['id'].toString());
+      final businessId = widget.businessId;
+      final grant = await DeviceOwnerAuthorization.instance.authority.authorizeLocal(businessId);
+      if (!mounted || widget.businessId != businessId) return;
+      await _offlineDrafts.deleteEstimate(
+        businessId, row['id'].toString(),
+        assertAuthorized: () => grant.assertValid(
+          businessId, supabase.auth.currentUser?.id ?? '',
+        ),
+      );
+      unawaited(_offlineDrafts.syncEstimateDeletions(businessId).catchError((Object _) {}));
       if (mounted) await _load();
     } catch (error) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));

@@ -84,6 +84,24 @@ void main() {
     await expectLater(reuse(), throwsStateError);
   });
 
+  test('an attempted standalone estimate stays hidden and holds its number', () async {
+    final drafts = OfflineDocumentDraftService(database: db);
+    final id = await drafts.createStandaloneEstimate(
+      'shop', customerId: 'customer', customerName: 'Synthetic customer',
+    );
+    await db.customStatement(
+      "UPDATE sync_outbox SET last_attempt_at=1,attempt_count=1 WHERE entity_id=?",
+      [id],
+    );
+    await drafts.deleteEstimate('shop', id);
+    expect(await LocalDocumentDetailCache(database: db).load('shop', id), isNull);
+    expect(await LocalNumberAllocator(db).availableNumbers('shop', 'estimate'), isEmpty);
+    final queued = await db.customSelect(
+      "SELECT entity_type FROM sync_outbox WHERE entity_type='estimate_delete'",
+    ).getSingle();
+    expect(queued.read<String>('entity_type'), 'estimate_delete');
+  });
+
   test('pool contains explicit releases only, scoped by shop and kind', () async {
     final numbers = LocalNumberAllocator(db);
     expect(await numbers.availableNumbers('shop', 'invoice'), [34]);

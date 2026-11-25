@@ -399,6 +399,13 @@ class _BusinessGateState extends State<BusinessGate> with WidgetsBindingObserver
       // Customer notes, findings and photos stay queued and retry.
     }
 
+    if (roleCode == 'owner') {
+      try {
+        await _offlineFinancial.syncExpenseDeletions(businessId);
+      } catch (_) {
+        // A failed deletion sync leaves the local deletion intact.
+      }
+    }
     try {
       await _offlineFinancial.flush(businessId);
     } catch (_) {
@@ -411,6 +418,13 @@ class _BusinessGateState extends State<BusinessGate> with WidgetsBindingObserver
       // Company edits remain saved for the next synchronization.
     }
 
+    if (roleCode == 'owner') {
+      try {
+        await _offlineDocumentDraft.syncEstimateDeletions(businessId);
+      } catch (_) {
+        // A failed deletion sync leaves the local deletion intact.
+      }
+    }
     try {
       await _offlineDocumentDraft.flush(businessId);
     } catch (_) {

@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:briskers_app/core/owner_report_models.dart';
+import 'package:briskers_app/core/connection_mode.dart';
+import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/local/briskers_local_database.dart'
     show BriskersLocalDatabase;
 import 'package:briskers_app/services/local_employee_reports.dart';
@@ -10,6 +12,29 @@ import 'package:briskers_app/services/offline_financial_write_service.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+class _ExpenseDeletionApi extends BriskersApi {
+  static const serverId = '00000000-0000-0000-0000-000000000009';
+  final operations = <String?>[];
+
+  @override
+  Future<String?> syncDeleteStandaloneExpense(
+    String businessId, {
+    String? transactionId,
+    String? createOperation,
+    List<String> preserveIds = const [],
+  }) async {
+    operations.add(createOperation);
+    return serverId;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> expenseDeletionFeed(
+    String businessId, {required int after}
+  ) async => after == 0
+      ? [{'transaction_id': serverId, 'deletion_seq': 1}]
+      : [];
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -121,6 +146,47 @@ void main() {
       'SELECT entity_id FROM sync_outbox',
     ).getSingle();
     expect(outbox.read<String>('entity_id'), 'kept');
+  });
+
+  test('deleting an attempted expense cancels its upload and applies its server ID', () async {
+    SharedPreferences.setMockInitialValues({});
+    final mode = BriskersConnectionModeController.instance;
+    await mode.setMode(BriskersConnectionMode.offline);
+    addTearDown(() => mode.setMode(BriskersConnectionMode.auto));
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final cache = LocalFinancialCache(database: db);
+    final api = _ExpenseDeletionApi();
+    final writes = OfflineFinancialWriteService(api: api, database: db);
+    const localId = 'local-transaction-financial-create-accepted';
+    final row = <String, dynamic>{
+      'id': localId,
+      'direction': 'expense',
+      'amount': 60,
+      'transaction_date': '2026-10-16',
+      'sync_state': 'pending',
+    };
+    await cache.saveTransactions('shop', [row]);
+    await db.customStatement(
+      "INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,"
+      "payload_json,last_attempt_at,attempt_count) "
+      "VALUES ('shop','financial_create',?,'create','{}',1,2)",
+      [localId],
+    );
+
+    await writes.deleteStandaloneExpense('shop', localId, assertAuthorized: () {});
+    expect(await cache.loadTransactions('shop'), isEmpty);
+    await writes.syncExpenseDeletions('shop');
+    expect(api.operations, isEmpty);
+    await mode.setMode(BriskersConnectionMode.auto);
+    await writes.syncExpenseDeletions('shop');
+    await writes.syncExpenseDeletions('shop');
+    expect(api.operations, ['financial-create-accepted']);
+    await cache.mergeServerTransactions('shop', [
+      {...row, 'id': _ExpenseDeletionApi.serverId},
+    ]);
+    expect(await cache.loadTransactions('shop'), isEmpty);
+    expect(await db.customSelect('SELECT id FROM sync_outbox').get(), isEmpty);
   });
 
   test('expense deletion survives an unreadable register snapshot', () async {

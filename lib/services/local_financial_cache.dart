@@ -179,6 +179,25 @@ class LocalFinancialCache {
       row['recurring_engine_owned'] != true && row['transfer_group_id'] == null &&
       row['invoice_payment_id'] == null && !requiresOwnerAccountEdit(row);
 
+  static bool isStandaloneExpense(Map<String, dynamic> row) =>
+      row['direction'] == 'expense' &&
+      !const {'void', 'voided', 'deleted'}.contains(row['status']) &&
+      row['sync_state'] != 'reversed' &&
+      row['payroll_operation_id'] == null &&
+      row['invoice_payment_id'] == null &&
+      row['document_id'] == null &&
+      row['job_id'] == null &&
+      row['recurring_rule_id'] == null &&
+      row['recurring_engine_owned'] != true &&
+      row['recurring'] != true &&
+      row['transfer_group_id'] == null;
+
+  static bool canDeleteStandaloneExpense(Map<String, dynamic> row) =>
+      isStandaloneExpense(row) &&
+      (row['deletable'] == true ||
+          row['id']?.toString().startsWith('local-transaction-financial-create-') == true ||
+          (row['sync_state'] == 'pending' && row['editable'] == true));
+
   Future<Set<String>> locallyVoidedExpenseIds(String business) async {
     final tables = await _database.customSelect(
       "SELECT name FROM sqlite_master WHERE type='table' AND name IN "

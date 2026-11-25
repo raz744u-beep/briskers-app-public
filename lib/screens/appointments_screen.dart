@@ -10,6 +10,8 @@ import '../local/local_database_provider.dart';
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
+import '../core/supabase_config.dart';
+import '../services/device_owner_authorization.dart';
 import '../core/navigation_content_timing.dart';
 import '../core/appointment_action_policy.dart';
 import '../services/appointment_sync_service.dart';
@@ -715,24 +717,18 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
   Future<void> _deleteAppointment(Map<String, dynamic> item) async {
     if (widget.roleCode != 'owner') return;
-    final isPendingCreate = item['id']?.toString().startsWith('local-appointment-') == true;
-
-    final ok = await _confirm(
-      title: 'Delete appointment?',
-      message:
-          'This permanently deletes the appointment. This cannot be undone.',
-      action: 'Delete',
-      destructive: true,
-    );
-    if (!ok) return;
     try {
-      if (isPendingCreate) {
-        await _appointmentSync.deletePendingCreate(widget.businessId,
-          item['id'].toString(), isOwner: true);
-      } else {
-        await _appointmentSync.queueDeleteSynced(
-          widget.businessId,item['id'].toString(),isOwner:true,
-        );
+      final businessId = widget.businessId;
+      final grant = await DeviceOwnerAuthorization.instance.authority.authorizeLocal(businessId);
+      if (!mounted || widget.businessId != businessId) return;
+      await _appointmentSync.queueOwnerDeletion(
+        businessId, item['id'].toString(), isOwner: true,
+        assertAuthorized: () => grant.assertValid(
+          businessId, supabase.auth.currentUser?.id ?? '',
+        ),
+      );
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        unawaited(_appointmentSync.flushDeletes(businessId).catchError((Object _) {}));
       }
       await _load(afterMutation: true);
     } catch (error) {
@@ -911,8 +907,8 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       isOwner: widget.roleCode == 'owner',
       linkedJob: item['job_id'] != null,
       linkedRequest: item['request_id'] != null,
-      pending: queued,
-      conflict: conflict,
+      pending: syncState == 'pending_delete',
+      conflict: false,
     );
 
     final action = await showModalBottomSheet<String>(

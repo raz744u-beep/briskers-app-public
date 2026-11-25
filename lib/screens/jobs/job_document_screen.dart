@@ -4697,44 +4697,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       return;
     }
 
-    final number = _detail!['document_number']?.toString().trim() ?? '';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete estimate?'),
-        content: Text(
-          number.isEmpty
-              ? 'This estimate will be permanently deleted.'
-              : 'Estimate #$number will be permanently deleted and its '
-                  'number can be reused.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: Text(tr('cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-            ),
-            child: const Text('Delete estimate'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-
     try {
       setState(() {
         _busy = true;
         _error = null;
       });
-
+      final businessId = widget.businessId;
+      final grant = await DeviceOwnerAuthorization.instance.authority.authorizeLocal(businessId);
+      if (!mounted || widget.businessId != businessId) return;
       await _offlineDocumentDraft.deleteEstimate(
-        widget.businessId,
-        widget.documentId,
+        businessId, widget.documentId,
+        assertAuthorized: () => grant.assertValid(
+          businessId, supabase.auth.currentUser?.id ?? '',
+        ),
       );
+      unawaited(_offlineDocumentDraft.syncEstimateDeletions(businessId).catchError((Object _) {}));
       if (mounted) Navigator.pop(context);
     } catch (error) {
       if (mounted) {

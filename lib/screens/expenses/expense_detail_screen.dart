@@ -1530,15 +1530,48 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     }
   }
 
+  Future<void> _deleteStandaloneExpense(Map<String, dynamic> detail) async {
+    final businessId = widget.businessId;
+    final id = widget.transactionId;
+    final generation = ++_loadGeneration;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final grant = await DeviceOwnerAuthorization.instance.authority
+          .authorizeLocal(businessId);
+      if (!_isCurrent(generation)) return;
+      await _localFinancial.saveTransactionDetail(businessId, id, detail);
+      final writes = OfflineFinancialWriteService();
+      await writes.deleteStandaloneExpense(
+        businessId, id,
+        assertAuthorized: () => grant.assertValid(
+          businessId, supabase.auth.currentUser?.id ?? '',
+        ),
+      );
+      unawaited(writes.syncExpenseDeletions(businessId).catchError((Object _) {}));
+      if (!_isCurrent(generation)) return;
+      widget.onChanged?.call();
+      if (mounted && _isCurrent(generation)) Navigator.pop(context);
+    } catch (error) {
+      if (_isCurrent(generation)) {
+        setState(() {
+          _busy = false;
+          _error = error.toString();
+        });
+      }
+    }
+  }
+
   Future<void> _delete() async {
     final detail = _detail;
-    if (detail == null ||
-        _busy ||
-        !widget.canDeleteTransaction ||
-        detail['deletable'] != true ||
-        !_canDeleteRecords) {
+    if (detail == null || _busy || !widget.canDeleteTransaction) return;
+    if (LocalFinancialCache.canDeleteStandaloneExpense(detail)) {
+      await _deleteStandaloneExpense(detail);
       return;
     }
+    if (detail['deletable'] != true || !_canDeleteRecords) return;
     final generation = _loadGeneration;
 
     final confirmed = await showDialog<bool>(
@@ -1828,8 +1861,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         (!LocalFinancialCache.requiresOwnerAccountEdit(detail) || widget.canDeleteTransaction);
     final deletable =
         widget.canDeleteTransaction &&
-        _canDeleteRecords &&
-        detail['deletable'] == true;
+        (LocalFinancialCache.canDeleteStandaloneExpense(detail) ||
+            (_canDeleteRecords && detail['deletable'] == true));
     final attachments = List<dynamic>.from(
       detail['attachments'] ?? const [],
     ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();

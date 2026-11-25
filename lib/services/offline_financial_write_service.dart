@@ -893,26 +893,102 @@ class OfflineFinancialWriteService {
       }
       final groups = await LocalEmployeeReports(database: _database)
           .duplicateGroups(business, isOwner: true);
-      final entry = groups
-          .expand((group) => group.entries)
-          .where((entry) => entry.expense?['id'] == transactionId)
-          .firstOrNull;
+      final group = groups.where((group) => group.entries.any(
+        (entry) => entry.expense?['id'] == transactionId,
+      )).firstOrNull;
+      final entry = group?.entries.firstWhere(
+        (entry) => entry.expense?['id'] == transactionId,
+      );
       if (entry == null) {
         throw StateError('This entry is no longer in the duplicate list.');
       }
       final original = entry.expense!;
       if (entry.operationId != null ||
-          original['invoice_payment_id'] != null ||
-          original['document_id'] != null ||
-          original['job_id'] != null ||
-          original['recurring_rule_id'] != null ||
-          original['recurring_engine_owned'] == true ||
-          original['recurring'] == true ||
-          original['transfer_group_id'] != null) {
+          !LocalFinancialCache.isStandaloneExpense({
+            ...original,
+            'direction': original['direction'] ?? 'expense',
+          })) {
         throw StateError('Delete this entry from its linked record.');
       }
+      await _deleteManualExpense(business, transactionId, {
+        ...original,
+        'direction': 'expense',
+        'amount': entry.cents! / 100,
+        'transaction_date': entry.date!.toIso8601String().split('T').first,
+      }, preserveIds: group!.entries
+          .map((entry) => entry.expense?['id']?.toString() ?? '')
+          .where((id) => id != transactionId && _serverExpenseId.hasMatch(id))
+          .toList());
+      assertAuthorized();
+    });
+  }
 
-      // Cancel writes for this expense, regardless of earlier sync attempts.
+  Future<void> deleteStandaloneExpense(
+    String business,
+    String transactionId, {
+    required void Function() assertAuthorized,
+  }) async {
+    assertAuthorized();
+    await _database.transaction(() async {
+      if ((await _cache.locallyVoidedExpenseIds(business)).contains(transactionId)) return;
+      final detail = await _cache.loadTransactionDetail(business, transactionId);
+      final original = detail ?? (await _cache.loadTransactions(business))
+          .where((row) => row['id'] == transactionId).firstOrNull;
+      if (original == null ||
+          !LocalFinancialCache.canDeleteStandaloneExpense(original)) {
+        throw StateError('Delete this expense from its linked record or open its saved details.');
+      }
+      await PayrollExpenseLinkStore(_database).prepare();
+      final link = await _database.customSelect(
+        'SELECT 1 FROM payroll_expense_links_v1 WHERE business_id=? AND transaction_id=?',
+        variables: [Variable(business), Variable(transactionId)],
+      ).getSingleOrNull();
+      if (link != null) throw StateError('Delete this expense from its payroll payment.');
+      await _deleteManualExpense(business, transactionId, original);
+      assertAuthorized();
+    });
+  }
+
+  static final _serverExpenseId = RegExp(
+    r'^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$',
+  );
+
+  Future<void> _deleteManualExpense(
+    String business,
+    String transactionId,
+    Map<String, dynamic> original, {
+    List<String> preserveIds = const [],
+  }) async {
+    const localPrefix = 'local-transaction-';
+    final remoteId = _serverExpenseId.hasMatch(transactionId) ? transactionId : null;
+    final createOperation = transactionId.startsWith('local-transaction-financial-create-')
+        ? transactionId.substring(localPrefix.length) : null;
+    // Cancel a provisional operation without replaying its create. The
+    // server can resolve the same operation if its reply was lost.
+    if (remoteId != null || createOperation != null) {
+      await _enqueue(business, 'financial_delete', transactionId, 'delete', {
+        'transaction_id': remoteId,
+        'create_operation': createOperation,
+        'preserve_ids': preserveIds,
+      });
+    }
+    await _cancelExpenseWrites(business, transactionId);
+    await _cache.deleteSavedTransaction(business, transactionId);
+    await LocalFinancialTotalsJournal(database: _database).record(
+      business, 'transaction:$transactionId',
+      before: {
+        for (final key in [
+          'account_id', 'category_id', 'counterparty_id', 'account',
+          'category', 'counterparty', 'remarks', 'direction', 'amount',
+        ])
+          if (original.containsKey(key)) key: original[key],
+        'id': transactionId,
+        'transaction_date': original['transaction_date'] ?? original['date'],
+      },
+    );
+  }
+
+  Future<void> _cancelExpenseWrites(String business, String transactionId) async {
       await _database.customStatement(
         """
         DELETE FROM sync_outbox
@@ -926,23 +1002,95 @@ class OfflineFinancialWriteService {
         """,
         [business, transactionId, transactionId, transactionId],
       );
-      await _cache.deleteSavedTransaction(business, transactionId);
-      await LocalFinancialTotalsJournal(database: _database).record(
-        business,
-        'transaction:$transactionId',
-        before: {
-          for (final key in [
-            'account_id', 'category_id', 'counterparty_id', 'account',
-            'category', 'counterparty', 'remarks',
-          ])
-            if (original.containsKey(key)) key: original[key],
-          'id': transactionId,
-          'direction': 'expense',
-          'amount': entry.cents! / 100,
-          'transaction_date': entry.date!.toIso8601String().split('T').first,
-        },
+  }
+
+  Future<void> _applyExpenseDeletion(String businessId, String id) async {
+    if ((await _cache.locallyVoidedExpenseIds(businessId)).contains(id)) return;
+    final detail = await _cache.loadTransactionDetail(businessId, id);
+    final original = detail ?? (await _cache.loadTransactions(businessId))
+        .where((row) => row['id'] == id).firstOrNull;
+    await _cancelExpenseWrites(businessId, id);
+    await _cache.deleteSavedTransaction(businessId, id);
+    await LocalFinancialTotalsJournal(database: _database).record(
+      businessId, 'transaction:$id',
+      before: original == null ? null : {
+        ...original,
+        'transaction_date': original['transaction_date'] ?? original['date'],
+      },
+    );
+  }
+
+  Future<void> syncExpenseDeletions(String businessId) async {
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    final rows = await _database.customSelect(
+      "SELECT id,payload_json FROM sync_outbox WHERE business_id=? "
+      "AND entity_type='financial_delete' AND state='pending' "
+      "AND (last_attempt_at IS NULL OR last_attempt_at<=?) ORDER BY id LIMIT 20",
+      variables: [Variable(businessId), Variable(_unixNow() - 300)],
+    ).get();
+    for (final row in rows) {
+      if (BriskersConnectionModeController.instance.forceOffline) return;
+      final id = row.read<int>('id');
+      final claimed = await _database.customUpdate(
+        "UPDATE sync_outbox SET last_attempt_at=? WHERE id=? AND business_id=? "
+        "AND state='pending' AND (last_attempt_at IS NULL OR last_attempt_at<=?)",
+        variables: [Variable(_unixNow()), Variable(id), Variable(businessId),
+          Variable(_unixNow() - 300)],
       );
-      assertAuthorized();
+      if (claimed == 0) continue;
+      final payload = jsonDecode(row.read<String>('payload_json')) as Map;
+      try {
+        final resolvedId = await _api.syncDeleteStandaloneExpense(
+          businessId,
+          transactionId: payload['transaction_id'] as String?,
+          createOperation: payload['create_operation'] as String?,
+          preserveIds: (payload['preserve_ids'] as List? ?? const []).cast<String>(),
+        );
+        await _database.transaction(() async {
+          if (resolvedId != null) {
+            await _applyExpenseDeletion(businessId, resolvedId);
+          }
+          await _database.customStatement(
+            'DELETE FROM sync_outbox WHERE id=? AND business_id=?', [id, businessId],
+          );
+        });
+      } catch (error) {
+        await _database.customStatement(
+          'UPDATE sync_outbox SET attempt_count=attempt_count+1,last_error=? '
+          'WHERE business_id=? AND id=?',
+          [error.toString(), businessId, id],
+        );
+        break;
+      }
+    }
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    final cursor = await _database.customSelect(
+      "SELECT last_server_cursor FROM local_sync_states "
+      "WHERE business_id=? AND scope='financial_deletions_v1'",
+      variables: [Variable(businessId)],
+    ).getSingleOrNull();
+    final after = int.tryParse(cursor?.data['last_server_cursor']?.toString() ?? '') ?? 0;
+    final page = await _api.expenseDeletionFeed(businessId, after: after);
+    if (page.isEmpty) return;
+    await _database.transaction(() async {
+      var next = after;
+      for (final row in page) {
+        final version = row['deletion_seq'];
+        final transactionId = row['transaction_id'];
+        if (version is! int || version <= next ||
+            transactionId is! String || !_serverExpenseId.hasMatch(transactionId)) {
+          throw StateError('Invalid expense deletion update.');
+        }
+        await _applyExpenseDeletion(businessId, transactionId);
+        next = version;
+      }
+      await _database.customStatement(
+        "INSERT INTO local_sync_states(business_id,scope,last_server_cursor,bootstrapped) "
+        "VALUES (?,'financial_deletions_v1',?,1) "
+        "ON CONFLICT(business_id,scope) DO UPDATE SET "
+        "last_server_cursor=MAX(last_server_cursor,excluded.last_server_cursor)",
+        [businessId, next],
+      );
     });
   }
 
