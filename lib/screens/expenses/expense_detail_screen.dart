@@ -1553,7 +1553,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       unawaited(writes.syncExpenseDeletions(businessId).catchError((Object _) {}));
       if (!_isCurrent(generation)) return;
       widget.onChanged?.call();
-      Navigator.pop(context);
+      if (mounted && _isCurrent(generation)) Navigator.pop(context);
     } catch (error) {
       if (_isCurrent(generation)) {
         setState(() {
