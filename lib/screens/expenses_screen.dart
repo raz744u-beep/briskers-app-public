@@ -683,7 +683,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       // snapshots made newly posted invoice payments appear very late.
       final rows = await _fetchTransactions(
         offset: 0, fastFirstPaint: true);
-      final reversed = await _localFinancial.reversedPayrollExpenseIds(businessId);
+      final reversed = {
+        ...await _localFinancial.reversedPayrollExpenseIds(businessId),
+        ...await _localFinancial.locallyVoidedExpenseIds(businessId),
+      };
       if (!_isCurrentLoad(epoch, businessId)) return;
       setState(() {
         _serverConfirmedTransactionIds.addAll(
@@ -1163,7 +1166,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         return;
       }
       final rows = await _fetchTransactions(offset: offset);
-      final reversed = await _localFinancial.reversedPayrollExpenseIds(businessId);
+      final reversed = {
+        ...await _localFinancial.reversedPayrollExpenseIds(businessId),
+        ...await _localFinancial.locallyVoidedExpenseIds(businessId),
+      };
       if (!_isCurrentLoad(epoch, businessId) || _showingLocal) return;
       setState(() {
         _serverConfirmedTransactionIds.addAll(

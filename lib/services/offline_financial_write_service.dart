@@ -880,107 +880,66 @@ class OfflineFinancialWriteService {
         PRIMARY KEY(business_id,transaction_id))''');
   }
 
-  Future<void> voidDuplicatePayrollExpense(
-    String business, {
-    required String duplicateId,
-    required String keepId,
-    required String ownerId,
+  Future<void> deleteDuplicatePayrollExpense(
+    String business,
+    String transactionId, {
     required void Function() assertAuthorized,
   }) async {
     assertAuthorized();
-    if (ownerId.isEmpty || duplicateId.isEmpty || keepId.isEmpty ||
-        duplicateId == keepId) {
-      throw StateError('Choose two separate saved payroll expenses.');
-    }
     await _database.transaction(() async {
-      await _ensureLocalVoids();
-      if ((await _cache.locallyVoidedExpenseIds(business)).contains(duplicateId)) {
+      if ((await _cache.locallyVoidedExpenseIds(business))
+          .contains(transactionId)) {
         return;
       }
       final groups = await LocalEmployeeReports(database: _database)
           .duplicateGroups(business, isOwner: true);
-      final matching = groups.where((group) {
-        final ids = group.entries.map((entry) => entry.expense?['id']);
-        return ids.contains(duplicateId) && ids.contains(keepId);
-      }).singleOrNull;
-      if (matching == null) {
-        throw StateError('The selected expenses no longer match. Reopen the review.');
+      final entry = groups
+          .expand((group) => group.entries)
+          .where((entry) => entry.expense?['id'] == transactionId)
+          .firstOrNull;
+      if (entry == null) {
+        throw StateError('This entry is no longer in the duplicate list.');
       }
-      final candidate = matching.entries.singleWhere(
-        (entry) => entry.expense?['id'] == duplicateId,
-      );
-      final original = candidate.expense!;
-      if (candidate.operationId != null ||
+      final original = entry.expense!;
+      if (entry.operationId != null ||
           original['invoice_payment_id'] != null ||
-          original['document_id'] != null || original['job_id'] != null ||
+          original['document_id'] != null ||
+          original['job_id'] != null ||
           original['recurring_rule_id'] != null ||
           original['recurring_engine_owned'] == true ||
           original['recurring'] == true ||
           original['transfer_group_id'] != null) {
-        throw StateError('This expense is linked to another record. Review it separately.');
+        throw StateError('Delete this entry from its linked record.');
       }
 
-      final queued = await _database.customSelect(
-        "SELECT * FROM sync_outbox WHERE business_id=? AND state!='reversed' "
-        "AND (entity_id=? OR (json_valid(payload_json) AND "
-        "(json_extract(payload_json,'\$.transaction_id')=? OR "
-        "json_extract(payload_json,'\$.local_transaction_id')=?)))",
-        variables: [
-          Variable(business), Variable(duplicateId),
-          Variable(duplicateId), Variable(duplicateId),
-        ],
-      ).get();
-      final pendingCreate = queued.singleOrNull;
-      final safePendingCreate = pendingCreate != null &&
-          pendingCreate.read<String>('entity_type') == 'financial_create' &&
-          pendingCreate.read<String>('state') == 'pending' &&
-          pendingCreate.data['last_attempt_at'] == null &&
-          pendingCreate.read<int>('attempt_count') == 0;
-      final needsQueueProof = queued.isNotEmpty ||
-          duplicateId.startsWith('local-') || original['sync_state'] == 'pending';
-      if (needsQueueProof && !safePendingCreate) {
-        throw StateError('This expense has unresolved sync activity. Review its sync status first.');
-      }
-      if (safePendingCreate) {
-        final queueId = pendingCreate.read<int>('id');
-        // Older builds recorded dispatch in the replay fence or recovery
-        // receipt before updating the queue's last-attempt timestamp.
-        final evidenceTables = await _database.customSelect(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
-          "('sync_replay_fences_v1','local_job_recovery_receipts')",
-        ).get();
-        final tables = evidenceTables.map((row) => row.read<String>('name')).toSet();
-        final fences = tables.contains('sync_replay_fences_v1')
-            ? await _database.customSelect(
-                'SELECT 1 FROM sync_replay_fences_v1 WHERE business_id=? AND replay_key=? LIMIT 1',
-                variables: [Variable(business), Variable('outbox:$queueId')],
-              ).get()
-            : const [];
-        final receipts = tables.contains('local_job_recovery_receipts')
-            ? await _database.customSelect(
-                'SELECT 1 FROM local_job_recovery_receipts WHERE business_id=? AND outbox_id=? LIMIT 1',
-                variables: [Variable(business), Variable(queueId)],
-              ).get()
-            : const [];
-        if (fences.isNotEmpty || receipts.isNotEmpty) {
-          throw StateError('A prior sync attempt needs review before removing this expense.');
-        }
-        await _database.customStatement(
-          "UPDATE sync_outbox SET state='reversed' WHERE id=?",
-          [queueId],
-        );
-      }
+      // Cancel writes for this expense, regardless of earlier sync attempts.
       await _database.customStatement(
-        'INSERT INTO local_financial_voids VALUES(?,?,?,?,?)',
-        [business, duplicateId, ownerId, DateTime.now().toUtc().toIso8601String(),
-         jsonEncode({...original, 'duplicate_kept_id': keepId})],
+        """
+        DELETE FROM sync_outbox
+        WHERE business_id = ?
+          AND entity_type IN ('financial_create', 'financial_update',
+            'financial_photo', 'financial_receipt_extraction')
+          AND (entity_id = ? OR CASE WHEN json_valid(payload_json) THEN
+            json_extract(payload_json, '\$.transaction_id') = ? OR
+            json_extract(payload_json, '\$.local_transaction_id') = ?
+          ELSE 0 END)
+        """,
+        [business, transactionId, transactionId, transactionId],
       );
+      await _cache.deleteSavedTransaction(business, transactionId);
       await LocalFinancialTotalsJournal(database: _database).record(
-        business, 'transaction:$duplicateId', before: {
-          ...original,
+        business,
+        'transaction:$transactionId',
+        before: {
+          for (final key in [
+            'account_id', 'category_id', 'counterparty_id', 'account',
+            'category', 'counterparty', 'remarks',
+          ])
+            if (original.containsKey(key)) key: original[key],
+          'id': transactionId,
           'direction': 'expense',
-          'amount': matching.cents / 100,
-          'transaction_date': matching.date.toIso8601String().split('T').first,
+          'amount': entry.cents! / 100,
+          'transaction_date': entry.date!.toIso8601String().split('T').first,
         },
       );
       assertAuthorized();
