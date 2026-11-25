@@ -44,7 +44,7 @@ class Nov12JobCompletion {
         if (applied.isNotEmpty) return;
         final edits = await db
             .customSelect(
-              "SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? AND entity_type IN ('invoice_pending_payment_edit','invoice_tax_edit','document_edit')",
+              "SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? AND entity_type IN ('invoice_pending_payment_edit','invoice_pending_payment_delete','invoice_tax_edit','document_edit')",
               variables: [Variable(business), Variable(invoice)],
             )
             .get();

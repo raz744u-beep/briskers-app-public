@@ -117,11 +117,15 @@ class OfflineInvoiceFinalization {
         if (detail == null || detail['id'] != id) {
           throw StateError('Open each selected invoice once to verify its saved receipts.');
         }
-        final edits = await db.customSelect("SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? AND entity_type IN ('invoice_pending_payment_edit','invoice_tax_edit','document_edit')",
+        final edits = await db.customSelect("SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? AND entity_type IN ('invoice_pending_payment_edit','invoice_pending_payment_delete','invoice_tax_edit','document_edit')",
           variables:[Variable(business),Variable(id)]).get();
         if (edits.isNotEmpty) throw StateError('Save and reconcile invoice corrections before finalization.');
-        final projected = OfflineInvoicePaymentLedger.projectPendingPayments(detail,
-          await OfflineInvoicePaymentLedger(database:db).pendingForInvoice(business,id));
+        final ledger = OfflineInvoicePaymentLedger(database: db);
+        final deletionIds = (await ledger.pendingDeletionIds(business))[id] ?? const <String>{};
+        final projected = OfflineInvoicePaymentLedger.projectPendingPayments(
+          OfflineInvoicePaymentLedger.projectPendingDeletions(detail, deletionIds),
+          await ledger.pendingForInvoice(business,id),
+        );
         final payload = jsonEncode(snapshot(projected,close));
         final previous = await db.customSelect('SELECT payload,state,operation_id FROM invoice_finalization_intents_v1 WHERE business_id=? AND invoice_id=?',
           variables:[Variable(business),Variable(id)]).get();
@@ -173,9 +177,11 @@ class OfflineInvoiceFinalization {
     final ledger = OfflineInvoicePaymentLedger(database: db);
     final taxed = await OfflineInvoiceTaxService(database: db)
         .projectPending(business, invoice, saved);
+    final deletionIds = (await ledger.pendingDeletionIds(business))[invoice] ?? const <String>{};
     return OfflineInvoicePaymentLedger.projectPendingEdits(
       OfflineInvoicePaymentLedger.projectPendingPayments(
-        taxed, await ledger.pendingForInvoice(business, invoice),
+        OfflineInvoicePaymentLedger.projectPendingDeletions(taxed, deletionIds),
+        await ledger.pendingForInvoice(business, invoice),
       ),
       await ledger.pendingEditsForInvoice(business, invoice),
     );
@@ -191,12 +197,22 @@ class OfflineInvoiceFinalization {
     final ledger = OfflineInvoicePaymentLedger(database: db);
     final action = forClosing ? 'closing' : 'posting';
     try {
+      final deletion = await db.customSelect(
+        "SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? "
+        "AND entity_type='invoice_pending_payment_delete' LIMIT 1",
+        variables: [Variable(business), Variable(invoice)],
+      ).getSingleOrNull();
+      if (deletion != null) {
+        throw StateError('Sync the saved payment removal before $action.');
+      }
       await OfflineDocumentEditService(database: db)
           .verifySavedLineCorrections(business, invoice, saved, action: action);
       final taxed = await OfflineInvoiceTaxService(database: db)
           .verifySavedTaxCorrection(business, invoice, saved, action: action);
+      final deletionIds = (await ledger.pendingDeletionIds(business))[invoice] ?? const <String>{};
       final original = OfflineInvoicePaymentLedger.projectPendingPayments(
-        taxed, queuedReceipts ?? await ledger.pendingForInvoice(business, invoice),
+        OfflineInvoicePaymentLedger.projectPendingDeletions(taxed, deletionIds),
+        queuedReceipts ?? await ledger.pendingForInvoice(business, invoice),
       );
       final corrected = OfflineInvoicePaymentLedger.projectPendingEdits(
         original, await ledger.pendingEditsForInvoice(business, invoice),
@@ -462,7 +478,7 @@ class OfflineInvoiceFinalization {
           await LocalDocumentDetailCache(database:db).loadReadOnly(business,invoice)==null) {
         continue;
       }
-      final unresolved=await db.customSelect("SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? AND entity_type IN ('invoice_payment_received','invoice_pending_payment_edit','invoice_tax_edit','document_edit')",
+      final unresolved=await db.customSelect("SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? AND entity_type IN ('invoice_payment_received','invoice_pending_payment_edit','invoice_pending_payment_delete','invoice_tax_edit','document_edit')",
         variables:[Variable(business),Variable(invoice)]).get();
       if(unresolved.isNotEmpty) continue;
       final operation=row.read<String>('operation_id');

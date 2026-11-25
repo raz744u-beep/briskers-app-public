@@ -528,14 +528,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       _offlinePayments.pendingForInvoice(widget.businessId, widget.documentId),
       _offlinePayments.pendingEditsForInvoice(
           widget.businessId, widget.documentId),
+      _offlinePayments.pendingDeletionIds(widget.businessId),
     ]);
     final memoProjected = Map<String, dynamic>.from(parallel[0] as Map);
     final queuedReceipts = parallel[1] as List<Map<String, dynamic>>;
     final queuedEdits = parallel[2] as List<Map<String, dynamic>>;
     final findingsProjected = await VehicleFindingActionsService()
         .projectInvoiceNotes(widget.businessId, memoProjected);
+    final deletionIds = parallel[3] as Map<String, Set<String>>;
     final withLocalReceipts = OfflineInvoicePaymentLedger.projectPendingPayments(
-        findingsProjected, queuedReceipts);
+        OfflineInvoicePaymentLedger.projectPendingDeletions(
+          findingsProjected, deletionIds[widget.documentId] ?? const {},
+        ),
+        queuedReceipts);
     final projected = await LocalInvoiceClosureStore(localDatabase).project(widget.businessId, OfflineInvoicePaymentLedger.projectPendingEdits(
         withLocalReceipts, queuedEdits));
     final jobId = projected['job_id']?.toString().trim() ?? '';
@@ -3675,18 +3680,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     Map<String, dynamic> payment,
   ) async {
     if (_busy || !_canManageInvoiceExpenses ||
-        payment['state']?.toString() != 'pending' ||
-        payment['reconciliation_required'] == true ||
-        _detail?['_payment_reconciliation_required'] == true) {
-      return;
-    }
-
-    final localReceipt = payment['_local_pending_payment'] == true;
-    final online = !BriskersConnectionModeController.instance.forceOffline;
-    final canRemove = widget.isOwner &&
-        (localReceipt ||
-         (online && payment['pending_sync'] != true &&
-          payment['_local_pending_edit'] != true));
+        payment['state']?.toString() != 'pending') return;
+    final canEdit = payment['reconciliation_required'] != true &&
+        _detail?['_payment_reconciliation_required'] != true;
+    final canRemove = widget.isOwner;
+    if (!canEdit && !canRemove) return;
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -3694,25 +3692,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: Text(tr('editPayment')),
-              subtitle: const Text('Amount, payment date, and method'),
-              onTap: () => Navigator.pop(sheetContext, 'edit'),
-            ),
-            if (widget.isOwner)
+            if (canEdit)
               ListTile(
-                enabled: canRemove,
+                leading: const Icon(Icons.edit_outlined),
+                title: Text(tr('editPayment')),
+                subtitle: const Text('Amount, payment date, and method'),
+                onTap: () => Navigator.pop(sheetContext, 'edit'),
+              ),
+            if (canRemove)
+              ListTile(
                 leading: Icon(Icons.delete_outline,
-                    color: canRemove ? Theme.of(context).colorScheme.error : null),
+                    color: Theme.of(context).colorScheme.error),
                 title: Text(tr('removePayment')),
-                subtitle: canRemove
-                    ? const Text('Unfinalized payment only')
-                    : const Text('Server-recorded payments require an online, '
-                        'verified removal. No offline deletion will be sent.'),
-                onTap: canRemove
-                    ? () => Navigator.pop(sheetContext, 'remove')
-                    : null,
+                subtitle: const Text('Unfinalized payment only'),
+                onTap: () => Navigator.pop(sheetContext, 'remove'),
               ),
             const SizedBox(height: 8),
           ],
@@ -3834,55 +3827,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _deletePayment(Map<String, dynamic> payment) async {
-    if (!widget.isOwner || _estimate ||
-        payment['state']?.toString() != 'pending' ||
-        payment['reconciliation_required'] == true ||
-        _detail?['_payment_reconciliation_required'] == true) {
-      return;
-    }
-    final localReceipt = payment['_local_pending_payment'] == true;
-    final online = !BriskersConnectionModeController.instance.forceOffline;
-    if (!localReceipt && (!online || payment['pending_sync'] == true ||
-        payment['_local_pending_edit'] == true)) {
-      setState(() => _error = 'This server-recorded payment cannot be '
-          'deleted offline or during a queued edit. No data was changed.');
-      return;
-    }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text("${tr('removePayment')}?"),
-        content: Text(
-          'Remove the ${_money(payment['amount'])} '
-          '${payment['payment_method_name'] ?? 'payment'} entry? '
-          'This removes an unfinalized receipt, not a posted transaction.',
+    if (!widget.isOwner || _estimate || payment['state'] != 'pending') return;
+    final businessId = widget.businessId;
+    final invoiceId = widget.documentId;
+    final removed = await _run(() async {
+      final grant = await DeviceOwnerAuthorization.instance.authority.authorizeLocal(businessId);
+      if (!mounted || businessId != widget.businessId || invoiceId != widget.documentId) {
+        return;
+      }
+      await _offlinePayments.queuePendingDeletion(
+        businessId, invoiceId, payment['id'].toString(),
+        localReceipt: payment['_local_pending_payment'] == true,
+        assertAuthorized: () => grant.assertValid(
+          businessId, supabase.auth.currentUser?.id ?? '',
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: Text(tr('cancel')),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    if (localReceipt) {
-      // A never-sent local receipt can be removed atomically without
-      // contacting Supabase. Any attempted/uncertain send fails closed.
-      await _run(() => _offlinePayments.deleteNeverSubmittedPayment(
-          widget.businessId,widget.documentId,payment['id'].toString()));
-    } else {
-      // The server RPC independently requires owner authorization.
-      await _run(() => _api.deletePendingInvoicePayment(
-          widget.businessId,payment['id'].toString()));
+      );
+    }, localOnly: true);
+    if (removed) {
+      unawaited(_offlinePayments.flushPendingDeletions(businessId).catchError((Object _) {}));
     }
   }
 
@@ -6614,9 +6576,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     Builder(
                       builder: (context) {
                         final payment = payments[index];
-                        final editable =
-                            payment['state']?.toString() == 'pending' &&
-                            payment['reconciliation_required'] != true;
+                        final pending = payment['state'] == 'pending';
+                        final canOpenActions = pending &&
+                            (widget.isOwner ||
+                                payment['reconciliation_required'] != true);
                         final methodName =
                             payment['payment_method_name']?.toString() ??
                                 tr('paymentSection');
@@ -6637,10 +6600,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                         return ListTile(
                           contentPadding:
                               const EdgeInsets.fromLTRB(16, 0, 8, 0),
-                          onTap: editable && !_busy && _canManageInvoiceExpenses
+                          onTap: canOpenActions && !_busy && _canManageInvoiceExpenses
                               ? () => _showPaymentContextMenu(payment)
                               : null,
-                          onLongPress: editable && !_busy && _canManageInvoiceExpenses
+                          onLongPress: canOpenActions && !_busy && _canManageInvoiceExpenses
                               ? () => _showPaymentContextMenu(payment)
                               : null,
                           leading: CircleAvatar(
@@ -6685,7 +6648,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                                   fontWeight: FontWeight.w400,
                                 ),
                               ),
-                              if (editable && !_busy && _canManageInvoiceExpenses)
+                              if (canOpenActions && !_busy && _canManageInvoiceExpenses)
                                 IconButton(
                                   icon: const Icon(Icons.edit_outlined, size: 20),
                                   tooltip: widget.isOwner

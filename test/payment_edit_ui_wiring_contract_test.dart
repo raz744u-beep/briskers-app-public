@@ -17,10 +17,9 @@ void main() {
     final edit = code.substring(editStart, deleteStart);
     expect(menu, isNot(contains("payment['pending_sync'] == true ||")));
     expect(menu, contains('await _editPayment(payment)'));
-    expect(menu, contains('BriskersConnectionModeController.instance.forceOffline'));
-    expect(menu, contains("payment['pending_sync'] != true"));
-    expect(menu, contains('if (widget.isOwner)'));
-    expect(menu, contains('enabled: canRemove'));
+    expect(menu, contains('final canRemove = widget.isOwner;'));
+    expect(menu, contains('if (canRemove)'));
+    expect(menu, isNot(contains('BriskersConnectionModeController.instance.forceOffline')));
     expect(menu, contains("'edit'"));
     expect(menu, contains("'remove'"));
     expect(edit, contains("payment['_local_pending_payment'] == true"));
@@ -40,6 +39,7 @@ void main() {
     final code = File('lib/services/invoice_finalization_guard.dart')
         .readAsStringSync();
     expect(code, contains("'invoice_pending_payment_edit'"));
+    expect(code, contains("'invoice_pending_payment_delete'"));
     expect(code, contains("'invoice_payment_received'"));
   });
 
@@ -58,17 +58,19 @@ void main() {
     expect(start,greaterThan(0));
     expect(end,greaterThan(start));
     final tab=code.substring(start,end);
-    expect(tab,contains('onTap: editable && !_busy && _canManageInvoiceExpenses'));
-    expect(tab,contains('onLongPress: editable && !_busy && _canManageInvoiceExpenses'));
+    expect(tab,contains('onTap: canOpenActions && !_busy && _canManageInvoiceExpenses'));
+    expect(tab,contains('onLongPress: canOpenActions && !_busy && _canManageInvoiceExpenses'));
     expect(tab,contains("tooltip: widget.isOwner"));
     expect(tab,contains('Icons.edit_outlined'));
     final a=code.indexOf('Future<void> _deletePayment(');
     final b=code.indexOf('Future<Map<String, dynamic>?> _pickInvoiceCustomer(',a);
     final removal=code.substring(a,b);
     expect(removal,contains('if (!widget.isOwner'));
-    expect(removal,contains('deleteNeverSubmittedPayment('));
-    expect(removal,contains('deletePendingInvoicePayment('));
-    expect(removal,contains('payment[\'pending_sync\'] == true'));
+    expect(removal,contains('queuePendingDeletion('));
+    expect(removal,contains('authorizeLocal(businessId)'));
+    expect(removal,contains('localOnly: true'));
+    expect(removal,contains('flushPendingDeletions(businessId)'));
+    expect(removal,isNot(contains('showDialog')));
   });
 
   test('invoice detail dock owns the bottom inset exactly once', () {

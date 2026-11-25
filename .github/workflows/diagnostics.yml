@@ -117,6 +117,9 @@ jobs:
           test/owner_reports_test.dart
           test/local_employee_reports_test.dart
           test/offline_appointment_delete_tombstone_test.dart
+          test/offline_payment_server_edit_replay_test.dart
+          test/payment_edit_ui_wiring_contract_test.dart
+          test/b2478_crossmodule_local_first_regression_contract_test.dart
           test/available_number_pool_test.dart
           test/owner_reports_widget_test.dart
           test/invoice_catalog_replacement_test.dart

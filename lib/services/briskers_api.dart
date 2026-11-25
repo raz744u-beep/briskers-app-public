@@ -4778,6 +4778,23 @@ class BriskersApi {
     );
   }
 
+  Future<String?> syncDeletePendingInvoicePayment(
+    String businessId, String invoiceId, {
+    String? paymentId,
+    String? createOperation,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_owner_delete_pending_invoice_payment_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+        'p_payment_id': paymentId,
+        'p_create_operation': createOperation,
+      },
+    );
+    return result as String?;
+  }
+
   Future<void> deletePendingInvoicePayment(
     String businessId,
     String paymentId,

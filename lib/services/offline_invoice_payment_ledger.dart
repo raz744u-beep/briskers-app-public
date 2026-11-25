@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
@@ -396,6 +397,9 @@ class OfflineInvoicePaymentLedger {
       throw ArgumentError('Invalid payment correction or balance.');
     }
     await _database.transaction(() async {
+      if ((await pendingDeletionIds(businessId))[invoiceId]?.contains(paymentId) == true) {
+        throw StateError('This pending receipt has already been removed.');
+      }
       final rows = await _database.customSelect(
         """SELECT id,state,attempt_count,last_attempt_at,payload_json
            FROM sync_outbox WHERE business_id=? AND entity_id=?
@@ -565,6 +569,228 @@ class OfflineInvoicePaymentLedger {
     final first = DateTime.tryParse(a);
     final second = DateTime.tryParse(b);
     return first != null && second != null && first.isAtSameMomentAs(second);
+  }
+
+  Future<void> _ensurePendingDeletionIds() => _database.customStatement("""
+    CREATE TABLE IF NOT EXISTS local_pending_invoice_payment_deletions_v1 (
+      business_id TEXT NOT NULL, invoice_id TEXT NOT NULL, selected_id TEXT NOT NULL,
+      payment_id TEXT,
+      PRIMARY KEY(business_id,invoice_id,selected_id)
+    )
+  """);
+
+  Future<Map<String, Set<String>>> pendingDeletionIds(String businessId) async {
+    final table = await _database.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' "
+      "AND name='local_pending_invoice_payment_deletions_v1'",
+    ).getSingleOrNull();
+    if (table == null) return {};
+    final rows = await _database.customSelect(
+      'SELECT invoice_id,selected_id,payment_id '
+      'FROM local_pending_invoice_payment_deletions_v1 WHERE business_id=?',
+      variables: [Variable(businessId)],
+    ).get();
+    final byInvoice = <String, Set<String>>{};
+    for (final row in rows) {
+      final ids = byInvoice.putIfAbsent(row.read<String>('invoice_id'), () => {});
+      ids.add(row.read<String>('selected_id'));
+      final canonical = row.readNullable<String>('payment_id');
+      if (canonical != null) ids.add(canonical);
+    }
+    return byInvoice;
+  }
+
+  static bool hasDeletedPaymentIdentity(Map row, Set<String> ids) =>
+      ['id', 'receipt_id', 'operation_id', 'client_operation_id', 'server_payment_id']
+          .any((key) => ids.contains(row[key]?.toString()));
+
+  static Map<String, dynamic> projectPendingDeletions(
+    Map<String, dynamic> detail, Set<String> ids,
+  ) {
+    if (ids.isEmpty || detail['payments'] is! List) return detail;
+    final payments = detail['payments'] as List;
+    var removedCents = 0;
+    final remaining = <dynamic>[];
+    for (final payment in payments) {
+      if (payment is Map && payment['state'] == 'pending' &&
+          hasDeletedPaymentIdentity(payment, ids)) {
+        final contribution = payment['_local_projected_payment_amount'] ?? payment['amount'];
+        removedCents += (_number(contribution) * 100).round();
+      } else {
+        remaining.add(payment);
+      }
+    }
+    if (removedCents == 0 && remaining.length == payments.length) return detail;
+    return {
+      ...detail,
+      'payments': remaining,
+      'pending_payment': max(
+        0, (_number(detail['pending_payment']) * 100).round() - removedCents,
+      ) / 100,
+    };
+  }
+
+  /// Remove the chosen unfinalized receipt from the local balance. A submitted
+  /// receipt retains only its identity until the server confirms removal.
+  Future<void> queuePendingDeletion(
+    String businessId, String invoiceId, String selectedId, {
+    required bool localReceipt,
+    required void Function() assertAuthorized,
+  }) async {
+    assertAuthorized();
+    await _database.transaction(() async {
+      if ((await pendingDeletionIds(businessId))[invoiceId]?.contains(selectedId) == true) return;
+      await LocalInvoiceClosureStore(_database).prepare();
+      final closure = await _database.customSelect(
+        'SELECT 1 FROM local_invoice_closures '
+        'WHERE business_id=? AND invoice_id=? AND reopened_at IS NULL',
+        variables: [Variable(businessId), Variable(invoiceId)],
+      ).getSingleOrNull();
+      final finalized = await LocalInvoiceClosureStore(_database)
+          .finalizedIncome(businessId, invoice: invoiceId);
+      if (closure != null ||
+          finalized.any((row) => hasDeletedPaymentIdentity(row, {selectedId}))) {
+        throw StateError('Review the saved invoice closure or posted payment first.');
+      }
+      final finalizations = await _database.customSelect(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='invoice_finalization_intents_v1'",
+      ).getSingleOrNull();
+      if (finalizations != null) {
+        final pending = await _database.customSelect(
+          'SELECT 1 FROM invoice_finalization_intents_v1 WHERE business_id=? AND invoice_id=? '
+          "AND state IN ('pending','inflight')",
+          variables: [Variable(businessId), Variable(invoiceId)],
+        ).getSingleOrNull();
+        if (pending != null) {
+          throw StateError('This invoice already has a saved finalization request.');
+        }
+      }
+      String? paymentId;
+      var needsServer = !localReceipt;
+      if (localReceipt) {
+        final row = await _database.customSelect(
+          "SELECT * FROM sync_outbox WHERE business_id=? AND entity_id=? "
+          "AND entity_type='invoice_payment_received' "
+          "AND CASE WHEN json_valid(payload_json) THEN "
+          "json_extract(payload_json,'\$.operation_id')=? ELSE 0 END",
+          variables: [Variable(businessId), Variable(invoiceId), Variable(selectedId)],
+        ).getSingleOrNull();
+        if (row == null) throw StateError('This saved payment is unavailable.');
+        final payload = jsonDecode(row.read<String>('payload_json')) as Map;
+        paymentId = payload['server_payment_id']?.toString();
+        needsServer = row.read<String>('state') != 'pending' ||
+            row.read<int>('attempt_count') != 0 || row.data['last_attempt_at'] != null ||
+            payload['replay_attempted'] == true || paymentId != null;
+        await _database.customStatement(
+          'DELETE FROM sync_outbox WHERE business_id=? AND id=?',
+          [businessId, row.read<int>('id')],
+        );
+        await LocalFinancialTotalsJournal(database: _database).record(
+          businessId, 'invoice-payment:$selectedId', after: null,
+        );
+      } else {
+        final detail = await LocalDocumentDetailCache(database: _database)
+            .loadReadOnly(businessId, invoiceId);
+        final payments = detail?['payments'] as List? ?? const [];
+        if (!payments.whereType<Map>().any(
+          (row) => row['id'] == selectedId && row['state'] == 'pending',
+        )) {
+          throw StateError('This receipt is not in the saved pending payments.');
+        }
+        paymentId = selectedId;
+      }
+      if (needsServer && invoiceId.startsWith('local-')) {
+        throw StateError('The server invoice identity is unavailable.');
+      }
+      if (paymentId != null) {
+        await _database.customStatement(
+          "DELETE FROM sync_outbox WHERE business_id=? AND entity_id=? "
+          "AND entity_type='invoice_pending_payment_edit' "
+          "AND CASE WHEN json_valid(payload_json) THEN "
+          "json_extract(payload_json,'\$.payment_id')=? ELSE 0 END",
+          [businessId, invoiceId, paymentId],
+        );
+      }
+      await _ensurePendingDeletionIds();
+      await _database.customStatement(
+        'INSERT INTO local_pending_invoice_payment_deletions_v1 VALUES (?,?,?,?)',
+        [businessId, invoiceId, selectedId, paymentId],
+      );
+      if (needsServer) {
+        await _database.customStatement(
+          "INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,payload_json) "
+          "VALUES (?,'invoice_pending_payment_delete',?,'delete',?)",
+          [businessId, invoiceId, jsonEncode({
+            'selected_id': selectedId,
+            'payment_id': localReceipt ? null : paymentId,
+            'create_operation': localReceipt ? selectedId : null,
+          })],
+        );
+      }
+      assertAuthorized();
+    });
+    LocalInvoicePaymentCoverageEvents.committed(
+      LocalInvoicePaymentCoverageChanged(
+        businessId: businessId, invoiceId: invoiceId, coversRemainingBalance: false,
+      ),
+    );
+  }
+
+  Future<void> flushPendingDeletions(String businessId) async {
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    final now = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+    final rows = await _database.customSelect(
+      "SELECT id,entity_id,payload_json FROM sync_outbox WHERE business_id=? "
+      "AND entity_type='invoice_pending_payment_delete' AND state='pending' "
+      "AND (last_attempt_at IS NULL OR last_attempt_at<=?) ORDER BY id LIMIT 20",
+      variables: [Variable(businessId), Variable(now - 300)],
+    ).get();
+    for (final row in rows) {
+      if (BriskersConnectionModeController.instance.forceOffline) return;
+      final queueId = row.read<int>('id');
+      final invoiceId = row.read<String>('entity_id');
+      final claimed = await _database.customUpdate(
+        "UPDATE sync_outbox SET last_attempt_at=? WHERE id=? AND business_id=? "
+        "AND state='pending' AND (last_attempt_at IS NULL OR last_attempt_at<=?)",
+        variables: [Variable(now), Variable(queueId), Variable(businessId), Variable(now - 300)],
+      );
+      if (claimed == 0) continue;
+      try {
+        final payload = jsonDecode(row.read<String>('payload_json')) as Map;
+        final id = await LocalJobQuarantine.guardReplay(
+          _database, businessId,
+          () => _api.syncDeletePendingInvoicePayment(
+            businessId, invoiceId,
+            paymentId: payload['payment_id'] as String?,
+            createOperation: payload['create_operation'] as String?,
+          ),
+          outboxId: queueId,
+        );
+        await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database, businessId, outboxId: queueId,
+          );
+          if (id != null) {
+            await _database.customStatement(
+              'UPDATE local_pending_invoice_payment_deletions_v1 SET payment_id=? '
+              'WHERE business_id=? AND invoice_id=? AND selected_id=?',
+              [id, businessId, invoiceId, payload['selected_id']],
+            );
+          }
+          await _database.customStatement(
+            'DELETE FROM sync_outbox WHERE business_id=? AND id=?', [businessId, queueId],
+          );
+        });
+      } catch (error) {
+        final conflict = error is PostgrestException && error.code == 'PT409';
+        await _database.customStatement(
+          'UPDATE sync_outbox SET state=?,attempt_count=attempt_count+1,last_error=? '
+          'WHERE business_id=? AND id=?',
+          [conflict ? 'conflict' : 'pending', error.toString(), businessId, queueId],
+        );
+        if (!conflict) break;
+      }
+    }
   }
 
   /// Owner-only UI may discard a local receipt that is proven never sent.
