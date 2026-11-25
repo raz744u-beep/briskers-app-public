@@ -196,6 +196,20 @@ class LocalFinancialCache {
     return ids;
   }
 
+  Future<bool> _isSavedTransactionDeleted(String business, String id) async {
+    final table = await _database.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' "
+      "AND name='local_financial_deletions'",
+    ).getSingleOrNull();
+    if (table == null) return false;
+    final deletion = await _database.customSelect(
+      'SELECT 1 FROM local_financial_deletions '
+      'WHERE business_id=? AND transaction_id=?',
+      variables: [Variable(business), Variable(id)],
+    ).getSingleOrNull();
+    return deletion != null;
+  }
+
   /// Keep only the ID needed to reject stale downloads of this transaction.
   Future<void> deleteSavedTransaction(String business, String id) async {
     await _database.transaction(() async {
@@ -207,7 +221,15 @@ class LocalFinancialCache {
         )
       ''');
       final raw = await _load(business, _transactionsKey);
-      if (jsonDecode(raw ?? 'null') case final List<dynamic> rows) {
+      Object? snapshot;
+      if (raw != null) {
+        try {
+          snapshot = jsonDecode(raw);
+        } on FormatException {
+          // The saved detail and deletion marker remain usable independently.
+        }
+      }
+      if (snapshot case final List<dynamic> rows) {
         await _save(
           business,
           _transactionsKey,
@@ -825,40 +847,43 @@ class LocalFinancialCache {
     if (!matchesTransaction(detail, businessId, transactionId)) {
       throw ArgumentError('Expense detail does not match its business and transaction.');
     }
-    final existing = await loadTransactionDetail(businessId, transactionId);
-    if (existing?['sync_state'] == 'reversed') return;
-    if (existing?['payroll_account_pending'] == true &&
-        !detail.containsKey('payroll_account_pending') &&
-        detail['sync_state'] != 'reversed') {
-      return;
-    }
-    if (existing?['payroll_amount_pending'] == true &&
-        !detail.containsKey('payroll_amount_pending') &&
-        detail['sync_state'] != 'reversed') {
-      return;
-    }
-    if (existing?['recurring_engine_owned'] == true &&
-        detail['recurring_engine_owned'] != true) {
-      // Ordinary detail prefetch cannot erase an engine-owned correction or
-      // local receipt. Explicit recurring recovery performs versioned merges.
-      return;
-    }
-    await _save(
-      businessId,
-      'transaction_detail_$transactionId',
-      jsonEncode({
-        'copy_number': ?existing?['copy_number'],
-        ...detail,
-        if (existing?['payroll_operation_id'] != null) ...{
-          'payroll_operation_id': existing!['payroll_operation_id'],
-          'payment_method': existing['payment_method'],
-        },
-        if (existing?['payroll_operation_id'] != null) ...{
-          'payroll_operation_id': existing!['payroll_operation_id'],
-          'payment_method': existing['payment_method'],
-        },
-      }),
-    );
+    await _database.transaction(() async {
+      if (await _isSavedTransactionDeleted(businessId, transactionId)) return;
+      final existing = await _readTransactionDetail(businessId, transactionId);
+      if (existing?['sync_state'] == 'reversed') return;
+      if (existing?['payroll_account_pending'] == true &&
+          !detail.containsKey('payroll_account_pending') &&
+          detail['sync_state'] != 'reversed') {
+        return;
+      }
+      if (existing?['payroll_amount_pending'] == true &&
+          !detail.containsKey('payroll_amount_pending') &&
+          detail['sync_state'] != 'reversed') {
+        return;
+      }
+      if (existing?['recurring_engine_owned'] == true &&
+          detail['recurring_engine_owned'] != true) {
+        // Ordinary detail prefetch cannot erase an engine-owned correction or
+        // local receipt. Explicit recurring recovery performs versioned merges.
+        return;
+      }
+      await _save(
+        businessId,
+        'transaction_detail_$transactionId',
+        jsonEncode({
+          'copy_number': ?existing?['copy_number'],
+          ...detail,
+          if (existing?['payroll_operation_id'] != null) ...{
+            'payroll_operation_id': existing!['payroll_operation_id'],
+            'payment_method': existing['payment_method'],
+          },
+          if (existing?['payroll_operation_id'] != null) ...{
+            'payroll_operation_id': existing!['payroll_operation_id'],
+            'payment_method': existing['payment_method'],
+          },
+        }),
+      );
+    });
   }
 
   /// Some imported expenses predate the detail cache. Combine only the saved
@@ -979,6 +1004,18 @@ class LocalFinancialCache {
           row['payroll_operation_id'] != null);
 
   Future<Map<String, dynamic>?> loadTransactionDetail(
+    String businessId,
+    String transactionId,
+  ) async {
+    return _database.transaction(() async {
+      if (await _isSavedTransactionDeleted(businessId, transactionId)) {
+        return null;
+      }
+      return _readTransactionDetail(businessId, transactionId);
+    });
+  }
+
+  Future<Map<String, dynamic>?> _readTransactionDetail(
     String businessId,
     String transactionId,
   ) async {

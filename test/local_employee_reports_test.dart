@@ -91,6 +91,16 @@ void main() {
     await removeDuplicate();
     await removeDuplicate();
     expect(await cache.loadTransactionDetail('shop', duplicateId), isNull);
+    // Detail prefetch and register refresh can finish after the local delete.
+    await cache.saveTransactionDetail('shop', duplicateId, duplicate);
+    await cache.saveTransactionDetail('shop', 'kept', kept);
+    expect(await cache.loadTransactionDetail('shop', duplicateId), isNull);
+    expect((await cache.loadTransactionDetail('shop', 'kept'))?['id'], 'kept');
+    final staleDetail = await database.customSelect(
+      "SELECT 1 FROM local_financial_cache WHERE business_id='shop' "
+      "AND cache_key='transaction_detail_local-transaction-copy'",
+    ).get();
+    expect(staleDetail, isEmpty);
     await cache.mergeServerTransactions('shop', [duplicate, kept]);
     expect(await reports.duplicateGroups('shop', isOwner: true), isEmpty);
     expect(
@@ -111,6 +121,23 @@ void main() {
       'SELECT entity_id FROM sync_outbox',
     ).getSingle();
     expect(outbox.read<String>('entity_id'), 'kept');
+  });
+
+  test('expense deletion survives an unreadable register snapshot', () async {
+    final database = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(database.close);
+    final cache = LocalFinancialCache(database: database);
+    const id = 'old-expense';
+    await cache.saveTransactionDetail('shop', id, {'id': id});
+    await cache.saveTransactions('shop', []);
+    await database.customStatement(
+      "UPDATE local_financial_cache SET payload_json='broken' "
+      "WHERE business_id='shop' AND cache_key='transactions_snapshot'",
+    );
+
+    await cache.deleteSavedTransaction('shop', id);
+    expect(await cache.loadTransactionDetail('shop', id), isNull);
+    expect(await cache.locallyVoidedExpenseIds('shop'), {id});
   });
 
   test(
