@@ -32,7 +32,8 @@ BUGS38_CONSOLIDATED_BRANCH = "fix/bugs38-consolidated"
 BACKUP_512_CANDIDATE_BRANCH = "candidate/backup-512-note9"
 PAYROLL_REPAYMENT_BRANCH = "fix/payroll-unified-repayment-4775"
 ESTIMATE_GROUPS_BRANCH = "candidate/estimate-groups-phone"
-CANDIDATE_BRANCHES.update({BUGS33_RELEASE_BRANCH, BUGS38_CONSOLIDATED_BRANCH, BACKUP_512_CANDIDATE_BRANCH, PAYROLL_REPAYMENT_BRANCH, ESTIMATE_GROUPS_BRANCH})
+PAYROLL_DUPLICATE_DELETE_BRANCH = "fix/owner-payroll-duplicate-direct-delete"
+CANDIDATE_BRANCHES.update({BUGS33_RELEASE_BRANCH, BUGS38_CONSOLIDATED_BRANCH, BACKUP_512_CANDIDATE_BRANCH, PAYROLL_REPAYMENT_BRANCH, ESTIMATE_GROUPS_BRANCH, PAYROLL_DUPLICATE_DELETE_BRANCH})
 BUILD_WORKFLOW = ".github/workflows/android-debug.yml"
 REQUIRED_WORKFLOWS = {
     "diagnostics.yml": "Briskers Diagnostics",
@@ -45,11 +46,11 @@ GLORIA_RECOVERY_WORKFLOW = ("gloria-exact-total-regression.yml",
 
 def workflows_for_branch(branch):
     workflows = dict(REQUIRED_WORKFLOWS)
-    if branch in {PAYROLL_CANDIDATE, BUGS33_RELEASE_BRANCH, BUGS38_CONSOLIDATED_BRANCH, BACKUP_512_CANDIDATE_BRANCH, PAYROLL_REPAYMENT_BRANCH, ESTIMATE_GROUPS_BRANCH}:
+    if branch in {PAYROLL_CANDIDATE, BUGS33_RELEASE_BRANCH, BUGS38_CONSOLIDATED_BRANCH, BACKUP_512_CANDIDATE_BRANCH, PAYROLL_REPAYMENT_BRANCH, ESTIMATE_GROUPS_BRANCH, PAYROLL_DUPLICATE_DELETE_BRANCH}:
         workflows["offline-recovery-android-check.yml"] = "Offline recovery Android debug verification"
         filename, name = GLORIA_RECOVERY_WORKFLOW
         workflows[filename] = name
-    if branch in {BUGS33_RELEASE_BRANCH, BUGS38_CONSOLIDATED_BRANCH, BACKUP_512_CANDIDATE_BRANCH, PAYROLL_REPAYMENT_BRANCH, ESTIMATE_GROUPS_BRANCH}:
+    if branch in {BUGS33_RELEASE_BRANCH, BUGS38_CONSOLIDATED_BRANCH, BACKUP_512_CANDIDATE_BRANCH, PAYROLL_REPAYMENT_BRANCH, ESTIMATE_GROUPS_BRANCH, PAYROLL_DUPLICATE_DELETE_BRANCH}:
         workflows["retry-storm-regression.yml"] = "Retry storm protection"
         workflows["offline-recurring-component.yml"] = "Offline recurring component"
     if branch == GLORIA_RECOVERY_BRANCH:
@@ -204,7 +205,7 @@ def validate_run(run, context, filename, name, workflow_id):
     # runs the same workflow files on push with the same exact-head checks.
     allowed_events = ALLOWED_EVENTS
     if (context.verification_branch == BUGS38_SOURCE_BRANCH or
-            context.branch in {BUGS38_CONSOLIDATED_BRANCH, BACKUP_512_CANDIDATE_BRANCH, PAYROLL_REPAYMENT_BRANCH, ESTIMATE_GROUPS_BRANCH} or
+            context.branch in {BUGS38_CONSOLIDATED_BRANCH, BACKUP_512_CANDIDATE_BRANCH, PAYROLL_REPAYMENT_BRANCH, ESTIMATE_GROUPS_BRANCH, PAYROLL_DUPLICATE_DELETE_BRANCH} or
             (filename == GLORIA_RECOVERY_WORKFLOW[0]
              and context.branch == GLORIA_RECOVERY_BRANCH)):
         allowed_events = ALLOWED_EVENTS | {"push"}

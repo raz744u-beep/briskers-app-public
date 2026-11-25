@@ -13,6 +13,7 @@ on:
       - 'tools/patches/offline_recurring_*.sql'
       - 'tools/tests/*offline_recurring*'
       - '.github/workflows/offline-recurring-component.yml'
+      - '.github/workflows/android-debug.yml'
   workflow_dispatch:
 
 permissions:
