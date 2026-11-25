@@ -27,6 +27,13 @@ class AppointmentSyncService {
   final BriskersLocalDatabase _database;
   final Random _random = Random.secure();
 
+  Future<void> _ensureAppointmentDeletionIds() => _database.customStatement("""
+    CREATE TABLE IF NOT EXISTS local_appointment_deletion_ids_v1 (
+      business_id TEXT NOT NULL, appointment_id TEXT NOT NULL,
+      PRIMARY KEY(business_id,appointment_id)
+    )
+  """);
+
   Future<void> pull(String businessId) async {
     final stateRows = await _database.customSelect(
       '''
@@ -614,6 +621,72 @@ class AppointmentSyncService {
     return retired;
   }
 
+  /// Hide the appointment and supersede its queued edits in the same commit.
+  /// The server identifies a provisional appointment by its original create.
+  Future<void> queueOwnerDeletion(
+    String businessId, String appointmentId, {
+    required bool isOwner,
+    void Function()? assertAuthorized,
+  }) async {
+    if (!isOwner) throw StateError('Only the owner can delete appointments.');
+    assertAuthorized?.call();
+    await _database.transaction(() async {
+      final row = await _database.customSelect(
+        'SELECT job_id,request_id,sync_state FROM local_appointments '
+        'WHERE business_id=? AND id=?',
+        variables: [Variable(businessId), Variable(appointmentId)],
+      ).getSingleOrNull();
+      if (row == null || row.read<String>('sync_state') == 'pending_delete') return;
+      if (row.data['job_id'] != null || row.data['request_id'] != null) {
+        throw StateError('Delete this appointment through its linked record.');
+      }
+      final local = appointmentId.startsWith('local-appointment-');
+      final current = await _database.customSelect(
+        "SELECT entity_type,payload_json FROM sync_outbox WHERE business_id=? "
+        "AND entity_id=? AND entity_type IN ('appointment_create','appointment_checkin')",
+        variables: [Variable(businessId), Variable(appointmentId)],
+      ).get();
+      if (current.any((op) => op.read<String>('entity_type') == 'appointment_checkin')) {
+        throw StateError('This appointment has a queued check-in.');
+      }
+      final create = current.where(
+        (op) => op.read<String>('entity_type') == 'appointment_create',
+      ).singleOrNull;
+      final createOperation = create == null ? null
+          : (jsonDecode(create.read<String>('payload_json')) as Map)['operation_id'];
+      if (local && createOperation is! String) {
+        throw StateError('The appointment creation identity is unavailable.');
+      }
+      await _database.customStatement(
+        "DELETE FROM sync_outbox WHERE business_id=? AND entity_id=? "
+        "AND entity_type IN ('appointment_create','appointment_edit','appointment_cancel')",
+        [businessId, appointmentId],
+      );
+      await _database.customStatement(
+        """INSERT INTO sync_outbox
+          (business_id,entity_type,entity_id,operation,payload_json,state,created_at)
+          VALUES (?,'appointment_delete',?,'delete',?,'pending',?)""",
+        [businessId, appointmentId, jsonEncode({
+          'identity_delete': true,
+          'appointment_id': local ? null : appointmentId,
+          'create_operation': local ? createOperation : null,
+        }), _unix(DateTime.now().toUtc())],
+      );
+      await _ensureAppointmentDeletionIds();
+      await _database.customStatement(
+        'INSERT OR IGNORE INTO local_appointment_deletion_ids_v1 VALUES (?,?)',
+        [businessId, appointmentId],
+      );
+      await _database.customStatement(
+        "UPDATE local_appointments SET sync_state='pending_delete',can_check_in=0 "
+        "WHERE business_id=? AND id=?",
+        [businessId, appointmentId],
+      );
+      assertAuthorized?.call();
+    });
+    _syncEvents.add(businessId);
+  }
+
   /// Stage owner-only deletion of a synchronized, unlinked appointment.
   /// A local tombstone prevents sync pulls from resurrecting it.
   Future<void> queueDeleteSynced(
@@ -1183,24 +1256,45 @@ class AppointmentSyncService {
         await LocalJobQuarantine.assertReplayAllowed(
           _database, businessId, outboxId: queueId,
         );
-        final deleted=await LocalJobQuarantine.guardReplay(
-          _database,
-          businessId,
-          () => _api.syncOfflineAppointmentDelete(
-            businessId,appointmentId,
-            operationId:payload['operation_id'].toString(),
-            baseVersion:row.read<int>('base_row_version'),
-          ),
-          outboxId: queueId,
-        );
-        if (!deleted) throw StateError('Server did not acknowledge deletion.');
+        String? canonicalId;
+        if (payload['identity_delete'] == true) {
+          canonicalId = await LocalJobQuarantine.guardReplay(
+            _database,
+            businessId,
+            () => _api.deleteAppointmentIdentity(
+              businessId,
+              appointmentId: payload['appointment_id'] as String?,
+              createOperation: payload['create_operation'] as String?,
+            ),
+            outboxId: queueId,
+          );
+        } else {
+          final deleted = await LocalJobQuarantine.guardReplay(
+            _database,
+            businessId,
+            () => _api.syncOfflineAppointmentDelete(
+              businessId, appointmentId,
+              operationId: payload['operation_id'].toString(),
+              baseVersion: row.read<int>('base_row_version'),
+            ),
+            outboxId: queueId,
+          );
+          if (!deleted) throw StateError('Server did not acknowledge deletion.');
+        }
         await _database.transaction(() async {
           await LocalJobQuarantine.assertReplayAllowed(
             _database, businessId, outboxId: queueId,
           );
+          if (payload['identity_delete'] == true && canonicalId != null) {
+            await _ensureAppointmentDeletionIds();
+            await _database.customStatement(
+              'INSERT OR IGNORE INTO local_appointment_deletion_ids_v1 VALUES (?,?)',
+              [businessId, canonicalId],
+            );
+          }
           await _database.customStatement(
-            'DELETE FROM local_appointments WHERE business_id=? AND id=?',
-            [businessId,appointmentId],
+            'DELETE FROM local_appointments WHERE business_id=? AND id IN (?,?)',
+            [businessId, appointmentId, canonicalId ?? appointmentId],
           );
           await _database.customStatement(
             'DELETE FROM sync_outbox WHERE id=?',[queueId],
@@ -1211,6 +1305,7 @@ class AppointmentSyncService {
         if (error is LocalJobQuarantineException) rethrow;
         final message=error.toString();
         final conflict=isSyncVersionConflict(error) ||
+          (payload['identity_delete'] == true && message.contains('23514')) ||
           message.contains('Appointment changed on another device') ||
           // A previously deleted appointment cannot be deleted again with
           // the stale local revision. Stop infinite replay; keep the local
@@ -1546,6 +1641,13 @@ class AppointmentSyncService {
     final id = appointment['id']?.toString() ?? '';
     if (id.isEmpty) return;
 
+    await _ensureAppointmentDeletionIds();
+    final deleted = await _database.customSelect(
+      'SELECT 1 FROM local_appointment_deletion_ids_v1 '
+      'WHERE business_id=? AND appointment_id=?',
+      variables: [Variable(businessId), Variable(id)],
+    ).getSingleOrNull();
+    if (deleted != null) return;
     final existing = await _database.customSelect(
       '''
       SELECT sync_state

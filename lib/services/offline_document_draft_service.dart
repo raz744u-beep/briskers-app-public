@@ -609,31 +609,170 @@ class OfflineDocumentDraftService {
     }
   }
 
-  Future<void> deleteEstimate(String businessId, String estimateId) async {
-    final snapshot = await _cache.load(businessId, estimateId);
-    final syncedId = snapshot?['_server_document_id']?.toString();
-    if (estimateId.startsWith('local-estimate-') && syncedId == null) {
-      await cancelNeverSyncedStandaloneEstimate(businessId, estimateId);
-      return;
-    }
-    final id = syncedId ?? estimateId;
-    final savedNumber = await LocalEstimateNumber.stored(_database, businessId, id)
-        ?? LocalEstimateNumber.existing(snapshot?['document_number']);
-    await _api.deleteEstimate(businessId, id);
+  static final _remoteEstimateId = RegExp(
+    r'^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$',
+  );
+
+  Future<void> deleteEstimate(
+    String businessId, String estimateId, {void Function()? assertAuthorized}
+  ) async {
+    assertAuthorized?.call();
     await _database.transaction(() async {
-      // Builds before the pool change kept the reservation on the draft ID.
-      final numbers = LocalNumberAllocator(_database);
-      await numbers.ensureSchema();
-      await _database.customStatement(
-        'UPDATE local_number_reservations SET entity_id=? WHERE business_id=? '
-        "AND kind='estimate' AND entity_id=? AND active=1",
-        [id, businessId, 'local-estimate-$id'],
-      );
-      if (estimateId != id) {
-        await _documents.recordEstimateDeleted(businessId, estimateId);
+      if ((await _documents.deletedEstimateIds(businessId)).contains(estimateId)) return;
+      final snapshot = await _cache.load(businessId, estimateId);
+      final id = snapshot?['_server_document_id']?.toString() ?? estimateId;
+      final indexed = await _database.customSelect(
+        "SELECT converted,document_number FROM local_documents "
+        "WHERE business_id=? AND id IN (?,?) AND kind='estimate'",
+        variables: [Variable(businessId), Variable(estimateId), Variable(id)],
+      ).get();
+      if (indexed.any((row) => row.read<int>('converted') == 1) ||
+          snapshot?['converted'] == true ||
+          (snapshot?['converted_invoice_id']?.toString().isNotEmpty ?? false)) {
+        throw StateError('This estimate belongs to an invoice.');
       }
-      await numbers.release(businessId, 'estimate', id, previousNumber: savedNumber);
-      await _documents.recordEstimateDeleted(businessId, id);
+      final pendingConversion = await _database.customSelect(
+        "SELECT 1 FROM sync_outbox WHERE business_id=? "
+        "AND (operation='convert_estimate' OR entity_type='estimate_add_to_invoice') "
+        "AND CASE WHEN json_valid(payload_json) THEN "
+        "json_extract(payload_json,'\$.estimate_id') IN (?,?) ELSE 0 END LIMIT 1",
+        variables: [Variable(businessId), Variable(estimateId), Variable(id)],
+      ).getSingleOrNull();
+      if (pendingConversion != null) {
+        throw StateError('This estimate has a saved invoice conversion.');
+      }
+      final localOnly = estimateId.startsWith('local-estimate-') && id == estimateId;
+      String remoteId = id;
+      if (localOnly) {
+        final create = await _database.customSelect(
+          "SELECT payload_json,attempt_count,last_attempt_at,state FROM sync_outbox "
+          "WHERE business_id=? AND entity_id=? AND entity_type='document_draft_create'",
+          variables: [Variable(businessId), Variable(estimateId)],
+        ).getSingleOrNull();
+        if (create != null && create.read<int>('attempt_count') == 0 &&
+            create.data['last_attempt_at'] == null && create.read<String>('state') == 'pending') {
+          await cancelNeverSyncedStandaloneEstimate(businessId, estimateId);
+          assertAuthorized?.call();
+          return;
+        }
+        final payload = create == null ? null
+            : jsonDecode(create.read<String>('payload_json')) as Map;
+        // The standalone sync RPC uses the operation UUID as the document ID.
+        // Job estimate imports may use a different server identity.
+        if (payload?['kind'] != 'estimate' || payload?['job_id'] != null ||
+            !_remoteEstimateId.hasMatch(payload?['operation_id']?.toString() ?? '')) {
+          throw StateError('This estimate upload has no confirmed server identity.');
+        }
+        remoteId = payload!['operation_id'].toString();
+      }
+      if (!_remoteEstimateId.hasMatch(remoteId)) {
+        throw StateError('The estimate identity is unavailable.');
+      }
+      final number = await LocalEstimateNumber.stored(_database, businessId, id)
+          ?? LocalEstimateNumber.existing(snapshot?['document_number'])
+          ?? LocalEstimateNumber.existing(indexed.firstOrNull?.data['document_number']);
+      final existing = await _database.customSelect(
+        "SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=? "
+        "AND entity_type='estimate_delete' LIMIT 1",
+        variables: [Variable(businessId), Variable(remoteId)],
+      ).getSingleOrNull();
+      if (existing == null) {
+        await _database.customStatement(
+          "INSERT INTO sync_outbox (business_id,entity_type,entity_id,operation,payload_json) "
+          "VALUES (?,'estimate_delete',?,'delete',?)",
+          [businessId, remoteId, jsonEncode({'reservation_id': id, 'number': number})],
+        );
+      }
+      await _hideDeletedEstimate(businessId, estimateId);
+      if (remoteId != estimateId) await _hideDeletedEstimate(businessId, remoteId);
+      assertAuthorized?.call();
+    });
+  }
+
+  Future<void> _hideDeletedEstimate(String businessId, String id) async {
+    await _database.customStatement(
+      "DELETE FROM sync_outbox WHERE business_id=? AND entity_id=? "
+      "AND operation IN ('create_estimate','edit_estimate','merge_estimate')",
+      [businessId, id],
+    );
+    await _documents.recordEstimateDeleted(businessId, id);
+  }
+
+  Future<void> syncEstimateDeletions(String businessId) async {
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    final rows = await _database.customSelect(
+      "SELECT id,entity_id,payload_json FROM sync_outbox WHERE business_id=? "
+      "AND entity_type='estimate_delete' AND state='pending' "
+      "AND (last_attempt_at IS NULL OR last_attempt_at<=?) ORDER BY id LIMIT 20",
+      variables: [Variable(businessId), Variable(_unixNow() - 300)],
+    ).get();
+    for (final row in rows) {
+      if (BriskersConnectionModeController.instance.forceOffline) return;
+      final queueId = row.read<int>('id');
+      final claimed = await _database.customUpdate(
+        "UPDATE sync_outbox SET last_attempt_at=? WHERE id=? AND business_id=? "
+        "AND state='pending' AND (last_attempt_at IS NULL OR last_attempt_at<=?)",
+        variables: [Variable(_unixNow()), Variable(queueId), Variable(businessId),
+          Variable(_unixNow() - 300)],
+      );
+      if (claimed == 0) continue;
+      try {
+        await _api.syncOwnerEstimateDelete(businessId, row.read<String>('entity_id'));
+        final payload = jsonDecode(row.read<String>('payload_json')) as Map;
+        await _database.transaction(() async {
+          final reservation = payload['reservation_id'] as String;
+          final numbers = LocalNumberAllocator(_database);
+          await numbers.ensureSchema();
+          await _database.customStatement(
+            'UPDATE local_number_reservations SET entity_id=? WHERE business_id=? '
+            "AND kind='estimate' AND entity_id=? AND active=1",
+            [reservation, businessId, 'local-estimate-$reservation'],
+          );
+          await numbers.release(
+            businessId, 'estimate', reservation, previousNumber: payload['number'],
+          );
+          await _database.customStatement(
+            'DELETE FROM sync_outbox WHERE business_id=? AND id=?',
+            [businessId, queueId],
+          );
+        });
+      } catch (error) {
+        await _database.customStatement(
+          'UPDATE sync_outbox SET attempt_count=attempt_count+1,last_error=? '
+          'WHERE business_id=? AND id=?',
+          [error.toString(), businessId, queueId],
+        );
+        break;
+      }
+    }
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    final cursor = await _database.customSelect(
+      "SELECT last_server_cursor FROM local_sync_states "
+      "WHERE business_id=? AND scope='estimate_deletions_v1'",
+      variables: [Variable(businessId)],
+    ).getSingleOrNull();
+    final after = cursor?.readNullable<int>('last_server_cursor') ?? 0;
+    final page = await _api.estimateDeletionFeed(businessId, after: after);
+    if (page.isEmpty) return;
+    await _database.transaction(() async {
+      var next = after;
+      for (final deletion in page) {
+        final version = deletion['deletion_seq'];
+        final id = deletion['estimate_id'];
+        if (version is! int || version <= next ||
+            id is! String || !_remoteEstimateId.hasMatch(id)) {
+          throw StateError('Invalid estimate deletion update.');
+        }
+        await _hideDeletedEstimate(businessId, id);
+        next = version;
+      }
+      await _database.customStatement(
+        "INSERT INTO local_sync_states(business_id,scope,last_server_cursor,bootstrapped) "
+        "VALUES (?,'estimate_deletions_v1',?,1) "
+        "ON CONFLICT(business_id,scope) DO UPDATE SET "
+        "last_server_cursor=MAX(last_server_cursor,excluded.last_server_cursor)",
+        [businessId, next],
+      );
     });
   }
 

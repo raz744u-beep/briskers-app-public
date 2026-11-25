@@ -1819,6 +1819,34 @@ class BriskersApi {
     );
   }
 
+  Future<String?> syncDeleteStandaloneExpense(
+    String businessId, {
+    String? transactionId,
+    String? createOperation,
+    List<String> preserveIds = const [],
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_delete_standalone_expense_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+        'p_create_operation': createOperation,
+        'p_preserve_ids': preserveIds,
+      },
+    );
+    return result as String?;
+  }
+
+  Future<List<Map<String, dynamic>>> expenseDeletionFeed(
+    String businessId, {required int after}
+  ) async {
+    final rows = await networkSupabase.rpc(
+      'briskers_expense_deletion_feed_v1',
+      params: {'p_business_id': businessId, 'p_after': after},
+    ) as List;
+    return rows.map((row) => Map<String, dynamic>.from(row as Map)).toList();
+  }
+
   Future<void> voidManualTransaction(
     String businessId,
     String transactionId,
@@ -2762,6 +2790,22 @@ class BriskersApi {
         'p_appointment_id': appointmentId,
       },
     );
+  }
+
+  Future<String?> deleteAppointmentIdentity(
+    String businessId, {
+    String? appointmentId,
+    String? createOperation,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_delete_appointment_identity_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+        'p_create_operation': createOperation,
+      },
+    );
+    return result as String?;
   }
 
   Future<void> deleteAppointment(
@@ -4390,6 +4434,23 @@ class BriskersApi {
         'p_invoice_id': invoiceId,
       },
     );
+  }
+
+  Future<void> syncOwnerEstimateDelete(String businessId, String estimateId) async {
+    await networkSupabase.rpc('briskers_owner_delete_estimate_v1', params: {
+      'p_business_id': businessId,
+      'p_estimate_id': estimateId,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> estimateDeletionFeed(
+    String businessId, {required int after}
+  ) async {
+    final rows = await networkSupabase.rpc(
+      'briskers_estimate_deletion_feed_v1',
+      params: {'p_business_id': businessId, 'p_after': after},
+    ) as List;
+    return rows.map((row) => Map<String, dynamic>.from(row as Map)).toList();
   }
 
   Future<void> deleteEstimate(

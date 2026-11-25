@@ -15,6 +15,8 @@ import 'package:intl/intl.dart';
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
+import '../core/supabase_config.dart';
+import '../services/device_owner_authorization.dart';
 import '../services/briskers_api.dart';
 import '../services/warranty_receipt_reporting.dart';
 import '../services/local_financial_cache.dart';
@@ -1771,6 +1773,35 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
   }
 
+  Future<void> _deleteStandaloneExpenseFromList(
+    String id, Map<String, dynamic> detail,
+  ) async {
+    final businessId = widget.businessId;
+    try {
+      final grant = await DeviceOwnerAuthorization.instance.authority
+          .authorizeLocal(businessId);
+      if (!mounted || widget.businessId != businessId) return;
+      await _localFinancial.saveTransactionDetail(businessId, id, detail);
+      final writes = OfflineFinancialWriteService();
+      await writes.deleteStandaloneExpense(
+        businessId, id,
+        assertAuthorized: () => grant.assertValid(
+          businessId, supabase.auth.currentUser?.id ?? '',
+        ),
+      );
+      if (!mounted || widget.businessId != businessId) return;
+      setState(() {
+        _transactions = _transactions.where((row) => row['id'] != id).toList();
+      });
+      unawaited(_load(showLoading: false, forceTotals: true));
+      unawaited(writes.syncExpenseDeletions(businessId).catchError((Object _) {}));
+    } catch (error) {
+      if (mounted && widget.businessId == businessId) {
+        setState(() => _error = error.toString());
+      }
+    }
+  }
+
   Future<void> _deleteTransactionFromList(String transactionId) async {
     final confirmed =
         await showDialog<bool>(
@@ -1829,7 +1860,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final payroll = LocalFinancialCache.requiresOwnerAccountEdit(detail) ||
         LocalFinancialCache.requiresOwnerAccountEdit(transaction);
     final editable = payroll ? _owner : _showingLocal || detail['editable'] == true;
-    final deletable = !_showingLocal && _owner && detail['deletable'] == true;
+    final standaloneDelete = _owner &&
+        LocalFinancialCache.canDeleteStandaloneExpense(detail);
+    final deletable = standaloneDelete ||
+        (!_showingLocal && _owner && detail['deletable'] == true);
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -1878,7 +1912,13 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     if (action == 'view') await _openTransaction(transaction);
     if (action == 'edit') await _editTransactionFromList(id);
     if (action == 'copy') await _copyTransactionFromList(id);
-    if (action == 'delete') await _deleteTransactionFromList(id);
+    if (action == 'delete') {
+      if (standaloneDelete) {
+        await _deleteStandaloneExpenseFromList(id, detail);
+      } else {
+        await _deleteTransactionFromList(id);
+      }
+    }
   }
 
   String _photoKey(String filename) {

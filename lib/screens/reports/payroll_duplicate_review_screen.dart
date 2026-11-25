@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -59,8 +61,8 @@ class _PayrollDuplicateReviewScreenState
     try {
       final grant = await DeviceOwnerAuthorization.instance.authority
           .authorizeLocal(widget.businessId);
-      await OfflineFinancialWriteService(database: widget.database)
-          .deleteDuplicatePayrollExpense(
+      final writes = OfflineFinancialWriteService(database: widget.database);
+      await writes.deleteDuplicatePayrollExpense(
             widget.businessId,
             entry.expense!['id'].toString(),
             assertAuthorized: () => grant.assertValid(
@@ -69,6 +71,7 @@ class _PayrollDuplicateReviewScreenState
             ),
           );
       if (mounted) setState(() => _groups = _load());
+      unawaited(writes.syncExpenseDeletions(widget.businessId).catchError((Object _) {}));
     } on StateError catch (error) {
       if (mounted) setState(() => _error = error.message);
     } catch (_) {
