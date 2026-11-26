@@ -18,6 +18,22 @@ class RecentRecordsCard extends StatefulWidget {
 class _RecentRecordsCardState extends State<RecentRecordsCard> {
   bool _expanded = false;
 
+  void _toggleExpanded() {
+    setState(() => _expanded = !_expanded);
+    if (!_expanded) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_expanded) return;
+      final reducedMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+      Scrollable.ensureVisible(
+        context,
+        alignment: 0,
+        duration: reducedMotion ? Duration.zero : const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
   static (String,IconData,Color) _style(RecentRecordKind kind) => switch(kind) {
     RecentRecordKind.invoice => ('Invoice',Icons.receipt_long_outlined,BriskersColors.invoices),
     RecentRecordKind.estimate => ('Estimate',Icons.description_outlined,BriskersColors.estimates),
@@ -91,7 +107,7 @@ class _RecentRecordsCardState extends State<RecentRecordsCard> {
       margin: const EdgeInsets.fromLTRB(12,0,12,12),
       title: 'Recently Viewed',icon: Icons.history,
       expanded: _expanded,
-      onToggle: () => setState(() => _expanded = !_expanded),
+      onToggle: _toggleExpanded,
       action: shown.isEmpty ? null : TextButton(
         onPressed: widget.onClear,
         style: TextButton.styleFrom(foregroundColor: Colors.white,

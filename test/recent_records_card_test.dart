@@ -17,6 +17,38 @@ const entries=<RecentRecord>[
 ];
 
 void main() {
+  testWidgets('expanding recently viewed scrolls its card to the viewport top', (tester) async {
+    tester.view.physicalSize = const Size(393, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            const SizedBox(height: 650),
+            RecentRecordsCard(records: entries, onOpen: (_) {}, onClear: () {}),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    ));
+
+    final header = find.text('Recently Viewed');
+    final card = find.byType(BriskersSectionCard);
+    await tester.scrollUntilVisible(header, 180);
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(card).dy, greaterThan(250));
+    await tester.tap(header);
+    await tester.pumpAndSettle();
+
+    final viewportTop = tester.getTopLeft(find.byType(ListView)).dy;
+    expect(tester.getTopLeft(card).dy, closeTo(viewportTop, 1));
+    expect(find.text('Invoice #6360').hitTestable(), findsOneWidget);
+  });
+
   for(final config in [(393.0,1.0),(320.0,1.8)]) {
     testWidgets('branded recent records preserve identity, order and clear action at ${config.$1} scale ${config.$2}',(tester) async {
       tester.view.physicalSize=Size(config.$1,2400);
