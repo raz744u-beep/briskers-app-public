@@ -17,20 +17,46 @@ class RecentRecordsCard extends StatefulWidget {
 
 class _RecentRecordsCardState extends State<RecentRecordsCard> {
   bool _expanded = false;
+  double? _offsetBeforeOpening;
 
   void _toggleExpanded() {
-    setState(() => _expanded = !_expanded);
-    if (!_expanded) return;
+    final opening = !_expanded;
+    final position = Scrollable.maybeOf(context)?.position;
+    if (opening) {
+      _offsetBeforeOpening = position?.pixels;
+    }
+    final previousOffset = _offsetBeforeOpening;
+    setState(() => _expanded = opening);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_expanded) return;
+      if (!mounted || _expanded != opening) return;
       final reducedMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-      Scrollable.ensureVisible(
-        context,
-        alignment: 0,
-        duration: reducedMotion ? Duration.zero : const Duration(milliseconds: 280),
-        curve: Curves.easeOutCubic,
-      );
+      final duration = reducedMotion ? Duration.zero : const Duration(milliseconds: 280);
+      if (opening) {
+        Scrollable.ensureVisible(
+          context,
+          alignment: 0,
+          duration: duration,
+          curve: Curves.easeOutCubic,
+        );
+        return;
+      }
+
+      if (previousOffset == null ||
+          position == null ||
+          !position.hasContentDimensions ||
+          !identical(Scrollable.maybeOf(context)?.position, position)) {
+        return;
+      }
+      final target = previousOffset
+          .clamp(position.minScrollExtent, position.maxScrollExtent)
+          .toDouble();
+      if (target == position.pixels) return;
+      if (reducedMotion) {
+        position.jumpTo(target);
+      } else {
+        position.animateTo(target, duration: duration, curve: Curves.easeOutCubic);
+      }
     });
   }
 
