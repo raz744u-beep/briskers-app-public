@@ -11,6 +11,7 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
+import 'sync_replay_fence.dart';
 import 'local_document_detail_cache.dart';
 import 'local_catalog_repository.dart';
 
@@ -703,6 +704,8 @@ class OfflineDocumentEditService {
     for (final row in rows) {
       final outboxId = row.read<int>('id');
       final operation = row.read<String>('operation');
+      final holdLineCreate = serverDetail['kind'] == 'estimate' &&
+          (operation == 'add_line' || operation == 'copy_line');
       var payload = Map<String, dynamic>.from(
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
@@ -735,6 +738,7 @@ class OfflineDocumentEditService {
               lineKind: payload['line_kind']?.toString() ?? 'item',
             ),
             outboxId: outboxId,
+            holdUntilLocalCommit: holdLineCreate,
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
           final serverLineId = _findAddedLine(
@@ -743,6 +747,14 @@ class OfflineDocumentEditService {
             payload,
           );
           final localLineId = payload['local_line_id']?.toString() ?? '';
+          if (holdLineCreate &&
+              (localLineId.isEmpty || serverLineId.isEmpty ||
+                  beforeIds.contains(serverLineId) ||
+                  !_serverLineIds(serverDetail).contains(serverLineId))) {
+            throw StateError(
+              'Estimate line identity needs review. Saved work is retained.',
+            );
+          }
           if (localLineId.isNotEmpty && serverLineId.isNotEmpty) {
             await _database.transaction(() async {
               await LocalJobQuarantine.assertReplayAllowed(
@@ -756,6 +768,15 @@ class OfflineDocumentEditService {
                 localLineId,
                 serverLineId,
               );
+              if (holdLineCreate) {
+                await _database.customStatement(
+                  'DELETE FROM sync_outbox WHERE id = ?',
+                  [outboxId],
+                );
+                await SyncReplayFence(_database).completeLocalCommit(
+                  businessId, 'outbox:$outboxId',
+                );
+              }
             });
           }
         } else if (operation == 'update_line') {
@@ -790,6 +811,11 @@ class OfflineDocumentEditService {
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
         } else if (operation == 'copy_line') {
+          if (holdLineCreate && await _recoverAcknowledgedCopy(
+            businessId, documentId, outboxId, payload, serverDetail,
+          )) {
+            continue;
+          }
           final beforeIds = _serverLineIds(serverDetail);
           var serverLineId = await LocalJobQuarantine.guardReplay(
             _database,
@@ -800,9 +826,12 @@ class OfflineDocumentEditService {
               expectedVersion: version,
             ),
             outboxId: outboxId,
+            holdUntilLocalCommit: holdLineCreate,
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
-          if (serverLineId.isEmpty) {
+          // Estimates must use the server's canonical copy identity. A
+          // missing acknowledgement is not permission to guess a new line.
+          if (serverLineId.isEmpty && !holdLineCreate) {
             serverLineId = _findAddedLine(
               beforeIds,
               serverDetail,
@@ -810,6 +839,14 @@ class OfflineDocumentEditService {
             );
           }
           final localLineId = payload['local_line_id']?.toString() ?? '';
+          if (holdLineCreate &&
+              (localLineId.isEmpty || serverLineId.isEmpty ||
+                  beforeIds.contains(serverLineId) ||
+                  !_serverLineIds(serverDetail).contains(serverLineId))) {
+            throw StateError(
+              'Estimate line identity needs review. Saved work is retained.',
+            );
+          }
           if (localLineId.isNotEmpty && serverLineId.isNotEmpty) {
             await _database.transaction(() async {
               await LocalJobQuarantine.assertReplayAllowed(
@@ -823,6 +860,15 @@ class OfflineDocumentEditService {
                 localLineId,
                 serverLineId,
               );
+              if (holdLineCreate) {
+                await _database.customStatement(
+                  'DELETE FROM sync_outbox WHERE id = ?',
+                  [outboxId],
+                );
+                await SyncReplayFence(_database).completeLocalCommit(
+                  businessId, 'outbox:$outboxId',
+                );
+              }
             });
           }
         } else if (operation == 'move_line') {
@@ -880,17 +926,19 @@ class OfflineDocumentEditService {
           serverDetail = await _api.documentDetail(businessId, documentId);
         }
 
-        await _database.transaction(() async {
-          await LocalJobQuarantine.assertReplayAllowed(
-            _database,
-            businessId,
-            outboxId: outboxId,
-          );
-          await _database.customStatement(
-            'DELETE FROM sync_outbox WHERE id = ?',
-            [outboxId],
-          );
-        });
+        if (!holdLineCreate) {
+          await _database.transaction(() async {
+            await LocalJobQuarantine.assertReplayAllowed(
+              _database,
+              businessId,
+              outboxId: outboxId,
+            );
+            await _database.customStatement(
+              'DELETE FROM sync_outbox WHERE id = ?',
+              [outboxId],
+            );
+          });
+        }
       } catch (error) {
         await _database.customStatement(
           '''
@@ -923,6 +971,16 @@ class OfflineDocumentEditService {
           replayGeneration) {
         throw StateError('Document replay was invalidated by Job revocation.');
       }
+      // A local edit may have been saved while the earlier RPC was in
+      // flight. Preserve its optimistic detail and pending state until
+      // the remaining queue is acknowledged.
+      final remaining = await _database.customSelect(
+        "SELECT id FROM sync_outbox WHERE business_id = ? "
+        "AND entity_type = 'document_edit' AND entity_id = ? "
+        "AND state <> 'done' LIMIT 1",
+        variables: [Variable<String>(businessId), Variable<String>(documentId)],
+      ).getSingleOrNull();
+      if (remaining != null) return;
       final previous = await _cache.load(businessId, documentId);
       await _cache.save(businessId, documentId, <String, dynamic>{
         ...serverDetail,
@@ -949,6 +1007,47 @@ class OfflineDocumentEditService {
       );
     });
   }
+
+  /// Resolve a known, durable copy acknowledgement without another mutation.
+  /// Unknown/ambiguous receipts must remain held for review.
+  Future<bool> _recoverAcknowledgedCopy(
+    String businessId,
+    String documentId,
+    int outboxId,
+    Map<String, dynamic> payload,
+    Map<String, dynamic> serverDetail,
+  ) => _database.transaction(() async {
+    final serverId = await LocalJobQuarantine.acknowledgedCopyId(
+      _database, businessId, outboxId,
+    );
+    if (serverId == null) return false;
+    final localId = payload['local_line_id']?.toString() ?? '';
+    final sourceId = payload['source_line_id']?.toString() ?? '';
+    final cached = await _cache.load(businessId, documentId);
+    if (serverDetail['id']?.toString() != documentId ||
+        serverDetail['kind'] != 'estimate' ||
+        localId.isEmpty || sourceId.isEmpty ||
+        serverId == localId || serverId == sourceId ||
+        cached == null || cached['kind'] != 'estimate' ||
+        _lines(serverDetail).where((line) => line['id'] == serverId).length != 1 ||
+        _lines(cached).where((line) => line['id'] == localId).length != 1 ||
+        _serverLineIds(cached).contains(serverId)) {
+      throw StateError(
+        'Estimate copy identity needs review. Saved work is retained.',
+      );
+    }
+    await LocalJobQuarantine.assertReplayAllowed(
+      _database, businessId, outboxId: outboxId,
+    );
+    await _remapLineId(businessId, documentId, localId, serverId);
+    await _database.customStatement(
+      'DELETE FROM sync_outbox WHERE id = ?', [outboxId],
+    );
+    await SyncReplayFence(_database).completeLocalCommit(
+      businessId, 'outbox:$outboxId',
+    );
+    return true;
+  });
 
   Future<Map<String, dynamic>> _refreshPayload(
     int outboxId,
