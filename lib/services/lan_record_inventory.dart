@@ -66,6 +66,13 @@ class LanRecordInventory {
     final blockedJobs = await LocalJobRetirement.blockedJobIds(db, business);
     final blockedDocuments = await LocalJobRetirement.blockedDocumentIds(db, business);
     final repairGroups = await LanEstimateRepairGroups(db).read(business);
+    final visits = await (db.select(db.localJobVisits)
+      ..where((row) => row.businessId.equals(business))
+      ..orderBy([(row) => OrderingTerm.asc(row.id)])).get();
+    final visitsByJob = <String, List<LocalJobVisit>>{};
+    for (final visit in visits) {
+      (visitsByJob[visit.jobId] ??= []).add(visit);
+    }
     final entries = <LanInventoryEntry>[];
 
     for (final kind in _tables.keys) {
@@ -98,17 +105,25 @@ class LanRecordInventory {
         final recordKind = document ? row.read<String>('kind') : kind;
         final payload = Map<String, Object?>.from(row.data);
         final cached = payload.remove('cached_detail');
-        final pending = payload.remove('sync_state') != 'synced' || id.startsWith('local-');
+        final history = recordKind == 'job' ? visitsByJob[id] : null;
+        final pending = payload.remove('sync_state') != 'synced' ||
+            id.startsWith('local-') ||
+            (history?.any((visit) => visit.syncState != 'synced' ||
+                visit.id.startsWith('local-')) ?? false);
         final detail = _documentFields(cached, business, id, recordKind);
         final groups = recordKind == 'estimate' ? repairGroups[id] : null;
         entries.add((
           kind: recordKind,
           identity: recordIdentity(business, recordKind, id),
-          fingerprint: _hash([payload, detail, ?groups]),
+          fingerprint: _hash([
+            payload, detail, ?groups,
+            if (history != null) [for (final visit in history) visit.toJson()],
+          ]),
           pending: pending,
           hasDocumentDetail: detail != null,
           review: {
             ..._reviewFields(recordKind, payload, detail),
+            if (history != null) 'Visits': '${history.length}',
             if (groups != null) 'Repair groups': '${groups['groups']!.length}',
           },
         ));

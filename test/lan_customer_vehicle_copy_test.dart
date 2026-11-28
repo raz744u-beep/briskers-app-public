@@ -132,6 +132,8 @@ void main() {
 
       await job(sender, 'eligible', 'J-81');
       await job(sender, 'attached', 'J-82');
+      await job(sender, 'pending-visit', 'J-87');
+      await job(sender, 'visit-conflict', 'J-88');
       await job(sender, 'with-finding', 'J-86');
       await job(sender, 'number-conflict', 'J-83');
       await job(sender, 'unapproved', 'J-84');
@@ -144,7 +146,14 @@ void main() {
         requested: 85,
       );
       await sender.customStatement(
-        "INSERT INTO local_job_visits (id,business_id,job_id,visit_number) VALUES ('visit','shop','attached',1)",
+        "INSERT INTO local_job_visits (id,business_id,job_id,visit_number,work_summary,sync_state) VALUES "
+        "('visit','shop','attached',1,'Brake check','synced'),"
+        "('local-visit-pending','shop','pending-visit',1,NULL,'pending'),"
+        "('occupied-visit','shop','visit-conflict',1,NULL,'synced')",
+      );
+      await receiver.customStatement(
+        "INSERT INTO local_job_visits (id,business_id,job_id,visit_number) "
+        "VALUES ('occupied-visit','shop','already-here',1)",
       );
       await sender.customStatement(
         "INSERT INTO local_findings (id,business_id,found_job_id,body,status) "
@@ -161,6 +170,8 @@ void main() {
             approvedIdentities: {
               identity('job', 'eligible'),
               identity('job', 'attached'),
+              identity('job', 'pending-visit'),
+              identity('job', 'visit-conflict'),
               identity('job', 'with-finding'),
               identity('job', 'number-conflict'),
               identity('job', 'reserved-number'),
@@ -174,12 +185,40 @@ void main() {
       await receiver.customStatement(
         "UPDATE local_sync_states SET last_server_cursor=40 WHERE business_id='shop' AND scope='jobs'",
       );
-      expect(await apply(), (customers: 0, vehicles: 0, jobs: 1, estimates: 0));
+      final jobBundle = bundle['jobs'] as Map<String, dynamic>;
+      expect((jobBundle['records'] as List).map((row) => row['id']),
+          isNot(contains('attached')));
+      final malformed = jsonDecode(jsonEncode(bundle)) as Map<String, dynamic>;
+      malformed['jobs']['recordsWithVisits'][0]['visits'][0]['jobId'] = 'wrong-parent';
+      await expectLater(
+        copy.copyMissing(
+          business: shop,
+          bundle: malformed,
+          approvedIdentities: {identity('job', 'attached')},
+        ),
+        throwsFormatException,
+      );
+      expect(await apply(), (customers: 0, vehicles: 0, jobs: 2, estimates: 0));
       expect(await apply(), (customers: 0, vehicles: 0, jobs: 0, estimates: 0));
       final saved = await receiver.select(receiver.localJobs).get();
       expect(
         saved.map((job) => job.id),
-        unorderedEquals(['eligible', 'already-here']),
+        unorderedEquals(['eligible', 'attached', 'already-here']),
+      );
+      final history = await receiver.customSelect(
+        "SELECT job_id,work_summary FROM local_job_visits WHERE id='visit'",
+      ).getSingle();
+      expect(history.data, {'job_id': 'attached', 'work_summary': 'Brake check'});
+      final sourceInventory = await LanRecordInventory(sender).read(shop);
+      await receiver.customStatement(
+        "UPDATE local_job_visits SET work_summary='Receiver edit' WHERE id='visit'",
+      );
+      final differences = LanRecordInventory.compare(
+        sourceInventory, await LanRecordInventory(receiver).read(shop),
+      );
+      expect(
+        differences.different.map((entry) => entry.identity),
+        contains(identity('job', 'attached')),
       );
       expect(await receiver.select(receiver.syncOutbox).get(), isEmpty);
     },
