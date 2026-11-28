@@ -63,7 +63,7 @@ void main() {
       bundle: bundle,
       approvedIdentities: approval,
     );
-    expect(result, (customers: 1, vehicles: 1));
+    expect(result, (customers: 1, vehicles: 1, jobs: 0));
     final customers = {
       for (final row in await receiver.select(receiver.localCustomers).get())
         row.id: row.displayName,
@@ -89,9 +89,73 @@ void main() {
         bundle: bundle,
         approvedIdentities: approval,
       ),
-      (customers: 0, vehicles: 0),
+      (customers: 0, vehicles: 0, jobs: 0),
     );
   });
+
+  test(
+    'copies only approved standalone jobs with matching dependencies',
+    () async {
+      final sender = BriskersLocalDatabase(NativeDatabase.memory());
+      final receiver = BriskersLocalDatabase(NativeDatabase.memory());
+      addTearDown(sender.close);
+      addTearDown(receiver.close);
+      for (final db in [sender, receiver]) {
+        await seedCursor(db, 40);
+        await db.customStatement(
+          "INSERT INTO local_sync_states (business_id, scope, last_server_cursor, bootstrapped) VALUES ('shop', 'jobs', 40, 1)",
+        );
+        await db.customStatement(
+          "INSERT INTO local_customers (id, business_id, display_name) VALUES ('customer','shop','Alex Example')",
+        );
+        await db.customStatement(
+          "INSERT INTO local_vehicles (id, business_id, vin) VALUES ('car','shop','1FAFP404X1F100001')",
+        );
+        await db.customStatement(
+          "INSERT INTO local_customer_vehicles (business_id,customer_id,vehicle_id) VALUES ('shop','customer','car')",
+        );
+      }
+
+      Future<void> job(BriskersLocalDatabase db, String id, String number) =>
+          db.customStatement(
+            "INSERT INTO local_jobs (id,business_id,access_scope,job_number,title,status,customer_id,vehicle_id) "
+            "VALUES (?,'shop','full',?,'Check brakes','open','customer','car')",
+            [id, number],
+          );
+
+      await job(sender, 'eligible', 'J-81');
+      await job(sender, 'attached', 'J-82');
+      await job(sender, 'number-conflict', 'J-83');
+      await job(sender, 'unapproved', 'J-84');
+      await job(receiver, 'already-here', 'j-83');
+      await sender.customStatement(
+        "INSERT INTO local_job_visits (id,business_id,job_id,visit_number) VALUES ('visit','shop','attached',1)",
+      );
+      final bundle = jsonDecode(
+        jsonEncode(await LanCustomerVehicleCopy(sender).share(shop)),
+      ) as Map<String, dynamic>;
+      final copy = LanCustomerVehicleCopy(receiver);
+      Future<({int customers, int vehicles, int jobs})> apply() =>
+          copy.copyMissing(
+            business: shop,
+            bundle: bundle,
+            approvedIdentities: {
+              identity('job', 'eligible'),
+              identity('job', 'attached'),
+              identity('job', 'number-conflict'),
+            },
+          );
+
+      expect(await apply(), (customers: 0, vehicles: 0, jobs: 1));
+      expect(await apply(), (customers: 0, vehicles: 0, jobs: 0));
+      final saved = await receiver.select(receiver.localJobs).get();
+      expect(
+        saved.map((job) => job.id),
+        unorderedEquals(['eligible', 'already-here']),
+      );
+      expect(await receiver.select(receiver.syncOutbox).get(), isEmpty);
+    },
+  );
 
   test(
     'refuses older source evidence and leaves the receiver untouched',

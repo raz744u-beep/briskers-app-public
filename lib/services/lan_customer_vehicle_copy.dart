@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import 'lan_record_inventory.dart';
+import 'lan_standalone_job_copy.dart';
 
 class LanCustomerVehicleCopy {
   const LanCustomerVehicleCopy(this.db);
@@ -57,6 +58,7 @@ class LanCustomerVehicleCopy {
         )..where((row) => row.businessId.equals(business))).get();
         return {
           'version': 1,
+          'jobs': await LanStandaloneJobCopy(db).share(business),
           'cursor': cursor,
           'customers': [
             for (final row in customers)
@@ -73,7 +75,7 @@ class LanCustomerVehicleCopy {
         };
       });
 
-  Future<({int customers, int vehicles})> copyMissing({
+  Future<({int customers, int vehicles, int jobs})> copyMissing({
     required String business,
     required Map<String, dynamic> bundle,
     required Set<String> approvedIdentities,
@@ -216,7 +218,17 @@ class LanCustomerVehicleCopy {
           .into(db.localCustomerVehicles)
           .insert(linksByVehicle[id]!.single);
     }
+    final copiedJobs = await LanStandaloneJobCopy(db).copyMissing(
+      business: business,
+      bundle: bundle['jobs'],
+      sourceCustomers: sourceCustomers,
+      sourceVehicles: sourceVehicles,
+      sourceLinks: linksByVehicle,
+      queuedIds: queued,
+      approvedIdentities: approvedIdentities,
+    );
     return (
+      jobs: copiedJobs,
       customers: customerCandidates.length,
       vehicles: vehicleCandidates.length,
     );

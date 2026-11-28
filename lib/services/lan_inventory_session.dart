@@ -203,7 +203,7 @@ class LanInventorySession {
       _recordCopyLimit,
     );
     if (data is! Map<String, dynamic>) {
-      throw const FormatException('Invalid customer and vehicle copy data.');
+      throw const FormatException('Invalid LAN record copy data.');
     }
     return data;
   }
@@ -230,7 +230,7 @@ class LanInventorySession {
       );
       if (response.statusCode != HttpStatus.ok) {
         throw StateError(
-          path == '/inventory' ? 'The inventory session is unavailable.' : 'The copy session is unavailable. Enable customer and vehicle copying on the source phone and share again.',
+          path == '/inventory' ? 'The inventory session is unavailable.' : 'The copy session is unavailable. Enable record copying on the source phone and share again.',
         );
       }
       final bytes = BytesBuilder(copy: false);

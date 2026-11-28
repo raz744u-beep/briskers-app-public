@@ -146,21 +146,23 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
       });
   });
 
-  Future<void> _copyCustomersAndVehicles() => _run(() async {
+  static const _copyKinds = {'customer', 'vehicle', 'job'};
+
+  Future<void> _copyMissingRecords() => _run(() async {
     final code = _comparedCode;
     final difference = _difference;
     if (code == null || difference == null) return;
     final eligible = {
       for (final item in difference.onlyOnSource)
-        if (item.kind == 'customer' || item.kind == 'vehicle') item.identity,
+        if (_copyKinds.contains(item.kind)) item.identity,
     };
     if (eligible.isEmpty) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
-        title: const Text('Copy missing customers and vehicles?'),
+        title: const Text('Copy missing records?'),
         content: const Text(
-          'This adds eligible records to this phone. Records already saved here stay as they are. '
+          'This can add eligible customers, vehicles, and open unassigned jobs with no linked work. Records already saved here stay as they are. '
           'Review any records this step skips before copying them.',
         ),
         actions: [
@@ -187,12 +189,13 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
       approvedIdentities: eligible,
     );
     if (!mounted) return;
-    final remaining = eligible.length - result.customers - result.vehicles;
+    final remaining =
+        eligible.length - result.customers - result.vehicles - result.jobs;
     setState(() {
       _difference = null;
       _comparedCode = null;
       _copyResult =
-          'Copied ${result.customers} customers and ${result.vehicles} vehicles. '
+          'Copied ${result.customers} customers, ${result.vehicles} vehicles, and ${result.jobs} jobs. '
           '$remaining still need review. Compare again to refresh the lists.';
     });
   });
@@ -308,9 +311,7 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
           if (offer == null) ...[
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text(
-                'Allow copying eligible customers and vehicles',
-              ),
+              title: const Text('Allow copying eligible records'),
               subtitle: const Text(
                 'Use this only on the source phone. The code can read customer contact details on this Wi-Fi session.',
               ),
@@ -323,7 +324,7 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
               onPressed: _busy ? null : _start,
               child: Text(
                 _allowCopy
-                    ? 'Share inventory and customer copy'
+                    ? 'Share inventory and record copy'
                     : 'Share my inventory',
               ),
             ),
@@ -383,11 +384,11 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
           if (_copyResult case final result?) Text(result),
           if (difference != null) ...[
             if (difference.onlyOnSource.any(
-              (item) => item.kind == 'customer' || item.kind == 'vehicle',
+              (item) => _copyKinds.contains(item.kind),
             ))
               OutlinedButton(
-                onPressed: _busy ? null : _copyCustomersAndVehicles,
-                child: const Text('Copy eligible customers and vehicles'),
+                onPressed: _busy ? null : _copyMissingRecords,
+                child: const Text('Copy eligible records'),
               ),
             _result(
               'Only on source phone',
