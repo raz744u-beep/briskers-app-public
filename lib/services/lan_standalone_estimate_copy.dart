@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:cryptography/dart.dart';
 import 'package:drift/drift.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -11,6 +12,7 @@ import 'local_document_sql_store.dart';
 import 'local_estimate_number.dart';
 import 'local_job_deletion_v3.dart';
 import 'local_job_retirement.dart';
+import 'local_job_quarantine.dart';
 import 'local_number_allocator.dart';
 import 'recovery_commit_store.dart';
 
@@ -43,7 +45,6 @@ class LanStandaloneEstimateCopy {
       row.syncState == 'synced' &&
       row.id.isNotEmpty &&
       !row.id.startsWith('local-') &&
-      row.jobId == null &&
       row.customerId != null &&
       !row.converted &&
       row.closedAt == null &&
@@ -61,7 +62,7 @@ class LanStandaloneEstimateCopy {
           (data['business_id'] != null &&
               data['business_id'] != row.businessId) ||
           data['customer_id'] != row.customerId ||
-          data['job_id'] != null ||
+          data['job_id'] != row.jobId ||
           data['status'] != row.status ||
           !const {
             null,
@@ -151,6 +152,43 @@ class LanStandaloneEstimateCopy {
     };
   }
 
+  Future<Map<String, LocalJob>> _matchingJobs(String business) async {
+    final blocked = {
+      ...await _blocked(business),
+      ...await LocalJobRetirement.blockedJobIds(db, business),
+      ...await LocalJobDeletionV3.blockedJobIds(db, business),
+      ...await LocalJobQuarantine.blockedJobIds(db, business),
+    };
+    final rows =
+        await (db.select(db.localJobs)..where(
+              (row) =>
+                  row.businessId.equals(business) &
+                  row.syncState.equals('synced') &
+                  row.accessScope.equals('full'),
+            ))
+            .get();
+    return {
+      for (final row in rows)
+        if (!row.id.startsWith('local-') && !blocked.contains(row.id))
+          row.id: row,
+    };
+  }
+
+  static String? _jobFingerprint(
+    LocalJob? job,
+    LocalDocument estimate,
+    Map<String, dynamic> detail,
+  ) {
+    if (job == null ||
+        job.customerId != estimate.customerId ||
+        job.vehicleId != detail['vehicle_id']) {
+      return null;
+    }
+    return base64UrlEncode(
+      const DartSha256().hashSync(utf8.encode(jsonEncode(job.toJson()))).bytes,
+    );
+  }
+
   Future<Map<String, dynamic>?> share(String business) async {
     final cursor = await _cursor(business);
     if (cursor == null || cursor < 0) return null;
@@ -173,6 +211,8 @@ class LanStandaloneEstimateCopy {
     final snapshots = await LanEstimateRepairGroups(db).read(business);
     final records = <Map<String, Object?>>[];
     final groupedRecords = <Map<String, Object?>>[];
+    final linkedRecords = <Map<String, Object?>>[];
+    final jobs = await _matchingJobs(business);
     for (final row in docs) {
       if (!_eligible(row, business) ||
           blocked.contains(row.id) ||
@@ -183,7 +223,21 @@ class LanStandaloneEstimateCopy {
       if (detail == null) continue;
       final snapshot = snapshots[row.id];
       final record = {'index': row.toJson(), 'detail': details[row.id]};
-      if (snapshot == null) {
+      if (row.jobId != null) {
+        final fingerprint = _jobFingerprint(jobs[row.jobId], row, detail);
+        if (fingerprint != null &&
+            (snapshot == null ||
+                LanEstimateRepairGroups.isComplete(
+                  snapshot,
+                  detail['lines'] as List,
+                ))) {
+          linkedRecords.add({
+            ...record,
+            'jobFingerprint': fingerprint,
+            'repairGroups': ?snapshot,
+          });
+        }
+      } else if (snapshot == null) {
         records.add(record);
       } else if (LanEstimateRepairGroups.isComplete(
         snapshot,
@@ -198,6 +252,7 @@ class LanStandaloneEstimateCopy {
       'cursor': cursor,
       'records': records,
       'groupedRecords': groupedRecords,
+      'linkedRecords': linkedRecords,
     };
   }
 
@@ -215,16 +270,19 @@ class LanStandaloneEstimateCopy {
         bundle['cursor'] is! int ||
         bundle['records'] is! List ||
         (bundle.containsKey('groupedRecords') &&
-            bundle['groupedRecords'] is! List)) {
+            bundle['groupedRecords'] is! List) ||
+        (bundle.containsKey('linkedRecords') &&
+            bundle['linkedRecords'] is! List)) {
       throw const FormatException('Invalid estimate copy data.');
     }
     final records = bundle['records'] as List;
     final groupedRecords = bundle['groupedRecords'] as List? ?? const [];
+    final linkedRecords = bundle['linkedRecords'] as List? ?? const [];
     final cursor = await _cursor(business);
     if (cursor == null ||
         cursor < 0 ||
         (bundle['cursor'] as int) < cursor ||
-        (records.isEmpty && groupedRecords.isEmpty)) {
+        (records.isEmpty && groupedRecords.isEmpty && linkedRecords.isEmpty)) {
       return 0;
     }
 
@@ -252,9 +310,13 @@ class LanStandaloneEstimateCopy {
     final ids = <String>{};
     final sourceNumbers = <int>{};
     var copied = 0;
-    for (final (raw, grouped) in [
-      for (final raw in records) (raw, false),
-      for (final raw in groupedRecords) (raw, true),
+    final jobs = linkedRecords.isEmpty
+        ? const <String, LocalJob>{}
+        : await _matchingJobs(business);
+    for (final (raw, grouped, linked) in [
+      for (final raw in records) (raw, false, false),
+      for (final raw in groupedRecords) (raw, true, false),
+      for (final raw in linkedRecords) (raw, false, true),
     ]) {
       if (raw is! Map<String, dynamic> ||
           raw['index'] is! Map<String, dynamic> ||
@@ -268,13 +330,18 @@ class LanStandaloneEstimateCopy {
         throw const FormatException('Invalid or duplicate LAN estimate.');
       }
       final snapshot = raw['repairGroups'];
-      if (grouped
+      final hasGroups = grouped || (linked && raw.containsKey('repairGroups'));
+      if (hasGroups
           ? !LanEstimateRepairGroups.isComplete(
               snapshot,
               detail['lines'] as List,
             )
           : raw.containsKey('repairGroups')) {
         throw const FormatException('Invalid LAN estimate repair groups.');
+      }
+      if (linked != (row.jobId != null) ||
+          (linked && raw['jobFingerprint'] is! String)) {
+        throw const FormatException('Invalid LAN estimate job link.');
       }
       final number = _number(row.documentNumber)!;
       if (!sourceNumbers.add(number)) {
@@ -294,6 +361,11 @@ class LanStandaloneEstimateCopy {
         continue;
       }
 
+      if (linked &&
+          _jobFingerprint(jobs[row.jobId], row, detail) !=
+              raw['jobFingerprint']) {
+        continue;
+      }
       final customer = sourceCustomers[row.customerId];
       if (customer == null || queuedIds.contains(customer.id)) continue;
       final savedCustomer = await (db.select(
@@ -331,7 +403,7 @@ class LanStandaloneEstimateCopy {
         'INSERT INTO local_document_details VALUES (?,?)',
         [key, serialized],
       );
-      if (grouped) await groups.insert(business, row.id, snapshot as Map);
+      if (hasGroups) await groups.insert(business, row.id, snapshot as Map);
       numbers.add(number);
       copied++;
     }

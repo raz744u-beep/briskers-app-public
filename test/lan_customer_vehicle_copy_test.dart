@@ -280,16 +280,24 @@ void main() {
       );
     }
 
+    for (final db in [sender, receiver]) {
+      await db.customStatement(
+        "INSERT INTO local_jobs (id,business_id,access_scope,job_number,title,status,customer_id) "
+        "VALUES ('linked-job','shop','full','J-92','Inspection','open','customer')",
+      );
+    }
+
     Future<void> seedEstimate(
       BriskersLocalDatabase db,
       String id,
       String number, {
       bool withDetail = true,
+      String? jobId,
     }) async {
       await db.customStatement(
-        "INSERT INTO local_documents (id,business_id,customer_id,kind,document_number,status,total,row_version) "
-        "VALUES (?,'shop','customer','estimate',?,'draft',145,2)",
-        [id, number],
+        "INSERT INTO local_documents (id,business_id,customer_id,kind,document_number,status,total,row_version,job_id) "
+        "VALUES (?,'shop','customer','estimate',?,'draft',145,2,?)",
+        [id, number, jobId],
       );
       if (withDetail) {
         await LocalDocumentSqlStore.write(
@@ -298,6 +306,7 @@ void main() {
           jsonEncode({
             'id': id,
             'kind': 'estimate',
+            'job_id': jobId,
             'customer_id': 'customer',
             'document_number': number,
             'status': 'draft',
@@ -312,6 +321,7 @@ void main() {
     await seedEstimate(sender, 'number-conflict', 'E-82');
     await seedEstimate(sender, 'list-only', 'E-83', withDetail: false);
     await seedEstimate(sender, 'grouped', 'E-84');
+    await seedEstimate(sender, 'linked', 'E-91', jobId: 'linked-job');
     await seedEstimate(sender, 'orphaned-member', 'E-85');
     await seedEstimate(sender, 'receiver-has-groups', 'E-86');
     await RepairGroupSchema.ensure(sender);
@@ -342,7 +352,7 @@ void main() {
           approvedIdentities: {
             for (final id in [
               'eligible', 'number-conflict', 'list-only', 'grouped',
-              'orphaned-member', 'receiver-has-groups',
+              'orphaned-member', 'receiver-has-groups', 'linked',
             ])
               identity('estimate', id),
           },
@@ -368,11 +378,21 @@ void main() {
       (await receiver.select(receiver.localDocuments).get()).map((row) => row.id),
       ['existing'],
     );
+    await receiver.customStatement(
+      "UPDATE local_jobs SET title='Receiver edit' WHERE id='linked-job'",
+    );
     expect(await apply(), (customers: 0, vehicles: 0, jobs: 0, estimates: 2));
+    await receiver.customStatement(
+      "UPDATE local_jobs SET title='Inspection' WHERE id='linked-job'",
+    );
+    expect(await apply(), (customers: 0, vehicles: 0, jobs: 0, estimates: 1));
+    final linked = await (receiver.select(receiver.localDocuments)
+      ..where((row) => row.id.equals('linked'))).getSingle();
+    expect(linked.jobId, 'linked-job');
     expect(await apply(), (customers: 0, vehicles: 0, jobs: 0, estimates: 0));
     expect(
       (await receiver.select(receiver.localDocuments).get()).map((row) => row.id),
-      unorderedEquals(['eligible', 'existing', 'grouped']),
+      unorderedEquals(['eligible', 'existing', 'grouped', 'linked']),
     );
     final raw = await LocalDocumentSqlStore.read(
       receiver,
