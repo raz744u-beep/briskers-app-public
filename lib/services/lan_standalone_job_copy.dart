@@ -5,6 +5,7 @@ import 'lan_record_inventory.dart';
 import 'local_job_deletion_v3.dart';
 import 'local_job_quarantine.dart';
 import 'local_job_retirement.dart';
+import 'local_number_allocator.dart';
 
 /// Copies the saved local projection of open jobs whose related work can be
 /// represented by the job, customer, vehicle, and ownership link alone.
@@ -25,8 +26,8 @@ class LanStandaloneJobCopy {
     return row?.lastServerCursor;
   }
 
-  static String _number(LocalJob job) =>
-      (job.jobNumber ?? '').trim().toUpperCase();
+  static int? _number(LocalJob job) =>
+      LocalNumberAllocator.parseJobNumber(job.jobNumber);
 
   static bool _eligible(LocalJob job, String business) =>
       job.businessId == business &&
@@ -42,7 +43,7 @@ class LanStandaloneJobCopy {
       job.paymentState == null &&
       job.customerId != null &&
       job.vehicleId != null &&
-      RegExp(r'^(?:[A-Z]+-)?[0-9]+$').hasMatch(_number(job));
+      (_number(job) ?? 0) > 0;
 
   Future<Set<String>> _blocked(String business) async {
     final ids = {
@@ -96,7 +97,7 @@ class LanStandaloneJobCopy {
     final jobs = await (db.select(
       db.localJobs,
     )..where((row) => row.businessId.equals(business))).get();
-    final numberCounts = <String, int>{};
+    final numberCounts = <int?, int>{};
     for (final job in jobs) {
       numberCounts.update(
         _number(job),
@@ -138,7 +139,7 @@ class LanStandaloneJobCopy {
 
     final jobs = <LocalJob>[];
     final sourceIds = <String>{};
-    final sourceNumbers = <String, int>{};
+    final sourceNumbers = <int?, int>{};
     for (final raw in bundle['records'] as List<dynamic>) {
       if (raw is! Map<String, dynamic>) {
         throw const FormatException('Invalid LAN job.');
@@ -159,10 +160,9 @@ class LanStandaloneJobCopy {
     final blocked = await _blocked(business);
     final saved = await db.select(db.localJobs).get();
     final savedIds = {for (final job in saved) job.id};
-    final savedNumbers = {
-      for (final job in saved)
-        if (job.businessId == business) _number(job),
-    };
+    final savedNumbers = await LocalNumberAllocator(db).occupiedJobNumbers(
+      business,
+    );
     final customers = {
       for (final row in await (db.select(
         db.localCustomers,

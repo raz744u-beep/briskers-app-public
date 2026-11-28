@@ -3,10 +3,14 @@ import 'dart:convert';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/lan_customer_vehicle_copy.dart';
 import 'package:briskers_app/services/lan_record_inventory.dart';
+import 'package:briskers_app/services/local_number_allocator.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   const shop = 'shop';
 
   Future<void> seedCursor(BriskersLocalDatabase db, int cursor) =>
@@ -127,7 +131,14 @@ void main() {
       await job(sender, 'attached', 'J-82');
       await job(sender, 'number-conflict', 'J-83');
       await job(sender, 'unapproved', 'J-84');
-      await job(receiver, 'already-here', 'j-83');
+      await job(receiver, 'already-here', '0083');
+      await job(sender, 'reserved-number', 'J-85');
+      await LocalNumberAllocator(receiver).allocate(
+        shop,
+        'job',
+        'pending-job',
+        requested: 85,
+      );
       await sender.customStatement(
         "INSERT INTO local_job_visits (id,business_id,job_id,visit_number) VALUES ('visit','shop','attached',1)",
       );
@@ -143,6 +154,7 @@ void main() {
               identity('job', 'eligible'),
               identity('job', 'attached'),
               identity('job', 'number-conflict'),
+              identity('job', 'reserved-number'),
             },
           );
 
