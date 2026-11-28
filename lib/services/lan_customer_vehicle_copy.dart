@@ -35,10 +35,11 @@ class LanCustomerVehicleCopy {
   Future<Map<String, dynamic>> share(String business) =>
       db.transaction(() async {
         final cursor = await _cursor(business);
-        if (cursor == null)
+        if (cursor == null) {
           throw StateError(
             'This phone has no verified customer and vehicle sync history.',
           );
+        }
         final queued = await _queuedIds(business);
         final customers =
             await (db.select(db.localCustomers)..where(
@@ -286,8 +287,9 @@ class LanCustomerVehicleCopy {
   ) {
     final rows = _rows(raw, decode);
     final indexed = {for (final row in rows) id(row): row};
-    if (indexed.length != rows.length)
+    if (indexed.length != rows.length) {
       throw const FormatException('Duplicate LAN copy record.');
+    }
     return indexed;
   }
 }
