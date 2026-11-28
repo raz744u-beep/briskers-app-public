@@ -26,6 +26,20 @@ class LocalJobWorkDate {
     'PRIMARY KEY(business_id,job_id))',
   );
 
+  Future<Map<String, String>> savedDates(String business) async {
+    await prepare();
+    final rows = await db
+        .customSelect(
+          'SELECT job_id,work_date FROM local_job_work_dates WHERE business_id=?',
+          variables: [Variable(business)],
+        )
+        .get();
+    return {
+      for (final row in rows)
+        row.read<String>('job_id'): row.read<String>('work_date'),
+    };
+  }
+
   Future<DateTime?> read(String business, String job) async {
     await prepare();
     final row = await db

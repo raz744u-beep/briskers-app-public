@@ -8,6 +8,8 @@ import 'lan_estimate_repair_groups.dart';
 import 'local_document_detail_cache.dart';
 import 'local_document_sql_store.dart';
 import 'local_job_retirement.dart';
+import 'local_job_work_date.dart';
+import 'local_task_schedule.dart';
 
 typedef LanInventoryEntry = ({
   String kind,
@@ -69,6 +71,7 @@ class LanRecordInventory {
     final visits = await (db.select(db.localJobVisits)
       ..where((row) => row.businessId.equals(business))
       ..orderBy([(row) => OrderingTerm.asc(row.id)])).get();
+    final dates = await LocalJobWorkDate(db).savedDates(business);
     final visitsByJob = <String, List<LocalJobVisit>>{};
     for (final visit in visits) {
       (visitsByJob[visit.jobId] ??= []).add(visit);
@@ -105,9 +108,11 @@ class LanRecordInventory {
         final recordKind = document ? row.read<String>('kind') : kind;
         final payload = Map<String, Object?>.from(row.data);
         final cached = payload.remove('cached_detail');
+        final workDate = recordKind == 'job' ? dates[id] : null;
+        final invalidDate = workDate != null && LocalTaskSchedule.parse(workDate) == null;
         final history = recordKind == 'job' ? visitsByJob[id] : null;
         final pending = payload.remove('sync_state') != 'synced' ||
-            id.startsWith('local-') ||
+            id.startsWith('local-') || invalidDate ||
             (history?.any((visit) => visit.syncState != 'synced' ||
                 visit.id.startsWith('local-')) ?? false);
         final detail = _documentFields(cached, business, id, recordKind);
@@ -118,11 +123,13 @@ class LanRecordInventory {
           fingerprint: _hash([
             payload, detail, ?groups,
             if (history != null) [for (final visit in history) visit.toJson()],
+            ?workDate,
           ]),
           pending: pending,
           hasDocumentDetail: detail != null,
           review: {
             ..._reviewFields(recordKind, payload, detail),
+            'Job Date': ?(invalidDate ? 'Invalid date' : workDate),
             if (history != null) 'Visits': '${history.length}',
             if (groups != null) 'Repair groups': '${groups['groups']!.length}',
           },

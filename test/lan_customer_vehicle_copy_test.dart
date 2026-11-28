@@ -5,6 +5,7 @@ import 'package:briskers_app/services/repair_group_schema.dart';
 import 'package:briskers_app/services/lan_customer_vehicle_copy.dart';
 import 'package:briskers_app/services/lan_record_inventory.dart';
 import 'package:briskers_app/services/local_number_allocator.dart';
+import 'package:briskers_app/services/local_job_work_date.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_document_sql_store.dart';
 import 'package:drift/native.dart';
@@ -132,6 +133,13 @@ void main() {
 
       await job(sender, 'eligible', 'J-81');
       await job(sender, 'attached', 'J-82');
+      await job(sender, 'dated', 'J-89');
+      await job(sender, 'dated-local-conflict', 'J-90');
+      await LocalJobWorkDate(sender).save(shop, 'dated', DateTime(2026, 11, 19));
+      await LocalJobWorkDate(receiver).prepare();
+      await receiver.customStatement(
+        "INSERT INTO local_job_work_dates VALUES ('shop','dated-local-conflict','2026-11-20')",
+      );
       await job(sender, 'pending-visit', 'J-87');
       await job(sender, 'visit-conflict', 'J-88');
       await job(sender, 'with-finding', 'J-86');
@@ -148,6 +156,7 @@ void main() {
       await sender.customStatement(
         "INSERT INTO local_job_visits (id,business_id,job_id,visit_number,work_summary,sync_state) VALUES "
         "('visit','shop','attached',1,'Brake check','synced'),"
+        "('dated-visit','shop','dated',1,'Inspection','synced'),"
         "('local-visit-pending','shop','pending-visit',1,NULL,'pending'),"
         "('occupied-visit','shop','visit-conflict',1,NULL,'synced')",
       );
@@ -170,6 +179,8 @@ void main() {
             approvedIdentities: {
               identity('job', 'eligible'),
               identity('job', 'attached'),
+              identity('job', 'dated'),
+              identity('job', 'dated-local-conflict'),
               identity('job', 'pending-visit'),
               identity('job', 'visit-conflict'),
               identity('job', 'with-finding'),
@@ -188,6 +199,12 @@ void main() {
       final jobBundle = bundle['jobs'] as Map<String, dynamic>;
       expect((jobBundle['records'] as List).map((row) => row['id']),
           isNot(contains('attached')));
+      expect((jobBundle['records'] as List).map((row) => row['id']),
+          isNot(contains('dated')));
+      expect(
+        (jobBundle['recordsWithVisits'] as List).map((row) => row['job']['id']),
+        isNot(contains('dated')),
+      );
       final malformed = jsonDecode(jsonEncode(bundle)) as Map<String, dynamic>;
       malformed['jobs']['recordsWithVisits'][0]['visits'][0]['jobId'] = 'wrong-parent';
       await expectLater(
@@ -198,18 +215,40 @@ void main() {
         ),
         throwsFormatException,
       );
-      expect(await apply(), (customers: 0, vehicles: 0, jobs: 2, estimates: 0));
+      final invalidDate = jsonDecode(jsonEncode(bundle)) as Map<String, dynamic>;
+      invalidDate['jobs']['recordsWithWorkDates'][0]['workDate'] = '2026-02-30';
+      await expectLater(
+        copy.copyMissing(
+          business: shop,
+          bundle: invalidDate,
+          approvedIdentities: {identity('job', 'dated')},
+        ),
+        throwsFormatException,
+      );
+      expect(await apply(), (customers: 0, vehicles: 0, jobs: 3, estimates: 0));
       expect(await apply(), (customers: 0, vehicles: 0, jobs: 0, estimates: 0));
       final saved = await receiver.select(receiver.localJobs).get();
       expect(
         saved.map((job) => job.id),
-        unorderedEquals(['eligible', 'attached', 'already-here']),
+        unorderedEquals(['eligible', 'attached', 'dated', 'already-here']),
       );
       final history = await receiver.customSelect(
         "SELECT job_id,work_summary FROM local_job_visits WHERE id='visit'",
       ).getSingle();
       expect(history.data, {'job_id': 'attached', 'work_summary': 'Brake check'});
+      expect(await LocalJobWorkDate(receiver).read(shop, 'dated'), DateTime(2026, 11, 19));
+      expect(
+        (await receiver.customSelect(
+          "SELECT job_id FROM local_job_visits WHERE id='dated-visit'",
+        ).getSingle()).read<String>('job_id'),
+        'dated',
+      );
+      expect(
+        await LocalJobWorkDate(receiver).read(shop, 'dated-local-conflict'),
+        DateTime(2026, 11, 20),
+      );
       final sourceInventory = await LanRecordInventory(sender).read(shop);
+      await LocalJobWorkDate(receiver).save(shop, 'dated', DateTime(2026, 11, 24));
       await receiver.customStatement(
         "UPDATE local_job_visits SET work_summary='Receiver edit' WHERE id='visit'",
       );
@@ -218,7 +257,7 @@ void main() {
       );
       expect(
         differences.different.map((entry) => entry.identity),
-        contains(identity('job', 'attached')),
+        containsAll([identity('job', 'attached'), identity('job', 'dated')]),
       );
       expect(await receiver.select(receiver.syncOutbox).get(), isEmpty);
     },

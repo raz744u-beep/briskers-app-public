@@ -5,7 +5,9 @@ import 'lan_record_inventory.dart';
 import 'local_job_deletion_v3.dart';
 import 'local_job_quarantine.dart';
 import 'local_job_retirement.dart';
+import 'local_job_work_date.dart';
 import 'local_number_allocator.dart';
+import 'local_task_schedule.dart';
 
 /// Copies the saved local projection of open jobs whose related work can be
 /// represented by the job, its saved visits, and its customer and vehicle.
@@ -63,7 +65,6 @@ class LanStandaloneJobCopy {
       'local_job_assignments': ['job_id'],
       'local_pre_inspections': ['job_id'],
       'local_findings': ['found_job_id', 'repair_job_id'],
-      'local_job_work_dates': ['job_id'],
       'local_job_status_intent_v1': ['job_id'],
       'local_job_task_activity_v1': ['job_id'],
       'local_job_identity_aliases': ['alias_id', 'canonical_id'],
@@ -106,6 +107,9 @@ class LanStandaloneJobCopy {
     );
   }
 
+  static bool _validWorkDate(Object? value) =>
+      LocalTaskSchedule.parse(value) != null;
+
   Future<Set<String>> _blockedVisits(String business) async => {
     ...await LocalJobDeletionV3.blockedIds(db, business, kind: 'job_visit'),
     ...await LocalJobQuarantine.blockedEntityIds(
@@ -138,34 +142,47 @@ class LanStandaloneJobCopy {
       (visitsByJob[visit.jobId] ??= []).add(visit);
     }
     final blockedVisits = await _blockedVisits(business);
+    final dates = await LocalJobWorkDate(db).savedDates(business);
     final records = <Map<String, dynamic>>[];
     final recordsWithVisits = <Map<String, dynamic>>[];
+    final recordsWithWorkDates = <Map<String, dynamic>>[];
     for (final job in jobs) {
       if (!_eligible(job, business) ||
           blocked.contains(job.id) ||
           numberCounts[_number(job)] != 1) {
         continue;
       }
-      final history = visitsByJob[job.id];
-      if (history == null) {
-        records.add(job.toJson());
-      } else if (_validVisits(history, job) &&
-          history.every(
+      final history = visitsByJob[job.id] ?? const [];
+      final workDate = dates[job.id];
+      if (!_validVisits(history, job) ||
+          history.any(
             (visit) =>
-                !blockedVisits.contains(visit.id) &&
-                !blocked.contains(visit.id),
-          )) {
-        recordsWithVisits.add({
-          'job': job.toJson(),
+                blockedVisits.contains(visit.id) || blocked.contains(visit.id),
+          ) ||
+          (workDate != null && !_validWorkDate(workDate))) {
+        continue;
+      }
+      final record = job.toJson();
+      if (workDate != null || history.isNotEmpty) {
+        final bundle = {
+          'job': record,
           'visits': [for (final visit in history) visit.toJson()],
-        });
+        };
+        if (workDate == null) {
+          recordsWithVisits.add(bundle);
+        } else {
+          recordsWithWorkDates.add({...bundle, 'workDate': workDate});
+        }
+      } else {
+        records.add(record);
       }
     }
-    // Receivers that do not understand visit bundles still copy plain jobs.
+    // Older receivers skip bundles with fields they cannot preserve.
     return {
       'cursor': cursor,
       'records': records,
       'recordsWithVisits': recordsWithVisits,
+      'recordsWithWorkDates': recordsWithWorkDates,
     };
   }
 
@@ -183,7 +200,9 @@ class LanStandaloneJobCopy {
         bundle['cursor'] is! int ||
         bundle['records'] is! List ||
         (bundle.containsKey('recordsWithVisits') &&
-            bundle['recordsWithVisits'] is! List)) {
+            bundle['recordsWithVisits'] is! List) ||
+        (bundle.containsKey('recordsWithWorkDates') &&
+            bundle['recordsWithWorkDates'] is! List)) {
       throw const FormatException('Invalid job copy data.');
     }
     final cursor = await _cursor(business);
@@ -191,25 +210,31 @@ class LanStandaloneJobCopy {
       return 0;
     }
 
-    final jobs = <({LocalJob job, List<LocalJobVisit> visits})>[];
+    final jobs =
+        <({LocalJob job, List<LocalJobVisit> visits, String? workDate})>[];
     final sourceIds = <String>{};
     final sourceVisitIds = <String>{};
     final sourceNumbers = <int?, int>{};
-    for (final (raw, withVisits) in [
-      for (final raw in bundle['records'] as List) (raw, false),
+    for (final (raw, nested, dated) in [
+      for (final raw in bundle['records'] as List) (raw, false, false),
       for (final raw in bundle['recordsWithVisits'] as List? ?? const [])
-        (raw, true),
+        (raw, true, false),
+      for (final raw in bundle['recordsWithWorkDates'] as List? ?? const [])
+        (raw, true, true),
     ]) {
       if (raw is! Map<String, dynamic>) {
         throw const FormatException('Invalid LAN job.');
       }
-      final payload = withVisits ? raw['job'] : raw;
-      final rawVisits = withVisits ? raw['visits'] : const [];
+      final payload = nested ? raw['job'] : raw;
+      final rawVisits = nested ? raw['visits'] : const [];
+      final workDate = dated ? raw['workDate'] : null;
       if (payload is! Map<String, dynamic> ||
           rawVisits is! List ||
-          (withVisits && rawVisits.isEmpty) ||
+          (nested && !dated && rawVisits.isEmpty) ||
+          (dated && !_validWorkDate(workDate)) ||
+          (!dated && raw.containsKey('workDate')) ||
           rawVisits.any((visit) => visit is! Map<String, dynamic>)) {
-        throw const FormatException('Invalid LAN job visits.');
+        throw const FormatException('Invalid LAN job history or Job Date.');
       }
       final job = LocalJob.fromJson(payload);
       final visits = [
@@ -222,7 +247,7 @@ class LanStandaloneJobCopy {
           visits.any((visit) => !sourceVisitIds.add(visit.id))) {
         throw const FormatException('Invalid or duplicate LAN job or visit.');
       }
-      jobs.add((job: job, visits: visits));
+      jobs.add((job: job, visits: visits, workDate: workDate as String?));
       sourceNumbers.update(
         _number(job),
         (count) => count + 1,
@@ -232,6 +257,7 @@ class LanStandaloneJobCopy {
     if (jobs.isEmpty) return 0;
 
     final blocked = await _blocked(business);
+    final localDates = await LocalJobWorkDate(db).savedDates(business);
     final localVisits = await db.select(db.localJobVisits).get();
     final occupiedVisitIds = {
       ...await _blockedVisits(business),
@@ -267,7 +293,7 @@ class LanStandaloneJobCopy {
     }
 
     var copied = 0;
-    for (final (:job, :visits) in jobs) {
+    for (final (:job, :visits, :workDate) in jobs) {
       final customer = sourceCustomers[job.customerId];
       final vehicle = sourceVehicles[job.vehicleId];
       final linkedOwners = owners[job.vehicleId];
@@ -278,6 +304,7 @@ class LanStandaloneJobCopy {
           blocked.contains(job.id) ||
           savedIds.contains(job.id) ||
           jobsWithLocalVisits.contains(job.id) ||
+          localDates.containsKey(job.id) ||
           visits.any(
             (visit) =>
                 occupiedVisitIds.contains(visit.id) ||
@@ -300,6 +327,12 @@ class LanStandaloneJobCopy {
       await db.into(db.localJobs).insert(job);
       for (final visit in visits) {
         await db.into(db.localJobVisits).insert(visit);
+      }
+      if (workDate != null) {
+        await db.customStatement(
+          'INSERT INTO local_job_work_dates (business_id,job_id,work_date) VALUES (?,?,?)',
+          [business, job.id, workDate],
+        );
       }
       copied++;
     }
