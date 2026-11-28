@@ -1,9 +1,12 @@
 import 'dart:convert';
 
 import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/services/repair_group_schema.dart';
 import 'package:briskers_app/services/lan_customer_vehicle_copy.dart';
 import 'package:briskers_app/services/lan_record_inventory.dart';
 import 'package:briskers_app/services/local_number_allocator.dart';
+import 'package:briskers_app/services/local_document_detail_cache.dart';
+import 'package:briskers_app/services/local_document_sql_store.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -67,7 +70,7 @@ void main() {
       bundle: bundle,
       approvedIdentities: approval,
     );
-    expect(result, (customers: 1, vehicles: 1, jobs: 0));
+    expect(result, (customers: 1, vehicles: 1, jobs: 0, estimates: 0));
     final customers = {
       for (final row in await receiver.select(receiver.localCustomers).get())
         row.id: row.displayName,
@@ -93,7 +96,7 @@ void main() {
         bundle: bundle,
         approvedIdentities: approval,
       ),
-      (customers: 0, vehicles: 0, jobs: 0),
+      (customers: 0, vehicles: 0, jobs: 0, estimates: 0),
     );
   });
 
@@ -146,7 +149,7 @@ void main() {
         jsonEncode(await LanCustomerVehicleCopy(sender).share(shop)),
       ) as Map<String, dynamic>;
       final copy = LanCustomerVehicleCopy(receiver);
-      Future<({int customers, int vehicles, int jobs})> apply() =>
+      Future<({int customers, int vehicles, int jobs, int estimates})> apply() =>
           copy.copyMissing(
             business: shop,
             bundle: bundle,
@@ -161,12 +164,12 @@ void main() {
       await receiver.customStatement(
         "UPDATE local_sync_states SET last_server_cursor=41 WHERE business_id='shop' AND scope='jobs'",
       );
-      expect(await apply(), (customers: 0, vehicles: 0, jobs: 0));
+      expect(await apply(), (customers: 0, vehicles: 0, jobs: 0, estimates: 0));
       await receiver.customStatement(
         "UPDATE local_sync_states SET last_server_cursor=40 WHERE business_id='shop' AND scope='jobs'",
       );
-      expect(await apply(), (customers: 0, vehicles: 0, jobs: 1));
-      expect(await apply(), (customers: 0, vehicles: 0, jobs: 0));
+      expect(await apply(), (customers: 0, vehicles: 0, jobs: 1, estimates: 0));
+      expect(await apply(), (customers: 0, vehicles: 0, jobs: 0, estimates: 0));
       final saved = await receiver.select(receiver.localJobs).get();
       expect(
         saved.map((job) => job.id),
@@ -175,6 +178,88 @@ void main() {
       expect(await receiver.select(receiver.syncOutbox).get(), isEmpty);
     },
   );
+
+  test('copies the estimate index and saved lines together', () async {
+    final sender = BriskersLocalDatabase(NativeDatabase.memory());
+    final receiver = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(sender.close);
+    addTearDown(receiver.close);
+    for (final db in [sender, receiver]) {
+      await seedCursor(db, 40);
+      await db.customStatement(
+        "INSERT INTO local_sync_states (business_id, scope, last_server_cursor, bootstrapped) "
+        "VALUES ('shop','documents',40,1)",
+      );
+      await db.customStatement(
+        "INSERT INTO local_customers (id,business_id,display_name) "
+        "VALUES ('customer','shop','Alex Example')",
+      );
+    }
+
+    Future<void> seedEstimate(
+      BriskersLocalDatabase db,
+      String id,
+      String number, {
+      bool withDetail = true,
+    }) async {
+      await db.customStatement(
+        "INSERT INTO local_documents (id,business_id,customer_id,kind,document_number,status,total,row_version) "
+        "VALUES (?,'shop','customer','estimate',?,'draft',145,2)",
+        [id, number],
+      );
+      if (withDetail) {
+        await LocalDocumentSqlStore.write(
+          db,
+          LocalDocumentDetailCache.key(shop, id),
+          jsonEncode({
+            'id': id,
+            'kind': 'estimate',
+            'customer_id': 'customer',
+            'document_number': number,
+            'status': 'draft',
+            'row_version': 2,
+            'lines': [{'id': 'line-1', 'name': 'Transmission service'}],
+          }),
+        );
+      }
+    }
+
+    await seedEstimate(sender, 'eligible', 'E-81');
+    await seedEstimate(sender, 'number-conflict', 'E-82');
+    await seedEstimate(sender, 'list-only', 'E-83', withDetail: false);
+    await seedEstimate(sender, 'grouped', 'E-84');
+    await RepairGroupSchema.ensure(sender);
+    await sender.customStatement(
+      "INSERT INTO repair_groups_v1 VALUES ('shop','grouped','group','Repair','','1','[]')",
+    );
+    await seedEstimate(receiver, 'existing', '00082');
+    final bundle = jsonDecode(
+      jsonEncode(await LanCustomerVehicleCopy(sender).share(shop)),
+    ) as Map<String, dynamic>;
+    final copy = LanCustomerVehicleCopy(receiver);
+    Future<({int customers, int vehicles, int jobs, int estimates})> apply() =>
+        copy.copyMissing(
+          business: shop,
+          bundle: bundle,
+          approvedIdentities: {
+            for (final id in ['eligible', 'number-conflict', 'list-only', 'grouped'])
+              identity('estimate', id),
+          },
+        );
+
+    expect(await apply(), (customers: 0, vehicles: 0, jobs: 0, estimates: 1));
+    expect(await apply(), (customers: 0, vehicles: 0, jobs: 0, estimates: 0));
+    expect(
+      (await receiver.select(receiver.localDocuments).get()).map((row) => row.id),
+      unorderedEquals(['eligible', 'existing']),
+    );
+    final raw = await LocalDocumentSqlStore.read(
+      receiver,
+      LocalDocumentDetailCache.key(shop, 'eligible'),
+    );
+    expect(jsonDecode(raw!)['lines'].single['name'], 'Transmission service');
+    expect(await receiver.select(receiver.syncOutbox).get(), isEmpty);
+  });
 
   test(
     'refuses older source evidence and leaves the receiver untouched',

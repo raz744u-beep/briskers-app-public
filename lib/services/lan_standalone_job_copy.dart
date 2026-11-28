@@ -160,8 +160,9 @@ class LanStandaloneJobCopy {
     final blocked = await _blocked(business);
     final saved = await db.select(db.localJobs).get();
     final savedIds = {for (final job in saved) job.id};
-    final savedNumbers = await LocalNumberAllocator(db).occupiedJobNumbers(
+    final savedNumbers = await LocalNumberAllocator(db).occupiedNumbers(
       business,
+      'job',
     );
     final customers = {
       for (final row in await (db.select(

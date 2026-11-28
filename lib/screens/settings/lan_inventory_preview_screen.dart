@@ -150,7 +150,7 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
     }
   });
 
-  static const _copyKinds = {'customer', 'vehicle', 'job'};
+  static const _copyKinds = {'customer', 'vehicle', 'job', 'estimate'};
 
   Future<void> _copyMissingRecords() => _run(() async {
     final code = _comparedCode;
@@ -167,7 +167,7 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
       builder: (dialog) => AlertDialog(
         title: const Text('Copy missing records?'),
         content: const Text(
-          'This can add eligible customers, vehicles, and open unassigned jobs with no linked work. Records already saved here stay as they are. '
+          'This can add eligible customers, vehicles, open unassigned jobs, and standalone estimates. Records already saved here stay as they are. '
           'Review any records this step skips before copying them.',
         ),
         actions: [
@@ -195,10 +195,10 @@ class _LanInventoryPreviewScreenState extends State<LanInventoryPreviewScreen> {
     );
     if (!mounted) return;
     final remaining =
-        eligible.length - result.customers - result.vehicles - result.jobs;
+        eligible.length - result.customers - result.vehicles - result.jobs - result.estimates;
     setState(() {
       _copyResult =
-          'Copied ${result.customers} customers, ${result.vehicles} vehicles, and ${result.jobs} jobs. '
+          'Copied ${result.customers} customers, ${result.vehicles} vehicles, ${result.jobs} jobs, and ${result.estimates} estimates. '
           '$remaining copy candidates still need review.';
     });
     final here = await LanRecordInventory(

@@ -90,13 +90,13 @@ class LocalNumberAllocator {
       'ON CONFLICT(business_id,kind) DO UPDATE SET next_number=excluded.next_number',[business,kind,next]);
     return next;
   }
-  Future<Set<int>> occupiedJobNumbers(String business) async {
+  Future<Set<int>> occupiedNumbers(String business, String kind) async {
     await ensureSchema();
-    final used = await _used(business, 'job');
+    final used = await _used(business, kind);
     final reserved = await db.customSelect(
       "SELECT number FROM local_number_reservations "
-      "WHERE business_id=? AND kind='job' AND active=1",
-      variables: [Variable(business)],
+      "WHERE business_id=? AND kind=? AND active=1",
+      variables: [Variable(business), Variable(kind)],
     ).get();
     return {...used.keys, for (final row in reserved) row.read<int>('number')};
   }
