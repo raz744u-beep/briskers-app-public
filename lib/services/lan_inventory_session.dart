@@ -62,8 +62,9 @@ class LanInventorySession {
           ],
       ]),
     );
-    if (payload.length > _inventoryLimit)
+    if (payload.length > _inventoryLimit) {
       throw StateError('This inventory is too large for a preview.');
+    }
     final key = await _cipher.newSecretKey();
     Future<List<int>> seal(List<int> plain, String path) async =>
         (await _cipher.encrypt(
@@ -74,8 +75,9 @@ class LanInventorySession {
     final payloads = {'/inventory': await seal(payload, '/inventory')};
     if (recordCopy != null) {
       final plain = utf8.encode(jsonEncode(recordCopy));
-      if (plain.length > _recordCopyLimit)
+      if (plain.length > _recordCopyLimit) {
         throw StateError('This copy is too large to share in one session.');
+      }
       payloads['/customer-vehicle-copy'] = await seal(
         plain,
         '/customer-vehicle-copy',
@@ -123,8 +125,9 @@ class LanInventorySession {
   ) {
     final match = RegExp(r'^([0-9.]+):([0-9]{1,5})/([A-Za-z0-9_-]{43}=)$')
         .firstMatch(code.trim());
-    if (match == null)
+    if (match == null) {
       throw const FormatException('Enter the full comparison code.');
+    }
     final address = InternetAddress.tryParse(match[1]!);
     final port = int.parse(match[2]!);
     if (address == null || !_private(address) || port < 1 || port > 65535) {
@@ -203,7 +206,7 @@ class LanInventorySession {
       _recordCopyLimit,
     );
     if (data is! Map<String, dynamic>) {
-      throw const FormatException('Invalid customer and vehicle copy data.');
+      throw const FormatException('Invalid LAN record copy data.');
     }
     return data;
   }
@@ -230,7 +233,7 @@ class LanInventorySession {
       );
       if (response.statusCode != HttpStatus.ok) {
         throw StateError(
-          path == '/inventory' ? 'The inventory session is unavailable.' : 'The copy session is unavailable. Enable customer and vehicle copying on the source phone and share again.',
+          path == '/inventory' ? 'The inventory session is unavailable.' : 'The copy session is unavailable. Enable record copying on the source phone and share again.',
         );
       }
       final bytes = BytesBuilder(copy: false);
@@ -240,8 +243,9 @@ class LanInventorySession {
         }
         bytes.add(chunk);
       }
-      if (bytes.length < 28)
+      if (bytes.length < 28) {
         throw const FormatException('The inventory was incomplete.');
+      }
       final plain = await _cipher.decrypt(
         SecretBox.fromConcatenation(
           bytes.takeBytes(), nonceLength: 12, macLength: 16,

@@ -2,6 +2,8 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import 'lan_record_inventory.dart';
+import 'lan_standalone_job_copy.dart';
+import 'lan_standalone_estimate_copy.dart';
 
 class LanCustomerVehicleCopy {
   const LanCustomerVehicleCopy(this.db);
@@ -33,10 +35,11 @@ class LanCustomerVehicleCopy {
   Future<Map<String, dynamic>> share(String business) =>
       db.transaction(() async {
         final cursor = await _cursor(business);
-        if (cursor == null)
+        if (cursor == null) {
           throw StateError(
             'This phone has no verified customer and vehicle sync history.',
           );
+        }
         final queued = await _queuedIds(business);
         final customers =
             await (db.select(db.localCustomers)..where(
@@ -57,6 +60,8 @@ class LanCustomerVehicleCopy {
         )..where((row) => row.businessId.equals(business))).get();
         return {
           'version': 1,
+          'jobs': await LanStandaloneJobCopy(db).share(business),
+          'estimates': await LanStandaloneEstimateCopy(db).share(business),
           'cursor': cursor,
           'customers': [
             for (final row in customers)
@@ -73,7 +78,7 @@ class LanCustomerVehicleCopy {
         };
       });
 
-  Future<({int customers, int vehicles})> copyMissing({
+  Future<({int customers, int vehicles, int jobs, int estimates})> copyMissing({
     required String business,
     required Map<String, dynamic> bundle,
     required Set<String> approvedIdentities,
@@ -216,7 +221,27 @@ class LanCustomerVehicleCopy {
           .into(db.localCustomerVehicles)
           .insert(linksByVehicle[id]!.single);
     }
+    final copiedJobs = await LanStandaloneJobCopy(db).copyMissing(
+      business: business,
+      bundle: bundle['jobs'],
+      sourceCustomers: sourceCustomers,
+      sourceVehicles: sourceVehicles,
+      sourceLinks: linksByVehicle,
+      queuedIds: queued,
+      approvedIdentities: approvedIdentities,
+    );
+    final copiedEstimates = await LanStandaloneEstimateCopy(db).copyMissing(
+      business: business,
+      bundle: bundle['estimates'],
+      sourceCustomers: sourceCustomers,
+      sourceVehicles: sourceVehicles,
+      sourceLinks: linksByVehicle,
+      queuedIds: queued,
+      approvedIdentities: approvedIdentities,
+    );
     return (
+      jobs: copiedJobs,
+      estimates: copiedEstimates,
       customers: customerCandidates.length,
       vehicles: vehicleCandidates.length,
     );
@@ -262,8 +287,9 @@ class LanCustomerVehicleCopy {
   ) {
     final rows = _rows(raw, decode);
     final indexed = {for (final row in rows) id(row): row};
-    if (indexed.length != rows.length)
+    if (indexed.length != rows.length) {
       throw const FormatException('Duplicate LAN copy record.');
+    }
     return indexed;
   }
 }

@@ -24,11 +24,16 @@ class LocalNumberAllocator {
     'job' => ('local_jobs','job_number',''),
     _ => throw ArgumentError('Unsupported number kind'),
   };
+  static int? parseJobNumber(Object? raw) {
+    final value = raw?.toString().trim().toUpperCase()
+        .replaceFirst(RegExp(r'^J-?'), '') ?? '';
+    return RegExp(r'^\d+$').hasMatch(value) ? int.tryParse(value) : null;
+  }
+
   int? _parse(Object? raw, String kind) {
+    if (kind == 'job') return parseJobNumber(raw);
     var value = raw?.toString().trim() ?? '';
-    if (kind == 'job') {
-      value = value.toUpperCase().replaceFirst(RegExp(r'^J-?'), '');
-    } else if (kind == 'estimate') {
+    if (kind == 'estimate') {
       value = value.toUpperCase().replaceFirst(RegExp(r'^E-'), '');
     } else if (kind == 'invoice') {
       value = value.toUpperCase().replaceFirst(RegExp(r'^(?:I-|MB-)'), '');
@@ -85,6 +90,17 @@ class LocalNumberAllocator {
       'ON CONFLICT(business_id,kind) DO UPDATE SET next_number=excluded.next_number',[business,kind,next]);
     return next;
   }
+  Future<Set<int>> occupiedNumbers(String business, String kind) async {
+    await ensureSchema();
+    final used = await _used(business, kind);
+    final reserved = await db.customSelect(
+      "SELECT number FROM local_number_reservations "
+      "WHERE business_id=? AND kind=? AND active=1",
+      variables: [Variable(business), Variable(kind)],
+    ).get();
+    return {...used.keys, for (final row in reserved) row.read<int>('number')};
+  }
+
   /// Only explicit releases are offered; a gap alone is never evidence.
   Future<List<int>> availableNumbers(String business, String kind) async {
     await ensureSchema();
