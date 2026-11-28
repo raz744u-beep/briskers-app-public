@@ -237,12 +237,21 @@ class LocalInvoiceClosure {
     await store.prepare();
     for (final id in invoices.toSet()) {
       final saved = await LocalDocumentDetailCache(database: db).loadReadOnly(business, id);
-      if (saved == null) throw StateError('Open the invoice to verify saved payment details.');
+      if (saved == null || saved['id'] != id || saved['kind'] != 'invoice' ||
+          (saved['business_id'] != null && saved['business_id'] != business) ||
+          const {'void', 'voided', 'cancelled', 'canceled', 'deleted'}
+              .contains(saved['status']?.toString().toLowerCase())) {
+        throw StateError('Open the invoice to verify saved payment details.');
+      }
       if (DocumentPresentation(saved).isClosed) continue;
       final corrected = await OfflineInvoiceFinalization(database: db)
           .verifyLocalFinancialDetail(business, id, saved, forClosing: true);
+      final projected = await store.projectFinalized(business, corrected);
+      if (LocalInvoiceClosureStore.verifiedPendingReceipts(projected) == null) {
+        throw StateError('Saved receipt amounts need verification before closing.');
+      }
       result[id] = OfflineInvoiceFinalization.snapshot(
-        await store.projectFinalized(business, corrected), true, local: true);
+        projected, true, local: true);
     }
     return result;
   }

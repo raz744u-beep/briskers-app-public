@@ -1947,6 +1947,20 @@ class LocalPayrollRepository {
   Future<List<Map<String, dynamic>>> work({String? employee, String? job}) async {
     _authorize();
     await prepare();
+    return _savedWork(employee: employee, job: job);
+  }
+
+  /// Read previously initialized payroll without running coverage recovery.
+  Future<List<Map<String, dynamic>>> savedWorkForCloseout() {
+    _authorize();
+    return _savedWork(useSavedAliasesOnly: true);
+  }
+
+  Future<List<Map<String, dynamic>>> _savedWork({
+    String? employee,
+    String? job,
+    bool useSavedAliasesOnly = false,
+  }) async {
     final notes=await HistoricalTaskRecordkeeping(db).read(business);
     // Historical recordkeeping can move the displayed mechanic without
     // rewriting a settled allocation. Include those IDs before SQL filtering.
@@ -2000,7 +2014,9 @@ class LocalPayrollRepository {
       [business, ?job,if(employee!=null)...[employee,reassigned!]],
     );
     _authorize();
-    final taskAliases = await LocalPayrollTaskIdentity(db).aliases(business);
+    final taskAliases = await LocalPayrollTaskIdentity(db).aliases(
+      business, refreshDocumentAliases: !useSavedAliasesOnly,
+    );
     final verifiedPaid=await VerifiedPaidLabor(db).allocations(business);
     return rows.map((row) {
       final total = row['state'] == 'In Progress'

@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -16,6 +17,49 @@ class LocalTaskReminders {
       value = ((value ^ c) * 16777619) & 0x7fffffff;
     }
     return value;
+  }
+
+  // General task IDs are positive. A negative ID keeps the weekly reminder
+  // independent of task reminders for the same business.
+  static int _closeoutId(String business) => -1 - notificationId(business, 0);
+
+  Future<bool> fridayCloseoutEnabled(String business) async {
+    if (!await prepare()) return false;
+    return (await plugin.pendingNotificationRequests()).any(
+      (request) => request.id == _closeoutId(business),
+    );
+  }
+
+  Future<void> setFridayCloseoutReminder(String business, bool enabled) async {
+    final allowed = await prepare(requestPermission: enabled);
+    if (!enabled) {
+      await plugin.cancel(id: _closeoutId(business));
+      return;
+    }
+    if (!allowed) throw const TaskReminderUnavailable();
+    final shop = tz.getLocation('America/Chicago');
+    final now = tz.TZDateTime.now(shop);
+    final days = (DateTime.friday - now.weekday + 7) % 7;
+    var next = tz.TZDateTime(shop, now.year, now.month, now.day + days, 15);
+    if (!next.isAfter(now)) {
+      next = tz.TZDateTime(shop, now.year, now.month, now.day + days + 7, 15);
+    }
+    await plugin.zonedSchedule(
+      id: _closeoutId(business),
+      title: 'Briskers Friday Closeout',
+      body: 'Open Owner Reports → Friday Closeout to review the latest saved shop records.',
+      scheduledDate: next,
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'briskers_closeout',
+          'Friday Closeout',
+          icon: 'ic_task_reminder',
+        ),
+        iOS: DarwinNotificationDetails(),
+      ),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+    );
   }
 
   Future<bool> prepare({bool requestPermission = false}) async {
@@ -105,9 +149,8 @@ class LocalTaskReminders {
         await plugin.cancel(id: id);
         continue;
       }
-      final when = DateTime.fromMillisecondsSinceEpoch(
-        due,
-      ).subtract(Duration(minutes: task['reminder_minutes'] as int? ?? 0));
+      final when = DateTime.fromMillisecondsSinceEpoch(due)
+          .subtract(Duration(minutes: task['reminder_minutes'] as int? ?? 0));
       if (!when.isAfter(DateTime.now())) {
         await plugin.cancel(id: id);
         continue;

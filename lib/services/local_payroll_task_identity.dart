@@ -9,8 +9,14 @@ class LocalPayrollTaskIdentity {
   const LocalPayrollTaskIdentity(this.db);
   final BriskersLocalDatabase db;
 
-  Future<Map<String, String>> aliases(String business) async {
-    await LocalDocumentIdentity(db).prepare();
+  Future<Map<String, String>> aliases(String business, {bool refreshDocumentAliases = true}) async {
+    if (refreshDocumentAliases) {
+      await LocalDocumentIdentity(db).prepare();
+    } else if (await db.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE name='local_document_identity_aliases'",
+    ).getSingleOrNull() == null) {
+      return {};
+    }
     final matches = await db.customSelect('''
       SELECT duplicate.id AS alias_id, original.id AS canonical_id
       FROM local_document_identity_aliases identity

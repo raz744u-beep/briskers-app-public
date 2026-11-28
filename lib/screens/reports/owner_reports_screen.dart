@@ -6,6 +6,7 @@ import '../../core/briskers_colors.dart';
 import '../../core/owner_report_models.dart';
 import 'employee_reports_pane.dart';
 import 'owner_report_transactions_screen.dart';
+import 'shop_closeout_screen.dart';
 import '../../services/local_owner_reports.dart';
 import '../../services/owner_report_preferences.dart';
 import '../../widgets/briskers_curved_tabs.dart';
@@ -531,6 +532,14 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen>
         icon: const Icon(Icons.refresh, color: Colors.white))]),
       bottomNavigationBar: widget.sharedBottomNavigationBar,
       body: Column(children: [
+        TextButton.icon(
+          onPressed: () => _open(ShopCloseoutScreen(
+            businessId: widget.businessId, isOwner: widget.isOwner,
+            reports: _repository, bottomNavigationBar: widget.sharedBottomNavigationBar,
+          )),
+          icon: const Icon(Icons.fact_check_outlined),
+          label: const Text('Friday Closeout'),
+        ),
         const SizedBox(height: 12),
         SingleChildScrollView(scrollDirection: Axis.horizontal, child: SizedBox(width: MediaQuery.sizeOf(context).width < 665 ? 665 : MediaQuery.sizeOf(context).width,
           child: BriskersCurvedTabs(controller: _tabs, entries: const [
