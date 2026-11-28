@@ -4,6 +4,7 @@ import 'package:cryptography/dart.dart';
 import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
+import 'lan_estimate_repair_groups.dart';
 import 'local_document_detail_cache.dart';
 import 'local_document_sql_store.dart';
 import 'local_job_retirement.dart';
@@ -64,6 +65,7 @@ class LanRecordInventory {
     await LocalDocumentSqlStore.ensure(db);
     final blockedJobs = await LocalJobRetirement.blockedJobIds(db, business);
     final blockedDocuments = await LocalJobRetirement.blockedDocumentIds(db, business);
+    final repairGroups = await LanEstimateRepairGroups(db).read(business);
     final entries = <LanInventoryEntry>[];
 
     for (final kind in _tables.keys) {
@@ -98,13 +100,17 @@ class LanRecordInventory {
         final cached = payload.remove('cached_detail');
         final pending = payload.remove('sync_state') != 'synced' || id.startsWith('local-');
         final detail = _documentFields(cached, business, id, recordKind);
+        final groups = recordKind == 'estimate' ? repairGroups[id] : null;
         entries.add((
           kind: recordKind,
           identity: recordIdentity(business, recordKind, id),
-          fingerprint: _hash([payload, detail]),
+          fingerprint: _hash([payload, detail, ?groups]),
           pending: pending,
           hasDocumentDetail: detail != null,
-          review: _reviewFields(recordKind, payload, detail),
+          review: {
+            ..._reviewFields(recordKind, payload, detail),
+            if (groups != null) 'Repair groups': '${groups['groups']!.length}',
+          },
         ));
       }
     }

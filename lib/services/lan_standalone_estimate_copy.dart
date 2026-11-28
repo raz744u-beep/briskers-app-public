@@ -4,7 +4,7 @@ import 'package:drift/drift.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../local/briskers_local_database.dart';
-import 'repair_group_schema.dart';
+import 'lan_estimate_repair_groups.dart';
 import 'lan_record_inventory.dart';
 import 'local_document_detail_cache.dart';
 import 'local_document_sql_store.dart';
@@ -97,18 +97,16 @@ class LanStandaloneEstimateCopy {
 
   Future<Set<String>> _blocked(String business) async {
     await LocalDocumentSqlStore.ensure(db);
-    await RepairGroupSchema.ensure(db);
     final prefix = LocalDocumentDetailCache.key(business, '');
     final rows = await db
         .customSelect(
           'SELECT entity_id AS id FROM sync_outbox WHERE business_id=? AND state<>\'done\' '
           'UNION SELECT estimate_id AS id FROM local_estimate_conversion_evidence WHERE business_id=? '
-          'UNION SELECT estimate AS id FROM repair_groups_v1 WHERE business=? '
-          'UNION SELECT estimate AS id FROM repair_group_members_v1 WHERE business=? '
           'UNION SELECT substr(cache_key,?) AS id FROM local_document_detail_deleted '
           'WHERE substr(cache_key,1,?)=?',
           variables: [
-            for (var i = 0; i < 4; i++) Variable(business),
+            Variable(business),
+            Variable(business),
             Variable(prefix.length + 1),
             Variable(prefix.length),
             Variable(prefix),
@@ -172,16 +170,34 @@ class LanStandaloneEstimateCopy {
         ifAbsent: () => 1,
       );
     }
+    final snapshots = await LanEstimateRepairGroups(db).read(business);
+    final records = <Map<String, Object?>>[];
+    final groupedRecords = <Map<String, Object?>>[];
+    for (final row in docs) {
+      if (!_eligible(row, business) ||
+          blocked.contains(row.id) ||
+          counts[_number(row.documentNumber)] != 1) {
+        continue;
+      }
+      final detail = _detail(details[row.id], row);
+      if (detail == null) continue;
+      final snapshot = snapshots[row.id];
+      final record = {'index': row.toJson(), 'detail': details[row.id]};
+      if (snapshot == null) {
+        records.add(record);
+      } else if (LanEstimateRepairGroups.isComplete(
+        snapshot,
+        detail['lines'] as List,
+      )) {
+        groupedRecords.add({...record, 'repairGroups': snapshot});
+      }
+    }
+    // Earlier receivers only read records. Keep grouped estimates separate
+    // so those receivers cannot copy an estimate without its repair groups.
     return {
       'cursor': cursor,
-      'records': [
-        for (final row in docs)
-          if (_eligible(row, business) &&
-              !blocked.contains(row.id) &&
-              counts[_number(row.documentNumber)] == 1 &&
-              _detail(details[row.id], row) != null)
-            {'index': row.toJson(), 'detail': details[row.id]},
-      ],
+      'records': records,
+      'groupedRecords': groupedRecords,
     };
   }
 
@@ -197,18 +213,24 @@ class LanStandaloneEstimateCopy {
     if (bundle == null) return 0;
     if (bundle is! Map<String, dynamic> ||
         bundle['cursor'] is! int ||
-        bundle['records'] is! List) {
+        bundle['records'] is! List ||
+        (bundle.containsKey('groupedRecords') &&
+            bundle['groupedRecords'] is! List)) {
       throw const FormatException('Invalid estimate copy data.');
     }
+    final records = bundle['records'] as List;
+    final groupedRecords = bundle['groupedRecords'] as List? ?? const [];
     final cursor = await _cursor(business);
     if (cursor == null ||
         cursor < 0 ||
         (bundle['cursor'] as int) < cursor ||
-        (bundle['records'] as List).isEmpty) {
+        (records.isEmpty && groupedRecords.isEmpty)) {
       return 0;
     }
 
     final blocked = await _blocked(business);
+    final groups = LanEstimateRepairGroups(db);
+    final existingGroups = await groups.read(business);
     final prefix = LocalDocumentDetailCache.key(business, '');
     final cached = await db
         .customSelect(
@@ -230,7 +252,10 @@ class LanStandaloneEstimateCopy {
     final ids = <String>{};
     final sourceNumbers = <int>{};
     var copied = 0;
-    for (final raw in bundle['records'] as List<dynamic>) {
+    for (final (raw, grouped) in [
+      for (final raw in records) (raw, false),
+      for (final raw in groupedRecords) (raw, true),
+    ]) {
       if (raw is! Map<String, dynamic> ||
           raw['index'] is! Map<String, dynamic> ||
           raw['detail'] is! String) {
@@ -242,6 +267,15 @@ class LanStandaloneEstimateCopy {
       if (!_eligible(row, business) || detail == null || !ids.add(row.id)) {
         throw const FormatException('Invalid or duplicate LAN estimate.');
       }
+      final snapshot = raw['repairGroups'];
+      if (grouped
+          ? !LanEstimateRepairGroups.isComplete(
+              snapshot,
+              detail['lines'] as List,
+            )
+          : raw.containsKey('repairGroups')) {
+        throw const FormatException('Invalid LAN estimate repair groups.');
+      }
       final number = _number(row.documentNumber)!;
       if (!sourceNumbers.add(number)) {
         throw const FormatException('Duplicate LAN estimate number.');
@@ -252,6 +286,7 @@ class LanStandaloneEstimateCopy {
           ) ||
           blocked.contains(row.id) ||
           existing.contains(row.id) ||
+          existingGroups.containsKey(row.id) ||
           existingDetails.contains(key) ||
           numbers.contains(number) ||
           await RecoveryCommitStore.isOriginal(db, business, row.id) ||
@@ -296,6 +331,7 @@ class LanStandaloneEstimateCopy {
         'INSERT INTO local_document_details VALUES (?,?)',
         [key, serialized],
       );
+      if (grouped) await groups.insert(business, row.id, snapshot as Map);
       numbers.add(number);
       copied++;
     }

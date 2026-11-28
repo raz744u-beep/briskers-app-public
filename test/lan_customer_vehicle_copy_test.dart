@@ -185,7 +185,7 @@ void main() {
     },
   );
 
-  test('copies the estimate index and saved lines together', () async {
+  test('copies estimate index, lines, and valid repair groups together', () async {
     final sender = BriskersLocalDatabase(NativeDatabase.memory());
     final receiver = BriskersLocalDatabase(NativeDatabase.memory());
     addTearDown(sender.close);
@@ -234,9 +234,23 @@ void main() {
     await seedEstimate(sender, 'number-conflict', 'E-82');
     await seedEstimate(sender, 'list-only', 'E-83', withDetail: false);
     await seedEstimate(sender, 'grouped', 'E-84');
+    await seedEstimate(sender, 'orphaned-member', 'E-85');
+    await seedEstimate(sender, 'receiver-has-groups', 'E-86');
     await RepairGroupSchema.ensure(sender);
     await sender.customStatement(
-      "INSERT INTO repair_groups_v1 VALUES ('shop','grouped','group','Repair','','1','[]')",
+      "INSERT INTO repair_groups_v1 VALUES "
+      "('shop','grouped','group','Repair','Transmission',2,'[]'),"
+      "('shop','grouped','empty','Later','',1,'[]')",
+    );
+    await sender.customStatement(
+      "INSERT INTO repair_group_members_v1 VALUES "
+      "('shop','grouped','line-1','group'),"
+      "('shop','orphaned-member','line-1','missing')",
+    );
+    await RepairGroupSchema.ensure(receiver);
+    await receiver.customStatement(
+      "INSERT INTO repair_groups_v1 VALUES "
+      "('shop','receiver-has-groups','local','Receiver work','',1,'[]')",
     );
     await seedEstimate(receiver, 'existing', '00082');
     final bundle = jsonDecode(
@@ -248,22 +262,68 @@ void main() {
           business: shop,
           bundle: bundle,
           approvedIdentities: {
-            for (final id in ['eligible', 'number-conflict', 'list-only', 'grouped'])
+            for (final id in [
+              'eligible', 'number-conflict', 'list-only', 'grouped',
+              'orphaned-member', 'receiver-has-groups',
+            ])
               identity('estimate', id),
           },
         );
 
-    expect(await apply(), (customers: 0, vehicles: 0, jobs: 0, estimates: 1));
+    final estimates = bundle['estimates'] as Map<String, dynamic>;
+    expect(
+      (estimates['records'] as List).map((row) => row['index']['id']),
+      isNot(contains('grouped')),
+    );
+    final invalidBundle = jsonDecode(jsonEncode(bundle)) as Map<String, dynamic>;
+    final grouped = (invalidBundle['estimates']['groupedRecords'] as List).single;
+    grouped['repairGroups']['members'][0][1] = 'missing-group';
+    await expectLater(
+      copy.copyMissing(
+        business: shop,
+        bundle: invalidBundle,
+        approvedIdentities: {identity('estimate', 'eligible'), identity('estimate', 'grouped')},
+      ),
+      throwsFormatException,
+    );
+    expect(
+      (await receiver.select(receiver.localDocuments).get()).map((row) => row.id),
+      ['existing'],
+    );
+    expect(await apply(), (customers: 0, vehicles: 0, jobs: 0, estimates: 2));
     expect(await apply(), (customers: 0, vehicles: 0, jobs: 0, estimates: 0));
     expect(
       (await receiver.select(receiver.localDocuments).get()).map((row) => row.id),
-      unorderedEquals(['eligible', 'existing']),
+      unorderedEquals(['eligible', 'existing', 'grouped']),
     );
     final raw = await LocalDocumentSqlStore.read(
       receiver,
       LocalDocumentDetailCache.key(shop, 'eligible'),
     );
     expect(jsonDecode(raw!)['lines'].single['name'], 'Transmission service');
+    final groups = await receiver.customSelect(
+      "SELECT id,name,description,position FROM repair_groups_v1 "
+      "WHERE business='shop' AND estimate='grouped' ORDER BY position",
+    ).get();
+    expect(groups.map((row) => row.data), [
+      {'id': 'empty', 'name': 'Later', 'description': '', 'position': 1},
+      {'id': 'group', 'name': 'Repair', 'description': 'Transmission', 'position': 2},
+    ]);
+    final member = await receiver.customSelect(
+      "SELECT line,group_id FROM repair_group_members_v1 "
+      "WHERE business='shop' AND estimate='grouped'",
+    ).getSingle();
+    expect(member.data, {'line': 'line-1', 'group_id': 'group'});
+    final sourceInventory = await LanRecordInventory(sender).read(shop);
+    await receiver.customStatement(
+      "UPDATE repair_groups_v1 SET name='Changed on receiver' "
+      "WHERE business='shop' AND estimate='grouped' AND id='group'",
+    );
+    final differences = LanRecordInventory.compare(
+      sourceInventory, await LanRecordInventory(receiver).read(shop),
+    );
+    expect(differences.different.map((entry) => entry.identity),
+        contains(identity('estimate', 'grouped')));
     expect(await receiver.select(receiver.syncOutbox).get(), isEmpty);
   });
 
