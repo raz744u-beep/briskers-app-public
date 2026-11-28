@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:briskers_app/services/lan_inventory_session.dart';
 import 'package:briskers_app/services/lan_record_inventory.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,6 +28,47 @@ void main() {
     expect(LanInventorySession.isComparisonCode('8.8.8.8:43210/$key'), isFalse);
     expect(LanInventorySession.isComparisonCode('192.168.0.25:65536/$key'), isFalse);
     expect(LanInventorySession.isComparisonCode('192.168.0.25:43210/short'), isFalse);
+  });
+
+  test('fetches a job copy bundle from an encrypted Wi-Fi session', () async {
+    final List<InternetAddress> addresses;
+    try {
+      addresses = await LanInventorySession.addresses();
+    } on SocketException {
+      markTestSkipped('This runner could not enumerate network interfaces.');
+      return;
+    }
+    if (addresses.isEmpty) {
+      markTestSkipped('This runner has no private IPv4 interface.');
+      return;
+    }
+    const business = 'synthetic-shop';
+    final job = entry(
+      LanRecordInventory.recordIdentity(business, 'job', 'job-1'),
+    );
+    final bundle = <String, dynamic>{
+      'version': 1,
+      'jobs': {
+        'cursor': 42,
+        'records': [
+          {'id': 'job-1'},
+        ],
+      },
+    };
+    final session = await LanInventorySession.offer(
+      address: addresses.first,
+      business: business,
+      inventory: [job],
+      recordCopy: bundle,
+    );
+    addTearDown(session.close);
+
+    final inventory = await LanInventorySession.fetch(session.code, business);
+    expect(inventory.single.identity, job.identity);
+    expect(
+      await LanInventorySession.fetchRecordCopy(session.code, business),
+      bundle,
+    );
   });
 
   test('compares stable IDs and separates unverified records from differences', () {

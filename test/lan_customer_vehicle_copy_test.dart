@@ -146,6 +146,13 @@ void main() {
             },
           );
 
+      await receiver.customStatement(
+        "UPDATE local_sync_states SET last_server_cursor=41 WHERE business_id='shop' AND scope='jobs'",
+      );
+      expect(await apply(), (customers: 0, vehicles: 0, jobs: 0));
+      await receiver.customStatement(
+        "UPDATE local_sync_states SET last_server_cursor=40 WHERE business_id='shop' AND scope='jobs'",
+      );
       expect(await apply(), (customers: 0, vehicles: 0, jobs: 1));
       expect(await apply(), (customers: 0, vehicles: 0, jobs: 0));
       final saved = await receiver.select(receiver.localJobs).get();
