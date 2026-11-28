@@ -132,6 +132,7 @@ void main() {
 
       await job(sender, 'eligible', 'J-81');
       await job(sender, 'attached', 'J-82');
+      await job(sender, 'with-finding', 'J-86');
       await job(sender, 'number-conflict', 'J-83');
       await job(sender, 'unapproved', 'J-84');
       await job(receiver, 'already-here', '0083');
@@ -145,6 +146,10 @@ void main() {
       await sender.customStatement(
         "INSERT INTO local_job_visits (id,business_id,job_id,visit_number) VALUES ('visit','shop','attached',1)",
       );
+      await sender.customStatement(
+        "INSERT INTO local_findings (id,business_id,found_job_id,body,status) "
+        "VALUES ('finding','shop','with-finding','Brake wear','unresolved')",
+      );
       final bundle = jsonDecode(
         jsonEncode(await LanCustomerVehicleCopy(sender).share(shop)),
       ) as Map<String, dynamic>;
@@ -156,6 +161,7 @@ void main() {
             approvedIdentities: {
               identity('job', 'eligible'),
               identity('job', 'attached'),
+              identity('job', 'with-finding'),
               identity('job', 'number-conflict'),
               identity('job', 'reserved-number'),
             },

@@ -63,6 +63,7 @@ class LanStandaloneJobCopy {
       'local_job_assignments': ['job_id'],
       'local_job_visits': ['job_id'],
       'local_pre_inspections': ['job_id'],
+      'local_findings': ['found_job_id', 'repair_job_id'],
       'local_job_work_dates': ['job_id'],
       'local_job_status_intent_v1': ['job_id'],
       'local_job_task_activity_v1': ['job_id'],
