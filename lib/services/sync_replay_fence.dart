@@ -66,6 +66,7 @@ class SyncReplayFence {
     String key,
     Future<T> Function() request, {
     int? outboxId,
+    bool holdUntilLocalCommit = false,
   }) async {
     if (!_networkAllowed()) throw const SyncReplayDeferred('Force Offline');
     // An outbox mutation can call a directly protected API. The outer scope
@@ -128,10 +129,11 @@ class SyncReplayFence {
         request,
         zoneValues: {_activeFence: (db, businessId)},
       );
-      await db.customStatement(
-        'DELETE FROM sync_replay_fences_v1 WHERE business_id=? AND replay_key=?',
-        [businessId, key],
-      );
+      // Financial line creation must retain its claim until the caller
+      // commits the local remap and outbox acknowledgement together.
+      if (!holdUntilLocalCommit) {
+        await completeLocalCommit(businessId, key);
+      }
       return result;
     } catch (error) {
       final conflict = isSyncVersionConflict(error);
@@ -153,7 +155,9 @@ class SyncReplayFence {
         [
           conflict
               ? 'conflict'
-              : (transient && attempts < maxAttempts ? 'ready' : 'review'),
+              : (transient && !holdUntilLocalCommit && attempts < maxAttempts
+                    ? 'ready'
+                    : 'review'),
           _now().millisecondsSinceEpoch + delayMs,
           error is PostgrestException
               ? error.code
@@ -165,6 +169,13 @@ class SyncReplayFence {
       rethrow;
     }
   }
+
+  /// Call within the same SQLite transaction as the outbox acknowledgement.
+  Future<void> completeLocalCommit(String businessId, String key) =>
+      db.customStatement(
+        'DELETE FROM sync_replay_fences_v1 WHERE business_id=? AND replay_key=?',
+        [businessId, key],
+      );
 
   static bool _isTransient(Object error) {
     if (error is TimeoutException || error is ClientException) return true;
