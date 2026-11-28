@@ -56,6 +56,9 @@ class LanRecordInventory {
   static String shopFingerprint(String business) =>
       _hash(['briskers-lan-inventory-v1', business]);
 
+  static String recordIdentity(String business, String kind, String id) =>
+      _hash([shopFingerprint(business), kind, id]);
+
   Future<List<LanInventoryEntry>> read(String business) => db.transaction(() async {
     if (business.trim().isEmpty) throw ArgumentError('A shop is required.');
     await LocalDocumentSqlStore.ensure(db);
@@ -97,7 +100,7 @@ class LanRecordInventory {
         final detail = _documentFields(cached, business, id, recordKind);
         entries.add((
           kind: recordKind,
-          identity: _hash([shopFingerprint(business), recordKind, id]),
+          identity: recordIdentity(business, recordKind, id),
           fingerprint: _hash([payload, detail]),
           pending: pending,
           hasDocumentDetail: detail != null,
@@ -196,7 +199,9 @@ class LanRecordInventory {
       onlyOnDestination: List.unmodifiable(onlyOnDestination),
       different: List.unmodifiable(different),
       destinationVersions: Map.unmodifiable({
-        for (final entry in different) entry.identity: to[entry.identity]!,
+        for (final entry in [...different, ...unverified])
+          if (from.containsKey(entry.identity) && to.containsKey(entry.identity))
+            entry.identity: to[entry.identity]!,
       }),
       unverified: List.unmodifiable(unverified),
     );

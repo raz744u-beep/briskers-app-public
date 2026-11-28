@@ -1142,7 +1142,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                   if (widget.isOwner)
                     OutlinedButton.icon(
                       icon: const Icon(Icons.devices_outlined),
-                      label: const Text('LAN record preview'),
+                      label: const Text('LAN compare and copy'),
                       onPressed: _syncing ? null : () => Navigator.push<void>(
                         context,
                         MaterialPageRoute(builder: (_) => LanInventoryPreviewScreen(

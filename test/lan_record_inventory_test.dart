@@ -46,6 +46,7 @@ void main() {
     expect(result.onlyOnDestination.map((item) => item.identity), ['destination-only']);
     expect(result.different.map((item) => item.identity), ['edited']);
     expect(result.destinationVersions['edited']?.fingerprint, 'destination');
+    expect(result.destinationVersions['pending-on-destination']?.pending, isTrue);
     expect(result.unverified.map((item) => item.identity),
         ['pending', 'invoice-index', 'pending-on-destination']);
   });
