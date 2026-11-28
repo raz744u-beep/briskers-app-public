@@ -13,6 +13,7 @@ import 'diagnostics_screen.dart';
 import 'document_numbering_settings_screen.dart';
 import 'employees_settings_screen.dart';
 import 'expense_settings_screen.dart';
+import 'friday_closeout_setting.dart';
 import 'job_statuses_settings_screen.dart';
 import 'kiosk_checkin_settings_screen.dart';
 import 'invoice_statuses_settings_screen.dart';
@@ -124,6 +125,8 @@ class SettingsScreen extends StatelessWidget {
             ),
           if (roleCode == 'owner')
             _CustomerNextActionSetting(businessId: businessId),
+          if (roleCode == 'owner')
+            FridayCloseoutSetting(key: ValueKey(businessId), businessId: businessId),
           if (roleCode == 'owner')
             ListTile(
               leading: const Icon(Icons.view_week_outlined, color: BriskersColors.settings),

@@ -17,6 +17,48 @@ class RecentRecordsCard extends StatefulWidget {
 
 class _RecentRecordsCardState extends State<RecentRecordsCard> {
   bool _expanded = false;
+  double? _offsetBeforeOpening;
+
+  void _toggleExpanded() {
+    final opening = !_expanded;
+    final position = Scrollable.maybeOf(context)?.position;
+    if (opening) {
+      _offsetBeforeOpening = position?.pixels;
+    }
+    final previousOffset = _offsetBeforeOpening;
+    setState(() => _expanded = opening);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _expanded != opening) return;
+      final reducedMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+      final duration = reducedMotion ? Duration.zero : const Duration(milliseconds: 280);
+      if (opening) {
+        Scrollable.ensureVisible(
+          context,
+          alignment: 0,
+          duration: duration,
+          curve: Curves.easeOutCubic,
+        );
+        return;
+      }
+
+      if (previousOffset == null ||
+          position == null ||
+          !position.hasContentDimensions ||
+          !identical(Scrollable.maybeOf(context)?.position, position)) {
+        return;
+      }
+      final target = previousOffset
+          .clamp(position.minScrollExtent, position.maxScrollExtent)
+          .toDouble();
+      if (target == position.pixels) return;
+      if (reducedMotion) {
+        position.jumpTo(target);
+      } else {
+        position.animateTo(target, duration: duration, curve: Curves.easeOutCubic);
+      }
+    });
+  }
 
   static (String,IconData,Color) _style(RecentRecordKind kind) => switch(kind) {
     RecentRecordKind.invoice => ('Invoice',Icons.receipt_long_outlined,BriskersColors.invoices),
@@ -91,7 +133,7 @@ class _RecentRecordsCardState extends State<RecentRecordsCard> {
       margin: const EdgeInsets.fromLTRB(12,0,12,12),
       title: 'Recently Viewed',icon: Icons.history,
       expanded: _expanded,
-      onToggle: () => setState(() => _expanded = !_expanded),
+      onToggle: _toggleExpanded,
       action: shown.isEmpty ? null : TextButton(
         onPressed: widget.onClear,
         style: TextButton.styleFrom(foregroundColor: Colors.white,

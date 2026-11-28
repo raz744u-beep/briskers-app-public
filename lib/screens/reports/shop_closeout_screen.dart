@@ -16,12 +16,14 @@ class ShopCloseoutScreen extends StatefulWidget {
     required this.isOwner,
     required this.reports,
     this.bottomNavigationBar,
+    this.onBackToDashboard,
   });
 
   final String businessId;
   final bool isOwner;
   final LocalOwnerReports reports;
   final Widget? bottomNavigationBar;
+  final VoidCallback? onBackToDashboard;
 
   @override
   State<ShopCloseoutScreen> createState() => _ShopCloseoutScreenState();
@@ -35,7 +37,7 @@ class _ShopCloseoutScreenState extends State<ShopCloseoutScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.isOwner) _readReminder();
+    if (widget.isOwner && widget.onBackToDashboard == null) _readReminder();
   }
 
   Future<void> _readReminder() async {
@@ -115,6 +117,133 @@ class _ShopCloseoutScreenState extends State<ShopCloseoutScreen> {
         body: Center(child: Text('Owner access is required.')),
       );
     }
+    final back = widget.onBackToDashboard;
+    final body = FutureBuilder<ShopCloseout>(
+      future: _agenda,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final data = snapshot.data;
+        if (data == null) {
+          return const Center(
+            child: Text(
+              'Saved shop records could not be read. Refresh to retry.',
+            ),
+          );
+        }
+        final sections = <Widget>[
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Text(
+              'Week ending ${DateFormat.yMMMd().format(data.friday)}\n'
+              'Records saved on this device · Read ${DateFormat.yMMMd().add_jm().format(data.loadedAt)}',
+            ),
+          ),
+          _section(
+            'Completed labor awaiting payroll',
+            data.labor,
+            data.payrollAvailable
+                ? 'No completed unpaid labor found on this device.'
+                : 'Payroll records unavailable.',
+            onTap: OwnerPayrollScreen.enabled
+                ? (_) => _open(
+                    OwnerPayrollScreen(
+                      businessId: widget.businessId,
+                      sharedBottomNavigationBar: widget.bottomNavigationBar,
+                    ),
+                  )
+                : null,
+          ),
+          _section(
+            'Fully paid invoices ready to close',
+            data.invoices,
+            'No invoices verified ready on this device.',
+            onTap: (item) => _open(
+              JobDocumentScreen(
+                businessId: widget.businessId,
+                documentId: item.id,
+                isOwner: true,
+                roleCode: 'owner',
+                canManageExpenses: true,
+                sharedBottomNavigationBar: widget.bottomNavigationBar,
+              ),
+            ),
+          ),
+          _section(
+            'Open jobs requiring attention',
+            data.jobs,
+            'No open jobs found on this device.',
+            onTap: (item) => _open(
+              JobDetailScreen(
+                businessId: widget.businessId,
+                jobId: item.id,
+                roleCode: 'owner',
+                bottomNavigationBar: widget.bottomNavigationBar,
+              ),
+            ),
+          ),
+          if (data.verify.isNotEmpty)
+            _section('Needs verification', [
+              for (final detail in data.verify)
+                (title: detail, detail: '', id: ''),
+            ], ''),
+          if (back == null)
+            SwitchListTile(
+              title: const Text('Friday device reminder'),
+              subtitle: const Text('Around 3 PM Gretna time'),
+              value: _reminder ?? false,
+              onChanged: _reminder == null ? null : _setReminder,
+            ),
+        ];
+        const padding = EdgeInsets.all(12);
+        return back == null
+            ? ListView(padding: padding, children: sections)
+            : Padding(
+                padding: padding,
+                child: Column(children: sections),
+              );
+      },
+    );
+    if (back != null) {
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Friday Closeout',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Refresh closeout',
+                  icon: const Icon(Icons.refresh),
+                  onPressed: _refresh,
+                ),
+              ],
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TextButton.icon(
+                onPressed: back,
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Back to Dashboard'),
+              ),
+            ),
+          ),
+          body,
+        ],
+      );
+    }
     return Scaffold(
       backgroundColor: taskCanvas,
       appBar: ApprovedTasksHeader(
@@ -128,88 +257,7 @@ class _ShopCloseoutScreenState extends State<ShopCloseoutScreen> {
         ],
       ),
       bottomNavigationBar: widget.bottomNavigationBar,
-      body: FutureBuilder<ShopCloseout>(
-        future: _agenda,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final data = snapshot.data;
-          if (data == null) {
-            return const Center(
-              child: Text(
-                'Saved shop records could not be read. Refresh to retry.',
-              ),
-            );
-          }
-          return ListView(
-            padding: const EdgeInsets.all(12),
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text(
-                  'Week ending ${DateFormat.yMMMd().format(data.friday)}\n'
-                  'Records saved on this device · Read ${DateFormat.yMMMd().add_jm().format(data.loadedAt)}',
-                ),
-              ),
-              _section(
-                'Completed labor awaiting payroll',
-                data.labor,
-                data.payrollAvailable
-                    ? 'No completed unpaid labor found on this device.'
-                    : 'Payroll records unavailable.',
-                onTap: OwnerPayrollScreen.enabled
-                    ? (_) => _open(
-                        OwnerPayrollScreen(
-                          businessId: widget.businessId,
-                          sharedBottomNavigationBar: widget.bottomNavigationBar,
-                        ),
-                      )
-                    : null,
-              ),
-              _section(
-                'Fully paid invoices ready to close',
-                data.invoices,
-                'No invoices verified ready on this device.',
-                onTap: (item) => _open(
-                  JobDocumentScreen(
-                    businessId: widget.businessId,
-                    documentId: item.id,
-                    isOwner: true,
-                    roleCode: 'owner',
-                    canManageExpenses: true,
-                    sharedBottomNavigationBar: widget.bottomNavigationBar,
-                  ),
-                ),
-              ),
-              _section(
-                'Open jobs requiring attention',
-                data.jobs,
-                'No open jobs found on this device.',
-                onTap: (item) => _open(
-                  JobDetailScreen(
-                    businessId: widget.businessId,
-                    jobId: item.id,
-                    roleCode: 'owner',
-                    bottomNavigationBar: widget.bottomNavigationBar,
-                  ),
-                ),
-              ),
-              if (data.verify.isNotEmpty)
-                _section('Needs verification', [
-                  for (final detail in data.verify)
-                    (title: detail, detail: '', id: ''),
-                ], ''),
-              SwitchListTile(
-                title: const Text('Friday device reminder'),
-                subtitle: const Text('Around 3 PM Gretna time'),
-                value: _reminder ?? false,
-                onChanged: _reminder == null ? null : _setReminder,
-              ),
-            ],
-          );
-        },
-      ),
+      body: body,
     );
   }
 }

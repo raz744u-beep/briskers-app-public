@@ -15,7 +15,10 @@ import '../services/offline_recurring_repository.dart';
 import '../services/local_financial_cache.dart';
 import '../services/recurring_financial_projection.dart';
 import '../services/briskers_api.dart';
+import '../core/friday_closeout_schedule.dart';
+import '../services/friday_closeout_preferences.dart';
 import '../services/local_job_repository.dart';
+import '../services/local_owner_reports.dart';
 import '../services/local_document_repository.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/weather_service.dart';
@@ -36,6 +39,7 @@ import 'jobs/job_document_screen.dart';
 import 'jobs/job_detail_screen.dart';
 import 'payroll/mechanic_labor_screen.dart';
 import 'payroll/owner_payroll_screen.dart';
+import 'reports/shop_closeout_screen.dart';
 import 'settings/employees_settings_screen.dart';
 import 'settings/navigation_settings_screen.dart';
 
@@ -84,6 +88,56 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   StreamSubscription<(String, String)>? _recentSubscription;
   List<RecentRecord> _recent = const [];
   (String, String)? _recentScope;
+  late final _closeoutReports = LocalOwnerReports();
+  FridayCloseoutSchedule _closeoutSchedule = const FridayCloseoutSchedule();
+  StreamSubscription<String>? _closeoutPreferencesChanges;
+  Timer? _closeoutTimer;
+  int _closeoutPreferencesRequest = 0;
+  String? _closeoutFriday;
+  String? _regularFriday;
+
+  Future<void> _loadCloseoutPreferences() async {
+    final request = ++_closeoutPreferencesRequest;
+    if (widget.roleCode != 'owner') return;
+    final preferences = FridayCloseoutPreferences(widget.businessId);
+    try {
+      final schedule = await preferences.load();
+      final regularFriday = await preferences.regularFriday();
+      if (!mounted || request != _closeoutPreferencesRequest) return;
+      _closeoutSchedule = schedule;
+      _regularFriday = regularFriday;
+      _updateCloseoutWindow();
+    } catch (_) {
+      // Keep the last known schedule if device preferences cannot be read.
+    }
+  }
+
+  void _updateCloseoutWindow() {
+    _closeoutTimer?.cancel();
+    final now = DateTime.now();
+    final window = _closeoutSchedule.window(now);
+    setState(() => _closeoutFriday = window.friday);
+    final nextChange = window.nextChange;
+    if (nextChange != null) {
+      _closeoutTimer = Timer(nextChange.difference(now), _updateCloseoutWindow);
+    }
+  }
+
+  Future<void> _chooseDashboard({required bool regular}) async {
+    final friday = _closeoutSchedule.window(DateTime.now()).friday;
+    if (friday == null) {
+      _updateCloseoutWindow();
+      return;
+    }
+    final preferences = FridayCloseoutPreferences(widget.businessId);
+    final selection = regular ? friday : null;
+    setState(() => _regularFriday = selection);
+    try {
+      await preferences.showRegularFor(selection);
+    } catch (_) {
+      // The current Home view can still switch for the rest of this session.
+    }
+  }
 
   LocalRecentRecords? get _recentStore {
     final user = LocalJobAccessHistory.currentUserId;
@@ -203,7 +257,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) unawaited(_catchUpRecurring());
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_catchUpRecurring());
+      if (widget.roleCode == 'owner') _updateCloseoutWindow();
+    }
   }
 
   static const _api = BriskersApi();
@@ -236,6 +293,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _closeoutPreferencesChanges = FridayCloseoutPreferences.changes.listen((business) {
+      if (business == widget.businessId) unawaited(_loadCloseoutPreferences());
+    });
+    unawaited(_loadCloseoutPreferences());
     _recentSubscription = LocalRecentRecords.changes.listen((scope) {
       if (scope == (widget.businessId, LocalJobAccessHistory.currentUserId)) {
         unawaited(_loadRecent());
@@ -263,6 +324,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _closeoutTimer?.cancel();
+    unawaited(_closeoutPreferencesChanges?.cancel());
     unawaited(_recentSubscription?.cancel());
     unawaited(_invoiceClosures?.cancel());
     WidgetsBinding.instance.removeObserver(this);
@@ -279,6 +342,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     if (oldWidget.businessId != widget.businessId || oldWidget.roleCode != widget.roleCode) {
       unawaited(_catchUpRecurring());
+      _closeoutTimer?.cancel();
+      _closeoutSchedule = const FridayCloseoutSchedule();
+      _closeoutFriday = null;
+      _regularFriday = null;
+      unawaited(_loadCloseoutPreferences());
     }
     if (oldWidget.businessId != widget.businessId ||
         oldWidget.roleCode != widget.roleCode) {
@@ -1274,9 +1342,67 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Widget _ownerDashboard() {
+    final friday = _closeoutFriday;
+    if (friday != null && _regularFriday != friday) {
+      return ShopCloseoutScreen(
+        key: ValueKey(friday),
+        businessId: widget.businessId,
+        isOwner: true,
+        reports: _closeoutReports,
+        bottomNavigationBar: widget.estimatesNavigationBar,
+        onBackToDashboard: () => unawaited(_chooseDashboard(regular: true)),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Card(
+        child: Column(
+          children: [
+            ListTile(
+              title: const Text('Owner Dashboard',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
+              trailing: friday == null
+                  ? null
+                  : TextButton(
+                      onPressed: () => unawaited(_chooseDashboard(regular: false)),
+                      child: const Text('Friday Closeout'),
+                    ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.build_outlined),
+              title: const Text('Active jobs'),
+              trailing: Text('${widget.jobsCount}'),
+              onTap: widget.onJobsTap,
+            ),
+            ListTile(
+              leading: const Icon(Icons.calendar_today_outlined),
+              title: const Text('Appointments today'),
+              trailing: Text('${widget.appointmentsCount}'),
+              onTap: widget.onAppointmentsTap,
+            ),
+            ListTile(
+              leading: const Icon(Icons.description_outlined),
+              title: const Text('Open estimates'),
+              trailing: Text('${widget.estimatesOpenCount}'),
+              onTap: _viewEstimates,
+            ),
+            ListTile(
+              leading: const Icon(Icons.receipt_long_outlined),
+              title: const Text('Open invoices'),
+              trailing: Text('${widget.invoicesOpenCount}'),
+              onTap: widget.onInvoicesTap,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
+    final owner = widget.roleCode == 'owner';
 
     return ColoredBox(
       color: Colors.white,
@@ -1413,7 +1539,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onViewAll: _showAllAttention,
             ),
             const SizedBox(height: 8),
+            if (owner) ...[
+              _ownerDashboard(),
+              const SizedBox(height: 12),
+              _recentlyViewed(),
+              const SizedBox(height: 12),
+            ],
             _HomeTiles(
+              compactMenu: owner,
               onPayrollTap: OwnerPayrollScreen.enabled && widget.roleCode == 'owner'
                   ? () => _openOwnerSection(ShopNavigationSection.payroll) : null,
               onEmployeesTap: OwnerPayrollScreen.enabled && widget.roleCode == 'owner'
@@ -1572,8 +1705,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               estimatesOpenCount: widget.estimatesOpenCount,
               invoicesOpenCount: widget.invoicesOpenCount,
             ),
-            const SizedBox(height: 12),
-            _recentlyViewed(),
+            if (!owner) ...[
+              const SizedBox(height: 12),
+              _recentlyViewed(),
+            ],
             const SizedBox(height: 24),
           ],
         ),
@@ -1727,6 +1862,7 @@ class _NeedsAttentionPanel extends StatelessWidget {
 
 class _HomeTiles extends StatelessWidget {
   const _HomeTiles({
+    required this.compactMenu,
     required this.expandedSection,
     required this.onToggle,
     required this.customersDrawer,
@@ -1747,6 +1883,7 @@ class _HomeTiles extends StatelessWidget {
     required this.invoicesOpenCount,
   });
 
+  final bool compactMenu;
   final String? expandedSection;
   final ValueChanged<String> onToggle;
   final Widget customersDrawer;
@@ -1772,6 +1909,15 @@ class _HomeTiles extends StatelessWidget {
     Color color,
     VoidCallback onTap,
   ) {
+    if (compactMenu) {
+      return ListTile(
+        dense: true,
+        leading: Icon(icon, color: color),
+        title: Text(label),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: onTap,
+      );
+    }
     return InkWell(
       borderRadius: BorderRadius.circular(16),
       onTap: onTap,
@@ -1824,7 +1970,9 @@ class _HomeTiles extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget row(Widget left, Widget right) => Row(
+    Widget row(Widget left, Widget right) => compactMenu
+        ? Column(children: [left, right])
+        : Row(
           children: [
             Expanded(child: left),
             const SizedBox(width: 10),
@@ -1836,6 +1984,8 @@ class _HomeTiles extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         children: [
+          if (compactMenu)
+            const ListTile(title: Text('Menu', style: TextStyle(fontWeight: FontWeight.w800))),
           row(
             _tile(
               'Customers',
